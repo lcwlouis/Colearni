@@ -1,1 +1,89 @@
 # Sapientian
+This project's goal is to create a learning copilot and second brain for people to learn and understand topics in a deep and comprehensive way. In the recent times, we have seen the rise in use of GenAI in education, general research and workplaces. 
+
+However, to put it bluntly the tools have been too good at summarising and being convincing. This we personally feel has led to "brainrot" and "fake learning". How often do you remember or really learnt anything from these reports and AI Summaries? We want to create a tool that will help you learn and understand topics in a deep and comprehensive way. 
+
+This would be a great tool for students, researchers, and professionals to use. There are other potential use cases such as trying to help people find new solutions to topics they completely had no prior knowledge. 
+> For example, your family member is dealing with certain health issues, however you have no idea what to do and seeing different doctors and specialists and getting different opinions and treatments. You want to find a solution that is best for them. You can use this tool to gain knowledge and provide "copilot" knowledge to your doctor as a second opinion to enhance the likelihood of identifying the true problem and finding the best solution.
+
+Tools to use and reference:
+- Perplexica
+- Searxng
+- Tavily (for more general search?)
+- Google ADK 
+- LangChain Tools
+- LightRAG
+- NaiveRAG
+
+Providers Supported:
+- Google
+- Anthropic
+- OpenAI
+- OpenRouter
+- Ollama
+
+# Workflow 
+1. User inputs the topic of interest
+2. Sapientian will search the web for relevant information in a deep research way
+3. Sapientian then generates a list of point of interests from the deep research report
+4. The user can choose from the list of POI then Sapientian will engage another agent to generate a list of search queries to be used in Searxng to find papers as well as well as posts from Subject Matter Experts (Open to other suggestions on what else to search for)
+5. This second layer agent will gather sufficient based on the "current knowledge" of the user. This list will be displayed to the user.
+    - On subsequent runs, especially the automatic periodic runs, it will check with the users whether they find the information interesting and useful. This will be added into the information base so that future searches can be more relevant to the user.
+    - This is an optional flow: The user can choose to skip to ingesting into knowledge base directly but we don't encourage this. (skips to step x)
+6. Once complete, the new knowledge will go to an agent that identifies POI within these papers and posts and highlight these to the user to encourage them to read and understand and learn the content.
+7. There will be a test section that dynamically generates dynamic and interactive quiz based on each paper/post. Once the user passes the test, the system will then ingest this into the knowledge base. (Both normal RAG and LightRAG)
+8. Once ingested this is also an agentic chatbot that can answer questions based on the complexity. 
+    - **Base Chatbot** with tools to delegate to an **Agent for NaiveRAG** or an **Agent for LightRAG** if necessary. If basic question with no need of knowledge base, it can answer directly.
+    - Agent that automatically updates a **working information on the user**'s question style, known knowledge, weaker topics, interests, etc. This information base should also consists of the user's preferences and goals. It should also consists of the the data ingested, date, and short summary of those data.
+    - Agent that reviews the current responses and user questions and **determines if further research is needed** to find more papers and posts for the user to learn. This will call the original search agent to do so. Alongside the information base by the above agent. 
+    - Agent that **automatically cleans up the data ingested** by deleting old data that is no longer important based on the depth that the user has learnt (This is long term goal to add)
+    - Periodic Agent that calls the search agent to update the information base with new data. This is to ensure that the user will learn of new developments at the level they are at.
+    - "Deep Research" Agent that crawls the current database to summarise the current knowledge for the user to review and see whether they are both on the same page.
+
+# Further Planning Decisions to make
+- What type of NaiveRAG to use?
+    - Basic RAG (which we can use the one built into LightRAG too)
+    - Parent Document Retrieval RAG
+    - HyDE
+    - RAG Fusion
+    - Hybrid RAG
+- MCP?
+- LangGraph or ADK? (I think for now we will stick to ADK)
+- How are we building the UI??? Are we creating a local app or web app?
+- What type of database to use?
+    - MongoDB?
+    - Postgres? (can share with LightRAG or we find another way for LightRAG)
+    - Supabase?
+- Do we build a Flask/FastAPI server and then build a web ui? This gives users the freedom to build some other way to use the app that we may not have time for. 
+- Is this going to be open source? I think this is the path I want to go down at least. So realistically I think API server might be a good path.
+
+---
+
+# Copilot Generated Setup Commands (To be verified and updated)
+
+## Initial setup
+chmod +x scripts/setup.sh
+./scripts/setup.sh
+
+## Start all services
+docker-compose up -d
+
+## Start with logs
+docker-compose up
+
+## Development mode (with hot reload)
+docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+
+## Stop services
+docker-compose down
+
+## Rebuild and restart
+docker-compose down && docker-compose up --build -d
+
+## View logs
+docker-compose logs -f ai-research-app
+docker-compose logs -f searxng
+
+## Health check
+curl http://localhost:5000/health
+curl http://localhost:8080/healthz
