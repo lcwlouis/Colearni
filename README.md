@@ -30,6 +30,7 @@ Providers Supported:
 5. This second layer agent will gather sufficient based on the "current knowledge" of the user. This list will be displayed to the user.
     - On subsequent runs, especially the automatic periodic runs, it will check with the users whether they find the information interesting and useful. This will be added into the information base so that future searches can be more relevant to the user.
     - This is an optional flow: The user can choose to skip to ingesting into knowledge base directly but we don't encourage this. (skips to step x)
+    - This step can also be the start of for the user if they choose to skip all the quiz and want to use this app as a query bot. This allows users to upload pdfs/txt/docx/md/pptx
 6. Once complete, the new knowledge will go to an agent that identifies POI within these papers and posts and highlight these to the user to encourage them to read and understand and learn the content.
 7. There will be a test section that dynamically generates dynamic and interactive quiz based on each paper/post. Once the user passes the test, the system will then ingest this into the knowledge base. (Both normal RAG and LightRAG)
 8. Once ingested this is also an agentic chatbot that can answer questions based on the complexity. 
