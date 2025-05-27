@@ -14,8 +14,9 @@ Tools to use and reference:
 - LangChain Tools
 - LightRAG
 - NaiveRAG
+- Neo4j
 
-Providers Supported:
+LLM Providers Supported:
 - Google
 - Anthropic
 - OpenAI
@@ -57,7 +58,9 @@ Human in the loop: user chooses interested topics from the list of POI
 6. Based on the selected POI list and the **"current knowledge"** of the user,  agent generates a custom list of search queries to be used in Searxng to find **papers** as well as well as posts from Subject Matter Experts (Open to other suggestions on what else to search for)This list will be displayed to the user.
 
 ## STEPS 8-11 is a knowledge extractor + quiz generator agent
-8. The new knowledge will go to an agent that identifies POI within these papers and posts and extracts these to the user to encourage them to read and understand and learn the content.
+8. The new knowledge will go to an agent that identifies POI within these papers and posts
+-  Calls an agent\LLM call to check if POI is interesting using user config file
+9. extracts these to the user to encourage them to read and understand and learn the content.
 9. There will be a test section that dynamically generates dynamic and interactive quiz based on each paper/post. 
 10. Once the user passes the test, the system will then ingest this into the knowledge base. (Both normal RAG and LightRAG)
 11. it will check with the users whether they find the information interesting and useful. This will update the user config file so that future searches can be more relevant to the user.
