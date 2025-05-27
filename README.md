@@ -41,6 +41,9 @@ Providers Supported:
     - Periodic Agent that calls the search agent to update the information base with new data. This is to ensure that the user will learn of new developments at the level they are at.
     - "Deep Research" Agent that crawls the current database to summarise the current knowledge for the user to review and see whether they are both on the same page.
 
+## UI Mockup
+![UI Mockup of Sapientian](sapientian-ui.png)
+
 # Further Planning Decisions to make
 - What type of NaiveRAG to use?
     - Basic RAG (which we can use the one built into LightRAG too)
