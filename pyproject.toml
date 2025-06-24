@@ -1,0 +1,12 @@
+[project]
+name = "colearni"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "google-adk>=1.4.2",
+    "langchain-community>=0.3.26",
+    "litellm>=1.73.0",
+    "tavily-python>=0.7.8",
+]
