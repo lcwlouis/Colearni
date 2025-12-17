@@ -1,4 +1,4 @@
-# Sapientian
+# Colearni
 This project's goal is to create a learning copilot and second brain for people to learn and understand topics in a deep and comprehensive way. In the recent times, we have seen the rise in use of GenAI in education, general research and workplaces. 
 
 However, to put it bluntly the tools have been too good at summarising and being convincing. This we personally feel has led to "brainrot" and "fake learning". How often do you remember or really learnt anything from these reports and AI Summaries? We want to create a tool that will help you learn and understand topics in a deep and comprehensive way. 
