@@ -1,5 +1,11 @@
 pyproject.toml
 adapters/__init__.py
+adapters/db/__init__.py
+adapters/db/dependencies.py
+adapters/db/engine.py
+adapters/db/session.py
+adapters/db/migrations/env.py
+adapters/db/migrations/versions/20260224_0001_initial_schema.py
 apps/__init__.py
 apps/api/__init__.py
 apps/api/main.py

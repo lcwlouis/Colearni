@@ -8,8 +8,12 @@ version = "0.1.0"
 description = "Minimal backend scaffold for Colearni"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.13.0,<2.0.0",
   "fastapi>=0.115.0,<1.0.0",
+  "pgvector>=0.3.6,<1.0.0",
   "pydantic-settings>=2.5.0,<3.0.0",
+  "psycopg[binary]>=3.2.0,<4.0.0",
+  "sqlalchemy>=2.0.35,<3.0.0",
   "uvicorn[standard]>=0.30.0,<1.0.0",
 ]
 
@@ -30,6 +34,9 @@ src = ["apps", "core", "domain", "adapters", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"adapters/db/migrations/versions/*.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
