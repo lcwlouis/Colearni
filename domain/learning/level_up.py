@@ -152,9 +152,6 @@ def submit_level_up_quiz(
     answers: list[dict[str, Any]],
     llm_client: GraphLLMClient | None,
 ) -> dict[str, Any]:
-    if llm_client is None:
-        raise LevelUpQuizUnavailableError("LLM grading client is unavailable.")
-
     quiz = (
         session.execute(
             text(
@@ -227,6 +224,7 @@ def submit_level_up_quiz(
             "score": float(existing["score"] or 0.0),
             "passed": bool(existing["passed"]),
             "critical_misconception": bool(grading.get("critical_misconception", False)),
+            "overall_feedback": str(grading.get("overall_feedback", "")).strip(),
             "mastery_status": mastery_status,
             "mastery_score": mastery_score,
             "replayed": True,
@@ -270,17 +268,44 @@ def submit_level_up_quiz(
         )
 
     answer_map = _validate_answers(items, answers)
-    prompt = _grading_prompt(items, answer_map)
-    grading = _parse_grading(
-        llm_client.generate_tutor_text(prompt=prompt),
-        [item["item_id"] for item in items],
-    )
+    short_items = [item for item in items if item["item_type"] == "short_answer"]
+    mcq_items = [item for item in items if item["item_type"] == "mcq"]
+    graded_by_id: dict[int, dict[str, Any]] = {}
+    short_overall_feedback = ""
 
-    score = sum(float(item["score"]) for item in grading["items"]) / len(grading["items"])
-    critical = any(bool(item["critical_misconception"]) for item in grading["items"])
+    if short_items:
+        if llm_client is None:
+            raise LevelUpQuizUnavailableError("LLM grading client is unavailable.")
+        short_prompt = _grading_prompt(short_items, answer_map)
+        short_grading = _parse_grading(
+            llm_client.generate_tutor_text(prompt=short_prompt),
+            [item["item_id"] for item in short_items],
+        )
+        short_overall_feedback = short_grading["overall_feedback"]
+        for graded_item in short_grading["items"]:
+            graded_by_id[int(graded_item["item_id"])] = graded_item
+
+    mcq_graded = _grade_mcq_items(mcq_items, answer_map)
+    for graded_item in mcq_graded:
+        graded_by_id[int(graded_item["item_id"])] = graded_item
+
+    ordered_items = [graded_by_id[item["item_id"]] for item in items]
+    score = sum(float(item["score"]) for item in ordered_items) / len(ordered_items)
+    critical = any(bool(item["critical_misconception"]) for item in ordered_items)
     passed = score >= PASS_SCORE and not critical
     mastery_status = "learned" if passed else "learning"
     mastery_score = max(0.0, min(1.0, float(score)))
+    overall_feedback = _build_overall_feedback(
+        short_overall_feedback=short_overall_feedback,
+        mcq_graded=mcq_graded,
+        passed=passed,
+        critical=critical,
+    )
+    grading_payload = {
+        "items": ordered_items,
+        "overall_feedback": overall_feedback,
+        "critical_misconception": critical,
+    }
 
     session.execute(
         text(
@@ -301,10 +326,7 @@ def submit_level_up_quiz(
             "quiz_id": quiz_id,
             "user_id": user_id,
             "answers": json.dumps({"answers": answers}, ensure_ascii=True),
-            "grading": json.dumps(
-                {**grading, "critical_misconception": critical},
-                ensure_ascii=True,
-            ),
+            "grading": json.dumps(grading_payload, ensure_ascii=True),
             "score": mastery_score,
             "passed": passed,
         },
@@ -343,6 +365,7 @@ def submit_level_up_quiz(
         "score": mastery_score,
         "passed": passed,
         "critical_misconception": critical,
+        "overall_feedback": overall_feedback,
         "mastery_status": mastery_status,
         "mastery_score": mastery_score,
         "replayed": False,
@@ -407,7 +430,31 @@ def _normalize_mcq(payload: dict[str, Any]) -> dict[str, Any]:
         choice_id not in ids or choice_id == correct for choice_id in critical
     ):
         raise LevelUpQuizValidationError("mcq payload has invalid correct/critical choice ids.")
-    return {"choices": choices, "correct_choice_id": correct, "critical_choice_ids": critical}
+    raw_explanations = payload.get("choice_explanations", {})
+    if raw_explanations is None:
+        raw_explanations = {}
+    if not isinstance(raw_explanations, dict):
+        raise LevelUpQuizValidationError("mcq choice_explanations must be an object.")
+    explanations: dict[str, str] = {}
+    for choice in choices:
+        choice_id = choice["id"]
+        raw_text = raw_explanations.get(choice_id)
+        provided = str(raw_text).strip() if raw_text is not None else ""
+        if provided:
+            explanations[choice_id] = provided
+            continue
+        explanations[choice_id] = _default_choice_explanation(
+            choice_id=choice_id,
+            correct_choice_id=correct,
+            critical_choice_ids=critical,
+            choice_text=choice["text"],
+        )
+    return {
+        "choices": choices,
+        "correct_choice_id": correct,
+        "critical_choice_ids": critical,
+        "choice_explanations": explanations,
+    }
 
 
 def _str_list(value: Any, *, required: bool, field: str) -> list[str]:
@@ -464,6 +511,12 @@ def _auto_items(concept: dict[str, Any], question_count: int) -> list[dict[str, 
                 ],
                 "correct_choice_id": "a",
                 "critical_choice_ids": ["d"],
+                "choice_explanations": {
+                    "a": "Correct: this option best matches the concept.",
+                    "b": "Incorrect: this option is only partially relevant.",
+                    "c": "Incorrect: this option is too generic to be correct.",
+                    "d": "Incorrect (critical): this option contradicts the concept.",
+                },
             },
         }
         for _ in range(mcq_count)
@@ -557,6 +610,70 @@ def _parse_grading(response: str, item_ids: list[int]) -> dict[str, Any]:
         "items": [by_id[item_id] for item_id in item_ids],
         "overall_feedback": payload["overall_feedback"].strip(),
     }
+
+
+def _grade_mcq_items(
+    items: list[dict[str, Any]],
+    answer_map: dict[int, str],
+) -> list[dict[str, Any]]:
+    graded: list[dict[str, Any]] = []
+    for item in items:
+        payload = item["payload"]
+        answer = answer_map[item["item_id"]]
+        score = 1.0 if answer == payload["correct_choice_id"] else 0.0
+        critical = answer in payload["critical_choice_ids"]
+        feedback = payload["choice_explanations"].get(
+            answer,
+            "Incorrect: the selected option does not match the concept.",
+        )
+        graded.append(
+            {
+                "item_id": item["item_id"],
+                "score": score,
+                "critical_misconception": critical,
+                "feedback": feedback,
+            }
+        )
+    return graded
+
+
+def _default_choice_explanation(
+    *,
+    choice_id: str,
+    correct_choice_id: str,
+    critical_choice_ids: list[str],
+    choice_text: str,
+) -> str:
+    if choice_id == correct_choice_id:
+        return "Correct: this option best matches the concept."
+    if choice_id in critical_choice_ids:
+        return "Incorrect (critical): this option contradicts the concept."
+    return f"Incorrect: '{choice_text}' is not the best match."
+
+
+def _build_overall_feedback(
+    *,
+    short_overall_feedback: str,
+    mcq_graded: list[dict[str, Any]],
+    passed: bool,
+    critical: bool,
+) -> str:
+    parts: list[str] = []
+    base = short_overall_feedback.strip()
+    if base:
+        parts.append(base)
+    else:
+        parts.append("Quiz graded.")
+    if mcq_graded:
+        correct = sum(1 for item in mcq_graded if float(item["score"]) >= 1.0)
+        parts.append(f"MCQ correctness: {correct}/{len(mcq_graded)}.")
+    if critical:
+        parts.append("A critical misconception was detected.")
+    if passed:
+        parts.append("You passed the level-up criteria.")
+    else:
+        parts.append("You did not pass; review feedback and retry with a new quiz.")
+    return " ".join(parts)
 
 
 __all__ = [
