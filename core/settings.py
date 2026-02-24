@@ -113,18 +113,6 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("APP_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
-    litellm_model: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("APP_LITELLM_MODEL", "LITELLM_MODEL"),
-    )
-    litellm_base_url: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("APP_LITELLM_BASE_URL", "LITELLM_BASE_URL"),
-    )
-    litellm_api_key: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("APP_LITELLM_API_KEY", "LITELLM_API_KEY"),
-    )
     resolver_lexical_top_k: int = Field(
         default=5,
         validation_alias=AliasChoices("APP_RESOLVER_LEXICAL_TOP_K", "RESOLVER_LEXICAL_TOP_K"),
@@ -236,53 +224,8 @@ class Settings(BaseSettings):
     def validate_embedding_provider(cls, value: str) -> str:
         """Restrict embedding provider options."""
         normalized = value.strip().lower()
-        if normalized not in {"openai", "mock", "litellm"}:
-            raise ValueError("embedding_provider must be one of: openai, mock, litellm")
-        return normalized
-
-    @field_validator("graph_llm_provider")
-    @classmethod
-    def validate_graph_llm_provider(cls, value: str) -> str:
-        """Restrict graph LLM provider options."""
-        normalized = value.strip().lower()
-        if normalized not in {"openai", "litellm"}:
-            raise ValueError("graph_llm_provider must be one of: openai, litellm")
-        return normalized
-
-    @field_validator("graph_llm_provider")
-    @classmethod
-    def validate_graph_llm_provider(cls, value: str) -> str:
-        """Restrict graph LLM provider options."""
-        normalized = value.strip().lower()
-        if normalized not in {"openai", "litellm"}:
-            raise ValueError("graph_llm_provider must be one of: openai, litellm")
-        return normalized
-
-    @field_validator("graph_llm_provider")
-    @classmethod
-    def validate_graph_llm_provider(cls, value: str) -> str:
-        """Restrict graph LLM provider options."""
-        normalized = value.strip().lower()
-        if normalized not in {"openai", "litellm"}:
-            raise ValueError("graph_llm_provider must be one of: openai, litellm")
-        return normalized
-
-    @field_validator("graph_llm_provider")
-    @classmethod
-    def validate_graph_llm_provider(cls, value: str) -> str:
-        """Restrict graph LLM provider options."""
-        normalized = value.strip().lower()
-        if normalized not in {"openai", "litellm"}:
-            raise ValueError("graph_llm_provider must be one of: openai, litellm")
-        return normalized
-
-    @field_validator("graph_llm_provider")
-    @classmethod
-    def validate_graph_llm_provider(cls, value: str) -> str:
-        """Restrict graph LLM provider options."""
-        normalized = value.strip().lower()
-        if normalized not in {"openai", "litellm"}:
-            raise ValueError("graph_llm_provider must be one of: openai, litellm")
+        if normalized not in {"openai", "mock"}:
+            raise ValueError("embedding_provider must be one of: openai, mock")
         return normalized
 
     @field_validator("graph_llm_provider")
