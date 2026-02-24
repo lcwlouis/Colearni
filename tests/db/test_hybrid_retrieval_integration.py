@@ -133,7 +133,7 @@ def test_hybrid_retrieval_combines_vector_and_fts_with_workspace_scoping() -> No
         assert [row.retrieval_method for row in ranked] == ["hybrid", "vector", "fts"]
         assert all(row.workspace_id == workspace_id_1 for row in ranked)
         assert all(row.document_id in {document_id_1a, document_id_1b} for row in ranked)
-        assert not any("other-workspace" in row.snippet for row in ranked)
+        assert not any("other-workspace" in row.text for row in ranked)
     finally:
         session.close()
         transaction.rollback()

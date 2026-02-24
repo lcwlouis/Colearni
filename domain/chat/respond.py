@@ -17,6 +17,8 @@ from core.settings import Settings, get_settings
 from core.verifier import verify_assistant_draft
 from sqlalchemy.orm import Session
 
+from domain.retrieval.fts_retriever import PgFtsRetriever
+from domain.retrieval.hybrid_retriever import HybridRetriever
 from domain.retrieval.types import RankedChunk
 from domain.retrieval.vector_retriever import PgVectorRetriever
 
@@ -32,9 +34,18 @@ def generate_chat_response(
     grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
 
     provider = build_embedding_provider(settings=active_settings)
-    retriever = PgVectorRetriever(
+    vector_retriever = PgVectorRetriever(
         session=session,
         embedding_provider=provider,
+        retrieval_max_top_k=active_settings.retrieval_max_top_k,
+    )
+    fts_retriever = PgFtsRetriever(
+        session=session,
+        retrieval_max_top_k=active_settings.retrieval_max_top_k,
+    )
+    retriever = HybridRetriever(
+        vector_retriever=vector_retriever,
+        fts_retriever=fts_retriever,
         retrieval_max_top_k=active_settings.retrieval_max_top_k,
     )
     ranked_chunks = retriever.retrieve(

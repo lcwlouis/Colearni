@@ -54,6 +54,7 @@ class FullTextSearchRow:
 
     chunk_id: int
     document_id: int
+    chunk_index: int
     text: str
     fts_rank: float
 
@@ -216,6 +217,7 @@ def full_text_top_k(
         "SELECT "
         "id AS chunk_id, "
         "document_id, "
+        "chunk_index, "
         "text, "
         "ts_rank_cd(tsv, plainto_tsquery('english', :query)) AS fts_rank "
         "FROM chunks "
@@ -234,6 +236,7 @@ def full_text_top_k(
         FullTextSearchRow(
             chunk_id=int(row["chunk_id"]),
             document_id=int(row["document_id"]),
+            chunk_index=int(row["chunk_index"]),
             text=str(row["text"]),
             fts_rank=float(row["fts_rank"]),
         )

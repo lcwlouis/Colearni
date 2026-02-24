@@ -79,7 +79,8 @@ class HybridRetriever(ChunkRetriever):
                 workspace_id=item[5].workspace_id,
                 document_id=item[5].document_id,
                 chunk_id=item[5].chunk_id,
-                snippet=item[5].snippet,
+                chunk_index=item[5].chunk_index,
+                text=item[5].text,
                 score=item[0],
                 retrieval_method=item[6],
             )

@@ -7,11 +7,14 @@ from typing import Annotated, Any
 
 from adapters.db.dependencies import get_db_session
 from core.ingestion import (
+    IngestionEmbeddingUnavailableError,
+    IngestionGraphUnavailableError,
     IngestionRequest,
     IngestionValidationError,
     UnsupportedTextDocumentError,
     ingest_text_document,
 )
+from core.settings import Settings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -67,9 +70,19 @@ async def upload_document(
         title=title or payload.title,
         source_uri=source_uri or payload.source_uri,
     )
+    settings_state = getattr(request.app.state, "settings", None)
+    settings = settings_state if isinstance(settings_state, Settings) else None
+    graph_llm_client = getattr(request.app.state, "graph_llm_client", None)
+    graph_embedding_provider = getattr(request.app.state, "graph_embedding_provider", None)
 
     try:
-        result = ingest_text_document(db, request=request_payload)
+        result = ingest_text_document(
+            db,
+            request=request_payload,
+            graph_llm_client=graph_llm_client,
+            graph_embedding_provider=graph_embedding_provider,
+            settings=settings,
+        )
     except UnsupportedTextDocumentError as exc:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -78,6 +91,16 @@ async def upload_document(
     except IngestionValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except IngestionEmbeddingUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except IngestionGraphUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
 

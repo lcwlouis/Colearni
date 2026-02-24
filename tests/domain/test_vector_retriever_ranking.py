@@ -73,9 +73,10 @@ def test_retrieve_clamps_top_k_and_applies_deterministic_ranking(
     assert captured["top_k"] == 2
     assert captured["query_embedding"] == [0.2, 0.3, 0.4]
     assert [item.chunk_id for item in ranked] == [3, 5]
+    assert [item.chunk_index for item in ranked] == [1, 1]
     assert [item.workspace_id for item in ranked] == [42, 42]
     assert [item.document_id for item in ranked] == [10, 11]
-    assert [item.snippet for item in ranked] == ["best", "first tie"]
+    assert [item.text for item in ranked] == ["best", "first tie"]
     assert [item.retrieval_method for item in ranked] == ["vector", "vector"]
     assert ranked[0].score == pytest.approx(0.9)
     assert ranked[1].score == pytest.approx(0.6)
@@ -110,7 +111,8 @@ def test_retrieve_enforces_minimum_top_k_of_one(monkeypatch: pytest.MonkeyPatch)
     assert captured["top_k"] == 1
     assert len(ranked) == 1
     assert ranked[0].workspace_id == 7
-    assert ranked[0].snippet == "only"
+    assert ranked[0].chunk_index == 3
+    assert ranked[0].text == "only"
     assert ranked[0].retrieval_method == "vector"
 
 

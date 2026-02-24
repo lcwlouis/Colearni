@@ -43,6 +43,20 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_EMBEDDING_BATCH_SIZE", "EMBEDDING_BATCH_SIZE"),
         ge=1,
     )
+    ingest_populate_embeddings: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "APP_INGEST_POPULATE_EMBEDDINGS",
+            "INGEST_POPULATE_EMBEDDINGS",
+        ),
+    )
+    ingest_build_graph: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "APP_INGEST_BUILD_GRAPH",
+            "INGEST_BUILD_GRAPH",
+        ),
+    )
     embedding_backfill_max_chunks: int = Field(
         default=500,
         validation_alias=AliasChoices(

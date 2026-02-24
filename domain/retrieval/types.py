@@ -13,6 +13,7 @@ class RankedChunk:
     workspace_id: int
     document_id: int
     chunk_id: int
-    snippet: str
+    chunk_index: int
+    text: str
     score: float
     retrieval_method: RetrievalMethod

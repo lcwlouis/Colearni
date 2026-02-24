@@ -24,7 +24,8 @@ class PgFtsRetriever(ChunkRetriever):
                 workspace_id=workspace_id,
                 document_id=row.document_id,
                 chunk_id=row.chunk_id,
-                snippet=row.text,
+                chunk_index=row.chunk_index,
+                text=row.text,
                 score=row.fts_rank,
                 retrieval_method="fts",
             )

@@ -12,18 +12,28 @@ from adapters.db.chunks import (
     list_chunks_for_document,
 )
 from adapters.db.documents import get_document_by_content_hash, insert_document
+from adapters.embeddings.factory import build_embedding_provider
 from adapters.parsers.chunker import chunk_text_deterministic
 from adapters.parsers.text import UnsupportedTextDocumentError, parse_text_payload
+from domain.embeddings.pipeline import NewChunkInput, populate_new_chunk_embeddings
 from domain.graph.pipeline import build_graph_for_chunks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.contracts import EmbeddingProvider, GraphLLMClient
-from core.settings import get_settings
+from core.settings import Settings, get_settings
 
 
 class IngestionValidationError(ValueError):
     """Raised when ingestion input is syntactically valid but semantically invalid."""
+
+
+class IngestionEmbeddingUnavailableError(RuntimeError):
+    """Raised when ingestion embedding writes are enabled but provider cannot be built."""
+
+
+class IngestionGraphUnavailableError(RuntimeError):
+    """Raised when graph building is enabled but graph dependencies are unavailable."""
 
 
 @dataclass(frozen=True)
@@ -58,8 +68,11 @@ def ingest_text_document(
     request: IngestionRequest,
     graph_llm_client: GraphLLMClient | None = None,
     graph_embedding_provider: EmbeddingProvider | None = None,
+    chunk_embedding_provider: EmbeddingProvider | None = None,
+    settings: Settings | None = None,
 ) -> IngestionResult:
     """Ingest a .md/.txt payload and persist document/chunks rows."""
+    active_settings = settings or get_settings()
     parsed = parse_text_payload(
         raw_bytes=request.raw_bytes,
         filename=request.filename,
@@ -127,13 +140,45 @@ def ingest_text_document(
             created=False,
         )
 
-    chunk_count = insert_chunks_bulk(
-        db,
-        workspace_id=request.workspace_id,
-        document_id=document.id,
-        chunk_texts=chunks,
-    )
-    if graph_llm_client is not None:
+    if active_settings.ingest_populate_embeddings:
+        provider = chunk_embedding_provider
+        if provider is None:
+            try:
+                provider = build_embedding_provider(settings=active_settings)
+            except ValueError as exc:
+                raise IngestionEmbeddingUnavailableError(
+                    "Chunk embedding provider is unavailable while "
+                    "APP_INGEST_POPULATE_EMBEDDINGS=true."
+                ) from exc
+        inserted_chunk_ids = populate_new_chunk_embeddings(
+            session=db,
+            provider=provider,
+            chunks=[
+                NewChunkInput(
+                    workspace_id=request.workspace_id,
+                    document_id=document.id,
+                    chunk_index=chunk_index,
+                    text=chunk_text,
+                )
+                for chunk_index, chunk_text in enumerate(chunks)
+            ],
+            batch_size=active_settings.embedding_batch_size,
+        )
+        chunk_count = len(inserted_chunk_ids)
+    else:
+        chunk_count = insert_chunks_bulk(
+            db,
+            workspace_id=request.workspace_id,
+            document_id=document.id,
+            chunk_texts=chunks,
+        )
+
+    if active_settings.ingest_build_graph:
+        if graph_llm_client is None:
+            raise IngestionGraphUnavailableError(
+                "Graph builder is unavailable while APP_INGEST_BUILD_GRAPH=true."
+            )
+        effective_graph_embedding_provider = graph_embedding_provider or chunk_embedding_provider
         build_graph_for_chunks(
             db,
             workspace_id=request.workspace_id,
@@ -143,8 +188,8 @@ def ingest_text_document(
                 document_id=document.id,
             ),
             llm_client=graph_llm_client,
-            settings=get_settings(),
-            embedding_provider=graph_embedding_provider,
+            settings=active_settings,
+            embedding_provider=effective_graph_embedding_provider,
         )
 
     db.commit()
@@ -170,6 +215,8 @@ def _resolve_title(*, title: str | None, filename: str | None) -> str:
 __all__ = [
     "IngestionRequest",
     "IngestionResult",
+    "IngestionEmbeddingUnavailableError",
+    "IngestionGraphUnavailableError",
     "IngestionValidationError",
     "UnsupportedTextDocumentError",
     "ingest_text_document",

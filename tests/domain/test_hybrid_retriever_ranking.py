@@ -24,7 +24,8 @@ def _row(chunk_id: int, method: RetrievalMethod = "vector") -> RankedChunk:
         workspace_id=7,
         document_id=10,
         chunk_id=chunk_id,
-        snippet=f"chunk-{chunk_id}",
+        chunk_index=chunk_id % 5,
+        text=f"chunk-{chunk_id}",
         score=1.0,
         retrieval_method=method,
     )

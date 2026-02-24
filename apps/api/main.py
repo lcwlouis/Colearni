@@ -13,6 +13,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Colearni API", version="0.1.0")
     app.state.settings = settings
+    app.state.graph_llm_client = None
+    app.state.graph_embedding_provider = None
     app.include_router(healthz_router)
     app.include_router(chat_router)
     app.include_router(documents_router)

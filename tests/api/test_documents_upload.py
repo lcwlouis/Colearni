@@ -6,6 +6,8 @@ from typing import Any
 
 from adapters.db.dependencies import get_db_session
 from apps.api.main import app
+from core.ingestion import IngestionEmbeddingUnavailableError, IngestionGraphUnavailableError
+from core.settings import get_settings
 from fastapi.testclient import TestClient
 
 
@@ -13,8 +15,18 @@ def test_upload_raw_text_returns_201_and_passes_payload(monkeypatch: Any) -> Non
     """Raw text upload should call ingestion and return created payload."""
     captured: dict[str, Any] = {}
 
-    def fake_ingest(_db: object, *, request: Any) -> Any:
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,
+        graph_llm_client: Any = None,
+        graph_embedding_provider: Any = None,
+    ) -> Any:
         captured["request"] = request
+        captured["settings"] = settings
+        captured["graph_llm_client"] = graph_llm_client
+        captured["graph_embedding_provider"] = graph_embedding_provider
         return type(
             "Result",
             (),
@@ -30,6 +42,17 @@ def test_upload_raw_text_returns_201_and_passes_payload(monkeypatch: Any) -> Non
         )()
 
     monkeypatch.setattr("apps.api.routes.documents.ingest_text_document", fake_ingest)
+    settings = get_settings().model_copy(update={"ingest_build_graph": False})
+    graph_llm_client = object()
+    graph_embedding_provider = object()
+    monkeypatch.setattr(app.state, "settings", settings, raising=False)
+    monkeypatch.setattr(app.state, "graph_llm_client", graph_llm_client, raising=False)
+    monkeypatch.setattr(
+        app.state,
+        "graph_embedding_provider",
+        graph_embedding_provider,
+        raising=False,
+    )
 
     def override_db() -> Any:
         yield object()
@@ -51,12 +74,22 @@ def test_upload_raw_text_returns_201_and_passes_payload(monkeypatch: Any) -> Non
     assert captured["request"].uploaded_by_user_id == 3
     assert captured["request"].title == "Doc"
     assert captured["request"].raw_bytes == b"hello world"
+    assert captured["settings"] is settings
+    assert captured["graph_llm_client"] is graph_llm_client
+    assert captured["graph_embedding_provider"] is graph_embedding_provider
 
 
 def test_upload_duplicate_returns_200(monkeypatch: Any) -> None:
     """Duplicate uploads should return 200 with created=false."""
 
-    def fake_ingest(_db: object, *, request: Any) -> Any:
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,  # noqa: ARG001
+        graph_llm_client: Any = None,  # noqa: ARG001
+        graph_embedding_provider: Any = None,  # noqa: ARG001
+    ) -> Any:
         return type(
             "Result",
             (),
@@ -89,3 +122,65 @@ def test_upload_duplicate_returns_200(monkeypatch: Any) -> None:
 
     assert response.status_code == 200
     assert response.json()["created"] is False
+
+
+def test_upload_returns_503_when_embedding_provider_is_unavailable(monkeypatch: Any) -> None:
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,  # noqa: ARG001
+        graph_llm_client: Any = None,  # noqa: ARG001
+        graph_embedding_provider: Any = None,  # noqa: ARG001
+    ) -> Any:  # noqa: ARG001
+        raise IngestionEmbeddingUnavailableError("Embedding provider is unavailable.")
+
+    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document", fake_ingest)
+
+    def override_db() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_db_session] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/documents/upload?workspace_id=9&uploaded_by_user_id=4",
+            content="embedding test",
+            headers={"content-type": "text/plain"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Embedding provider is unavailable."
+
+
+def test_upload_returns_503_when_graph_builder_is_unavailable(monkeypatch: Any) -> None:
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,  # noqa: ARG001
+        graph_llm_client: Any = None,  # noqa: ARG001
+        graph_embedding_provider: Any = None,  # noqa: ARG001
+    ) -> Any:  # noqa: ARG001
+        raise IngestionGraphUnavailableError("Graph builder is unavailable.")
+
+    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document", fake_ingest)
+
+    def override_db() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_db_session] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/documents/upload?workspace_id=9&uploaded_by_user_id=4",
+            content="graph test",
+            headers={"content-type": "text/plain"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Graph builder is unavailable."
