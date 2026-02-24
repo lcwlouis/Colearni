@@ -48,11 +48,12 @@ class PgVectorRetriever(ChunkRetriever):
 
         return [
             RankedChunk(
+                workspace_id=workspace_id,
                 chunk_id=row.chunk_id,
                 document_id=row.document_id,
-                chunk_index=row.chunk_index,
-                text=row.text,
+                snippet=row.text,
                 score=1.0 - row.cosine_distance,
+                retrieval_method="vector",
             )
             for row in ranked_rows
         ]

@@ -48,6 +48,16 @@ class VectorSearchRow:
     cosine_distance: float
 
 
+@dataclass(frozen=True, slots=True)
+class FullTextSearchRow:
+    """Raw row returned from full-text search ranking."""
+
+    chunk_id: int
+    document_id: int
+    text: str
+    fts_rank: float
+
+
 def _vector_literal(values: Sequence[float]) -> str:
     """Serialize an embedding vector to pgvector text format."""
     if not values:
@@ -187,6 +197,45 @@ def vector_top_k(
             chunk_index=int(row["chunk_index"]),
             text=str(row["text"]),
             cosine_distance=float(row["cosine_distance"]),
+        )
+        for row in rows
+    ]
+
+
+def full_text_top_k(
+    session: Session,
+    query: str,
+    workspace_id: int,
+    top_k: int,
+) -> list[FullTextSearchRow]:
+    """Return top-k chunk rows by full-text rank within one workspace."""
+    if top_k < 1:
+        raise ValueError("top_k must be >= 1")
+
+    statement = text(
+        "SELECT "
+        "id AS chunk_id, "
+        "document_id, "
+        "text, "
+        "ts_rank_cd(tsv, plainto_tsquery('english', :query)) AS fts_rank "
+        "FROM chunks "
+        "WHERE workspace_id = :workspace_id "
+        "AND tsv @@ plainto_tsquery('english', :query) "
+        "ORDER BY fts_rank DESC, id ASC "
+        "LIMIT :top_k"
+    )
+
+    rows = session.execute(
+        statement,
+        {"query": query, "workspace_id": workspace_id, "top_k": top_k},
+    ).mappings()
+
+    return [
+        FullTextSearchRow(
+            chunk_id=int(row["chunk_id"]),
+            document_id=int(row["document_id"]),
+            text=str(row["text"]),
+            fts_rank=float(row["fts_rank"]),
         )
         for row in rows
     ]

@@ -6,12 +6,20 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from adapters.db.chunks import count_chunks_for_document, insert_chunks_bulk
+from adapters.db.chunks import (
+    count_chunks_for_document,
+    insert_chunks_bulk,
+    list_chunks_for_document,
+)
 from adapters.db.documents import get_document_by_content_hash, insert_document
 from adapters.parsers.chunker import chunk_text_deterministic
 from adapters.parsers.text import UnsupportedTextDocumentError, parse_text_payload
+from domain.graph.pipeline import build_graph_for_chunks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from core.contracts import EmbeddingProvider, GraphLLMClient
+from core.settings import get_settings
 
 
 class IngestionValidationError(ValueError):
@@ -44,7 +52,13 @@ class IngestionResult:
     created: bool
 
 
-def ingest_text_document(db: Session, *, request: IngestionRequest) -> IngestionResult:
+def ingest_text_document(
+    db: Session,
+    *,
+    request: IngestionRequest,
+    graph_llm_client: GraphLLMClient | None = None,
+    graph_embedding_provider: EmbeddingProvider | None = None,
+) -> IngestionResult:
     """Ingest a .md/.txt payload and persist document/chunks rows."""
     parsed = parse_text_payload(
         raw_bytes=request.raw_bytes,
@@ -119,6 +133,20 @@ def ingest_text_document(db: Session, *, request: IngestionRequest) -> Ingestion
         document_id=document.id,
         chunk_texts=chunks,
     )
+    if graph_llm_client is not None:
+        build_graph_for_chunks(
+            db,
+            workspace_id=request.workspace_id,
+            chunks=list_chunks_for_document(
+                db,
+                workspace_id=request.workspace_id,
+                document_id=document.id,
+            ),
+            llm_client=graph_llm_client,
+            settings=get_settings(),
+            embedding_provider=graph_embedding_provider,
+        )
+
     db.commit()
     return IngestionResult(
         document_id=document.id,
