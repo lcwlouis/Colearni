@@ -39,6 +39,10 @@ def create_level_up_quiz(
     session_id: int | None,
     question_count: int,
     items: list[dict[str, Any]] | None,
+    quiz_type: str = "level_up",
+    min_items: int = MIN_ITEMS,
+    max_items: int = MAX_ITEMS,
+    context_source: str | None = None,
 ) -> dict[str, Any]:
     concept = (
         session.execute(
@@ -59,16 +63,18 @@ def create_level_up_quiz(
         raise LevelUpQuizNotFoundError("Concept not found in workspace.")
     concept_name = str(concept["canonical_name"])
     concept_description = str(concept["description"] or "")
-    context_source = "provided" if items else "generated"
+    resolved_context_source = context_source or ("provided" if items else "generated")
 
     normalized_items = (
-        _normalize_items(items) if items else _auto_items(concept, question_count)
+        _normalize_items(items, min_items=min_items, max_items=max_items)
+        if items
+        else _auto_items(concept, question_count, min_items=min_items, max_items=max_items)
     )
     normalized_items = _attach_generation_context(
         normalized_items,
         concept_name=concept_name,
         concept_description=concept_description,
-        context_source=context_source,
+        context_source=resolved_context_source,
     )
 
     quiz = (
@@ -83,7 +89,7 @@ def create_level_up_quiz(
                     quiz_type,
                     status
                 )
-                VALUES (:workspace_id, :user_id, :session_id, :concept_id, 'level_up', 'ready')
+                VALUES (:workspace_id, :user_id, :session_id, :concept_id, :quiz_type, 'ready')
                 RETURNING id, status
                 """
             ),
@@ -92,6 +98,7 @@ def create_level_up_quiz(
                 "user_id": user_id,
                 "session_id": session_id,
                 "concept_id": concept_id,
+                "quiz_type": quiz_type,
             },
         )
         .mappings()
@@ -160,6 +167,9 @@ def submit_level_up_quiz(
     user_id: int,
     answers: list[dict[str, Any]],
     llm_client: GraphLLMClient | None,
+    quiz_type: str = "level_up",
+    update_mastery: bool = True,
+    retry_hint: str = RETRY_HINT,
 ) -> dict[str, Any]:
     quiz = (
         session.execute(
@@ -167,11 +177,11 @@ def submit_level_up_quiz(
                 """
                 SELECT id, user_id, concept_id
                 FROM quizzes
-                WHERE id = :quiz_id AND workspace_id = :workspace_id AND quiz_type = 'level_up'
+                WHERE id = :quiz_id AND workspace_id = :workspace_id AND quiz_type = :quiz_type
                 FOR UPDATE
                 """
             ),
-            {"quiz_id": quiz_id, "workspace_id": workspace_id},
+            {"quiz_id": quiz_id, "workspace_id": workspace_id, "quiz_type": quiz_type},
         )
         .mappings()
         .first()
@@ -198,47 +208,49 @@ def submit_level_up_quiz(
         .first()
     )
     if existing is not None:
-        mastery = (
-            session.execute(
-                text(
-                    """
-                    SELECT status, score
-                    FROM mastery
-                    WHERE workspace_id = :workspace_id
-                      AND user_id = :user_id
-                      AND concept_id = :concept_id
-                    LIMIT 1
-                    """
-                ),
-                {
-                    "workspace_id": workspace_id,
-                    "user_id": user_id,
-                    "concept_id": int(quiz["concept_id"]),
-                },
-            )
-            .mappings()
-            .first()
-        )
         grading = existing["grading"] if isinstance(existing["grading"], dict) else {}
-        mastery_status = (
-            str(mastery["status"])
-            if mastery
-            else ("learned" if existing["passed"] else "learning")
-        )
-        mastery_score = float(mastery["score"]) if mastery else float(existing["score"] or 0.0)
         session.commit()
-        return {
+        payload: dict[str, Any] = {
             "quiz_id": quiz_id,
             "attempt_id": int(existing["id"]),
             "score": float(existing["score"] or 0.0),
             "passed": bool(existing["passed"]),
             "critical_misconception": bool(grading.get("critical_misconception", False)),
             "overall_feedback": str(grading.get("overall_feedback", "")).strip(),
-            "mastery_status": mastery_status,
-            "mastery_score": mastery_score,
             "replayed": True,
-            "retry_hint": RETRY_HINT,
+            "retry_hint": retry_hint,
         }
+        if update_mastery:
+            mastery = (
+                session.execute(
+                    text(
+                        """
+                        SELECT status, score
+                        FROM mastery
+                        WHERE workspace_id = :workspace_id
+                          AND user_id = :user_id
+                          AND concept_id = :concept_id
+                        LIMIT 1
+                        """
+                    ),
+                    {
+                        "workspace_id": workspace_id,
+                        "user_id": user_id,
+                        "concept_id": int(quiz["concept_id"]),
+                    },
+                )
+                .mappings()
+                .first()
+            )
+            payload["mastery_status"] = (
+                str(mastery["status"])
+                if mastery
+                else ("learned" if existing["passed"] else "learning")
+            )
+            payload["mastery_score"] = (
+                float(mastery["score"]) if mastery else float(existing["score"] or 0.0)
+            )
+        return payload
 
     item_rows = (
         session.execute(
@@ -345,47 +357,55 @@ def submit_level_up_quiz(
         text("UPDATE quizzes SET status = 'graded', updated_at = now() WHERE id = :quiz_id"),
         {"quiz_id": quiz_id},
     )
-    session.execute(
-        text(
-            """
-            INSERT INTO mastery (workspace_id, user_id, concept_id, score, status)
-            VALUES (:workspace_id, :user_id, :concept_id, :score, :status)
-            ON CONFLICT (user_id, concept_id)
-            DO UPDATE SET
-                workspace_id = EXCLUDED.workspace_id,
-                score = EXCLUDED.score,
-                status = EXCLUDED.status,
-                updated_at = now()
-            """
-        ),
-        {
-            "workspace_id": workspace_id,
-            "user_id": user_id,
-            "concept_id": int(quiz["concept_id"]),
-            "score": mastery_score,
-            "status": mastery_status,
-        },
-    )
+    if update_mastery:
+        session.execute(
+            text(
+                """
+                INSERT INTO mastery (workspace_id, user_id, concept_id, score, status)
+                VALUES (:workspace_id, :user_id, :concept_id, :score, :status)
+                ON CONFLICT (user_id, concept_id)
+                DO UPDATE SET
+                    workspace_id = EXCLUDED.workspace_id,
+                    score = EXCLUDED.score,
+                    status = EXCLUDED.status,
+                    updated_at = now()
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": int(quiz["concept_id"]),
+                "score": mastery_score,
+                "status": mastery_status,
+            },
+        )
     session.commit()
 
-    return {
+    payload = {
         "quiz_id": quiz_id,
         "attempt_id": attempt_id,
         "score": mastery_score,
         "passed": passed,
         "critical_misconception": critical,
         "overall_feedback": overall_feedback,
-        "mastery_status": mastery_status,
-        "mastery_score": mastery_score,
         "replayed": False,
         "retry_hint": None,
     }
+    if update_mastery:
+        payload["mastery_status"] = mastery_status
+        payload["mastery_score"] = mastery_score
+    return payload
 
 
-def _normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if len(items) < MIN_ITEMS or len(items) > MAX_ITEMS:
+def _normalize_items(
+    items: list[dict[str, Any]],
+    *,
+    min_items: int = MIN_ITEMS,
+    max_items: int = MAX_ITEMS,
+) -> list[dict[str, Any]]:
+    if len(items) < min_items or len(items) > max_items:
         raise LevelUpQuizValidationError(
-            f"items must include between {MIN_ITEMS} and {MAX_ITEMS} entries"
+            f"items must include between {min_items} and {max_items} entries"
         )
     normalized: list[dict[str, Any]] = []
     for item in items:
@@ -559,10 +579,16 @@ def _attach_generation_context(
     return with_context
 
 
-def _auto_items(concept: dict[str, Any], question_count: int) -> list[dict[str, Any]]:
-    if question_count < MIN_ITEMS or question_count > MAX_ITEMS:
+def _auto_items(
+    concept: dict[str, Any],
+    question_count: int,
+    *,
+    min_items: int = MIN_ITEMS,
+    max_items: int = MAX_ITEMS,
+) -> list[dict[str, Any]]:
+    if question_count < min_items or question_count > max_items:
         raise LevelUpQuizValidationError(
-            f"question_count must be between {MIN_ITEMS} and {MAX_ITEMS}"
+            f"question_count must be between {min_items} and {max_items}"
         )
     name = str(concept["canonical_name"])
     desc = str(concept["description"] or "")
