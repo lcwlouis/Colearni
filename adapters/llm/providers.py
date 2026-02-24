@@ -27,6 +27,7 @@ _DISAMBIGUATION_SCHEMA: dict[str, object] = {
     "additionalProperties": False,
 }
 
+
 class _OpenAICompatibleGraphLLMClient:
     def __init__(
         self,
@@ -72,6 +73,14 @@ class _OpenAICompatibleGraphLLMClient:
             ),
         )
 
+    def generate_tutor_text(self, *, prompt: str) -> str:
+        return self._chat_text(
+            prompt=prompt,
+            system_instruction=(
+                "You are a grounded tutor. Follow style instructions exactly and stay concise."
+            ),
+        )
+
     def _chat_json(
         self,
         *,
@@ -79,7 +88,7 @@ class _OpenAICompatibleGraphLLMClient:
         schema: dict[str, object],
         prompt: str,
     ) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, object] = {
             "model": self._model,
             "temperature": 0,
             "messages": [
@@ -94,12 +103,31 @@ class _OpenAICompatibleGraphLLMClient:
                 "json_schema": {"name": schema_name, "strict": True, "schema": schema},
             },
         }
+        content = self._extract_message_content(self._post_chat_completion(payload))
+        response_payload = json.loads(content)
+        if not isinstance(response_payload, dict):
+            raise ValueError("Graph LLM response payload must decode to an object")
+        return response_payload
+
+    def _chat_text(self, *, prompt: str, system_instruction: str) -> str:
+        payload: dict[str, object] = {
+            "model": self._model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        content = self._extract_message_content(self._post_chat_completion(payload))
+        return content.strip()
+
+    def _post_chat_completion(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         headers = {"Content-Type": "application/json"}
         if self._api_key is not None:
             headers["Authorization"] = f"Bearer {self._api_key}"
         request = Request(
             self._url,
-            data=json.dumps(payload).encode("utf-8"),
+            data=json.dumps(dict(payload)).encode("utf-8"),
             headers=headers,
             method="POST",
         )
@@ -113,10 +141,18 @@ class _OpenAICompatibleGraphLLMClient:
             raise RuntimeError(f"Graph LLM request failed: {exc.reason}") from exc
 
         parsed = json.loads(response_body)
-        choices = parsed.get("choices")
+        if not isinstance(parsed, Mapping):
+            raise ValueError("Graph LLM response payload must decode to an object")
+        return parsed
+
+    def _extract_message_content(self, payload: Mapping[str, object]) -> str:
+        choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
             raise ValueError("Graph LLM response missing choices")
-        message = choices[0].get("message")
+        first_choice = choices[0]
+        if not isinstance(first_choice, Mapping):
+            raise ValueError("Graph LLM response missing choice payload")
+        message = first_choice.get("message")
         if not isinstance(message, Mapping):
             raise ValueError("Graph LLM response missing message")
         content = message.get("content")
@@ -128,10 +164,7 @@ class _OpenAICompatibleGraphLLMClient:
             )
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Graph LLM response missing textual content")
-        response_payload = json.loads(content)
-        if not isinstance(response_payload, dict):
-            raise ValueError("Graph LLM response payload must decode to an object")
-        return response_payload
+        return content
 
 
 class OpenAIGraphLLMClient(_OpenAICompatibleGraphLLMClient):
@@ -144,6 +177,7 @@ class OpenAIGraphLLMClient(_OpenAICompatibleGraphLLMClient):
             base_url="https://api.openai.com/v1",
             api_key=api_key,
         )
+
 
 class LiteLLMGraphLLMClient(_OpenAICompatibleGraphLLMClient):
     def __init__(

@@ -1,5 +1,6 @@
 alembic<2.0.0,>=1.13.0
 fastapi<1.0.0,>=0.115.0
+litellm<2.0.0,>=1.81.0
 pgvector<1.0.0,>=0.3.6
 pydantic-settings<3.0.0,>=2.5.0
 python-multipart<1.0.0,>=0.0.9

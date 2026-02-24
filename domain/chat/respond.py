@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from adapters.db.documents import DocumentRow, get_document_by_id
+from adapters.db.mastery import get_mastery_status
 from adapters.embeddings.factory import build_embedding_provider
+from adapters.llm.factory import build_graph_llm_client
 from core.schemas import (
     CITATION_LABEL_FROM_NOTES,
     AssistantDraft,
@@ -17,6 +19,7 @@ from core.settings import Settings, get_settings
 from core.verifier import verify_assistant_draft
 from sqlalchemy.orm import Session
 
+from domain.chat.tutor_agent import build_tutor_response_text
 from domain.retrieval.fts_retriever import PgFtsRetriever
 from domain.retrieval.hybrid_retriever import HybridRetriever
 from domain.retrieval.types import RankedChunk
@@ -60,9 +63,19 @@ def generate_chat_response(
         chunks=ranked_chunks,
     )
     citations = _build_workspace_citations(evidence)
+    tutor_llm_client = _build_tutor_llm_client(settings=active_settings)
+    mastery_status = _resolve_mastery_status(
+        session=session,
+        request=request,
+    )
 
     draft = AssistantDraft(
-        text=_compose_draft_text(query=request.query, evidence=evidence),
+        text=build_tutor_response_text(
+            query=request.query,
+            evidence=evidence,
+            mastery_status=mastery_status,
+            llm_client=tutor_llm_client,
+        ),
         evidence=evidence,
         citations=citations,
     )
@@ -119,15 +132,26 @@ def _build_workspace_citations(evidence: list[EvidenceItem]) -> list[Citation]:
     return citations
 
 
-def _compose_draft_text(*, query: str, evidence: list[EvidenceItem]) -> str:
-    if not evidence:
-        return (
-            "I could not find relevant, source-linked passages in your workspace for this "
-            f"question: {query}"
-        )
+def _resolve_mastery_status(
+    *,
+    session: Session,
+    request: ChatRespondRequest,
+) -> str | None:
+    if request.user_id is None or request.concept_id is None:
+        return None
+    return get_mastery_status(
+        session,
+        workspace_id=request.workspace_id,
+        user_id=request.user_id,
+        concept_id=request.concept_id,
+    )
 
-    lead = _truncate(_single_line(evidence[0].content), limit=280)
-    return f'From your notes, a relevant passage is: "{lead}"'
+
+def _build_tutor_llm_client(*, settings: Settings):
+    try:
+        return build_graph_llm_client(settings=settings)
+    except ValueError:
+        return None
 
 
 def _truncate(value: str, *, limit: int) -> str:

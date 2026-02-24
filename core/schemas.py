@@ -174,6 +174,8 @@ class ChatRespondRequest(BaseModel):
 
     workspace_id: int = Field(gt=0)
     query: str = Field(min_length=1)
+    user_id: int | None = Field(default=None, gt=0)
+    concept_id: int | None = Field(default=None, gt=0)
     top_k: int = Field(default=5, ge=1)
     grounding_mode: GroundingMode | None = None
 
