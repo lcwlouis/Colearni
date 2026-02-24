@@ -97,6 +97,37 @@ sequenceDiagram
 
 ---
 
+## Practice flow (non-leveling)
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant API as FastAPI /practice routes
+  participant P as Practice Domain
+  participant L as LLM Provider
+  participant DB as Postgres
+
+  U->>API: Generate flashcards or practice quiz from concept_id
+  API->>P: Validate workspace + concept + bounds
+  P->>L: Generate JSON content from concept + adjacency context
+  alt Invalid generation output
+    P->>L: Retry generation (up to 3 attempts total)
+  end
+  P->>DB: Persist practice quiz + items (quiz_type='practice')
+  API-->>U: Practice payload
+  U->>API: Submit practice answers
+  API->>P: Grade (MCQ deterministic + short-answer rubric)
+  P->>DB: Store attempt only (no mastery update)
+  API-->>U: Score + per-item feedback + overall feedback
+```
+
+Practice constraints:
+- Practice routes remain thin and only delegate to domain functions.
+- Practice submissions are idempotent on replay and return the stored graded attempt.
+- Practice flows do not transition mastery to `learned`.
+
+---
+
 ## Repo structure (must remain clean)
 
 ```

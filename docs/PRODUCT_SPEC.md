@@ -52,6 +52,11 @@ From the graph UI:
   - flashcards
   - mini quizzes
 These do **not** change mastery status to learned. They are practice only.
+- Mini quizzes are bounded to **3–6** items and must include at least one `short_answer` and one `mcq`.
+- Practice quiz generation is resilient to malformed model output:
+  - normalize common short-answer payload shape issues (for example, `rubric_keywords`)
+  - regenerate up to **3 attempts** before returning a validation error
+- Practice submissions return score + feedback but never mutate mastery state.
 
 ### 5) Graph UI (progress + exploration)
 Users can:
