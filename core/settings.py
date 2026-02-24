@@ -105,6 +105,10 @@ class Settings(BaseSettings):
         default="http://localhost:4000/v1",
         validation_alias=AliasChoices("APP_LITELLM_BASE_URL", "LITELLM_BASE_URL"),
     )
+    litellm_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("APP_LITELLM_MODEL", "LITELLM_MODEL"),
+    )
     litellm_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("APP_LITELLM_API_KEY", "LITELLM_API_KEY"),
@@ -224,8 +228,8 @@ class Settings(BaseSettings):
     def validate_embedding_provider(cls, value: str) -> str:
         """Restrict embedding provider options."""
         normalized = value.strip().lower()
-        if normalized not in {"openai", "mock"}:
-            raise ValueError("embedding_provider must be one of: openai, mock")
+        if normalized not in {"openai", "litellm", "mock"}:
+            raise ValueError("embedding_provider must be one of: openai, litellm, mock")
         return normalized
 
     @field_validator("graph_llm_provider")

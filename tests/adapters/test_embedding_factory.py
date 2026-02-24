@@ -4,9 +4,26 @@ from typing import Any
 
 import pytest
 from adapters.embeddings.factory import build_embedding_provider
+from adapters.embeddings.litellm_provider import LiteLLMEmbeddingProvider
 from adapters.embeddings.mock_provider import MockEmbeddingProvider
 from adapters.embeddings.openai_provider import OpenAIEmbeddingProvider
-from core.settings import get_settings
+from core.settings import Settings, get_settings
+
+
+def _clear_embedding_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in [
+        "APP_EMBEDDING_PROVIDER",
+        "EMBEDDING_PROVIDER",
+        "APP_OPENAI_API_KEY",
+        "OPENAI_API_KEY",
+        "APP_LITELLM_MODEL",
+        "LITELLM_MODEL",
+        "APP_LITELLM_BASE_URL",
+        "LITELLM_BASE_URL",
+        "APP_LITELLM_API_KEY",
+        "LITELLM_API_KEY",
+    ]:
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_factory_returns_mock_provider() -> None:
@@ -90,5 +107,40 @@ def test_factory_raises_when_litellm_model_is_missing() -> None:
     settings = get_settings().model_copy(
         update={"embedding_provider": "litellm", "litellm_model": "  "}
     )
+    with pytest.raises(ValueError, match="APP_LITELLM_MODEL"):
+        build_embedding_provider(settings=settings)
+
+
+@pytest.mark.parametrize(
+    ("provider", "extra_env", "expected_type"),
+    [
+        ("mock", {}, MockEmbeddingProvider),
+        ("openai", {"APP_OPENAI_API_KEY": "sk-test"}, OpenAIEmbeddingProvider),
+        ("litellm", {"APP_LITELLM_MODEL": "text-embedding-proxy"}, LiteLLMEmbeddingProvider),
+    ],
+)
+def test_factory_builds_provider_from_env_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    extra_env: dict[str, str],
+    expected_type: type[object],
+) -> None:
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.setenv("APP_EMBEDDING_PROVIDER", provider)
+    for key, value in extra_env.items():
+        monkeypatch.setenv(key, value)
+
+    settings = Settings(_env_file=None)
+
+    assert isinstance(build_embedding_provider(settings=settings), expected_type)
+
+
+def test_factory_env_litellm_provider_requires_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_embedding_env(monkeypatch)
+    monkeypatch.setenv("APP_EMBEDDING_PROVIDER", "litellm")
+    monkeypatch.setenv("APP_LITELLM_MODEL", "   ")
+
+    settings = Settings(_env_file=None)
+
     with pytest.raises(ValueError, match="APP_LITELLM_MODEL"):
         build_embedding_provider(settings=settings)

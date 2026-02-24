@@ -26,3 +26,33 @@ def test_settings_ignores_default_grounded_mode_typo(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.default_grounding_mode == GroundingMode.HYBRID
+
+
+def test_settings_reads_litellm_embedding_config_from_app_env(monkeypatch) -> None:
+    """APP_ embedding env aliases should hydrate LiteLLM embedding settings."""
+    monkeypatch.delenv("APP_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("APP_LITELLM_MODEL", raising=False)
+    monkeypatch.delenv("LITELLM_MODEL", raising=False)
+    monkeypatch.setenv("APP_EMBEDDING_PROVIDER", "litellm")
+    monkeypatch.setenv("APP_LITELLM_MODEL", "text-embedding-proxy")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.embedding_provider == "litellm"
+    assert settings.litellm_model == "text-embedding-proxy"
+
+
+def test_settings_reads_litellm_embedding_config_from_legacy_env_aliases(monkeypatch) -> None:
+    """Unprefixed env aliases should also hydrate LiteLLM embedding settings."""
+    monkeypatch.delenv("APP_EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("APP_LITELLM_MODEL", raising=False)
+    monkeypatch.delenv("LITELLM_MODEL", raising=False)
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "litellm")
+    monkeypatch.setenv("LITELLM_MODEL", "text-embedding-proxy-legacy")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.embedding_provider == "litellm"
+    assert settings.litellm_model == "text-embedding-proxy-legacy"
