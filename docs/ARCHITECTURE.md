@@ -87,7 +87,7 @@ sequenceDiagram
     Q->>DB: Store quiz + items
     Q-->>U: Quiz card payload
     U->>C: Submit quiz answers
-    C->>G: Grade short-answer via LLM rubric + MCQ deterministically
+    C->>G: Grade short-answer via LLM rubric with persisted generation context + MCQ deterministically
     G->>DB: Store attempt + update mastery
     C-->>U: Per-item feedback + overall feedback + updated status
   else Learned

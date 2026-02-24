@@ -57,9 +57,18 @@ def create_level_up_quiz(
     )
     if concept is None:
         raise LevelUpQuizNotFoundError("Concept not found in workspace.")
+    concept_name = str(concept["canonical_name"])
+    concept_description = str(concept["description"] or "")
+    context_source = "provided" if items else "generated"
 
     normalized_items = (
         _normalize_items(items) if items else _auto_items(concept, question_count)
+    )
+    normalized_items = _attach_generation_context(
+        normalized_items,
+        concept_name=concept_name,
+        concept_description=concept_description,
+        context_source=context_source,
     )
 
     quiz = (
@@ -401,7 +410,11 @@ def _normalize_short(payload: dict[str, Any]) -> dict[str, Any]:
         required=False,
         field="critical_misconception_keywords",
     )
-    return {"rubric_keywords": rubric, "critical_misconception_keywords": critical}
+    normalized = {"rubric_keywords": rubric, "critical_misconception_keywords": critical}
+    generation_context = _normalize_generation_context(payload.get("_generation_context"))
+    if generation_context is not None:
+        normalized["_generation_context"] = generation_context
+    return normalized
 
 
 def _normalize_mcq(payload: dict[str, Any]) -> dict[str, Any]:
@@ -449,12 +462,16 @@ def _normalize_mcq(payload: dict[str, Any]) -> dict[str, Any]:
             critical_choice_ids=critical,
             choice_text=choice["text"],
         )
-    return {
+    normalized = {
         "choices": choices,
         "correct_choice_id": correct,
         "critical_choice_ids": critical,
         "choice_explanations": explanations,
     }
+    generation_context = _normalize_generation_context(payload.get("_generation_context"))
+    if generation_context is not None:
+        normalized["_generation_context"] = generation_context
+    return normalized
 
 
 def _str_list(value: Any, *, required: bool, field: str) -> list[str]:
@@ -472,6 +489,76 @@ def _str_list(value: Any, *, required: bool, field: str) -> list[str]:
     return out
 
 
+def _normalize_generation_context(raw_context: Any) -> dict[str, Any] | None:
+    if raw_context is None:
+        return None
+    if not isinstance(raw_context, dict):
+        raise LevelUpQuizValidationError("_generation_context must be an object.")
+
+    concept_name = str(raw_context.get("concept_name", "")).strip()
+    if not concept_name:
+        raise LevelUpQuizValidationError("_generation_context.concept_name must not be empty.")
+    concept_description = str(raw_context.get("concept_description", "")).strip()
+    context_source = str(raw_context.get("context_source", "")).strip().lower() or "generated"
+    if context_source not in {"generated", "provided"}:
+        raise LevelUpQuizValidationError(
+            "_generation_context.context_source must be generated or provided."
+        )
+    context_keywords = _str_list(
+        raw_context.get("context_keywords", []),
+        required=False,
+        field="_generation_context.context_keywords",
+    )
+    if not context_keywords:
+        context_keywords = _extract_context_keywords(
+            concept_name=concept_name,
+            concept_description=concept_description,
+        )
+    return {
+        "concept_name": concept_name,
+        "concept_description": concept_description,
+        "context_keywords": context_keywords,
+        "context_source": context_source,
+    }
+
+
+def _extract_context_keywords(*, concept_name: str, concept_description: str) -> list[str]:
+    raw_tokens = (concept_name + " " + concept_description).lower().split()
+    tokens = ["".join(ch for ch in token if ch.isalnum()) for token in raw_tokens]
+    keywords = [token for token in tokens if len(token) > 2][:4]
+    return keywords or ["concept"]
+
+
+def _attach_generation_context(
+    items: list[dict[str, Any]],
+    *,
+    concept_name: str,
+    concept_description: str,
+    context_source: str,
+) -> list[dict[str, Any]]:
+    context_keywords = _extract_context_keywords(
+        concept_name=concept_name,
+        concept_description=concept_description,
+    )
+    with_context: list[dict[str, Any]] = []
+    for item in items:
+        payload = dict(item["payload"])
+        payload["_generation_context"] = {
+            "concept_name": concept_name,
+            "concept_description": concept_description,
+            "context_keywords": context_keywords,
+            "context_source": context_source,
+        }
+        with_context.append(
+            {
+                "item_type": item["item_type"],
+                "prompt": item["prompt"],
+                "payload": payload,
+            }
+        )
+    return with_context
+
+
 def _auto_items(concept: dict[str, Any], question_count: int) -> list[dict[str, Any]]:
     if question_count < MIN_ITEMS or question_count > MAX_ITEMS:
         raise LevelUpQuizValidationError(
@@ -479,9 +566,7 @@ def _auto_items(concept: dict[str, Any], question_count: int) -> list[dict[str, 
         )
     name = str(concept["canonical_name"])
     desc = str(concept["description"] or "")
-    raw_tokens = (name + " " + desc).lower().split()
-    keywords = ["".join(ch for ch in token if ch.isalnum()) for token in raw_tokens]
-    keywords = [token for token in keywords if len(token) > 2][:4] or ["concept"]
+    keywords = _extract_context_keywords(concept_name=name, concept_description=desc)
     short_count = min(
         max(int(math.floor((question_count * 0.6) + 0.5)), 1),
         question_count - 1,
@@ -555,6 +640,7 @@ def _grading_prompt(items: list[dict[str, Any]], answer_map: dict[int, str]) -> 
     submission = [{**item, "answer": answer_map[item["item_id"]]} for item in items]
     return (
         "Return JSON only with keys items and overall_feedback. "
+        "Use payload._generation_context as the canonical generation-time context. "
         "Each items entry must include item_id, score(0..1), "
         "critical_misconception(bool), feedback.\n"
         f"ITEM_IDS_JSON: {json.dumps(ids, ensure_ascii=True)}\n"

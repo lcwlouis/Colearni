@@ -40,6 +40,9 @@ For a given concept/topic:
 - Mixed grading:
   - MCQ items are graded deterministically with per-choice explanations.
   - Short-answer items are graded by LLM using a strict rubric schema.
+- Grading context:
+  - Persist a generation-time context snapshot per item and reuse it during grading.
+  - This keeps grading aligned with the exact context used when the quiz was created.
 - Mastery is updated.
 - Tutor returns per-item feedback plus an overall feedback summary and next steps.
 

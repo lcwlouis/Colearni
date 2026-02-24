@@ -19,9 +19,11 @@ class DeterministicQuizGrader:
         self.score = score
         self.critical = critical
         self.calls = 0
+        self.last_prompt: str | None = None
 
     def generate_tutor_text(self, *, prompt: str) -> str:
         self.calls += 1
+        self.last_prompt = prompt
         marker = "ITEM_IDS_JSON:"
         ids = next(
             json.loads(line.split(marker, maxsplit=1)[1].strip())
@@ -180,6 +182,24 @@ def test_level_up_pass_fail_transitions(
         assert set(mcq_payload["choice_explanations"].keys()) == {
             choice["id"] for choice in mcq_payload["choices"]
         }
+        short_payload = session.execute(
+            text(
+                """
+                SELECT payload
+                FROM quiz_items
+                WHERE quiz_id = :quiz_id AND item_type = 'short_answer'
+                ORDER BY position
+                LIMIT 1
+                """
+            ),
+            {"quiz_id": create_payload["quiz_id"]},
+        ).scalar_one()
+        generation_context = short_payload.get("_generation_context")
+        assert isinstance(generation_context, dict)
+        assert generation_context.get("concept_name") == "Linear Map"
+        assert generation_context.get("context_source") == "generated"
+        assert isinstance(generation_context.get("context_keywords"), list)
+        assert generation_context["context_keywords"]
 
         submitted = client.post(
             f"/quizzes/{create_payload['quiz_id']}/submit",
@@ -210,6 +230,8 @@ def test_level_up_pass_fail_transitions(
         ).scalar_one()
         assert isinstance(grading, dict)
         assert isinstance(grading.get("overall_feedback"), str)
+        assert grader.last_prompt is not None
+        assert "_generation_context" in grader.last_prompt
 
         mastery_status = session.execute(
             text(
@@ -323,6 +345,21 @@ def test_level_up_mcq_only_submission_works_without_llm() -> None:
         )
         assert created.status_code == 201
         quiz = created.json()
+        mcq_payload = session.execute(
+            text(
+                """
+                SELECT payload
+                FROM quiz_items
+                WHERE quiz_id = :quiz_id
+                ORDER BY position
+                LIMIT 1
+                """
+            ),
+            {"quiz_id": quiz["quiz_id"]},
+        ).scalar_one()
+        generation_context = mcq_payload.get("_generation_context")
+        assert isinstance(generation_context, dict)
+        assert generation_context.get("context_source") == "provided"
 
         submitted = client.post(
             f"/quizzes/{quiz['quiz_id']}/submit",
