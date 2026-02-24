@@ -39,6 +39,27 @@ class PracticeLLM:
         )
 
 
+class FlakyPracticeLLM(PracticeLLM):
+    def __init__(self) -> None:
+        self.quiz_calls = 0
+
+    def generate_tutor_text(self, *, prompt: str) -> str:
+        if "QUESTION_COUNT:" in prompt:
+            self.quiz_calls += 1
+            if self.quiz_calls == 1:
+                return json.dumps(
+                    {
+                        "items": [
+                            _mcq_item(1),
+                            _mcq_item(2),
+                            _mcq_item(3),
+                            _mcq_item(4),
+                        ]
+                    }
+                )
+        return super().generate_tutor_text(prompt=prompt)
+
+
 def _short_item() -> dict[str, Any]:
     return {
         "item_type": "short_answer",
@@ -164,5 +185,26 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
         ).mappings().one()
         assert str(mastery["status"]) == "learning"
         assert float(mastery["score"]) == 0.4
+    finally:
+        _close(session, app, client)
+
+
+def test_practice_quiz_generation_retries_when_first_payload_is_invalid() -> None:
+    session = _session_or_skip()
+    workspace_id, user_id, concept_id = _seed(session)
+    llm = FlakyPracticeLLM()
+    app, client = _client(session, llm)
+    try:
+        created = client.post(
+            "/practice/quizzes",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "question_count": 4,
+            },
+        )
+        assert created.status_code == 201
+        assert llm.quiz_calls == 2
     finally:
         _close(session, app, client)

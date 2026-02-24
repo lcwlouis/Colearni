@@ -14,6 +14,7 @@ MAX_FLASHCARDS = 12
 MIN_ITEMS = 3
 MAX_ITEMS = 6
 ADJACENT_LIMIT = 6
+MAX_GENERATION_ATTEMPTS = 3
 RETRY_HINT = "create a new practice quiz to retry"
 
 PracticeNotFoundError = level_up.LevelUpQuizNotFoundError
@@ -95,19 +96,7 @@ def create_practice_quiz(
         f"QUESTION_COUNT: {question_count}\n"
         f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
     )
-    payload = _parse_json(
-        llm_client.generate_tutor_text(prompt=prompt),
-        "Practice quiz generation response is not valid JSON.",
-    )
-    items = level_up._normalize_items(
-        payload.get("items"),
-        min_items=MIN_ITEMS,
-        max_items=MAX_ITEMS,
-    )
-    if {item["item_type"] for item in items} != {"short_answer", "mcq"}:
-        raise PracticeGenerationError(
-            "Practice quiz requires at least one short_answer and one mcq."
-        )
+    items = _generate_practice_items_with_retries(llm_client=llm_client, prompt=prompt)
 
     return level_up.create_level_up_quiz(
         session,
@@ -144,6 +133,96 @@ def submit_practice_quiz(
         update_mastery=False,
         retry_hint=RETRY_HINT,
     )
+
+
+def _generate_practice_items_with_retries(
+    *,
+    llm_client: GraphLLMClient,
+    prompt: str,
+) -> list[dict[str, Any]]:
+    last_error: Exception | None = None
+    retry_prompt = prompt
+    for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
+        try:
+            payload = _parse_json(
+                llm_client.generate_tutor_text(prompt=retry_prompt),
+                "Practice quiz generation response is not valid JSON.",
+            )
+            raw_items = _coerce_generated_items(payload.get("items"))
+            items = level_up._normalize_items(
+                raw_items,
+                min_items=MIN_ITEMS,
+                max_items=MAX_ITEMS,
+            )
+            if {item["item_type"] for item in items} != {"short_answer", "mcq"}:
+                raise PracticeGenerationError(
+                    "Practice quiz requires at least one short_answer and one mcq."
+                )
+            return items
+        except PracticeGenerationError as exc:
+            last_error = exc
+        except PracticeValidationError as exc:
+            last_error = exc
+        if attempt < MAX_GENERATION_ATTEMPTS:
+            retry_prompt = (
+                f"{prompt}\n"
+                f"RETRY_ATTEMPT: {attempt + 1}/{MAX_GENERATION_ATTEMPTS}\n"
+                f"PREVIOUS_OUTPUT_INVALID_REASON: {last_error}\n"
+                "Regenerate from scratch and return only valid JSON."
+            )
+
+    if last_error is None:
+        raise PracticeGenerationError("Practice quiz generation failed.")
+    raise PracticeGenerationError(
+        f"Practice quiz generation failed after {MAX_GENERATION_ATTEMPTS} attempts: {last_error}"
+    ) from last_error
+
+
+def _coerce_generated_items(raw_items: Any) -> Any:
+    if not isinstance(raw_items, list):
+        return raw_items
+    out: list[Any] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        normalized_item = dict(item)
+        item_type = str(normalized_item.get("item_type", "")).strip().lower()
+        payload = normalized_item.get("payload")
+        if item_type == "short_answer" and isinstance(payload, dict):
+            normalized_payload = dict(payload)
+            normalized_payload["rubric_keywords"] = _coerce_keyword_list(
+                normalized_payload.get("rubric_keywords"),
+                default=["concept"],
+            )
+            normalized_payload["critical_misconception_keywords"] = _coerce_keyword_list(
+                normalized_payload.get("critical_misconception_keywords", []),
+                default=[],
+            )
+            normalized_item["payload"] = normalized_payload
+        out.append(normalized_item)
+    return out
+
+
+def _coerce_keyword_list(value: Any, *, default: list[str]) -> list[str]:
+    if isinstance(value, list):
+        raw_values = value
+    elif isinstance(value, str):
+        if "," in value:
+            raw_values = value.split(",")
+        else:
+            raw_values = value.split()
+    elif value is None:
+        raw_values = []
+    else:
+        raw_values = [value]
+
+    out: list[str] = []
+    for raw in raw_values:
+        token = str(raw).strip().lower()
+        if token and token not in out:
+            out.append(token)
+    return out or list(default)
 
 
 def _context(session: Session, *, workspace_id: int, concept_id: int) -> dict[str, Any]:
