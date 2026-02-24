@@ -1,0 +1,569 @@
+from __future__ import annotations
+
+import json
+import math
+from typing import Any
+
+from core.contracts import GraphLLMClient
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+MIN_ITEMS = 5
+MAX_ITEMS = 10
+PASS_SCORE = 0.75
+RETRY_HINT = "create a new level-up quiz to retry"
+
+
+class LevelUpQuizNotFoundError(ValueError):
+    pass
+
+
+class LevelUpQuizValidationError(ValueError):
+    pass
+
+
+class LevelUpQuizGradingError(ValueError):
+    pass
+
+
+class LevelUpQuizUnavailableError(RuntimeError):
+    pass
+
+
+def create_level_up_quiz(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int,
+    session_id: int | None,
+    question_count: int,
+    items: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    concept = (
+        session.execute(
+            text(
+                """
+                SELECT canonical_name, description
+                FROM concepts_canon
+                WHERE id = :concept_id AND workspace_id = :workspace_id AND is_active = TRUE
+                LIMIT 1
+                """
+            ),
+            {"concept_id": concept_id, "workspace_id": workspace_id},
+        )
+        .mappings()
+        .first()
+    )
+    if concept is None:
+        raise LevelUpQuizNotFoundError("Concept not found in workspace.")
+
+    normalized_items = (
+        _normalize_items(items) if items else _auto_items(concept, question_count)
+    )
+
+    quiz = (
+        session.execute(
+            text(
+                """
+                INSERT INTO quizzes (
+                    workspace_id,
+                    user_id,
+                    session_id,
+                    concept_id,
+                    quiz_type,
+                    status
+                )
+                VALUES (:workspace_id, :user_id, :session_id, :concept_id, 'level_up', 'ready')
+                RETURNING id, status
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                "concept_id": concept_id,
+            },
+        )
+        .mappings()
+        .one()
+    )
+    quiz_id = int(quiz["id"])
+
+    session.execute(
+        text(
+            """
+            INSERT INTO quiz_items (quiz_id, position, item_type, prompt, payload)
+            VALUES (:quiz_id, :position, :item_type, :prompt, CAST(:payload AS jsonb))
+            """
+        ),
+        [
+            {
+                "quiz_id": quiz_id,
+                "position": idx,
+                "item_type": item["item_type"],
+                "prompt": item["prompt"],
+                "payload": json.dumps(item["payload"], ensure_ascii=True),
+            }
+            for idx, item in enumerate(normalized_items, start=1)
+        ],
+    )
+    session.commit()
+
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT id AS item_id, position, item_type, prompt
+                FROM quiz_items
+                WHERE quiz_id = :quiz_id
+                ORDER BY position
+                """
+            ),
+            {"quiz_id": quiz_id},
+        )
+        .mappings()
+        .all()
+    )
+    return {
+        "quiz_id": quiz_id,
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "concept_id": concept_id,
+        "status": str(quiz["status"]),
+        "items": [
+            {
+                "item_id": int(row["item_id"]),
+                "position": int(row["position"]),
+                "item_type": str(row["item_type"]),
+                "prompt": str(row["prompt"]),
+            }
+            for row in rows
+        ],
+    }
+
+
+def submit_level_up_quiz(
+    session: Session,
+    *,
+    quiz_id: int,
+    workspace_id: int,
+    user_id: int,
+    answers: list[dict[str, Any]],
+    llm_client: GraphLLMClient | None,
+) -> dict[str, Any]:
+    if llm_client is None:
+        raise LevelUpQuizUnavailableError("LLM grading client is unavailable.")
+
+    quiz = (
+        session.execute(
+            text(
+                """
+                SELECT id, user_id, concept_id
+                FROM quizzes
+                WHERE id = :quiz_id AND workspace_id = :workspace_id AND quiz_type = 'level_up'
+                FOR UPDATE
+                """
+            ),
+            {"quiz_id": quiz_id, "workspace_id": workspace_id},
+        )
+        .mappings()
+        .first()
+    )
+    if quiz is None:
+        raise LevelUpQuizNotFoundError("Quiz not found in workspace.")
+    if int(quiz["user_id"]) != user_id:
+        raise LevelUpQuizValidationError("Quiz does not belong to user.")
+
+    existing = (
+        session.execute(
+            text(
+                """
+                SELECT id, score, passed, grading
+                FROM quiz_attempts
+                WHERE quiz_id = :quiz_id AND user_id = :user_id AND graded_at IS NOT NULL
+                ORDER BY id
+                LIMIT 1
+                """
+            ),
+            {"quiz_id": quiz_id, "user_id": user_id},
+        )
+        .mappings()
+        .first()
+    )
+    if existing is not None:
+        mastery = (
+            session.execute(
+                text(
+                    """
+                    SELECT status, score
+                    FROM mastery
+                    WHERE workspace_id = :workspace_id
+                      AND user_id = :user_id
+                      AND concept_id = :concept_id
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "workspace_id": workspace_id,
+                    "user_id": user_id,
+                    "concept_id": int(quiz["concept_id"]),
+                },
+            )
+            .mappings()
+            .first()
+        )
+        grading = existing["grading"] if isinstance(existing["grading"], dict) else {}
+        mastery_status = (
+            str(mastery["status"])
+            if mastery
+            else ("learned" if existing["passed"] else "learning")
+        )
+        mastery_score = float(mastery["score"]) if mastery else float(existing["score"] or 0.0)
+        session.commit()
+        return {
+            "quiz_id": quiz_id,
+            "attempt_id": int(existing["id"]),
+            "score": float(existing["score"] or 0.0),
+            "passed": bool(existing["passed"]),
+            "critical_misconception": bool(grading.get("critical_misconception", False)),
+            "mastery_status": mastery_status,
+            "mastery_score": mastery_score,
+            "replayed": True,
+            "retry_hint": RETRY_HINT,
+        }
+
+    item_rows = (
+        session.execute(
+            text(
+                """
+                SELECT id AS item_id, item_type, prompt, payload
+                FROM quiz_items
+                WHERE quiz_id = :quiz_id
+                ORDER BY position
+                """
+            ),
+            {"quiz_id": quiz_id},
+        )
+        .mappings()
+        .all()
+    )
+    if not item_rows:
+        raise LevelUpQuizValidationError("Quiz has no items to submit.")
+
+    items: list[dict[str, Any]] = []
+    for row in item_rows:
+        payload = row["payload"] if isinstance(row["payload"], dict) else {}
+        item_type = str(row["item_type"])
+        payload = (
+            _normalize_short(payload)
+            if item_type == "short_answer"
+            else _normalize_mcq(payload)
+        )
+        items.append(
+            {
+                "item_id": int(row["item_id"]),
+                "item_type": item_type,
+                "prompt": str(row["prompt"]),
+                "payload": payload,
+            }
+        )
+
+    answer_map = _validate_answers(items, answers)
+    prompt = _grading_prompt(items, answer_map)
+    grading = _parse_grading(
+        llm_client.generate_tutor_text(prompt=prompt),
+        [item["item_id"] for item in items],
+    )
+
+    score = sum(float(item["score"]) for item in grading["items"]) / len(grading["items"])
+    critical = any(bool(item["critical_misconception"]) for item in grading["items"])
+    passed = score >= PASS_SCORE and not critical
+    mastery_status = "learned" if passed else "learning"
+    mastery_score = max(0.0, min(1.0, float(score)))
+
+    session.execute(
+        text(
+            """
+            INSERT INTO quiz_attempts (quiz_id, user_id, answers, grading, score, passed, graded_at)
+            VALUES (
+                :quiz_id,
+                :user_id,
+                CAST(:answers AS jsonb),
+                CAST(:grading AS jsonb),
+                :score,
+                :passed,
+                now()
+            )
+            """
+        ),
+        {
+            "quiz_id": quiz_id,
+            "user_id": user_id,
+            "answers": json.dumps({"answers": answers}, ensure_ascii=True),
+            "grading": json.dumps(
+                {**grading, "critical_misconception": critical},
+                ensure_ascii=True,
+            ),
+            "score": mastery_score,
+            "passed": passed,
+        },
+    )
+    attempt_id = int(session.execute(text("SELECT currval('quiz_attempts_id_seq')")).scalar_one())
+    session.execute(
+        text("UPDATE quizzes SET status = 'graded', updated_at = now() WHERE id = :quiz_id"),
+        {"quiz_id": quiz_id},
+    )
+    session.execute(
+        text(
+            """
+            INSERT INTO mastery (workspace_id, user_id, concept_id, score, status)
+            VALUES (:workspace_id, :user_id, :concept_id, :score, :status)
+            ON CONFLICT (user_id, concept_id)
+            DO UPDATE SET
+                workspace_id = EXCLUDED.workspace_id,
+                score = EXCLUDED.score,
+                status = EXCLUDED.status,
+                updated_at = now()
+            """
+        ),
+        {
+            "workspace_id": workspace_id,
+            "user_id": user_id,
+            "concept_id": int(quiz["concept_id"]),
+            "score": mastery_score,
+            "status": mastery_status,
+        },
+    )
+    session.commit()
+
+    return {
+        "quiz_id": quiz_id,
+        "attempt_id": attempt_id,
+        "score": mastery_score,
+        "passed": passed,
+        "critical_misconception": critical,
+        "mastery_status": mastery_status,
+        "mastery_score": mastery_score,
+        "replayed": False,
+        "retry_hint": None,
+    }
+
+
+def _normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(items) < MIN_ITEMS or len(items) > MAX_ITEMS:
+        raise LevelUpQuizValidationError(
+            f"items must include between {MIN_ITEMS} and {MAX_ITEMS} entries"
+        )
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        item_type = str(item.get("item_type", "")).strip().lower()
+        prompt = str(item.get("prompt", "")).strip()
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        if not prompt or item_type not in {"short_answer", "mcq"}:
+            raise LevelUpQuizValidationError("Each item requires valid item_type and prompt.")
+        payload = (
+            _normalize_short(payload)
+            if item_type == "short_answer"
+            else _normalize_mcq(payload)
+        )
+        normalized.append({"item_type": item_type, "prompt": prompt, "payload": payload})
+    return normalized
+
+
+def _normalize_short(payload: dict[str, Any]) -> dict[str, Any]:
+    rubric = _str_list(payload.get("rubric_keywords"), required=True, field="rubric_keywords")
+    critical = _str_list(
+        payload.get("critical_misconception_keywords", []),
+        required=False,
+        field="critical_misconception_keywords",
+    )
+    return {"rubric_keywords": rubric, "critical_misconception_keywords": critical}
+
+
+def _normalize_mcq(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = payload.get("choices")
+    if not isinstance(raw, list) or len(raw) < 2:
+        raise LevelUpQuizValidationError("mcq payload requires at least two choices.")
+    choices: list[dict[str, str]] = []
+    ids: list[str] = []
+    for choice in raw:
+        if not isinstance(choice, dict):
+            raise LevelUpQuizValidationError("mcq choices must be objects.")
+        choice_id = str(choice.get("id", "")).strip()
+        choice_text = str(choice.get("text", "")).strip()
+        if not choice_id or not choice_text or choice_id in ids:
+            raise LevelUpQuizValidationError("mcq choices require unique id and non-empty text.")
+        ids.append(choice_id)
+        choices.append({"id": choice_id, "text": choice_text})
+
+    correct = str(payload.get("correct_choice_id", "")).strip()
+    critical = _str_list(
+        payload.get("critical_choice_ids", []),
+        required=False,
+        field="critical_choice_ids",
+    )
+    if correct not in ids or any(
+        choice_id not in ids or choice_id == correct for choice_id in critical
+    ):
+        raise LevelUpQuizValidationError("mcq payload has invalid correct/critical choice ids.")
+    return {"choices": choices, "correct_choice_id": correct, "critical_choice_ids": critical}
+
+
+def _str_list(value: Any, *, required: bool, field: str) -> list[str]:
+    if not isinstance(value, list):
+        raise LevelUpQuizValidationError(f"{field} must be a list.")
+    out: list[str] = []
+    for item in value:
+        text_value = str(item).strip().lower()
+        if not text_value:
+            raise LevelUpQuizValidationError(f"{field} cannot contain empty values.")
+        if text_value not in out:
+            out.append(text_value)
+    if required and not out:
+        raise LevelUpQuizValidationError(f"{field} cannot be empty.")
+    return out
+
+
+def _auto_items(concept: dict[str, Any], question_count: int) -> list[dict[str, Any]]:
+    if question_count < MIN_ITEMS or question_count > MAX_ITEMS:
+        raise LevelUpQuizValidationError(
+            f"question_count must be between {MIN_ITEMS} and {MAX_ITEMS}"
+        )
+    name = str(concept["canonical_name"])
+    desc = str(concept["description"] or "")
+    raw_tokens = (name + " " + desc).lower().split()
+    keywords = ["".join(ch for ch in token if ch.isalnum()) for token in raw_tokens]
+    keywords = [token for token in keywords if len(token) > 2][:4] or ["concept"]
+    short_count = min(
+        max(int(math.floor((question_count * 0.6) + 0.5)), 1),
+        question_count - 1,
+    )
+    mcq_count = question_count - short_count
+    short = [
+        {
+            "item_type": "short_answer",
+            "prompt": f"Explain the core idea of {name}.",
+            "payload": {
+                "rubric_keywords": keywords,
+                "critical_misconception_keywords": ["contradiction", "unrelated"],
+            },
+        }
+        for _ in range(short_count)
+    ]
+    mcq = [
+        {
+            "item_type": "mcq",
+            "prompt": f"Which option best describes {name}?",
+            "payload": {
+                "choices": [
+                    {"id": "a", "text": f"Aligned with {name}."},
+                    {"id": "b", "text": "Partially relevant."},
+                    {"id": "c", "text": "Too generic."},
+                    {"id": "d", "text": "Contradicts the concept."},
+                ],
+                "correct_choice_id": "a",
+                "critical_choice_ids": ["d"],
+            },
+        }
+        for _ in range(mcq_count)
+    ]
+    return short + mcq
+
+
+def _validate_answers(items: list[dict[str, Any]], answers: list[dict[str, Any]]) -> dict[int, str]:
+    if not answers:
+        raise LevelUpQuizValidationError("answers must not be empty.")
+    mapped: dict[int, str] = {}
+    for answer in answers:
+        item_id = answer.get("item_id")
+        text_value = str(answer.get("answer", "")).strip()
+        if not isinstance(item_id, int) or not text_value or item_id in mapped:
+            raise LevelUpQuizValidationError(
+                "answers must include unique item_id with non-empty answer."
+            )
+        mapped[item_id] = text_value
+
+    item_ids = {item["item_id"] for item in items}
+    if set(mapped.keys()) != item_ids:
+        raise LevelUpQuizValidationError("answers must include every quiz item exactly once.")
+
+    for item in items:
+        if item["item_type"] != "mcq":
+            continue
+        choices = {choice["id"] for choice in item["payload"]["choices"]}
+        if mapped[item["item_id"]] not in choices:
+            raise LevelUpQuizValidationError("mcq answers must match a valid choice id.")
+    return mapped
+
+
+def _grading_prompt(items: list[dict[str, Any]], answer_map: dict[int, str]) -> str:
+    ids = [item["item_id"] for item in items]
+    submission = [{**item, "answer": answer_map[item["item_id"]]} for item in items]
+    return (
+        "Return JSON only with keys items and overall_feedback. "
+        "Each items entry must include item_id, score(0..1), "
+        "critical_misconception(bool), feedback.\n"
+        f"ITEM_IDS_JSON: {json.dumps(ids, ensure_ascii=True)}\n"
+        f"QUIZ_SUBMISSION_JSON: {json.dumps(submission, ensure_ascii=True)}"
+    )
+
+
+def _parse_grading(response: str, item_ids: list[int]) -> dict[str, Any]:
+    text_value = response.strip()
+    if text_value.startswith("```"):
+        text_value = "\n".join(
+            line for line in text_value.splitlines() if not line.strip().startswith("```")
+        ).strip()
+    try:
+        payload = json.loads(text_value)
+    except json.JSONDecodeError as exc:
+        raise LevelUpQuizGradingError("Grading response is not valid JSON.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise LevelUpQuizGradingError("Grading response missing items list.")
+    if (
+        not isinstance(payload.get("overall_feedback"), str)
+        or not payload["overall_feedback"].strip()
+    ):
+        raise LevelUpQuizGradingError("Grading response missing overall_feedback.")
+
+    by_id: dict[int, dict[str, Any]] = {}
+    for item in payload["items"]:
+        if not isinstance(item, dict) or not isinstance(item.get("item_id"), int):
+            raise LevelUpQuizGradingError("Invalid grading item payload.")
+        score = item.get("score")
+        critical = item.get("critical_misconception")
+        feedback = item.get("feedback")
+        if (
+            not isinstance(score, (int, float))
+            or float(score) < 0
+            or float(score) > 1
+            or not isinstance(critical, bool)
+            or not isinstance(feedback, str)
+            or not feedback.strip()
+        ):
+            raise LevelUpQuizGradingError("Invalid grading score/critical/feedback values.")
+        by_id[int(item["item_id"])] = {
+            "item_id": int(item["item_id"]),
+            "score": float(score),
+            "critical_misconception": critical,
+            "feedback": feedback.strip(),
+        }
+
+    if set(by_id.keys()) != set(item_ids):
+        raise LevelUpQuizGradingError("grading items must cover every quiz item exactly once.")
+
+    return {
+        "items": [by_id[item_id] for item_id in item_ids],
+        "overall_feedback": payload["overall_feedback"].strip(),
+    }
+
+
+__all__ = [
+    "LevelUpQuizGradingError",
+    "LevelUpQuizNotFoundError",
+    "LevelUpQuizUnavailableError",
+    "LevelUpQuizValidationError",
+    "create_level_up_quiz",
+    "submit_level_up_quiz",
+]
