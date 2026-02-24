@@ -37,9 +37,11 @@ For a given concept/topic:
 **Card behavior:**
 - Display 5–10 questions in a single card UI.
 - User answers all questions and submits once.
-- LLM grades using a strict rubric schema.
+- Mixed grading:
+  - MCQ items are graded deterministically with per-choice explanations.
+  - Short-answer items are graded by LLM using a strict rubric schema.
 - Mastery is updated.
-- Tutor returns feedback and next steps.
+- Tutor returns per-item feedback plus an overall feedback summary and next steps.
 
 ### 4) Practice mode (non-leveling)
 From the graph UI:

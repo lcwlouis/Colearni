@@ -99,6 +99,16 @@ def _client(session: Session, grader: DeterministicQuizGrader) -> tuple[Any, Tes
     return app, TestClient(app)
 
 
+def _client_without_llm(session: Session) -> tuple[Any, TestClient]:
+    app = create_app(settings=get_settings().model_copy(update={"ingest_build_graph": False}))
+
+    def override_db() -> Any:
+        yield session
+
+    app.dependency_overrides[get_db_session] = override_db
+    return app, TestClient(app)
+
+
 def _answers(items: list[dict[str, Any]], *, mcq: str) -> list[dict[str, Any]]:
     return [
         {
@@ -154,6 +164,22 @@ def test_level_up_pass_fail_transitions(
         create_payload = created.json()
         item_types = {item["item_type"] for item in create_payload["items"]}
         assert item_types == {"short_answer", "mcq"}
+        mcq_payload = session.execute(
+            text(
+                """
+                SELECT payload
+                FROM quiz_items
+                WHERE quiz_id = :quiz_id AND item_type = 'mcq'
+                ORDER BY position
+                LIMIT 1
+                """
+            ),
+            {"quiz_id": create_payload["quiz_id"]},
+        ).scalar_one()
+        assert isinstance(mcq_payload.get("choice_explanations"), dict)
+        assert set(mcq_payload["choice_explanations"].keys()) == {
+            choice["id"] for choice in mcq_payload["choices"]
+        }
 
         submitted = client.post(
             f"/quizzes/{create_payload['quiz_id']}/submit",
@@ -167,6 +193,23 @@ def test_level_up_pass_fail_transitions(
         submit_payload = submitted.json()
         assert submit_payload["passed"] is expected_pass
         assert submit_payload["mastery_status"] == expected_status
+        assert isinstance(submit_payload["overall_feedback"], str)
+        assert submit_payload["overall_feedback"]
+
+        grading = session.execute(
+            text(
+                """
+                SELECT grading
+                FROM quiz_attempts
+                WHERE quiz_id = :quiz_id
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {"quiz_id": create_payload["quiz_id"]},
+        ).scalar_one()
+        assert isinstance(grading, dict)
+        assert isinstance(grading.get("overall_feedback"), str)
 
         mastery_status = session.execute(
             text(
@@ -223,6 +266,7 @@ def test_level_up_submit_replay_is_idempotent() -> None:
         assert second.json()["replayed"] is True
         assert second.json()["attempt_id"] == first.json()["attempt_id"]
         assert second.json()["retry_hint"] == "create a new level-up quiz to retry"
+        assert second.json()["overall_feedback"] == first.json()["overall_feedback"]
         assert grader.calls == 1
 
         attempts = int(
@@ -235,6 +279,64 @@ def test_level_up_submit_replay_is_idempotent() -> None:
             ).scalar_one()
         )
         assert attempts == 1
+    finally:
+        app.dependency_overrides.clear()
+        client.close()
+        bind = session.get_bind()
+        session.close()
+        if bind is not None:
+            bind.dispose()
+
+
+def test_level_up_mcq_only_submission_works_without_llm() -> None:
+    session = _session_or_skip()
+    workspace_id, user_id, concept_id = _seed(session)
+    app, client = _client_without_llm(session)
+    items = [
+        {
+            "item_type": "mcq",
+            "prompt": f"MCQ question {index}",
+            "payload": {
+                "choices": [
+                    {"id": "a", "text": "Correct"},
+                    {"id": "b", "text": "Wrong"},
+                ],
+                "correct_choice_id": "a",
+                "critical_choice_ids": ["b"],
+                "choice_explanations": {
+                    "a": "Correct because it matches the concept.",
+                    "b": "Incorrect and critical because it contradicts the concept.",
+                },
+            },
+        }
+        for index in range(1, 6)
+    ]
+    try:
+        created = client.post(
+            "/quizzes/level-up",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "items": items,
+            },
+        )
+        assert created.status_code == 201
+        quiz = created.json()
+
+        submitted = client.post(
+            f"/quizzes/{quiz['quiz_id']}/submit",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "answers": _answers(quiz["items"], mcq="a"),
+            },
+        )
+        assert submitted.status_code == 200
+        payload = submitted.json()
+        assert payload["passed"] is True
+        assert "MCQ correctness" in payload["overall_feedback"]
+        assert payload["overall_feedback"]
     finally:
         app.dependency_overrides.clear()
         client.close()
