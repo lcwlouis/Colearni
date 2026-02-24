@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.13.0,<2.0.0",
   "fastapi>=0.115.0,<1.0.0",
+  "litellm>=1.81.0,<2.0.0",
   "pgvector>=0.3.6,<1.0.0",
   "pydantic-settings>=2.5.0,<3.0.0",
   "python-multipart>=0.0.9,<1.0.0",

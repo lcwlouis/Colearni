@@ -2,13 +2,43 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from adapters.db.dependencies import get_db_session
-from apps.api.main import app
+from apps.api.main import app, create_app
 from core.ingestion import IngestionEmbeddingUnavailableError, IngestionGraphUnavailableError
 from core.settings import get_settings
 from fastapi.testclient import TestClient
+
+
+def _created_result(*, request: Any) -> Any:
+    return SimpleNamespace(
+        document_id=17,
+        workspace_id=request.workspace_id,
+        title=request.title or "untitled",
+        mime_type="text/plain",
+        content_hash="hash",
+        chunk_count=1,
+        created=True,
+    )
+
+
+def _upload_once(app_instance: Any) -> Any:
+    def override_db() -> Any:
+        yield object()
+
+    app_instance.dependency_overrides[get_db_session] = override_db
+    try:
+        client = TestClient(app_instance)
+        return client.post(
+            "/documents/upload?workspace_id=1&uploaded_by_user_id=1",
+            content="hello",
+            headers={"content-type": "text/plain"},
+        )
+    finally:
+        app_instance.dependency_overrides.clear()
 
 
 def test_upload_raw_text_returns_201_and_passes_payload(monkeypatch: Any) -> None:
@@ -184,3 +214,77 @@ def test_upload_returns_503_when_graph_builder_is_unavailable(monkeypatch: Any) 
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Graph builder is unavailable."
+
+
+def test_create_app_graph_enabled_builds_client_and_upload_passes_it(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    graph_llm_client = object()
+    settings = get_settings().model_copy(update={"ingest_build_graph": True})
+    monkeypatch.setattr(
+        "apps.api.main.build_graph_llm_client",
+        lambda settings: graph_llm_client,  # noqa: ARG005
+    )
+    app_instance = create_app(settings=settings)
+
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,
+        graph_llm_client: Any = None,
+        graph_embedding_provider: Any = None,  # noqa: ARG001
+    ) -> Any:
+        captured["settings"] = settings
+        captured["graph_llm_client"] = graph_llm_client
+        return _created_result(request=request)
+
+    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document", fake_ingest)
+    response = _upload_once(app_instance)
+
+    assert response.status_code == 201
+    assert app_instance.state.graph_llm_client is graph_llm_client
+    assert captured["settings"] is settings
+    assert captured["graph_llm_client"] is graph_llm_client
+
+
+def test_create_app_graph_disabled_skips_client_build(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    settings = get_settings().model_copy(update={"ingest_build_graph": False})
+    monkeypatch.setattr(
+        "apps.api.main.build_graph_llm_client",
+        lambda settings: (_ for _ in ()).throw(  # noqa: ARG005
+            AssertionError("graph client factory should not run when graph ingestion is disabled")
+        ),
+    )
+    app_instance = create_app(settings=settings)
+
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,
+        graph_llm_client: Any = None,
+        graph_embedding_provider: Any = None,  # noqa: ARG001
+    ) -> Any:
+        captured["settings"] = settings
+        captured["graph_llm_client"] = graph_llm_client
+        return _created_result(request=request)
+
+    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document", fake_ingest)
+    response = _upload_once(app_instance)
+
+    assert response.status_code == 201
+    assert app_instance.state.graph_llm_client is None
+    assert captured["settings"] is settings
+    assert captured["graph_llm_client"] is None
+
+
+def test_create_app_graph_enabled_propagates_client_config_errors(monkeypatch: Any) -> None:
+    settings = get_settings().model_copy(update={"ingest_build_graph": True})
+    monkeypatch.setattr(
+        "apps.api.main.build_graph_llm_client",
+        lambda settings: (_ for _ in ()).throw(ValueError("bad graph config")),  # noqa: ARG005
+    )
+
+    with pytest.raises(ValueError, match="bad graph config"):
+        create_app(settings=settings)
