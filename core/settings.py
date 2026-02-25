@@ -214,6 +214,38 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_RESOLVER_EDGE_WEIGHT_CAP", "RESOLVER_EDGE_WEIGHT_CAP"),
         ge=0.0,
     )
+    gardener_max_llm_calls_per_run: int = Field(
+        default=30,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_MAX_LLM_CALLS_PER_RUN",
+            "GARDENER_MAX_LLM_CALLS_PER_RUN",
+        ),
+        ge=0,
+    )
+    gardener_max_clusters_per_run: int = Field(
+        default=50,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_MAX_CLUSTERS_PER_RUN",
+            "GARDENER_MAX_CLUSTERS_PER_RUN",
+        ),
+        ge=0,
+    )
+    gardener_max_dirty_nodes_per_run: int = Field(
+        default=200,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_MAX_DIRTY_NODES_PER_RUN",
+            "GARDENER_MAX_DIRTY_NODES_PER_RUN",
+        ),
+        ge=1,
+    )
+    gardener_recent_window_days: int = Field(
+        default=7,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_RECENT_WINDOW_DAYS",
+            "GARDENER_RECENT_WINDOW_DAYS",
+        ),
+        ge=1,
+    )
 
     @field_validator("database_url")
     @classmethod

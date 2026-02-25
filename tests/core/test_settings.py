@@ -56,3 +56,18 @@ def test_settings_reads_litellm_embedding_config_from_legacy_env_aliases(monkeyp
 
     assert settings.embedding_provider == "litellm"
     assert settings.litellm_model == "text-embedding-proxy-legacy"
+
+
+def test_settings_reads_gardener_budget_aliases(monkeypatch) -> None:
+    """Gardener env aliases should hydrate budget defaults from APP_ and legacy keys."""
+    monkeypatch.setenv("APP_GARDENER_MAX_LLM_CALLS_PER_RUN", "12")
+    monkeypatch.setenv("GARDENER_MAX_CLUSTERS_PER_RUN", "9")
+    monkeypatch.setenv("APP_GARDENER_MAX_DIRTY_NODES_PER_RUN", "77")
+    monkeypatch.setenv("GARDENER_RECENT_WINDOW_DAYS", "5")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.gardener_max_llm_calls_per_run == 12
+    assert settings.gardener_max_clusters_per_run == 9
+    assert settings.gardener_max_dirty_nodes_per_run == 77
+    assert settings.gardener_recent_window_days == 5

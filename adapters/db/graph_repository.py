@@ -6,8 +6,14 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from domain.graph.types import ExtractedConcept, ExtractedEdge, dedupe_keywords, truncate_text
-from sqlalchemy import text
+from domain.graph.types import (
+    ExtractedConcept,
+    ExtractedEdge,
+    dedupe_keywords,
+    normalize_alias,
+    truncate_text,
+)
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 
@@ -42,6 +48,19 @@ class CanonicalEdgeRow:
     """Projected canonical edge row."""
 
     id: int
+    description: str
+    keywords: list[str]
+    weight: float
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalEdgeRepointRow:
+    """Edge row used during merge repoint operations."""
+
+    id: int
+    src_id: int
+    tgt_id: int
+    relation_type: str
     description: str
     keywords: list[str]
     weight: float
@@ -329,6 +348,292 @@ def list_vector_candidates(
         )
         for row in rows
     ]
+
+
+def list_gardener_seed_concepts(
+    session: Session,
+    *,
+    workspace_id: int,
+    recent_window_days: int,
+    limit: int,
+) -> list[CanonicalConceptRow]:
+    """List bounded dirty/recent active canonical concepts for one workspace."""
+    if recent_window_days < 1:
+        raise ValueError("recent_window_days must be >= 1")
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    workspace_id,
+                    canonical_name,
+                    description,
+                    aliases,
+                    embedding,
+                    is_active,
+                    dirty
+                FROM concepts_canon
+                WHERE workspace_id = :workspace_id
+                  AND is_active = TRUE
+                  AND (
+                    dirty = TRUE
+                    OR updated_at >= now() - make_interval(days => :recent_window_days)
+                  )
+                ORDER BY dirty DESC, updated_at DESC, id ASC
+                LIMIT :limit
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "recent_window_days": recent_window_days,
+                "limit": limit,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    return [_to_canonical_concept_required(row) for row in rows]
+
+
+def set_canonical_concept_dirty(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+    dirty: bool,
+) -> None:
+    """Set dirty flag for one canonical concept."""
+    session.execute(
+        text(
+            """
+            UPDATE concepts_canon
+            SET
+                dirty = :dirty,
+                updated_at = now()
+            WHERE workspace_id = :workspace_id
+              AND id = :concept_id
+            """
+        ),
+        {"workspace_id": workspace_id, "concept_id": concept_id, "dirty": dirty},
+    )
+
+
+def insert_concept_merge_log_idempotent(
+    session: Session,
+    *,
+    workspace_id: int,
+    from_id: int,
+    to_id: int,
+    reason: str,
+    method: str,
+    confidence: float,
+) -> bool:
+    """Insert merge log row at most once per workspace/from/to tuple."""
+    if from_id == to_id:
+        return False
+
+    inserted = session.execute(
+        text(
+            """
+            INSERT INTO concept_merge_log (
+                workspace_id,
+                from_id,
+                to_id,
+                reason,
+                method,
+                confidence
+            )
+            SELECT
+                :workspace_id,
+                :from_id,
+                :to_id,
+                :reason,
+                :method,
+                :confidence
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM concept_merge_log
+                WHERE workspace_id = :workspace_id
+                  AND from_id = :from_id
+                  AND to_id = :to_id
+            )
+            RETURNING id
+            """
+        ),
+        {
+            "workspace_id": workspace_id,
+            "from_id": from_id,
+            "to_id": to_id,
+            "reason": reason,
+            "method": method,
+            "confidence": confidence,
+        },
+    ).scalar_one_or_none()
+    return inserted is not None
+
+
+def deactivate_canonical_concept(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+) -> bool:
+    """Deactivate one canonical concept; returns True when state changed."""
+    result = session.execute(
+        text(
+            """
+            UPDATE concepts_canon
+            SET
+                is_active = FALSE,
+                dirty = FALSE,
+                updated_at = now()
+            WHERE workspace_id = :workspace_id
+              AND id = :concept_id
+              AND is_active = TRUE
+            """
+        ),
+        {"workspace_id": workspace_id, "concept_id": concept_id},
+    )
+    return bool(result.rowcount and result.rowcount > 0)
+
+
+def repoint_alias_map(
+    session: Session,
+    *,
+    workspace_id: int,
+    from_id: int,
+    to_id: int,
+) -> int:
+    """Repoint alias rows from one canonical concept id to another."""
+    if from_id == to_id:
+        return 0
+    result = session.execute(
+        text(
+            """
+            UPDATE concept_merge_map
+            SET
+                canon_concept_id = :to_id,
+                updated_at = now()
+            WHERE workspace_id = :workspace_id
+              AND canon_concept_id = :from_id
+            """
+        ),
+        {"workspace_id": workspace_id, "from_id": from_id, "to_id": to_id},
+    )
+    return int(result.rowcount or 0)
+
+
+def ensure_aliases_map_to_concept(
+    session: Session,
+    *,
+    workspace_id: int,
+    aliases: Sequence[str],
+    canon_concept_id: int,
+    confidence: float,
+    method: str,
+) -> int:
+    """Ensure each alias points at canon_concept_id through merge-map upsert."""
+    upserts = 0
+    seen: set[str] = set()
+    for alias in aliases:
+        alias_norm = normalize_alias(alias)
+        if not alias_norm or alias_norm in seen:
+            continue
+        seen.add(alias_norm)
+        upsert_concept_merge_map(
+            session,
+            workspace_id=workspace_id,
+            alias=alias_norm,
+            canon_concept_id=canon_concept_id,
+            confidence=confidence,
+            method=method,
+        )
+        upserts += 1
+    return upserts
+
+
+def repoint_edges_for_merge(
+    session: Session,
+    *,
+    workspace_id: int,
+    from_id: int,
+    to_id: int,
+    weight_cap: float,
+    edge_description_max_chars: int,
+) -> int:
+    """Move all edges touching from_id to to_id, deduping via canonical edge upsert."""
+    if from_id == to_id:
+        return 0
+
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    src_id,
+                    tgt_id,
+                    relation_type,
+                    description,
+                    keywords,
+                    weight
+                FROM edges_canon
+                WHERE workspace_id = :workspace_id
+                  AND (src_id = :from_id OR tgt_id = :from_id)
+                ORDER BY id ASC
+                """
+            ),
+            {"workspace_id": workspace_id, "from_id": from_id},
+        )
+        .mappings()
+        .all()
+    )
+    edges = [
+        CanonicalEdgeRepointRow(
+            id=int(row["id"]),
+            src_id=int(row["src_id"]),
+            tgt_id=int(row["tgt_id"]),
+            relation_type=str(row["relation_type"]),
+            description=str(row["description"] or ""),
+            keywords=[str(keyword) for keyword in (row["keywords"] or [])],
+            weight=float(row["weight"]),
+        )
+        for row in rows
+    ]
+    if not edges:
+        return 0
+
+    session.execute(
+        text("DELETE FROM edges_canon WHERE id IN :edge_ids").bindparams(
+            bindparam("edge_ids", expanding=True)
+        ),
+        {"edge_ids": [edge.id for edge in edges]},
+    )
+
+    upserts = 0
+    for edge in edges:
+        new_src = to_id if edge.src_id == from_id else edge.src_id
+        new_tgt = to_id if edge.tgt_id == from_id else edge.tgt_id
+        if new_src == new_tgt:
+            continue
+        upsert_canonical_edge(
+            session,
+            workspace_id=workspace_id,
+            src_id=new_src,
+            tgt_id=new_tgt,
+            relation_type=edge.relation_type,
+            description=edge.description,
+            keywords=edge.keywords,
+            delta_weight=edge.weight,
+            weight_cap=weight_cap,
+            edge_description_max_chars=edge_description_max_chars,
+        )
+        upserts += 1
+    return upserts
 
 
 def get_canonical_concept(
