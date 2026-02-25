@@ -21,6 +21,7 @@ export const DEFAULT_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/ap
 type QueryValue = string | number | boolean | null | undefined;
 type Query = Record<string, QueryValue>;
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+const defaultFetch: FetchLike = (input, init) => globalThis.fetch(input, init);
 
 export class ApiError extends Error {
   constructor(
@@ -53,7 +54,7 @@ export class ApiClient {
 
   constructor(opts?: { baseUrl?: string; fetchImpl?: FetchLike }) {
     this.baseUrl = (opts?.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/$/, "");
-    this.fetchImpl = opts?.fetchImpl ?? fetch;
+    this.fetchImpl = opts?.fetchImpl ?? defaultFetch;
   }
 
   private async request<T>(path: string, init: RequestInit, params?: Query): Promise<T> {
