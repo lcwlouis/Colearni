@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from core.contracts import GraphLLMClient
+from core.observability import observation_context
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -47,10 +48,15 @@ def generate_practice_flashcards(
         f"CARD_COUNT: {card_count}\n"
         f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
     )
-    payload = _parse_json(
-        llm_client.generate_tutor_text(prompt=prompt),
-        "Flashcard generation response is not valid JSON.",
-    )
+    with observation_context(
+        component="practice",
+        operation="practice.flashcards.generate",
+        workspace_id=workspace_id,
+    ):
+        payload = _parse_json(
+            llm_client.generate_tutor_text(prompt=prompt),
+            "Flashcard generation response is not valid JSON.",
+        )
     cards = payload.get("flashcards")
     if not isinstance(cards, list) or len(cards) != card_count:
         raise PracticeGenerationError("Flashcard response must contain exactly card_count entries.")
@@ -96,7 +102,12 @@ def create_practice_quiz(
         f"QUESTION_COUNT: {question_count}\n"
         f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
     )
-    items = _generate_practice_items_with_retries(llm_client=llm_client, prompt=prompt)
+    with observation_context(
+        component="practice",
+        operation="practice.quiz.generate",
+        workspace_id=workspace_id,
+    ):
+        items = _generate_practice_items_with_retries(llm_client=llm_client, prompt=prompt)
 
     return level_up.create_level_up_quiz(
         session,
@@ -144,10 +155,11 @@ def _generate_practice_items_with_retries(
     retry_prompt = prompt
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         try:
-            payload = _parse_json(
-                llm_client.generate_tutor_text(prompt=retry_prompt),
-                "Practice quiz generation response is not valid JSON.",
-            )
+            with observation_context(retry_attempt=attempt):
+                payload = _parse_json(
+                    llm_client.generate_tutor_text(prompt=retry_prompt),
+                    "Practice quiz generation response is not valid JSON.",
+                )
             raw_items = _coerce_generated_items(payload.get("items"))
             items = level_up._normalize_items(
                 raw_items,

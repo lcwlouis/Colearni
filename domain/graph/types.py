@@ -100,17 +100,22 @@ class ResolverBudgets:
     max_llm_calls_per_document: int
     llm_calls_chunk: int = 0
     llm_calls_document: int = 0
+    last_hard_stop_reason: str | None = None
 
     def reset_chunk(self) -> None:
         """Reset chunk-local counters while preserving document counter."""
         self.llm_calls_chunk = 0
+        self.last_hard_stop_reason = None
 
     def can_call_llm(self) -> bool:
         """Return whether another LLM call is allowed under hard limits."""
         if self.llm_calls_chunk >= self.max_llm_calls_per_chunk:
+            self.last_hard_stop_reason = "chunk_cap_reached"
             return False
         if self.llm_calls_document >= self.max_llm_calls_per_document:
+            self.last_hard_stop_reason = "document_cap_reached"
             return False
+        self.last_hard_stop_reason = None
         return True
 
     def register_llm_call(self) -> None:

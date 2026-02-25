@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from adapters.db import graph_repository
 from core.contracts import GraphLLMClient
+from core.observability import configure_observability, set_event_sink
 from core.settings import get_settings
 from domain.graph import gardener
 
@@ -75,6 +76,17 @@ def _candidate(
 
 def test_gardener_stops_when_llm_budget_is_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """Zero LLM budget should hard-stop before any cluster decision call."""
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
     seed_a = _concept(11, name="Vector Space")
     seed_b = _concept(12, name="Vector Spaces")
     llm = StubGardenerLLM({"decision": "MERGE_INTO", "merge_into_id": 11, "confidence": 0.9})
@@ -119,10 +131,29 @@ def test_gardener_stops_when_llm_budget_is_zero(monkeypatch: pytest.MonkeyPatch)
     assert result.llm_calls == 0
     assert result.merges_applied == 0
     assert llm.calls == 0
+    hard_stops = [
+        event for event in events if event["event_name"] == "graph.gardener.budget.hard_stop"
+    ]
+    assert len(hard_stops) == 1
+    assert hard_stops[0]["reason"] == "llm_budget_exhausted"
+    usage = [event for event in events if event["event_name"] == "graph.gardener.budget.usage"]
+    assert usage
+    set_event_sink(None)
 
 
 def test_gardener_stops_when_cluster_budget_is_hit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cluster cap should stop processing after the first eligible cluster."""
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
     seeds = [
         _concept(11, name="A"),
         _concept(12, name="A-prime"),
@@ -193,6 +224,14 @@ def test_gardener_stops_when_cluster_budget_is_hit(monkeypatch: pytest.MonkeyPat
     assert result.stopped_by_cluster_budget is True
     assert result.llm_calls == 1
     assert len(merge_calls) == 1
+    hard_stops = [
+        event for event in events if event["event_name"] == "graph.gardener.budget.hard_stop"
+    ]
+    assert len(hard_stops) == 1
+    assert hard_stops[0]["reason"] == "cluster_budget_exhausted"
+    usage = [event for event in events if event["event_name"] == "graph.gardener.budget.usage"]
+    assert usage
+    set_event_sink(None)
 
 
 def test_execute_merge_is_idempotent_when_source_is_already_inactive(

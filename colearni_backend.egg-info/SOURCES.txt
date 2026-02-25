@@ -46,6 +46,7 @@ core/__init__.py
 core/contracts.py
 core/health.py
 core/ingestion.py
+core/observability.py
 core/schemas.py
 core/settings.py
 core/verifier.py

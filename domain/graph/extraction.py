@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.contracts import GraphLLMClient
+from core.observability import observation_context
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from domain.graph.types import (
@@ -52,9 +53,10 @@ def extract_raw_graph_from_chunk(
 ) -> RawGraphExtraction:
     """Extract and normalize raw concepts/edges for one chunk."""
     try:
-        payload = _RawGraphPayload.model_validate(
-            llm_client.extract_raw_graph(chunk_text=chunk_text)
-        )
+        with observation_context(component="graph", operation="graph.extraction"):
+            payload = _RawGraphPayload.model_validate(
+                llm_client.extract_raw_graph(chunk_text=chunk_text)
+            )
     except ValidationError as exc:
         raise ValueError(f"Graph extraction schema validation failed: {exc}") from exc
 

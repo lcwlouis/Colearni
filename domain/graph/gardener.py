@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
+from uuid import uuid4
 
 from adapters.db import graph_repository
 from core.contracts import GraphLLMClient
+from core.observability import emit_event, observation_context, start_span
 from core.settings import Settings
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
@@ -119,153 +121,224 @@ def run_graph_gardener(
     max_dirty_nodes: int | None = None,
     max_clusters: int | None = None,
     max_llm_calls: int | None = None,
+    run_id: str | None = None,
 ) -> GardenerRunResult:
     """Run one bounded offline graph-consolidation pass for one workspace."""
-    config = GardenerConfig.from_settings(settings)
-    effective_max_dirty_nodes = config.max_dirty_nodes_per_run
-    if max_dirty_nodes is not None:
-        effective_max_dirty_nodes = min(max_dirty_nodes, config.max_dirty_nodes_per_run)
-    if effective_max_dirty_nodes < 1:
-        raise ValueError("max_dirty_nodes must be >= 1")
-
-    effective_max_clusters = config.max_clusters_per_run
-    if max_clusters is not None:
-        effective_max_clusters = min(max_clusters, config.max_clusters_per_run)
-    if effective_max_clusters < 0:
-        raise ValueError("max_clusters must be >= 0")
-
-    effective_max_llm_calls = config.max_llm_calls_per_run
-    if max_llm_calls is not None:
-        effective_max_llm_calls = min(max_llm_calls, config.max_llm_calls_per_run)
-    if effective_max_llm_calls < 0:
-        raise ValueError("max_llm_calls must be >= 0")
-
-    budgets = GardenerBudgets(
-        max_llm_calls_per_run=effective_max_llm_calls,
-        max_clusters_per_run=effective_max_clusters,
-    )
-    seeds = graph_repository.list_gardener_seed_concepts(
-        session,
+    resolved_run_id = run_id or str(uuid4())
+    with observation_context(
+        component="graph",
+        operation="graph.gardener.run",
         workspace_id=workspace_id,
-        recent_window_days=config.recent_window_days,
-        limit=effective_max_dirty_nodes,
-    )
-    if not seeds:
-        return GardenerRunResult(
-            seed_nodes_selected=0,
-            clusters_total=0,
-            clusters_processed=0,
-            clusters_skipped=0,
-            merges_applied=0,
-            llm_calls=0,
-            stopped_by_cluster_budget=False,
-            stopped_by_llm_budget=False,
+        run_id=resolved_run_id,
+    ), start_span(
+        "graph.gardener.run",
+        component="graph",
+        operation="graph.gardener.run",
+        workspace_id=workspace_id,
+        run_id=resolved_run_id,
+    ):
+        config = GardenerConfig.from_settings(settings)
+        effective_max_dirty_nodes = config.max_dirty_nodes_per_run
+        if max_dirty_nodes is not None:
+            effective_max_dirty_nodes = min(max_dirty_nodes, config.max_dirty_nodes_per_run)
+        if effective_max_dirty_nodes < 1:
+            raise ValueError("max_dirty_nodes must be >= 1")
+
+        effective_max_clusters = config.max_clusters_per_run
+        if max_clusters is not None:
+            effective_max_clusters = min(max_clusters, config.max_clusters_per_run)
+        if effective_max_clusters < 0:
+            raise ValueError("max_clusters must be >= 0")
+
+        effective_max_llm_calls = config.max_llm_calls_per_run
+        if max_llm_calls is not None:
+            effective_max_llm_calls = min(max_llm_calls, config.max_llm_calls_per_run)
+        if effective_max_llm_calls < 0:
+            raise ValueError("max_llm_calls must be >= 0")
+
+        budgets = GardenerBudgets(
+            max_llm_calls_per_run=effective_max_llm_calls,
+            max_clusters_per_run=effective_max_clusters,
         )
-
-    seed_ids = {seed.id for seed in seeds}
-    cluster_concepts: dict[int, _ClusterConcept] = {
-        seed.id: _to_cluster_concept(seed) for seed in seeds
-    }
-    adjacency: dict[int, set[int]] = {seed.id: set() for seed in seeds}
-
-    for seed in seeds:
-        candidates = _candidate_blocking(
-            session=session,
+        emit_event(
+            "graph.gardener.budget.usage",
+            status="info",
+            component="graph",
+            operation="graph.gardener.run",
             workspace_id=workspace_id,
-            seed=seed,
-            config=config,
+            llm_calls=budgets.llm_calls,
+            clusters_processed=budgets.clusters_processed,
+            max_llm_calls_per_run=budgets.max_llm_calls_per_run,
+            max_clusters_per_run=budgets.max_clusters_per_run,
         )
-        for candidate in candidates:
-            cluster_concepts.setdefault(
-                candidate.concept_id,
-                _ClusterConcept(
-                    concept_id=candidate.concept_id,
-                    canonical_name=candidate.canonical_name,
-                    description=candidate.description,
-                    aliases=tuple(candidate.aliases),
-                ),
-            )
-            if candidate.concept_id == seed.id:
-                continue
-            adjacency.setdefault(seed.id, set()).add(candidate.concept_id)
-            adjacency.setdefault(candidate.concept_id, set()).add(seed.id)
-
-    clusters = _connected_components(adjacency)
-    stabilized_seed_ids: set[int] = set()
-    merges_applied = 0
-    clusters_skipped = 0
-    stopped_by_cluster_budget = False
-    stopped_by_llm_budget = False
-
-    for cluster in clusters:
-        cluster_seed_ids = seed_ids.intersection(cluster)
-        if not cluster_seed_ids:
-            continue
-        if len(cluster) < 2:
-            stabilized_seed_ids.update(cluster_seed_ids)
-            continue
-
-        if not budgets.can_process_cluster():
-            stopped_by_cluster_budget = True
-            break
-        if not budgets.can_call_llm():
-            stopped_by_llm_budget = True
-            break
-        budgets.register_cluster()
-        budgets.register_llm_call()
-
-        decision = _cluster_llm_decision(
-            llm_client=llm_client,
-            concepts=cluster_concepts,
-            cluster=cluster,
-        )
-        if decision is None:
-            clusters_skipped += 1
-            continue
-        if decision.confidence < config.cluster_llm_confidence_floor:
-            clusters_skipped += 1
-            continue
-        target_id = decision.merge_into_id
-        if target_id is None or target_id not in cluster:
-            clusters_skipped += 1
-            continue
-
-        merge_away_ids = sorted(cluster_seed_ids - {target_id})
-        for source_id in merge_away_ids:
-            if _execute_merge(
-                session=session,
-                workspace_id=workspace_id,
-                from_concept_id=source_id,
-                to_concept_id=target_id,
-                confidence=decision.confidence,
-                method="llm",
-                reason=_GARDENER_REASON,
-                edge_weight_cap=config.edge_weight_cap,
-                edge_description_max_chars=config.edge_description_max_chars,
-            ):
-                merges_applied += 1
-
-        if target_id in seed_ids:
-            stabilized_seed_ids.add(target_id)
-
-    for concept_id in sorted(stabilized_seed_ids):
-        graph_repository.set_canonical_concept_dirty(
+        seeds = graph_repository.list_gardener_seed_concepts(
             session,
             workspace_id=workspace_id,
-            concept_id=concept_id,
-            dirty=False,
+            recent_window_days=config.recent_window_days,
+            limit=effective_max_dirty_nodes,
         )
+        if not seeds:
+            return GardenerRunResult(
+                seed_nodes_selected=0,
+                clusters_total=0,
+                clusters_processed=0,
+                clusters_skipped=0,
+                merges_applied=0,
+                llm_calls=0,
+                stopped_by_cluster_budget=False,
+                stopped_by_llm_budget=False,
+            )
 
-    return GardenerRunResult(
-        seed_nodes_selected=len(seeds),
-        clusters_total=len(clusters),
-        clusters_processed=budgets.clusters_processed,
-        clusters_skipped=clusters_skipped,
-        merges_applied=merges_applied,
-        llm_calls=budgets.llm_calls,
-        stopped_by_cluster_budget=stopped_by_cluster_budget,
-        stopped_by_llm_budget=stopped_by_llm_budget,
-    )
+        seed_ids = {seed.id for seed in seeds}
+        cluster_concepts: dict[int, _ClusterConcept] = {
+            seed.id: _to_cluster_concept(seed) for seed in seeds
+        }
+        adjacency: dict[int, set[int]] = {seed.id: set() for seed in seeds}
+
+        for seed in seeds:
+            candidates = _candidate_blocking(
+                session=session,
+                workspace_id=workspace_id,
+                seed=seed,
+                config=config,
+            )
+            for candidate in candidates:
+                cluster_concepts.setdefault(
+                    candidate.concept_id,
+                    _ClusterConcept(
+                        concept_id=candidate.concept_id,
+                        canonical_name=candidate.canonical_name,
+                        description=candidate.description,
+                        aliases=tuple(candidate.aliases),
+                    ),
+                )
+                if candidate.concept_id == seed.id:
+                    continue
+                adjacency.setdefault(seed.id, set()).add(candidate.concept_id)
+                adjacency.setdefault(candidate.concept_id, set()).add(seed.id)
+
+        clusters = _connected_components(adjacency)
+        stabilized_seed_ids: set[int] = set()
+        merges_applied = 0
+        clusters_skipped = 0
+        stopped_by_cluster_budget = False
+        stopped_by_llm_budget = False
+
+        for cluster in clusters:
+            cluster_seed_ids = seed_ids.intersection(cluster)
+            if not cluster_seed_ids:
+                continue
+            if len(cluster) < 2:
+                stabilized_seed_ids.update(cluster_seed_ids)
+                continue
+
+            if not budgets.can_process_cluster():
+                stopped_by_cluster_budget = True
+                emit_event(
+                    "graph.gardener.budget.hard_stop",
+                    status="warning",
+                    component="graph",
+                    operation="graph.gardener.run",
+                    workspace_id=workspace_id,
+                    reason="cluster_budget_exhausted",
+                    llm_calls=budgets.llm_calls,
+                    clusters_processed=budgets.clusters_processed,
+                    max_llm_calls_per_run=budgets.max_llm_calls_per_run,
+                    max_clusters_per_run=budgets.max_clusters_per_run,
+                )
+                break
+            if not budgets.can_call_llm():
+                stopped_by_llm_budget = True
+                emit_event(
+                    "graph.gardener.budget.hard_stop",
+                    status="warning",
+                    component="graph",
+                    operation="graph.gardener.run",
+                    workspace_id=workspace_id,
+                    reason="llm_budget_exhausted",
+                    llm_calls=budgets.llm_calls,
+                    clusters_processed=budgets.clusters_processed,
+                    max_llm_calls_per_run=budgets.max_llm_calls_per_run,
+                    max_clusters_per_run=budgets.max_clusters_per_run,
+                )
+                break
+            budgets.register_cluster()
+            budgets.register_llm_call()
+            emit_event(
+                "graph.gardener.budget.usage",
+                status="info",
+                component="graph",
+                operation="graph.gardener.run",
+                workspace_id=workspace_id,
+                llm_calls=budgets.llm_calls,
+                clusters_processed=budgets.clusters_processed,
+                max_llm_calls_per_run=budgets.max_llm_calls_per_run,
+                max_clusters_per_run=budgets.max_clusters_per_run,
+            )
+
+            decision = _cluster_llm_decision(
+                llm_client=llm_client,
+                concepts=cluster_concepts,
+                cluster=cluster,
+            )
+            if decision is None:
+                clusters_skipped += 1
+                continue
+            if decision.confidence < config.cluster_llm_confidence_floor:
+                clusters_skipped += 1
+                continue
+            target_id = decision.merge_into_id
+            if target_id is None or target_id not in cluster:
+                clusters_skipped += 1
+                continue
+
+            merge_away_ids = sorted(cluster_seed_ids - {target_id})
+            for source_id in merge_away_ids:
+                if _execute_merge(
+                    session=session,
+                    workspace_id=workspace_id,
+                    from_concept_id=source_id,
+                    to_concept_id=target_id,
+                    confidence=decision.confidence,
+                    method="llm",
+                    reason=_GARDENER_REASON,
+                    edge_weight_cap=config.edge_weight_cap,
+                    edge_description_max_chars=config.edge_description_max_chars,
+                ):
+                    merges_applied += 1
+
+            if target_id in seed_ids:
+                stabilized_seed_ids.add(target_id)
+
+        for concept_id in sorted(stabilized_seed_ids):
+            graph_repository.set_canonical_concept_dirty(
+                session,
+                workspace_id=workspace_id,
+                concept_id=concept_id,
+                dirty=False,
+            )
+
+        emit_event(
+            "graph.gardener.budget.usage",
+            status="info",
+            component="graph",
+            operation="graph.gardener.run",
+            workspace_id=workspace_id,
+            llm_calls=budgets.llm_calls,
+            clusters_processed=budgets.clusters_processed,
+            max_llm_calls_per_run=budgets.max_llm_calls_per_run,
+            max_clusters_per_run=budgets.max_clusters_per_run,
+        )
+        return GardenerRunResult(
+            seed_nodes_selected=len(seeds),
+            clusters_total=len(clusters),
+            clusters_processed=budgets.clusters_processed,
+            clusters_skipped=clusters_skipped,
+            merges_applied=merges_applied,
+            llm_calls=budgets.llm_calls,
+            stopped_by_cluster_budget=stopped_by_cluster_budget,
+            stopped_by_llm_budget=stopped_by_llm_budget,
+        )
 
 
 def _candidate_blocking(

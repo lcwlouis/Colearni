@@ -1,6 +1,7 @@
 """FastAPI app entrypoint."""
 
 from adapters.llm.factory import build_graph_llm_client
+from core.observability import configure_observability
 from core.settings import Settings, get_settings
 from fastapi import FastAPI
 
@@ -15,6 +16,7 @@ from apps.api.routes.quizzes import router as quizzes_router
 def create_app(*, settings: Settings | None = None) -> FastAPI:
     """Create and configure the FastAPI app."""
     resolved_settings = settings if settings is not None else get_settings()
+    configure_observability(resolved_settings)
     app = FastAPI(title="Colearni API", version="0.1.0")
     app.state.settings = resolved_settings
     app.state.graph_llm_client = (

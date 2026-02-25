@@ -8,6 +8,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from core.observability import emit_event, extract_token_usage, get_observation_context, start_span
+
 _RAW_GRAPH_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {"concepts": {"type": "array"}, "edges": {"type": "array"}},
@@ -36,6 +38,7 @@ class _OpenAICompatibleGraphLLMClient:
         timeout_seconds: float,
         base_url: str,
         api_key: str | None,
+        provider: str,
     ) -> None:
         if not model.strip():
             raise ValueError("graph_llm model cannot be empty")
@@ -47,6 +50,7 @@ class _OpenAICompatibleGraphLLMClient:
         self._timeout_seconds = timeout_seconds
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self._api_key = api_key.strip() if api_key is not None and api_key.strip() else None
+        self._provider = provider.strip() or "unknown"
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         return self._chat_json(
@@ -131,19 +135,91 @@ class _OpenAICompatibleGraphLLMClient:
             headers=headers,
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
-                response_body = response.read().decode("utf-8")
-        except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace") if exc.fp is not None else ""
-            raise RuntimeError(f"Graph LLM request failed with status {exc.code}: {body}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"Graph LLM request failed: {exc.reason}") from exc
+        context = get_observation_context()
+        operation = str(context.get("operation") or "llm.call")
+        with start_span(
+            "llm.call",
+            component="llm",
+            operation=operation,
+            provider=self._provider,
+            model=self._model,
+        ):
+            try:
+                with urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
+                    response_body = response.read().decode("utf-8")
+            except HTTPError as exc:
+                emit_event(
+                    "llm.call",
+                    status="failure",
+                    component="llm",
+                    operation=operation,
+                    provider=self._provider,
+                    model=self._model,
+                    token_prompt=None,
+                    token_completion=None,
+                    token_total=None,
+                    error_type=type(exc).__name__,
+                )
+                body = exc.read().decode("utf-8", errors="replace") if exc.fp is not None else ""
+                raise RuntimeError(
+                    f"Graph LLM request failed with status {exc.code}: {body}"
+                ) from exc
+            except URLError as exc:
+                emit_event(
+                    "llm.call",
+                    status="failure",
+                    component="llm",
+                    operation=operation,
+                    provider=self._provider,
+                    model=self._model,
+                    token_prompt=None,
+                    token_completion=None,
+                    token_total=None,
+                    error_type=type(exc).__name__,
+                )
+                raise RuntimeError(f"Graph LLM request failed: {exc.reason}") from exc
 
-        parsed = json.loads(response_body)
-        if not isinstance(parsed, Mapping):
-            raise ValueError("Graph LLM response payload must decode to an object")
-        return parsed
+            try:
+                parsed = json.loads(response_body)
+            except json.JSONDecodeError as exc:
+                emit_event(
+                    "llm.call",
+                    status="failure",
+                    component="llm",
+                    operation=operation,
+                    provider=self._provider,
+                    model=self._model,
+                    token_prompt=None,
+                    token_completion=None,
+                    token_total=None,
+                    error_type=type(exc).__name__,
+                )
+                raise
+            if not isinstance(parsed, Mapping):
+                emit_event(
+                    "llm.call",
+                    status="failure",
+                    component="llm",
+                    operation=operation,
+                    provider=self._provider,
+                    model=self._model,
+                    token_prompt=None,
+                    token_completion=None,
+                    token_total=None,
+                    error_type=ValueError.__name__,
+                )
+                raise ValueError("Graph LLM response payload must decode to an object")
+
+            emit_event(
+                "llm.call",
+                status="success",
+                component="llm",
+                operation=operation,
+                provider=self._provider,
+                model=self._model,
+                **extract_token_usage(parsed),
+            )
+            return parsed
 
     def _extract_message_content(self, payload: Mapping[str, object]) -> str:
         choices = payload.get("choices")
@@ -176,6 +252,7 @@ class OpenAIGraphLLMClient(_OpenAICompatibleGraphLLMClient):
             timeout_seconds=timeout_seconds,
             base_url="https://api.openai.com/v1",
             api_key=api_key,
+            provider="openai",
         )
 
 
@@ -193,4 +270,5 @@ class LiteLLMGraphLLMClient(_OpenAICompatibleGraphLLMClient):
             timeout_seconds=timeout_seconds,
             base_url=base_url,
             api_key=api_key,
+            provider="litellm",
         )

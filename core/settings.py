@@ -101,6 +101,26 @@ class Settings(BaseSettings):
         ),
         gt=0,
     )
+    observability_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("APP_OBSERVABILITY_ENABLED", "OBSERVABILITY_ENABLED"),
+    )
+    observability_otlp_endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_OBSERVABILITY_OTLP_ENDPOINT",
+            "OBSERVABILITY_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+        ),
+    )
+    observability_service_name: str = Field(
+        default="colearni-backend",
+        validation_alias=AliasChoices(
+            "APP_OBSERVABILITY_SERVICE_NAME",
+            "OBSERVABILITY_SERVICE_NAME",
+            "OTEL_SERVICE_NAME",
+        ),
+    )
     litellm_base_url: str = Field(
         default="http://localhost:4000/v1",
         validation_alias=AliasChoices("APP_LITELLM_BASE_URL", "LITELLM_BASE_URL"),
@@ -286,6 +306,24 @@ class Settings(BaseSettings):
         if normalized not in {GroundingMode.HYBRID.value, GroundingMode.STRICT.value}:
             raise ValueError("default_grounding_mode must be one of: hybrid, strict")
         return GroundingMode(normalized)
+
+    @field_validator("observability_otlp_endpoint")
+    @classmethod
+    def validate_observability_otlp_endpoint(cls, value: str | None) -> str | None:
+        """Normalize blank observability endpoints to None."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("observability_service_name")
+    @classmethod
+    def validate_observability_service_name(cls, value: str) -> str:
+        """Require a non-empty service name when observability is enabled."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("observability_service_name must not be empty")
+        return normalized
 
 
 @lru_cache

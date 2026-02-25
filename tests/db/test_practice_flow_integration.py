@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from core.observability import configure_observability, set_event_sink
+from core.settings import get_settings
 from sqlalchemy import text
 from tests.db.test_level_up_quiz_flow_integration import _client, _seed, _session_or_skip
 
@@ -125,6 +127,17 @@ def test_practice_flashcards_generation_success() -> None:
 
 
 def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> None:
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
     session = _session_or_skip()
     workspace_id, user_id, concept_id = _seed(session)
     wrong_workspace_id, _, _ = _seed(session)
@@ -138,6 +151,15 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
     session.commit()
 
     app, client = _client(session, PracticeLLM())
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
     try:
         wrong = client.post(
             "/practice/quizzes",
@@ -207,8 +229,11 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
         ).mappings().one()
         assert str(mastery["status"]) == "learning"
         assert float(mastery["score"]) == 0.4
+        assert any(event["event_name"] == "grading.practice.start" for event in events)
+        assert any(event["event_name"] == "grading.practice.result" for event in events)
     finally:
         _close(session, app, client)
+        set_event_sink(None)
 
 
 def test_practice_quiz_generation_retries_when_first_payload_is_invalid() -> None:
@@ -230,3 +255,56 @@ def test_practice_quiz_generation_retries_when_first_payload_is_invalid() -> Non
         assert llm.quiz_calls == 2
     finally:
         _close(session, app, client)
+
+
+def test_practice_quiz_submit_failure_emits_observability_event() -> None:
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
+    session = _session_or_skip()
+    workspace_id, user_id, concept_id = _seed(session)
+    app, client = _client(session, PracticeLLM())
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
+    try:
+        created = client.post(
+            "/practice/quizzes",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "question_count": 4,
+            },
+        )
+        assert created.status_code == 201
+        quiz = created.json()
+
+        submitted = client.post(
+            f"/practice/quizzes/{quiz['quiz_id']}/submit",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "answers": _answers(quiz["items"])[:1],
+            },
+        )
+        assert submitted.status_code == 422
+        assert any(event["event_name"] == "grading.practice.start" for event in events)
+        assert any(event["event_name"] == "grading.practice.failure" for event in events)
+    finally:
+        _close(session, app, client)
+        set_event_sink(None)

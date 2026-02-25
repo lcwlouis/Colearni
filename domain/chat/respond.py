@@ -6,6 +6,7 @@ from adapters.db.documents import DocumentRow, get_document_by_id
 from adapters.db.mastery import get_mastery_status
 from adapters.embeddings.factory import build_embedding_provider
 from adapters.llm.factory import build_graph_llm_client
+from core.observability import observation_context
 from core.schemas import (
     CITATION_LABEL_FROM_NOTES,
     AssistantDraft,
@@ -33,53 +34,58 @@ def generate_chat_response(
     settings: Settings | None = None,
 ) -> AssistantResponseEnvelope:
     """Build a deterministic chat response and enforce citation policy."""
-    active_settings = settings or get_settings()
-    grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
-
-    provider = build_embedding_provider(settings=active_settings)
-    vector_retriever = PgVectorRetriever(
-        session=session,
-        embedding_provider=provider,
-        retrieval_max_top_k=active_settings.retrieval_max_top_k,
-    )
-    fts_retriever = PgFtsRetriever(
-        session=session,
-        retrieval_max_top_k=active_settings.retrieval_max_top_k,
-    )
-    retriever = HybridRetriever(
-        vector_retriever=vector_retriever,
-        fts_retriever=fts_retriever,
-        retrieval_max_top_k=active_settings.retrieval_max_top_k,
-    )
-    ranked_chunks = retriever.retrieve(
-        query=request.query,
+    with observation_context(
+        component="chat",
+        operation="chat.respond",
         workspace_id=request.workspace_id,
-        top_k=request.top_k,
-    )
+    ):
+        active_settings = settings or get_settings()
+        grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
 
-    evidence = _build_workspace_evidence(
-        session=session,
-        workspace_id=request.workspace_id,
-        chunks=ranked_chunks,
-    )
-    citations = _build_workspace_citations(evidence)
-    tutor_llm_client = _build_tutor_llm_client(settings=active_settings)
-    mastery_status = _resolve_mastery_status(
-        session=session,
-        request=request,
-    )
-
-    draft = AssistantDraft(
-        text=build_tutor_response_text(
+        provider = build_embedding_provider(settings=active_settings)
+        vector_retriever = PgVectorRetriever(
+            session=session,
+            embedding_provider=provider,
+            retrieval_max_top_k=active_settings.retrieval_max_top_k,
+        )
+        fts_retriever = PgFtsRetriever(
+            session=session,
+            retrieval_max_top_k=active_settings.retrieval_max_top_k,
+        )
+        retriever = HybridRetriever(
+            vector_retriever=vector_retriever,
+            fts_retriever=fts_retriever,
+            retrieval_max_top_k=active_settings.retrieval_max_top_k,
+        )
+        ranked_chunks = retriever.retrieve(
             query=request.query,
+            workspace_id=request.workspace_id,
+            top_k=request.top_k,
+        )
+
+        evidence = _build_workspace_evidence(
+            session=session,
+            workspace_id=request.workspace_id,
+            chunks=ranked_chunks,
+        )
+        citations = _build_workspace_citations(evidence)
+        tutor_llm_client = _build_tutor_llm_client(settings=active_settings)
+        mastery_status = _resolve_mastery_status(
+            session=session,
+            request=request,
+        )
+
+        draft = AssistantDraft(
+            text=build_tutor_response_text(
+                query=request.query,
+                evidence=evidence,
+                mastery_status=mastery_status,
+                llm_client=tutor_llm_client,
+            ),
             evidence=evidence,
-            mastery_status=mastery_status,
-            llm_client=tutor_llm_client,
-        ),
-        evidence=evidence,
-        citations=citations,
-    )
-    return verify_assistant_draft(draft=draft, grounding_mode=grounding_mode)
+            citations=citations,
+        )
+        return verify_assistant_draft(draft=draft, grounding_mode=grounding_mode)
 
 
 def _build_workspace_evidence(

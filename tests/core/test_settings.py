@@ -71,3 +71,27 @@ def test_settings_reads_gardener_budget_aliases(monkeypatch) -> None:
     assert settings.gardener_max_clusters_per_run == 9
     assert settings.gardener_max_dirty_nodes_per_run == 77
     assert settings.gardener_recent_window_days == 5
+
+
+def test_settings_observability_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("APP_OBSERVABILITY_ENABLED", raising=False)
+    monkeypatch.delenv("APP_OBSERVABILITY_OTLP_ENDPOINT", raising=False)
+    monkeypatch.delenv("APP_OBSERVABILITY_SERVICE_NAME", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.observability_enabled is False
+    assert settings.observability_otlp_endpoint is None
+    assert settings.observability_service_name == "colearni-backend"
+
+
+def test_settings_reads_observability_aliases(monkeypatch) -> None:
+    monkeypatch.setenv("OBSERVABILITY_ENABLED", "true")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318/v1/traces")
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "colearni-test")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.observability_enabled is True
+    assert settings.observability_otlp_endpoint == "http://127.0.0.1:4318/v1/traces"
+    assert settings.observability_service_name == "colearni-test"

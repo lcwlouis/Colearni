@@ -8,6 +8,7 @@ from typing import Literal
 
 from adapters.db import graph_repository
 from core.contracts import EmbeddingProvider, GraphLLMClient
+from core.observability import emit_event
 from core.settings import Settings
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
@@ -168,6 +169,8 @@ class OnlineResolver:
             )
 
         llm_decision = self._llm_disambiguation_decision(
+            workspace_id=workspace_id,
+            chunk_id=chunk_id,
             raw_concept=raw_concept,
             candidates=candidates,
             budgets=budgets,
@@ -344,11 +347,38 @@ class OnlineResolver:
     def _llm_disambiguation_decision(
         self,
         *,
+        workspace_id: int,
+        chunk_id: int,
         raw_concept: ExtractedConcept,
         candidates: Sequence[CanonicalCandidate],
         budgets: ResolverBudgets,
     ) -> ResolverDecision:
-        if not candidates or not budgets.can_call_llm():
+        _emit_resolver_budget_usage(
+            workspace_id=workspace_id,
+            chunk_id=chunk_id,
+            budgets=budgets,
+        )
+        if not candidates:
+            return ResolverDecision(
+                decision="CREATE_NEW",
+                merge_into_id=None,
+                confidence=1.0,
+                method="fallback",
+            )
+        if not budgets.can_call_llm():
+            emit_event(
+                "graph.resolver.budget.hard_stop",
+                status="warning",
+                component="graph",
+                operation="graph.resolver.resolve_concept",
+                workspace_id=workspace_id,
+                chunk_id=chunk_id,
+                reason=budgets.last_hard_stop_reason or "budget_exhausted",
+                llm_calls_chunk=budgets.llm_calls_chunk,
+                llm_calls_document=budgets.llm_calls_document,
+                max_llm_calls_per_chunk=budgets.max_llm_calls_per_chunk,
+                max_llm_calls_per_document=budgets.max_llm_calls_per_document,
+            )
             return ResolverDecision(
                 decision="CREATE_NEW",
                 merge_into_id=None,
@@ -358,6 +388,11 @@ class OnlineResolver:
 
         try:
             budgets.register_llm_call()
+            _emit_resolver_budget_usage(
+                workspace_id=workspace_id,
+                chunk_id=chunk_id,
+                budgets=budgets,
+            )
             payload = _DisambiguationPayload.model_validate(
                 self._llm_client.disambiguate(
                     raw_name=raw_concept.name,
@@ -582,6 +617,26 @@ def _merge_map_method(method: str) -> str:
     if method in {"exact", "lexical", "vector", "llm", "manual"}:
         return method
     return "exact"
+
+
+def _emit_resolver_budget_usage(
+    *,
+    workspace_id: int,
+    chunk_id: int,
+    budgets: ResolverBudgets,
+) -> None:
+    emit_event(
+        "graph.resolver.budget.usage",
+        status="info",
+        component="graph",
+        operation="graph.resolver.resolve_concept",
+        workspace_id=workspace_id,
+        chunk_id=chunk_id,
+        llm_calls_chunk=budgets.llm_calls_chunk,
+        llm_calls_document=budgets.llm_calls_document,
+        max_llm_calls_per_chunk=budgets.max_llm_calls_per_chunk,
+        max_llm_calls_per_document=budgets.max_llm_calls_per_document,
+    )
 
 
 def _merge_aliases(existing_aliases: Sequence[str], alias_to_add: str) -> list[str]:

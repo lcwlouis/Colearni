@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 from adapters.db import graph_repository
 from core.contracts import EmbeddingProvider, GraphLLMClient
+from core.observability import configure_observability, set_event_sink
+from core.settings import get_settings
 from domain.graph.resolver import OnlineResolver, ResolverConfig
 from domain.graph.types import ExtractedConcept, ExtractedEdge, ResolverBudgets
 
@@ -278,6 +280,17 @@ def test_budget_hard_stop_skips_llm(
     max_per_document: int,
 ) -> None:
     """LLM should not run when chunk or document caps are already exhausted."""
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
     llm = StubLLM({"decision": "MERGE_INTO", "merge_into_id": 55, "confidence": 0.9})
     resolver = _resolver(llm)
     _patch_repo_defaults(monkeypatch)
@@ -299,6 +312,13 @@ def test_budget_hard_stop_skips_llm(
 
     assert resolved.created is True
     assert llm.disambiguate_calls == 0
+    hard_stops = [
+        event for event in events if event["event_name"] == "graph.resolver.budget.hard_stop"
+    ]
+    assert len(hard_stops) == 1
+    expected_reason = "chunk_cap_reached" if max_per_chunk == 0 else "document_cap_reached"
+    assert hard_stops[0]["reason"] == expected_reason
+    set_event_sink(None)
 
 
 def test_llm_error_falls_back_to_create(monkeypatch: pytest.MonkeyPatch) -> None:

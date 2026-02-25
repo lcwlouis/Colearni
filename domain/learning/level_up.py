@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import math
 from typing import Any
+from uuid import uuid4
 
 from core.contracts import GraphLLMClient
+from core.observability import emit_event, observation_context, start_span
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -170,249 +172,349 @@ def submit_level_up_quiz(
     quiz_type: str = "level_up",
     update_mastery: bool = True,
     retry_hint: str = RETRY_HINT,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
-    quiz = (
-        session.execute(
-            text(
-                """
-                SELECT id, user_id, concept_id
-                FROM quizzes
-                WHERE id = :quiz_id AND workspace_id = :workspace_id AND quiz_type = :quiz_type
-                FOR UPDATE
-                """
-            ),
-            {"quiz_id": quiz_id, "workspace_id": workspace_id, "quiz_type": quiz_type},
-        )
-        .mappings()
-        .first()
-    )
-    if quiz is None:
-        raise LevelUpQuizNotFoundError("Quiz not found in workspace.")
-    if int(quiz["user_id"]) != user_id:
-        raise LevelUpQuizValidationError("Quiz does not belong to user.")
+    resolved_run_id = run_id or str(uuid4())
+    event_prefix = "grading.level_up" if quiz_type == "level_up" else "grading.practice"
+    operation = f"{event_prefix}.submit"
+    stage = "load_quiz"
 
-    item_rows = (
-        session.execute(
-            text(
-                """
-                SELECT id AS item_id, item_type, prompt, payload
-                FROM quiz_items
-                WHERE quiz_id = :quiz_id
-                ORDER BY position
-                """
-            ),
-            {"quiz_id": quiz_id},
-        )
-        .mappings()
-        .all()
-    )
-    item_refs = [
-        {
-            "item_id": int(row["item_id"]),
-            "item_type": str(row["item_type"]),
-        }
-        for row in item_rows
-    ]
-
-    existing = (
-        session.execute(
-            text(
-                """
-                SELECT id, score, passed, grading
-                FROM quiz_attempts
-                WHERE quiz_id = :quiz_id AND user_id = :user_id AND graded_at IS NOT NULL
-                ORDER BY id
-                LIMIT 1
-                """
-            ),
-            {"quiz_id": quiz_id, "user_id": user_id},
-        )
-        .mappings()
-        .first()
-    )
-    if existing is not None:
-        grading = existing["grading"] if isinstance(existing["grading"], dict) else {}
-        feedback_items = _compose_feedback_items(
-            item_refs=item_refs,
-            graded_items=grading.get("items"),
-        )
-        session.commit()
-        payload: dict[str, Any] = {
-            "quiz_id": quiz_id,
-            "attempt_id": int(existing["id"]),
-            "score": float(existing["score"] or 0.0),
-            "passed": bool(existing["passed"]),
-            "critical_misconception": bool(grading.get("critical_misconception", False)),
-            "overall_feedback": str(grading.get("overall_feedback", "")).strip(),
-            "items": feedback_items,
-            "replayed": True,
-            "retry_hint": retry_hint,
-        }
-        if update_mastery:
-            mastery = (
+    with observation_context(
+        component="grading",
+        operation=operation,
+        workspace_id=workspace_id,
+        quiz_id=quiz_id,
+        run_id=resolved_run_id,
+    ), start_span(
+        event_prefix,
+        component="grading",
+        operation=operation,
+        workspace_id=workspace_id,
+        quiz_id=quiz_id,
+        run_id=resolved_run_id,
+    ):
+        try:
+            quiz = (
                 session.execute(
                     text(
                         """
-                        SELECT status, score
-                        FROM mastery
-                        WHERE workspace_id = :workspace_id
-                          AND user_id = :user_id
-                          AND concept_id = :concept_id
+                        SELECT id, user_id, concept_id
+                        FROM quizzes
+                        WHERE id = :quiz_id
+                          AND workspace_id = :workspace_id
+                          AND quiz_type = :quiz_type
+                        FOR UPDATE
+                        """
+                    ),
+                    {"quiz_id": quiz_id, "workspace_id": workspace_id, "quiz_type": quiz_type},
+                )
+                .mappings()
+                .first()
+            )
+            if quiz is None:
+                raise LevelUpQuizNotFoundError("Quiz not found in workspace.")
+            if int(quiz["user_id"]) != user_id:
+                raise LevelUpQuizValidationError("Quiz does not belong to user.")
+
+            stage = "load_items"
+            item_rows = (
+                session.execute(
+                    text(
+                        """
+                        SELECT id AS item_id, item_type, prompt, payload
+                        FROM quiz_items
+                        WHERE quiz_id = :quiz_id
+                        ORDER BY position
+                        """
+                    ),
+                    {"quiz_id": quiz_id},
+                )
+                .mappings()
+                .all()
+            )
+            item_refs = [
+                {
+                    "item_id": int(row["item_id"]),
+                    "item_type": str(row["item_type"]),
+                }
+                for row in item_rows
+            ]
+            short_item_count = sum(
+                1 for row in item_rows if str(row["item_type"]) == "short_answer"
+            )
+            mcq_item_count = sum(1 for row in item_rows if str(row["item_type"]) == "mcq")
+            emit_event(
+                f"{event_prefix}.start",
+                status="info",
+                component="grading",
+                operation=operation,
+                workspace_id=workspace_id,
+                quiz_id=quiz_id,
+                short_item_count=short_item_count,
+                mcq_item_count=mcq_item_count,
+            )
+
+            stage = "check_replay"
+            existing = (
+                session.execute(
+                    text(
+                        """
+                        SELECT id, score, passed, grading
+                        FROM quiz_attempts
+                        WHERE quiz_id = :quiz_id AND user_id = :user_id AND graded_at IS NOT NULL
+                        ORDER BY id
                         LIMIT 1
+                        """
+                    ),
+                    {"quiz_id": quiz_id, "user_id": user_id},
+                )
+                .mappings()
+                .first()
+            )
+            if existing is not None:
+                grading = existing["grading"] if isinstance(existing["grading"], dict) else {}
+                feedback_items = _compose_feedback_items(
+                    item_refs=item_refs,
+                    graded_items=grading.get("items"),
+                )
+                session.commit()
+                payload: dict[str, Any] = {
+                    "quiz_id": quiz_id,
+                    "attempt_id": int(existing["id"]),
+                    "score": float(existing["score"] or 0.0),
+                    "passed": bool(existing["passed"]),
+                    "critical_misconception": bool(grading.get("critical_misconception", False)),
+                    "overall_feedback": str(grading.get("overall_feedback", "")).strip(),
+                    "items": feedback_items,
+                    "replayed": True,
+                    "retry_hint": retry_hint,
+                }
+                if update_mastery:
+                    mastery = (
+                        session.execute(
+                            text(
+                                """
+                                SELECT status, score
+                                FROM mastery
+                                WHERE workspace_id = :workspace_id
+                                  AND user_id = :user_id
+                                  AND concept_id = :concept_id
+                                LIMIT 1
+                                """
+                            ),
+                            {
+                                "workspace_id": workspace_id,
+                                "user_id": user_id,
+                                "concept_id": int(quiz["concept_id"]),
+                            },
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    payload["mastery_status"] = (
+                        str(mastery["status"])
+                        if mastery
+                        else ("learned" if existing["passed"] else "learning")
+                    )
+                    payload["mastery_score"] = (
+                        float(mastery["score"]) if mastery else float(existing["score"] or 0.0)
+                    )
+                emit_event(
+                    f"{event_prefix}.result",
+                    status="success",
+                    component="grading",
+                    operation=operation,
+                    workspace_id=workspace_id,
+                    quiz_id=quiz_id,
+                    attempt_id=int(existing["id"]),
+                    score=payload["score"],
+                    passed=payload["passed"],
+                    critical_misconception=payload["critical_misconception"],
+                    replayed=True,
+                )
+                return payload
+
+            if not item_rows:
+                raise LevelUpQuizValidationError("Quiz has no items to submit.")
+
+            stage = "normalize_items"
+            items: list[dict[str, Any]] = []
+            for row in item_rows:
+                payload = row["payload"] if isinstance(row["payload"], dict) else {}
+                item_type = str(row["item_type"])
+                payload = (
+                    _normalize_short(payload)
+                    if item_type == "short_answer"
+                    else _normalize_mcq(payload)
+                )
+                items.append(
+                    {
+                        "item_id": int(row["item_id"]),
+                        "item_type": item_type,
+                        "prompt": str(row["prompt"]),
+                        "payload": payload,
+                    }
+                )
+
+            stage = "validate_answers"
+            answer_map = _validate_answers(items, answers)
+            short_items = [item for item in items if item["item_type"] == "short_answer"]
+            mcq_items = [item for item in items if item["item_type"] == "mcq"]
+            graded_by_id: dict[int, dict[str, Any]] = {}
+            short_overall_feedback = ""
+
+            if short_items:
+                stage = "grade_short_answer"
+                if llm_client is None:
+                    raise LevelUpQuizUnavailableError("LLM grading client is unavailable.")
+                short_prompt = _grading_prompt(short_items, answer_map)
+                short_grading = _parse_grading(
+                    llm_client.generate_tutor_text(prompt=short_prompt),
+                    [item["item_id"] for item in short_items],
+                )
+                short_overall_feedback = short_grading["overall_feedback"]
+                for graded_item in short_grading["items"]:
+                    graded_by_id[int(graded_item["item_id"])] = graded_item
+
+            stage = "grade_mcq"
+            mcq_graded = _grade_mcq_items(mcq_items, answer_map)
+            for graded_item in mcq_graded:
+                graded_by_id[int(graded_item["item_id"])] = graded_item
+
+            ordered_items = [graded_by_id[item["item_id"]] for item in items]
+            feedback_items = _compose_feedback_items(
+                item_refs=[
+                    {"item_id": item["item_id"], "item_type": item["item_type"]} for item in items
+                ],
+                graded_items=ordered_items,
+            )
+            score = sum(float(item["score"]) for item in ordered_items) / len(ordered_items)
+            critical = any(bool(item["critical_misconception"]) for item in ordered_items)
+            passed = score >= PASS_SCORE and not critical
+            mastery_status = "learned" if passed else "learning"
+            mastery_score = max(0.0, min(1.0, float(score)))
+            overall_feedback = _build_overall_feedback(
+                short_overall_feedback=short_overall_feedback,
+                mcq_graded=mcq_graded,
+                passed=passed,
+                critical=critical,
+            )
+            grading_payload = {
+                "items": feedback_items,
+                "overall_feedback": overall_feedback,
+                "critical_misconception": critical,
+            }
+
+            stage = "persist_attempt"
+            session.execute(
+                text(
+                    """
+                    INSERT INTO quiz_attempts (
+                        quiz_id,
+                        user_id,
+                        answers,
+                        grading,
+                        score,
+                        passed,
+                        graded_at
+                    )
+                    VALUES (
+                        :quiz_id,
+                        :user_id,
+                        CAST(:answers AS jsonb),
+                        CAST(:grading AS jsonb),
+                        :score,
+                        :passed,
+                        now()
+                    )
+                    """
+                ),
+                {
+                    "quiz_id": quiz_id,
+                    "user_id": user_id,
+                    "answers": json.dumps({"answers": answers}, ensure_ascii=True),
+                    "grading": json.dumps(grading_payload, ensure_ascii=True),
+                    "score": mastery_score,
+                    "passed": passed,
+                },
+            )
+            attempt_id = int(
+                session.execute(text("SELECT currval('quiz_attempts_id_seq')")).scalar_one()
+            )
+            session.execute(
+                text(
+                    "UPDATE quizzes "
+                    "SET status = 'graded', updated_at = now() "
+                    "WHERE id = :quiz_id"
+                ),
+                {"quiz_id": quiz_id},
+            )
+            if update_mastery:
+                stage = "update_mastery"
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO mastery (workspace_id, user_id, concept_id, score, status)
+                        VALUES (:workspace_id, :user_id, :concept_id, :score, :status)
+                        ON CONFLICT (user_id, concept_id)
+                        DO UPDATE SET
+                            workspace_id = EXCLUDED.workspace_id,
+                            score = EXCLUDED.score,
+                            status = EXCLUDED.status,
+                            updated_at = now()
                         """
                     ),
                     {
                         "workspace_id": workspace_id,
                         "user_id": user_id,
                         "concept_id": int(quiz["concept_id"]),
+                        "score": mastery_score,
+                        "status": mastery_status,
                     },
                 )
-                .mappings()
-                .first()
-            )
-            payload["mastery_status"] = (
-                str(mastery["status"])
-                if mastery
-                else ("learned" if existing["passed"] else "learning")
-            )
-            payload["mastery_score"] = (
-                float(mastery["score"]) if mastery else float(existing["score"] or 0.0)
-            )
-        return payload
+            stage = "commit"
+            session.commit()
 
-    if not item_rows:
-        raise LevelUpQuizValidationError("Quiz has no items to submit.")
-
-    items: list[dict[str, Any]] = []
-    for row in item_rows:
-        payload = row["payload"] if isinstance(row["payload"], dict) else {}
-        item_type = str(row["item_type"])
-        payload = (
-            _normalize_short(payload)
-            if item_type == "short_answer"
-            else _normalize_mcq(payload)
-        )
-        items.append(
-            {
-                "item_id": int(row["item_id"]),
-                "item_type": item_type,
-                "prompt": str(row["prompt"]),
-                "payload": payload,
-            }
-        )
-
-    answer_map = _validate_answers(items, answers)
-    short_items = [item for item in items if item["item_type"] == "short_answer"]
-    mcq_items = [item for item in items if item["item_type"] == "mcq"]
-    graded_by_id: dict[int, dict[str, Any]] = {}
-    short_overall_feedback = ""
-
-    if short_items:
-        if llm_client is None:
-            raise LevelUpQuizUnavailableError("LLM grading client is unavailable.")
-        short_prompt = _grading_prompt(short_items, answer_map)
-        short_grading = _parse_grading(
-            llm_client.generate_tutor_text(prompt=short_prompt),
-            [item["item_id"] for item in short_items],
-        )
-        short_overall_feedback = short_grading["overall_feedback"]
-        for graded_item in short_grading["items"]:
-            graded_by_id[int(graded_item["item_id"])] = graded_item
-
-    mcq_graded = _grade_mcq_items(mcq_items, answer_map)
-    for graded_item in mcq_graded:
-        graded_by_id[int(graded_item["item_id"])] = graded_item
-
-    ordered_items = [graded_by_id[item["item_id"]] for item in items]
-    feedback_items = _compose_feedback_items(
-        item_refs=[{"item_id": item["item_id"], "item_type": item["item_type"]} for item in items],
-        graded_items=ordered_items,
-    )
-    score = sum(float(item["score"]) for item in ordered_items) / len(ordered_items)
-    critical = any(bool(item["critical_misconception"]) for item in ordered_items)
-    passed = score >= PASS_SCORE and not critical
-    mastery_status = "learned" if passed else "learning"
-    mastery_score = max(0.0, min(1.0, float(score)))
-    overall_feedback = _build_overall_feedback(
-        short_overall_feedback=short_overall_feedback,
-        mcq_graded=mcq_graded,
-        passed=passed,
-        critical=critical,
-    )
-    grading_payload = {
-        "items": feedback_items,
-        "overall_feedback": overall_feedback,
-        "critical_misconception": critical,
-    }
-
-    session.execute(
-        text(
-            """
-            INSERT INTO quiz_attempts (quiz_id, user_id, answers, grading, score, passed, graded_at)
-            VALUES (
-                :quiz_id,
-                :user_id,
-                CAST(:answers AS jsonb),
-                CAST(:grading AS jsonb),
-                :score,
-                :passed,
-                now()
-            )
-            """
-        ),
-        {
-            "quiz_id": quiz_id,
-            "user_id": user_id,
-            "answers": json.dumps({"answers": answers}, ensure_ascii=True),
-            "grading": json.dumps(grading_payload, ensure_ascii=True),
-            "score": mastery_score,
-            "passed": passed,
-        },
-    )
-    attempt_id = int(session.execute(text("SELECT currval('quiz_attempts_id_seq')")).scalar_one())
-    session.execute(
-        text("UPDATE quizzes SET status = 'graded', updated_at = now() WHERE id = :quiz_id"),
-        {"quiz_id": quiz_id},
-    )
-    if update_mastery:
-        session.execute(
-            text(
-                """
-                INSERT INTO mastery (workspace_id, user_id, concept_id, score, status)
-                VALUES (:workspace_id, :user_id, :concept_id, :score, :status)
-                ON CONFLICT (user_id, concept_id)
-                DO UPDATE SET
-                    workspace_id = EXCLUDED.workspace_id,
-                    score = EXCLUDED.score,
-                    status = EXCLUDED.status,
-                    updated_at = now()
-                """
-            ),
-            {
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-                "concept_id": int(quiz["concept_id"]),
+            payload = {
+                "quiz_id": quiz_id,
+                "attempt_id": attempt_id,
                 "score": mastery_score,
-                "status": mastery_status,
-            },
-        )
-    session.commit()
-
-    payload = {
-        "quiz_id": quiz_id,
-        "attempt_id": attempt_id,
-        "score": mastery_score,
-        "passed": passed,
-        "critical_misconception": critical,
-        "overall_feedback": overall_feedback,
-        "items": feedback_items,
-        "replayed": False,
-        "retry_hint": None,
-    }
-    if update_mastery:
-        payload["mastery_status"] = mastery_status
-        payload["mastery_score"] = mastery_score
-    return payload
+                "passed": passed,
+                "critical_misconception": critical,
+                "overall_feedback": overall_feedback,
+                "items": feedback_items,
+                "replayed": False,
+                "retry_hint": None,
+            }
+            if update_mastery:
+                payload["mastery_status"] = mastery_status
+                payload["mastery_score"] = mastery_score
+            emit_event(
+                f"{event_prefix}.result",
+                status="success",
+                component="grading",
+                operation=operation,
+                workspace_id=workspace_id,
+                quiz_id=quiz_id,
+                attempt_id=attempt_id,
+                score=mastery_score,
+                passed=passed,
+                critical_misconception=critical,
+                replayed=False,
+            )
+            return payload
+        except Exception as exc:
+            emit_event(
+                f"{event_prefix}.failure",
+                status="failure",
+                component="grading",
+                operation=operation,
+                workspace_id=workspace_id,
+                quiz_id=quiz_id,
+                stage=stage,
+                error_type=type(exc).__name__,
+            )
+            raise
 
 
 def _normalize_items(

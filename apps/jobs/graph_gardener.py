@@ -6,6 +6,7 @@ import argparse
 
 from adapters.db.session import new_session
 from adapters.llm.factory import build_graph_llm_client
+from core.observability import configure_observability
 from core.settings import get_settings
 from domain.graph.gardener import run_graph_gardener
 
@@ -38,6 +39,7 @@ def main() -> int:
     """Run one bounded graph gardener pass and print a short summary."""
     args = _parse_args()
     settings = get_settings()
+    configure_observability(settings)
     llm_client = build_graph_llm_client(settings=settings)
 
     session = new_session()

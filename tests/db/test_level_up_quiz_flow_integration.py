@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from adapters.db.dependencies import get_db_session
 from apps.api.main import create_app
+from core.observability import configure_observability, set_event_sink
 from core.settings import get_settings
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -136,6 +137,17 @@ def test_level_up_pass_fail_transitions(
     expected_status: str,
     mcq: str,
 ) -> None:
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
     session = _session_or_skip()
     grader = DeterministicQuizGrader(score=score, critical=critical)
     workspace_id, user_id, concept_id = _seed(session)
@@ -151,6 +163,15 @@ def test_level_up_pass_fail_transitions(
         )
         session.commit()
     app, client = _client(session, grader)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
 
     try:
         created = client.post(
@@ -277,6 +298,8 @@ def test_level_up_pass_fail_transitions(
         }
         assert grader.last_prompt is not None
         assert "_generation_context" in grader.last_prompt
+        assert any(event["event_name"] == "grading.level_up.start" for event in events)
+        assert any(event["event_name"] == "grading.level_up.result" for event in events)
 
         mastery_status = session.execute(
             text(
@@ -298,6 +321,7 @@ def test_level_up_pass_fail_transitions(
         session.close()
         if bind is not None:
             bind.dispose()
+        set_event_sink(None)
 
 
 def test_level_up_submit_replay_is_idempotent() -> None:
@@ -355,6 +379,66 @@ def test_level_up_submit_replay_is_idempotent() -> None:
         session.close()
         if bind is not None:
             bind.dispose()
+
+
+def test_level_up_submit_failure_emits_observability_event() -> None:
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
+    session = _session_or_skip()
+    grader = DeterministicQuizGrader(score=0.8, critical=False)
+    workspace_id, user_id, concept_id = _seed(session)
+    app, client = _client(session, grader)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
+
+    try:
+        created = client.post(
+            "/quizzes/level-up",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "question_count": 5,
+            },
+        )
+        assert created.status_code == 201
+        quiz = created.json()
+
+        submitted = client.post(
+            f"/quizzes/{quiz['quiz_id']}/submit",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "answers": _answers(quiz["items"], mcq="a")[:1],
+            },
+        )
+        assert submitted.status_code == 422
+        assert any(event["event_name"] == "grading.level_up.start" for event in events)
+        assert any(event["event_name"] == "grading.level_up.failure" for event in events)
+    finally:
+        app.dependency_overrides.clear()
+        client.close()
+        bind = session.get_bind()
+        session.close()
+        if bind is not None:
+            bind.dispose()
+        set_event_sink(None)
 
 
 def test_level_up_mcq_only_submission_works_without_llm() -> None:
