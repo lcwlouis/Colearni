@@ -1,0 +1,63 @@
+:root {
+  --bg: linear-gradient(135deg, #eef7ff, #fff6e8);
+  --text: #10243e;
+  --muted: #4d6480;
+  --panel: #fffffff0;
+  --line: #c8d8e9;
+  --accent: #0f5f9c;
+  --danger: #b42318;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--text);
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+}
+.shell { width: min(1020px, calc(100% - 2rem)); margin: 1.25rem auto 2rem; }
+.topbar { display: flex; flex-direction: column; gap: 0.7rem; margin-bottom: 1rem; }
+.brand { margin: 0; font: 700 2rem "Iowan Old Style", "Palatino Linotype", Georgia, serif; }
+.nav { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.nav-link {
+  text-decoration: none; color: var(--text);
+  border: 1px solid var(--line); border-radius: 999px;
+  background: #fff; padding: 0.45rem 0.75rem;
+}
+.nav-link[aria-current="page"] { background: #dcedfb; border-color: var(--accent); }
+.content { animation: fade 0.2s ease-out; }
+.panel {
+  border: 1px solid var(--line); border-radius: 1rem; padding: 1rem;
+  background: var(--panel); backdrop-filter: blur(4px);
+}
+.stack { display: grid; gap: 0.85rem; }
+.grid { display: grid; gap: 0.75rem; }
+.field { display: grid; gap: 0.35rem; }
+.field-label { font-size: 0.9rem; color: var(--muted); }
+input, textarea, select, button { font: inherit; }
+input, textarea, select {
+  width: 100%; padding: 0.5rem 0.65rem; background: #fff;
+  border: 1px solid var(--line); border-radius: 0.6rem;
+}
+.button-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+button {
+  cursor: pointer; color: #fff; background: var(--accent);
+  border: 1px solid var(--accent); border-radius: 0.6rem; padding: 0.45rem 0.8rem;
+}
+button.secondary { color: var(--text); background: #fff; border-color: var(--line); }
+button:disabled { opacity: 0.7; cursor: wait; }
+.status {
+  margin: 0; padding: 0.55rem 0.7rem; border-radius: 0.6rem;
+  border: 1px dashed var(--line); background: #ffffffb0; color: var(--muted);
+}
+.status.error { border-color: #f5c9c3; color: var(--danger); background: #fff2f1; }
+pre {
+  margin: 0; padding: 0.6rem; max-height: 18rem; overflow: auto;
+  border: 1px solid var(--line); border-radius: 0.6rem; background: #fff;
+  font-family: Menlo, Monaco, "Courier New", monospace; font-size: 0.82rem;
+}
+@keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (min-width: 768px) {
+  .topbar { flex-direction: row; justify-content: space-between; align-items: center; }
+  .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
