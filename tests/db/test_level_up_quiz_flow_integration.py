@@ -213,6 +213,8 @@ def test_level_up_pass_fail_transitions(
         submit_payload = submitted.json()
         assert submit_payload["passed"] is expected_pass
         assert submit_payload["mastery_status"] == expected_status
+        assert isinstance(submit_payload["mastery_score"], float)
+        assert 0.0 <= submit_payload["mastery_score"] <= 1.0
         assert isinstance(submit_payload["overall_feedback"], str)
         assert submit_payload["overall_feedback"]
         assert isinstance(submit_payload["items"], list)

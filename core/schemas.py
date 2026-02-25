@@ -185,6 +185,147 @@ class ChatRespondRequest(BaseModel):
         return _require_non_empty(value, "query")
 
 
+QuizItemType = Literal["short_answer", "mcq"]
+QuizItemResult = Literal["correct", "partial", "incorrect"]
+MasteryStatus = Literal["locked", "learning", "learned"]
+LuckyMode = Literal["adjacent", "wildcard"]
+
+
+class QuizItemSummary(BaseModel):
+    item_id: int = Field(gt=0)
+    position: int = Field(ge=1)
+    item_type: QuizItemType
+    prompt: str = Field(min_length=1)
+
+
+class QuizCreateResponse(BaseModel):
+    quiz_id: int = Field(gt=0)
+    workspace_id: int = Field(gt=0)
+    user_id: int = Field(gt=0)
+    concept_id: int = Field(gt=0)
+    status: str = Field(min_length=1)
+    items: list[QuizItemSummary] = Field(min_length=1)
+
+
+class QuizFeedbackItem(BaseModel):
+    item_id: int = Field(gt=0)
+    item_type: QuizItemType
+    result: QuizItemResult
+    is_correct: bool
+    critical_misconception: bool
+    feedback: str = Field(min_length=1)
+    score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class PracticeQuizSubmitResponse(BaseModel):
+    quiz_id: int = Field(gt=0)
+    attempt_id: int = Field(gt=0)
+    score: float = Field(ge=0.0, le=1.0)
+    passed: bool
+    critical_misconception: bool
+    overall_feedback: str = Field(min_length=1)
+    items: list[QuizFeedbackItem] = Field(min_length=1)
+    replayed: bool
+    retry_hint: str | None
+
+
+class LevelUpQuizSubmitResponse(PracticeQuizSubmitResponse):
+    mastery_status: MasteryStatus
+    mastery_score: float = Field(ge=0.0, le=1.0)
+
+
+class PracticeFlashcard(BaseModel):
+    front: str = Field(min_length=1)
+    back: str = Field(min_length=1)
+    hint: str = Field(min_length=1)
+
+
+class PracticeFlashcardsResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    concept_id: int = Field(gt=0)
+    concept_name: str = Field(min_length=1)
+    flashcards: list[PracticeFlashcard] = Field(min_length=1)
+
+
+class GraphConceptDetail(BaseModel):
+    concept_id: int = Field(gt=0)
+    canonical_name: str = Field(min_length=1)
+    description: str
+    aliases: list[str] = Field(default_factory=list)
+    degree: int = Field(ge=0)
+
+
+class GraphConceptDetailResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    concept: GraphConceptDetail
+
+
+class GraphSubgraphNode(BaseModel):
+    concept_id: int = Field(gt=0)
+    canonical_name: str = Field(min_length=1)
+    description: str
+    hop_distance: int = Field(ge=0)
+
+
+class GraphSubgraphEdge(BaseModel):
+    edge_id: int = Field(gt=0)
+    src_concept_id: int = Field(gt=0)
+    tgt_concept_id: int = Field(gt=0)
+    relation_type: str = Field(min_length=1)
+    description: str
+    keywords: list[str] = Field(default_factory=list)
+    weight: float
+
+
+class GraphSubgraphResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    root_concept_id: int = Field(gt=0)
+    max_hops: int = Field(ge=1)
+    nodes: list[GraphSubgraphNode]
+    edges: list[GraphSubgraphEdge]
+
+
+class GraphLuckyAdjacentScoreComponents(BaseModel):
+    hop_distance: int = Field(ge=0)
+    strongest_link_weight: float
+
+
+class GraphLuckyWildcardScoreComponents(BaseModel):
+    degree: int = Field(ge=0)
+    total_incident_weight: float
+
+
+class GraphLuckyPickAdjacent(BaseModel):
+    concept_id: int = Field(gt=0)
+    canonical_name: str = Field(min_length=1)
+    description: str
+    hop_distance: int = Field(ge=0)
+    score_components: GraphLuckyAdjacentScoreComponents
+
+
+class GraphLuckyPickWildcard(BaseModel):
+    concept_id: int = Field(gt=0)
+    canonical_name: str = Field(min_length=1)
+    description: str
+    hop_distance: None = None
+    score_components: GraphLuckyWildcardScoreComponents
+
+
+class GraphLuckyResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    seed_concept_id: int = Field(gt=0)
+    mode: LuckyMode
+    pick: GraphLuckyPickAdjacent | GraphLuckyPickWildcard
+
+    @model_validator(mode="after")
+    def _validate_pick_mode(self) -> GraphLuckyResponse:
+        if self.mode == "adjacent" and isinstance(self.pick, GraphLuckyPickWildcard):
+            raise ValueError("adjacent mode requires adjacent pick payload")
+        if self.mode == "wildcard" and isinstance(self.pick, GraphLuckyPickAdjacent):
+            raise ValueError("wildcard mode requires wildcard pick payload")
+        return self
+
+
 __all__ = [
     "AssistantDraft",
     "AssistantResponseEnvelope",
@@ -196,6 +337,27 @@ __all__ = [
     "CitationLabel",
     "EvidenceItem",
     "EvidenceSourceType",
+    "GraphConceptDetail",
+    "GraphConceptDetailResponse",
+    "GraphLuckyAdjacentScoreComponents",
+    "GraphLuckyPickAdjacent",
+    "GraphLuckyPickWildcard",
+    "GraphLuckyResponse",
+    "GraphLuckyWildcardScoreComponents",
+    "GraphSubgraphEdge",
+    "GraphSubgraphNode",
+    "GraphSubgraphResponse",
     "GroundingMode",
+    "LevelUpQuizSubmitResponse",
+    "LuckyMode",
+    "MasteryStatus",
+    "PracticeFlashcard",
+    "PracticeFlashcardsResponse",
+    "PracticeQuizSubmitResponse",
+    "QuizCreateResponse",
+    "QuizFeedbackItem",
+    "QuizItemResult",
+    "QuizItemSummary",
+    "QuizItemType",
     "RefusalReason",
 ]

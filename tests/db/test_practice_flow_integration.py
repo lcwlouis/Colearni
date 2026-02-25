@@ -179,6 +179,8 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
         assert isinstance(payload["score"], float)
         assert payload["overall_feedback"]
         assert isinstance(payload["items"], list)
+        assert "mastery_status" not in payload
+        assert "mastery_score" not in payload
         assert len(payload["items"]) == len(quiz["items"])
         for item in payload["items"]:
             assert set(item.keys()) == {

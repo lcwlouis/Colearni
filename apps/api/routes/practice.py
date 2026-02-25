@@ -4,6 +4,7 @@ from typing import Any
 
 from adapters.db.dependencies import get_db_session
 from adapters.llm.factory import build_graph_llm_client
+from core.schemas import PracticeFlashcardsResponse, PracticeQuizSubmitResponse, QuizCreateResponse
 from core.settings import Settings
 from domain.learning.practice import (
     PracticeGenerationError,
@@ -65,19 +66,21 @@ def _raise_http(exc: Exception) -> None:
     raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
-@router.post("/flashcards")
+@router.post("/flashcards", response_model=PracticeFlashcardsResponse)
 def flashcards(
     payload: FlashcardsRequest,
     request: Request,
     db: Session = Depends(get_db_session),
-) -> dict[str, Any]:
+) -> PracticeFlashcardsResponse:
     try:
-        return generate_practice_flashcards(
-            db,
-            workspace_id=payload.workspace_id,
-            concept_id=payload.concept_id,
-            card_count=payload.card_count,
-            llm_client=_llm_client(request),
+        return PracticeFlashcardsResponse.model_validate(
+            generate_practice_flashcards(
+                db,
+                workspace_id=payload.workspace_id,
+                concept_id=payload.concept_id,
+                card_count=payload.card_count,
+                llm_client=_llm_client(request),
+            )
         )
     except (
         PracticeNotFoundError,
@@ -88,21 +91,27 @@ def flashcards(
         _raise_http(exc)
 
 
-@router.post("/quizzes", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/quizzes",
+    status_code=status.HTTP_201_CREATED,
+    response_model=QuizCreateResponse,
+)
 def create_quiz(
     payload: CreateQuizRequest,
     request: Request,
     db: Session = Depends(get_db_session),
-) -> dict[str, Any]:
+) -> QuizCreateResponse:
     try:
-        return create_practice_quiz(
-            db,
-            workspace_id=payload.workspace_id,
-            user_id=payload.user_id,
-            concept_id=payload.concept_id,
-            session_id=payload.session_id,
-            question_count=payload.question_count,
-            llm_client=_llm_client(request),
+        return QuizCreateResponse.model_validate(
+            create_practice_quiz(
+                db,
+                workspace_id=payload.workspace_id,
+                user_id=payload.user_id,
+                concept_id=payload.concept_id,
+                session_id=payload.session_id,
+                question_count=payload.question_count,
+                llm_client=_llm_client(request),
+            )
         )
     except (
         PracticeNotFoundError,
@@ -113,21 +122,23 @@ def create_quiz(
         _raise_http(exc)
 
 
-@router.post("/quizzes/{quiz_id}/submit")
+@router.post("/quizzes/{quiz_id}/submit", response_model=PracticeQuizSubmitResponse)
 def submit_quiz(
     quiz_id: int,
     payload: SubmitQuizRequest,
     request: Request,
     db: Session = Depends(get_db_session),
-) -> dict[str, Any]:
+) -> PracticeQuizSubmitResponse:
     try:
-        return submit_practice_quiz(
-            db,
-            quiz_id=quiz_id,
-            workspace_id=payload.workspace_id,
-            user_id=payload.user_id,
-            answers=payload.answers,
-            llm_client=_llm_client(request),
+        return PracticeQuizSubmitResponse.model_validate(
+            submit_practice_quiz(
+                db,
+                quiz_id=quiz_id,
+                workspace_id=payload.workspace_id,
+                user_id=payload.user_id,
+                answers=payload.answers,
+                llm_client=_llm_client(request),
+            )
         )
     except (
         PracticeNotFoundError,
