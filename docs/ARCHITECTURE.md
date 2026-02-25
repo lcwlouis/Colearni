@@ -17,6 +17,8 @@ We build on:
 - LLM provider abstraction (OpenAI or other)
 - Observability via structured events + OpenTelemetry (OTLP export), with optional Arize Phoenix in dev
 
+API endpoint contracts are documented in [API.md](API.md).
+
 ---
 
 ## High-level architecture

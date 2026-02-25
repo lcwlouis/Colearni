@@ -58,7 +58,26 @@ def _submit(with_mastery: bool) -> dict[str, Any]:
         payload["mastery_status"] = "learned"
         payload["mastery_score"] = 1.0
     return payload
+
+
+OPENAPI_ROUTES = {
+    ("/healthz", "get"),
+    ("/chat/respond", "post"),
+    ("/documents/upload", "post"),
+    ("/graph/concepts/{concept_id}", "get"),
+    ("/graph/concepts/{concept_id}/subgraph", "get"),
+    ("/graph/lucky", "get"),
+    ("/quizzes/level-up", "post"),
+    ("/quizzes/{quiz_id}/submit", "post"),
+    ("/practice/flashcards", "post"),
+    ("/practice/quizzes", "post"),
+    ("/practice/quizzes/{quiz_id}/submit", "post"),
+}
+
+
 OPENAPI_REFS = [
+    ("/chat/respond", "post", "200", "#/components/schemas/AssistantResponseEnvelope"),
+    ("/documents/upload", "post", "201", "#/components/schemas/DocumentUploadResponse"),
     ("/quizzes/level-up", "post", "201", "#/components/schemas/QuizCreateResponse"),
     ("/quizzes/{quiz_id}/submit", "post", "200", "#/components/schemas/LevelUpQuizSubmitResponse"),
     ("/practice/flashcards", "post", "200", "#/components/schemas/PracticeFlashcardsResponse"),
@@ -103,6 +122,12 @@ REQUIRED_FIELDS = {
     "GraphSubgraphResponse": {"workspace_id", "root_concept_id", "max_hops", "nodes", "edges"},
     "GraphLuckyResponse": {"workspace_id", "seed_concept_id", "mode", "pick"},
 }
+
+
+@pytest.mark.parametrize(("path", "method"), sorted(OPENAPI_ROUTES))
+def test_openapi_declares_expected_backend_routes(path: str, method: str) -> None:
+    assert method in app.openapi()["paths"][path]
+
 
 @pytest.mark.parametrize(("path", "method", "status", "ref"), OPENAPI_REFS)
 def test_openapi_routes_use_typed_response_models(
