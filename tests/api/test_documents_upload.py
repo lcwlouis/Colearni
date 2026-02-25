@@ -8,7 +8,11 @@ from typing import Any
 import pytest
 from adapters.db.dependencies import get_db_session
 from apps.api.main import app, create_app
-from core.ingestion import IngestionEmbeddingUnavailableError, IngestionGraphUnavailableError
+from core.ingestion import (
+    IngestionEmbeddingUnavailableError,
+    IngestionGraphUnavailableError,
+    IngestionValidationError,
+)
 from core.settings import get_settings
 from fastapi.testclient import TestClient
 
@@ -214,6 +218,42 @@ def test_upload_returns_503_when_graph_builder_is_unavailable(monkeypatch: Any) 
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Graph builder is unavailable."
+
+
+def test_upload_returns_422_for_non_extractable_pdf(monkeypatch: Any) -> None:
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,  # noqa: ARG001
+        graph_llm_client: Any = None,  # noqa: ARG001
+        graph_embedding_provider: Any = None,  # noqa: ARG001
+    ) -> Any:  # noqa: ARG001
+        raise IngestionValidationError(
+            "PDF has no extractable text layer. Only text-extractable PDFs are supported."
+        )
+
+    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document", fake_ingest)
+
+    def override_db() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_db_session] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/documents/upload?workspace_id=9&uploaded_by_user_id=4",
+            content=b"%PDF-1.4",
+            headers={"content-type": "application/pdf"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]
+        == "PDF has no extractable text layer. Only text-extractable PDFs are supported."
+    )
 
 
 def test_create_app_graph_enabled_builds_client_and_upload_passes_it(monkeypatch: Any) -> None:

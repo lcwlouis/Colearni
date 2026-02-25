@@ -38,7 +38,7 @@ class IngestionGraphUnavailableError(RuntimeError):
 
 @dataclass(frozen=True)
 class IngestionRequest:
-    """Inputs required to ingest a text or markdown payload."""
+    """Inputs required to ingest a markdown/text/PDF payload."""
 
     workspace_id: int
     uploaded_by_user_id: int
@@ -71,7 +71,7 @@ def ingest_text_document(
     chunk_embedding_provider: EmbeddingProvider | None = None,
     settings: Settings | None = None,
 ) -> IngestionResult:
-    """Ingest a .md/.txt payload and persist document/chunks rows."""
+    """Ingest a .md/.txt/.pdf payload and persist document/chunks rows."""
     active_settings = settings or get_settings()
     parsed = parse_text_payload(
         raw_bytes=request.raw_bytes,
@@ -79,6 +79,10 @@ def ingest_text_document(
         content_type=request.content_type,
     )
     if not parsed.normalized_text:
+        if parsed.mime_type == "application/pdf":
+            raise IngestionValidationError(
+                "PDF has no extractable text layer. Only text-extractable PDFs are supported."
+            )
         raise IngestionValidationError("Document content is empty after normalization.")
 
     content_hash = hashlib.sha256(parsed.normalized_text.encode("utf-8")).hexdigest()

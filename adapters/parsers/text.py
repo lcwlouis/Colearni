@@ -1,15 +1,20 @@
-"""Text and markdown parsing helpers."""
+"""Text, markdown, and PDF parsing helpers."""
 
 from __future__ import annotations
 
 import os
 import re
 from dataclasses import dataclass
+from io import BytesIO
+
+from pypdf import PdfReader
 
 _MARKDOWN_EXTENSIONS = {".md"}
 _TEXT_EXTENSIONS = {".txt"}
+_PDF_EXTENSIONS = {".pdf"}
 _MARKDOWN_MIME_TYPES = {"text/markdown"}
 _TEXT_MIME_TYPES = {"text/plain"}
+_PDF_MIME_TYPES = {"application/pdf"}
 
 
 class UnsupportedTextDocumentError(ValueError):
@@ -45,14 +50,17 @@ def parse_text_payload(
     filename: str | None,
     content_type: str | None,
 ) -> ParsedTextDocument:
-    """Parse and normalize a markdown/text payload."""
+    """Parse and normalize a markdown/text/PDF payload."""
     mime_type = _resolve_mime_type(filename=filename, content_type=content_type)
-    try:
-        decoded = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise UnsupportedTextDocumentError(
-            "Only UTF-8 encoded .md/.txt payloads are supported."
-        ) from exc
+    if mime_type == "application/pdf":
+        decoded = _extract_pdf_text(raw_bytes)
+    else:
+        try:
+            decoded = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise UnsupportedTextDocumentError(
+                "Only UTF-8 encoded .md/.txt payloads are supported."
+            ) from exc
 
     normalized = normalize_text(decoded)
     return ParsedTextDocument(
@@ -60,6 +68,16 @@ def parse_text_payload(
         mime_type=mime_type,
         filename=filename,
     )
+
+
+def _extract_pdf_text(raw_bytes: bytes) -> str:
+    try:
+        reader = PdfReader(BytesIO(raw_bytes))
+        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as exc:
+        raise UnsupportedTextDocumentError(
+            "Failed to parse PDF payload. Ensure the file is a valid, unencrypted PDF."
+        ) from exc
 
 
 def _resolve_mime_type(*, filename: str | None, content_type: str | None) -> str:
@@ -71,13 +89,17 @@ def _resolve_mime_type(*, filename: str | None, content_type: str | None) -> str
         return "text/markdown"
     if extension in _TEXT_EXTENSIONS:
         return "text/plain"
+    if extension in _PDF_EXTENSIONS:
+        return "application/pdf"
 
     if canonical_content_type in _MARKDOWN_MIME_TYPES:
         return "text/markdown"
     if canonical_content_type in _TEXT_MIME_TYPES:
         return "text/plain"
+    if canonical_content_type in _PDF_MIME_TYPES:
+        return "application/pdf"
 
-    raise UnsupportedTextDocumentError("Only .md and .txt documents are supported.")
+    raise UnsupportedTextDocumentError("Only .md, .txt, and .pdf documents are supported.")
 
 
 def _file_extension(filename: str | None) -> str | None:

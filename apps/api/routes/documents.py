@@ -59,7 +59,7 @@ async def upload_document(
     source_uri: Annotated[str | None, Query()] = None,
     db: Session = Depends(get_db_session),
 ) -> DocumentUploadResponse | JSONResponse:
-    """Upload .md/.txt content via multipart or raw body."""
+    """Upload .md/.txt/.pdf content via multipart or raw body."""
     payload = await _read_upload_payload(request)
     request_payload = IngestionRequest(
         workspace_id=workspace_id,
