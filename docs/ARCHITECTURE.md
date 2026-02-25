@@ -15,6 +15,7 @@ We build on:
   - Postgres full-text search (`tsvector`) for keyword retrieval
   - graph tables for canonical/raw concepts and edges
 - LLM provider abstraction (OpenAI or other)
+- Observability via structured events + OpenTelemetry (OTLP export), with optional Arize Phoenix in dev
 
 ---
 
@@ -33,6 +34,8 @@ flowchart TB
   GRAPH --> PG
   API --> UI[Next.js UI (later)]
   COND --> LLM[LLM Provider]
+  COND --> OBS[Observability (Events + OTel)]
+  OBS --> PHX[Phoenix (optional)]
 ````
 
 ---
@@ -164,6 +167,21 @@ docs/
 * `GraphGardener`: offline consolidation job (budgeted)
 * `TutorAgent`: decides Socratic vs Direct based on mastery + user intent
 * `LevelUpQuizAgent`: produces quiz card + grades + updates mastery
+
+---
+
+## Observability (MVP+)
+
+Goals:
+- Trace grading and graph-budget behavior end-to-end.
+- Track token/call cost where provider responses expose usage metadata.
+- Correlate app logs, spans, and request IDs for debugging.
+
+Requirements:
+- Instrument level-up/practice grading, resolver, and gardener paths with structured events.
+- Emit budget stop reasons explicitly.
+- Keep observability provider-agnostic; Phoenix should be optional and enabled by env.
+- Never log secrets or full sensitive payloads.
 
 ---
 

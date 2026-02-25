@@ -178,6 +178,26 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
         assert submitted.status_code == 200
         assert isinstance(payload["score"], float)
         assert payload["overall_feedback"]
+        assert isinstance(payload["items"], list)
+        assert len(payload["items"]) == len(quiz["items"])
+        for item in payload["items"]:
+            assert set(item.keys()) == {
+                "item_id",
+                "item_type",
+                "result",
+                "is_correct",
+                "critical_misconception",
+                "feedback",
+                "score",
+            }
+            assert item["item_type"] in {"short_answer", "mcq"}
+            assert item["result"] in {"correct", "partial", "incorrect"}
+            assert isinstance(item["is_correct"], bool)
+            assert isinstance(item["critical_misconception"], bool)
+            assert isinstance(item["feedback"], str)
+            assert item["feedback"]
+            assert isinstance(item["score"], float)
+            assert 0.0 <= item["score"] <= 1.0
 
         mastery = session.execute(
             text("SELECT status, score FROM mastery WHERE user_id=:u AND concept_id=:c"),

@@ -215,6 +215,37 @@ def test_level_up_pass_fail_transitions(
         assert submit_payload["mastery_status"] == expected_status
         assert isinstance(submit_payload["overall_feedback"], str)
         assert submit_payload["overall_feedback"]
+        assert isinstance(submit_payload["items"], list)
+        assert len(submit_payload["items"]) == len(create_payload["items"])
+        for item in submit_payload["items"]:
+            assert set(item.keys()) == {
+                "item_id",
+                "item_type",
+                "result",
+                "is_correct",
+                "critical_misconception",
+                "feedback",
+                "score",
+            }
+            assert item["item_type"] in {"short_answer", "mcq"}
+            assert item["result"] in {"correct", "partial", "incorrect"}
+            assert isinstance(item["is_correct"], bool)
+            assert isinstance(item["critical_misconception"], bool)
+            assert isinstance(item["feedback"], str)
+            assert item["feedback"]
+            assert isinstance(item["score"], float)
+            assert 0.0 <= item["score"] <= 1.0
+
+        mcq_items = [item for item in submit_payload["items"] if item["item_type"] == "mcq"]
+        assert mcq_items
+        if mcq == "a":
+            assert all(item["result"] == "correct" for item in mcq_items)
+            assert all(item["is_correct"] is True for item in mcq_items)
+            assert all(item["score"] == 1.0 for item in mcq_items)
+        else:
+            assert all(item["result"] == "incorrect" for item in mcq_items)
+            assert all(item["is_correct"] is False for item in mcq_items)
+            assert all(item["score"] == 0.0 for item in mcq_items)
 
         grading = session.execute(
             text(
@@ -230,6 +261,18 @@ def test_level_up_pass_fail_transitions(
         ).scalar_one()
         assert isinstance(grading, dict)
         assert isinstance(grading.get("overall_feedback"), str)
+        assert isinstance(grading.get("items"), list)
+        assert grading["items"]
+        grading_item = grading["items"][0]
+        assert set(grading_item.keys()) == {
+            "item_id",
+            "item_type",
+            "result",
+            "is_correct",
+            "critical_misconception",
+            "feedback",
+            "score",
+        }
         assert grader.last_prompt is not None
         assert "_generation_context" in grader.last_prompt
 
@@ -289,6 +332,8 @@ def test_level_up_submit_replay_is_idempotent() -> None:
         assert second.json()["attempt_id"] == first.json()["attempt_id"]
         assert second.json()["retry_hint"] == "create a new level-up quiz to retry"
         assert second.json()["overall_feedback"] == first.json()["overall_feedback"]
+        assert second.json()["items"] == first.json()["items"]
+        assert second.json()["items"]
         assert grader.calls == 1
 
         attempts = int(
@@ -374,6 +419,11 @@ def test_level_up_mcq_only_submission_works_without_llm() -> None:
         assert payload["passed"] is True
         assert "MCQ correctness" in payload["overall_feedback"]
         assert payload["overall_feedback"]
+        assert payload["items"]
+        assert all(item["item_type"] == "mcq" for item in payload["items"])
+        assert all(item["result"] == "correct" for item in payload["items"])
+        assert all(item["is_correct"] is True for item in payload["items"])
+        assert all(item["score"] == 1.0 for item in payload["items"])
     finally:
         app.dependency_overrides.clear()
         client.close()

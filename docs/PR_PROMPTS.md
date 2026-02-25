@@ -785,8 +785,6 @@ Implementation plan (files + tests). Do NOT write code yet.
 
 ## New Prompts (Next)
 
-Use `Shared Post-Implement Prompt` after each `PR16+ (Implement)` run.
-
 ### PR16 - Level-Up Submit API Contract Parity
 
 Worktree: `codex/pr16-levelup-feedback-contract`
@@ -815,11 +813,6 @@ Requirements:
 
 Output:
 Implementation plan (files + tests + schema changes). Do NOT write code yet.
-```
-
-```text
-PR16 (Implement):
-Implement PR16 per approved plan.
 
 Acceptance criteria:
 - `/quizzes/level-up/submit` returns per-item feedback and overall feedback in one response.
@@ -852,11 +845,6 @@ Requirements:
 
 Output:
 Implementation plan (files + endpoint contract map + tests). Do NOT write code yet.
-```
-
-```text
-PR17 (Implement):
-Implement PR17 per approved plan.
 
 Acceptance criteria:
 - Target endpoints return typed response models (no loose dict contracts).
@@ -876,30 +864,29 @@ PR18 (Design only, no code yet):
 Read AGENTS.md plus docs/CODEX.md, docs/ARCHITECTURE.md, docs/PRODUCT_SPEC.md, docs/GRAPH.md.
 
 Goal:
-Add observability for grading flows and graph/gardener budgets without changing business behavior.
+Add observability for grading flows and graph/gardener budgets with OpenTelemetry wiring and optional Arize Phoenix export.
 
 Requirements:
-- Add structured events/logs for:
+- Add structured events/logs and spans for:
   - level-up grading start/result/failure
   - practice grading start/result/failure
   - resolver and gardener budget usage + hard-stop reasons
+- Add provider/model/operation metadata for LLM calls used by chat, quizzes, practice, resolver, and gardener.
+- Capture token usage fields when available (prompt/completion/total) and emit null-safe attributes when absent.
 - Include correlation IDs (workspace_id, quiz_id/attempt_id, run_id where relevant).
 - Keep instrumentation provider-agnostic (works with OpenAI/LiteLLM paths).
+- Add env-driven observability config (enable flag + OTLP endpoint + service name), defaulting to safe no-op when disabled.
 - Ensure logs do not expose secrets or full sensitive payloads.
 - Add tests validating instrumentation is emitted on key success/failure branches.
 - Keep PR <= 400 LOC net (split if needed).
 
 Output:
 Implementation plan (events schema + file list + tests). Do NOT write code yet.
-```
-
-```text
-PR18 (Implement):
-Implement PR18 per approved plan.
 
 Acceptance criteria:
 - Grading paths emit structured observability events.
 - Resolver/gardener budget consumption and stop reasons are logged.
+- Tracing can export via OTLP when enabled (Phoenix-compatible).
 - Instrumentation does not alter existing grading or graph behavior.
 - ruff check . passes.
 - pytest -q passes.
@@ -921,6 +908,7 @@ Requirements:
 - Create `apps/web` (Next.js) with minimal page shell and navigation.
 - Add typed API client aligned to backend response contracts from PR17.
 - Add environment-configurable backend base URL.
+- Ensure browser requests can reach API in dev (either configure backend CORS in this PR or split to follow-up PR22).
 - Add initial views/placeholders for:
   - tutor chat
   - graph exploration
@@ -932,16 +920,12 @@ Requirements:
 
 Output:
 Implementation plan (files + client strategy + tests/lint plan). Do NOT write code yet.
-```
-
-```text
-PR19 (Implement):
-Implement PR19 per approved plan.
 
 Acceptance criteria:
 - Frontend app boots and can call backend health endpoint.
 - Typed API client works against current backend contracts.
 - Desktop and mobile layout render without breakage.
+- Browser-origin API calls succeed in local dev without CORS failures.
 - Backend test suite remains green.
 - Frontend commands are documented.
 - PR <= 400 LOC net.
@@ -974,11 +958,6 @@ Requirements:
 
 Output:
 Implementation plan (routes/components/state + tests). Do NOT write code yet.
-```
-
-```text
-PR20 (Implement):
-Implement PR20 per approved plan.
 
 Acceptance criteria:
 - Chat UI works end-to-end with citations/grounding states shown.
@@ -1017,11 +996,6 @@ Requirements:
 
 Output:
 Implementation plan (components/data flows/tests). Do NOT write code yet.
-```
-
-```text
-PR21 (Implement):
-Implement PR21 per approved plan.
 
 Acceptance criteria:
 - Graph UI loads canonical node data and bounded adjacency.
@@ -1031,12 +1005,81 @@ Acceptance criteria:
 - PR <= 400 LOC net.
 ```
 
+### PR22 - Backend Web Compatibility (CORS + Request Correlation)
+
+Worktree: `codex/pr22-web-api-compat`
+
+```text
+PR22 (Design only, no code yet):
+Read AGENTS.md plus docs/CODEX.md and docs/ARCHITECTURE.md.
+
+Goal:
+Harden backend-to-frontend compatibility for browser clients.
+
+Requirements:
+- Add configurable CORS middleware with explicit allowlist (no wildcard with credentials).
+- Add settings/env support for allowed origins and methods.
+- Add/propagate request correlation IDs (request_id) into response headers and logs/spans.
+- Keep API routes thin; app-level middleware/settings only.
+- Add tests for:
+  - allowed origin success
+  - blocked origin behavior
+  - request_id presence
+- Keep PR <= 400 LOC net.
+
+Output:
+Implementation plan (files + settings + tests). Do NOT write code yet.
+
+Acceptance criteria:
+- Browser clients can call API from configured web origin.
+- CORS policy is explicit and safe-by-default.
+- Request correlation ID is present and usable for observability joins.
+- ruff check . passes.
+- pytest -q passes.
+- PR <= 400 LOC net.
+```
+
+### PR23 - Phoenix Dev Stack + Observability Docs
+
+Worktree: `codex/pr23-phoenix-devstack-docs`
+
+```text
+PR23 (Design only, no code yet):
+Read AGENTS.md plus docs/CODEX.md, docs/ARCHITECTURE.md, docs/GRAPH.md.
+
+Goal:
+Make observability runnable and repeatable for local development with Phoenix.
+
+Requirements:
+- Add optional local Phoenix service wiring (docker-compose profile or equivalent) for OTLP ingest + UI.
+- Document exact startup/env steps and verification flow.
+- Add/update docs:
+  - observability setup
+  - what traces/events are emitted
+  - token accounting caveats by provider path
+- Ensure default app startup works when Phoenix is not running.
+- Keep PR <= 400 LOC net.
+
+Output:
+Implementation plan (compose/docs changes + verification checklist). Do NOT write code yet.
+
+Acceptance criteria:
+- Developers can run app + Phoenix locally and view traces.
+- Docs include copy-paste commands and required env vars.
+- App behavior remains unchanged when observability disabled.
+- ruff check . passes.
+- pytest -q passes.
+- PR <= 400 LOC net.
+```
+
 ## Parallel Work Guidance (for New PRs)
 
-Safe to run concurrently after PR17 is merged:
-- `PR18` and `PR19` can run in parallel.
+Safe to run concurrently after PR18 is merged:
+- `PR19` and `PR23` can run in parallel.
 
 Must be sequential:
-- `PR16 -> PR17 -> PR19`.
+- `PR16 -> PR17 -> PR18`.
+- `PR22` should land before frontend features that issue browser-side API calls.
+- `PR19` depends on `PR17` contracts and either includes CORS changes or waits for `PR22`.
 - `PR20` depends on `PR19` and `PR16/PR17` contracts.
 - `PR21` depends on `PR19` and graph/practice contract stability.

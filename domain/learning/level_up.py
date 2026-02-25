@@ -191,6 +191,29 @@ def submit_level_up_quiz(
     if int(quiz["user_id"]) != user_id:
         raise LevelUpQuizValidationError("Quiz does not belong to user.")
 
+    item_rows = (
+        session.execute(
+            text(
+                """
+                SELECT id AS item_id, item_type, prompt, payload
+                FROM quiz_items
+                WHERE quiz_id = :quiz_id
+                ORDER BY position
+                """
+            ),
+            {"quiz_id": quiz_id},
+        )
+        .mappings()
+        .all()
+    )
+    item_refs = [
+        {
+            "item_id": int(row["item_id"]),
+            "item_type": str(row["item_type"]),
+        }
+        for row in item_rows
+    ]
+
     existing = (
         session.execute(
             text(
@@ -209,6 +232,10 @@ def submit_level_up_quiz(
     )
     if existing is not None:
         grading = existing["grading"] if isinstance(existing["grading"], dict) else {}
+        feedback_items = _compose_feedback_items(
+            item_refs=item_refs,
+            graded_items=grading.get("items"),
+        )
         session.commit()
         payload: dict[str, Any] = {
             "quiz_id": quiz_id,
@@ -217,6 +244,7 @@ def submit_level_up_quiz(
             "passed": bool(existing["passed"]),
             "critical_misconception": bool(grading.get("critical_misconception", False)),
             "overall_feedback": str(grading.get("overall_feedback", "")).strip(),
+            "items": feedback_items,
             "replayed": True,
             "retry_hint": retry_hint,
         }
@@ -252,21 +280,6 @@ def submit_level_up_quiz(
             )
         return payload
 
-    item_rows = (
-        session.execute(
-            text(
-                """
-                SELECT id AS item_id, item_type, prompt, payload
-                FROM quiz_items
-                WHERE quiz_id = :quiz_id
-                ORDER BY position
-                """
-            ),
-            {"quiz_id": quiz_id},
-        )
-        .mappings()
-        .all()
-    )
     if not item_rows:
         raise LevelUpQuizValidationError("Quiz has no items to submit.")
 
@@ -311,6 +324,10 @@ def submit_level_up_quiz(
         graded_by_id[int(graded_item["item_id"])] = graded_item
 
     ordered_items = [graded_by_id[item["item_id"]] for item in items]
+    feedback_items = _compose_feedback_items(
+        item_refs=[{"item_id": item["item_id"], "item_type": item["item_type"]} for item in items],
+        graded_items=ordered_items,
+    )
     score = sum(float(item["score"]) for item in ordered_items) / len(ordered_items)
     critical = any(bool(item["critical_misconception"]) for item in ordered_items)
     passed = score >= PASS_SCORE and not critical
@@ -323,7 +340,7 @@ def submit_level_up_quiz(
         critical=critical,
     )
     grading_payload = {
-        "items": ordered_items,
+        "items": feedback_items,
         "overall_feedback": overall_feedback,
         "critical_misconception": critical,
     }
@@ -388,6 +405,7 @@ def submit_level_up_quiz(
         "passed": passed,
         "critical_misconception": critical,
         "overall_feedback": overall_feedback,
+        "items": feedback_items,
         "replayed": False,
         "retry_hint": None,
     }
@@ -747,6 +765,83 @@ def _grade_mcq_items(
             }
         )
     return graded
+
+
+def _compose_feedback_items(
+    *,
+    item_refs: list[dict[str, Any]],
+    graded_items: Any,
+) -> list[dict[str, Any]]:
+    if not isinstance(graded_items, list):
+        return []
+
+    item_types_by_id: dict[int, str] = {}
+    for item in item_refs:
+        item_id = item.get("item_id")
+        item_type = str(item.get("item_type", "")).strip().lower()
+        if isinstance(item_id, int) and item_type:
+            item_types_by_id[item_id] = item_type
+
+    by_id: dict[int, dict[str, Any]] = {}
+    for graded_item in graded_items:
+        if not isinstance(graded_item, dict):
+            continue
+        item_id = graded_item.get("item_id")
+        if not isinstance(item_id, int):
+            continue
+        item_type = item_types_by_id.get(item_id)
+        if item_type is None:
+            continue
+        feedback = str(graded_item.get("feedback", "")).strip()
+        if not feedback:
+            continue
+        score = _coerce_score(graded_item.get("score"))
+        critical = bool(graded_item.get("critical_misconception", False))
+        result = _derive_item_result(item_type=item_type, score=score, critical=critical)
+        by_id[item_id] = {
+            "item_id": item_id,
+            "item_type": item_type,
+            "result": result,
+            "is_correct": result == "correct",
+            "critical_misconception": critical,
+            "feedback": feedback,
+            "score": score,
+        }
+
+    return [by_id[item_id] for item_id in item_types_by_id if item_id in by_id]
+
+
+def _coerce_score(value: Any) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+    score = float(value)
+    return max(0.0, min(1.0, score))
+
+
+def _derive_item_result(*, item_type: str, score: float | None, critical: bool) -> str:
+    if item_type == "mcq":
+        return "correct" if score is not None and score >= 1.0 else "incorrect"
+
+    if item_type == "short_answer":
+        if critical:
+            return "incorrect"
+        if score is None:
+            return "partial"
+        if score >= 1.0:
+            return "correct"
+        if score <= 0.0:
+            return "incorrect"
+        return "partial"
+
+    if score is None:
+        return "partial"
+    if score >= 1.0:
+        return "correct"
+    if score <= 0.0:
+        return "incorrect"
+    return "partial"
 
 
 def _default_choice_explanation(

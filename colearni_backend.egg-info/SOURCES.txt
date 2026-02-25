@@ -30,11 +30,13 @@ apps/api/main.py
 apps/api/routes/__init__.py
 apps/api/routes/chat.py
 apps/api/routes/documents.py
+apps/api/routes/graph.py
 apps/api/routes/healthz.py
 apps/api/routes/practice.py
 apps/api/routes/quizzes.py
 apps/jobs/__init__.py
 apps/jobs/backfill_chunk_embeddings.py
+apps/jobs/graph_gardener.py
 colearni_backend.egg-info/PKG-INFO
 colearni_backend.egg-info/SOURCES.txt
 colearni_backend.egg-info/dependency_links.txt
@@ -54,7 +56,9 @@ domain/chat/tutor_agent.py
 domain/embeddings/__init__.py
 domain/embeddings/pipeline.py
 domain/graph/__init__.py
+domain/graph/explore.py
 domain/graph/extraction.py
+domain/graph/gardener.py
 domain/graph/pipeline.py
 domain/graph/resolver.py
 domain/graph/types.py
