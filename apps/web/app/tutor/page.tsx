@@ -3,7 +3,9 @@
 import { FormEvent, useEffect, useMemo, useReducer, useState } from "react";
 
 import { ChatResponse } from "@/components/chat-response";
+import { ConceptGraph } from "@/components/concept-graph";
 import { LevelUpCard } from "@/components/level-up-card";
+import { MarkdownContent } from "@/components/markdown-content";
 import { ApiError, apiClient } from "@/lib/api/client";
 import type {
   AssistantResponseEnvelope,
@@ -387,7 +389,7 @@ export default function TutorPage() {
   }, [showGraph, currentConcept?.concept_id, workspaceId, userId]);
 
   return (
-    <section className="tutor-shell">
+    <section className={`tutor-shell${showGraph ? " with-graph" : ""}`}>
       <aside className="panel session-sidebar">
         <div className="button-row">
           <h2>Chats</h2>
@@ -469,7 +471,7 @@ export default function TutorPage() {
               {message.role === "assistant" && message.response ? (
                 <ChatResponse response={message.response} />
               ) : (
-                <p className="chat-text">{message.text}</p>
+                <MarkdownContent content={message.text} />
               )}
             </article>
           ))}
@@ -514,45 +516,28 @@ export default function TutorPage() {
           <h2>Concept graph</h2>
           {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
           {conceptsError ? <p className="status error">{conceptsError}</p> : null}
-          <div className="concept-list">
-            {concepts.map((concept) => (
-              <button
-                key={concept.concept_id}
-                type="button"
-                className={`concept-item ${currentConcept?.concept_id === concept.concept_id ? "active" : ""}`}
-                onClick={() => {
-                  setCurrentConcept(concept);
-                  setSuggestedConceptId(concept.concept_id);
-                }}
-              >
-                <strong>{concept.canonical_name}</strong>
-                <span className="field-label">{masteryLabel(concept.mastery_status, concept.mastery_score)}</span>
-              </button>
-            ))}
-          </div>
-
           {subgraph ? (
-            <div className="subgraph-list">
-              <h3>Focused subgraph</h3>
-              {subgraph.nodes.map((node) => (
-                <button
-                  key={node.concept_id}
-                  type="button"
-                  className={`concept-item ${currentConcept?.concept_id === node.concept_id ? "active" : ""}`}
-                  onClick={() => {
-                    setSuggestedConceptId(node.concept_id);
-                    const matched = concepts.find((item) => item.concept_id === node.concept_id);
-                    if (matched) {
-                      setCurrentConcept(matched);
-                    }
-                  }}
-                >
-                  <strong>{node.canonical_name}</strong>
-                  <span className="field-label">
-                    hop {node.hop_distance} · {masteryLabel(node.mastery_status, node.mastery_score)}
-                  </span>
-                </button>
-              ))}
+            <ConceptGraph
+              nodes={subgraph.nodes}
+              edges={subgraph.edges}
+              selectedId={currentConcept?.concept_id}
+              onSelect={(id) => {
+                setSuggestedConceptId(id);
+                const matched = concepts.find((item) => item.concept_id === id);
+                if (matched) {
+                  setCurrentConcept(matched);
+                }
+              }}
+              width={320}
+              height={350}
+            />
+          ) : !conceptsLoading ? (
+            <p className="status empty">Select a concept to view its graph.</p>
+          ) : null}
+          {currentConcept ? (
+            <div className="graph-legend">
+              <p><strong>{currentConcept.canonical_name}</strong></p>
+              <span className="field-label">{masteryLabel(currentConcept.mastery_status, currentConcept.mastery_score)}</span>
             </div>
           ) : null}
         </aside>

@@ -1,59 +1,90 @@
 "use client";
 
-import { useState } from "react";
+import { useReducer, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { AsyncState } from "@/components/async-state";
+import { FlashcardList } from "@/components/flashcard-list";
+import { PracticeQuizCard } from "@/components/practice-quiz-card";
 import { ApiError, apiClient } from "@/lib/api/client";
+import { practiceReducer, initialPracticeState, toPracticeAnswers } from "@/lib/practice/practice-state";
 
 export default function PracticePage() {
-  const [workspace_id, setWorkspace] = useState("1"), [user_id, setUser] = useState("1"), [concept_id, setConcept] = useState("1"), [question_count, setQuestionCount] = useState("5"), [card_count, setCardCount] = useState("6");
-  const [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null), [data, setData] = useState<unknown | null>(null);
+  const params = useSearchParams();
+  const workspaceId = Number(params.get("workspace_id") || "1");
+  const conceptId = Number(params.get("concept_id") || "1");
+  const initialMode = params.get("mode"); // "quiz" or null (flashcards)
 
-  async function run(action: "level_up" | "practice_quiz" | "flashcards") {
-    setLoading(true); setError(null); setData(null);
-    try {
-      const shared = { workspace_id: Number(workspace_id), user_id: Number(user_id), concept_id: Number(concept_id) };
-      setData(action === "level_up" ? await apiClient.createLevelUpQuiz({ ...shared, question_count: Number(question_count) }) : action === "practice_quiz" ? await apiClient.createPracticeQuiz({ ...shared, question_count: Math.max(3, Math.min(6, Number(question_count))) }) : await apiClient.generatePracticeFlashcards({ workspace_id: shared.workspace_id, concept_id: shared.concept_id, card_count: Number(card_count) }));
-    } catch (err: unknown) { setError(err instanceof ApiError ? err.message : "Practice request failed"); }
-    finally { setLoading(false); }
-  }
+  const [state, dispatch] = useReducer(practiceReducer, initialPracticeState);
+
+  const loadFlashcards = useCallback(() => {
+    dispatch({ type: "flashcards_start" });
+    apiClient.generatePracticeFlashcards({ workspace_id: workspaceId, concept_id: conceptId })
+      .then((data) => dispatch({ type: "flashcards_success", data }))
+      .catch((e) => dispatch({ type: "flashcards_error", error: e instanceof ApiError ? e.message : "Failed to generate flashcards" }));
+  }, [workspaceId, conceptId]);
+
+  const loadQuiz = useCallback(() => {
+    dispatch({ type: "quiz_start" });
+    apiClient.createPracticeQuiz({ workspace_id: workspaceId, user_id: 1, concept_id: conceptId })
+      .then((quiz) => dispatch({ type: "quiz_success", quiz }))
+      .catch((e) => dispatch({ type: "quiz_error", error: e instanceof ApiError ? e.message : "Failed to create practice quiz" }));
+  }, [workspaceId, conceptId]);
+
+  const submitQuiz = useCallback(() => {
+    if (!state.quiz) return;
+    dispatch({ type: "submit_start" });
+    apiClient.submitPracticeQuiz(state.quiz.quiz_id, {
+      workspace_id: workspaceId,
+      user_id: 1,
+      answers: toPracticeAnswers(state.quiz.items, state.answers),
+    })
+      .then((result) => dispatch({ type: "submit_success", result }))
+      .catch((e) => dispatch({ type: "submit_error", error: e instanceof ApiError ? e.message : "Failed to submit practice quiz" }));
+  }, [workspaceId, state.quiz, state.answers]);
+
+  const { phase, flashcards, quiz } = state;
 
   return (
     <section className="panel stack">
-      <h1>Quizzes/practice entry points</h1>
-      <p>Submit endpoints are in the typed client; this scaffold covers create/generate entry points.</p>
-      <div className="grid two">
-        <label className="field">
-          <span className="field-label">Workspace ID</span>
-          <input type="number" min={1} value={workspace_id} onChange={(e) => setWorkspace(e.target.value)} />
-        </label>
-        <label className="field">
-          <span className="field-label">User ID</span>
-          <input type="number" min={1} value={user_id} onChange={(e) => setUser(e.target.value)} />
-        </label>
-      </div>
-      <div className="grid two">
-        <label className="field">
-          <span className="field-label">Concept ID</span>
-          <input type="number" min={1} value={concept_id} onChange={(e) => setConcept(e.target.value)} />
-        </label>
-        <label className="field">
-          <span className="field-label">Question count</span>
-          <input
-            type="number"
-            min={3}
-            max={10}
-            value={question_count}
-            onChange={(e) => setQuestionCount(e.target.value)}
-          />
-        </label>
-      </div>
-      <label className="field">
-        <span className="field-label">Flashcard count</span>
-        <input type="number" min={3} max={12} value={card_count} onChange={(e) => setCardCount(e.target.value)} />
-      </label>
-      <div className="button-row"><button type="button" disabled={loading} onClick={() => run("level_up")}>Create level-up quiz</button><button type="button" className="secondary" disabled={loading} onClick={() => run("practice_quiz")}>Create practice quiz</button><button type="button" className="secondary" disabled={loading} onClick={() => run("flashcards")}>Generate flashcards</button></div>
-      <AsyncState loading={loading} error={error} empty={!data} emptyLabel="Choose one entry action." />
-      {data ? <pre>{JSON.stringify(data, null, 2)}</pre> : null}
+      <h1>Practice</h1>
+      <p className="field-label">Workspace {workspaceId} · Concept {conceptId}</p>
+      <span className="practice-badge">Practice only — does not affect mastery</span>
+
+      {phase === "idle" ? (
+        <div className="button-row">
+          <button type="button" onClick={loadFlashcards}>Generate flashcards</button>
+          <button type="button" className="secondary" onClick={loadQuiz}>Practice quiz</button>
+        </div>
+      ) : null}
+
+      {/* Flashcard states */}
+      {phase === "loading_flashcards" ? <AsyncState loading error={null} empty={false} /> : null}
+      {flashcards ? <FlashcardList flashcards={flashcards.flashcards} conceptName={flashcards.concept_name} /> : null}
+      {phase === "flashcards_ready" || flashcards ? (
+        <div className="button-row">
+          <button type="button" className="secondary" onClick={() => dispatch({ type: "reset" })}>Back</button>
+        </div>
+      ) : null}
+
+      {/* Practice quiz states */}
+      {quiz || phase === "loading_quiz" || (phase === "error" && !flashcards) ? (
+        <PracticeQuizCard
+          state={state}
+          onAnswerChange={(id, val) => dispatch({ type: "answer", item_id: id, answer: val })}
+          onSubmitQuiz={submitQuiz}
+          onReset={() => dispatch({ type: "reset" })}
+        />
+      ) : null}
+
+      {/* Error on flashcard load */}
+      {phase === "error" && !quiz && !flashcards ? (
+        <div className="stack">
+          <p className="status error">Error: {state.error}</p>
+          <div className="button-row">
+            <button type="button" className="secondary" onClick={() => dispatch({ type: "reset" })}>Back</button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

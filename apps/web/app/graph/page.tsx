@@ -1,52 +1,136 @@
 "use client";
 
-import { useState } from "react";
+import { useReducer, useEffect, useState, useCallback } from "react";
 import { AsyncState } from "@/components/async-state";
+import { ConceptGraph } from "@/components/concept-graph";
 import { ApiError, apiClient } from "@/lib/api/client";
-import type { LuckyMode } from "@/lib/api/types";
+import { graphReducer, initialGraphState } from "@/lib/graph/graph-state";
+import type { LuckyMode, JsonObject } from "@/lib/api/types";
+
+const WS_ID = 1; // default workspace; could be lifted to context/param later
 
 export default function GraphPage() {
-  const [workspace_id, setWorkspace] = useState("1"), [concept_id, setConcept] = useState("1"), [max_hops, setMaxHops] = useState("1"), [mode, setMode] = useState<LuckyMode>("adjacent");
-  const [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null), [data, setData] = useState<unknown | null>(null);
+  const [state, dispatch] = useReducer(graphReducer, initialGraphState);
+  const [query, setQuery] = useState("");
+  const [luckyLoading, setLuckyLoading] = useState(false);
 
-  async function run(action: "detail" | "subgraph" | "lucky") {
-    setLoading(true); setError(null); setData(null);
-    try {
-      const base = { workspace_id: Number(workspace_id), concept_id: Number(concept_id) };
-      setData(action === "detail" ? await apiClient.getConceptDetail(base) : action === "subgraph" ? await apiClient.getConceptSubgraph({ ...base, max_hops: Number(max_hops) }) : await apiClient.getLuckyPick({ ...base, mode, k_hops: Number(max_hops) }));
-    } catch (err: unknown) { setError(err instanceof ApiError ? err.message : "Graph request failed"); }
-    finally { setLoading(false); }
-  }
+  // Load concept list on mount (bounded, limit=50)
+  useEffect(() => {
+    dispatch({ type: "list_start" });
+    apiClient.listConcepts({ workspace_id: WS_ID, q: query || undefined, limit: 50 })
+      .then((r) => dispatch({ type: "list_success", concepts: r.concepts }))
+      .catch((e) => dispatch({ type: "list_error", error: e instanceof ApiError ? e.message : "Failed to load concepts" }));
+  }, [query]);
+
+  const selectConcept = useCallback((conceptId: number) => {
+    dispatch({ type: "detail_start" });
+    Promise.all([
+      apiClient.getConceptDetail({ workspace_id: WS_ID, concept_id: conceptId }),
+      apiClient.getConceptSubgraph({ workspace_id: WS_ID, concept_id: conceptId, max_hops: 2, max_nodes: 40, max_edges: 80 }),
+    ])
+      .then(([detail, subgraph]) => dispatch({ type: "detail_success", detail, subgraph }))
+      .catch((e) => dispatch({ type: "detail_error", error: e instanceof ApiError ? e.message : "Failed to load detail" }));
+  }, []);
+
+  const lucky = useCallback((mode: LuckyMode) => {
+    const conceptId = state.selectedDetail?.concept.concept_id;
+    if (!conceptId) return;
+    setLuckyLoading(true);
+    dispatch({ type: "clear_lucky" });
+    apiClient.getLuckyPick({ workspace_id: WS_ID, concept_id: conceptId, mode, k_hops: 2 })
+      .then((pick) => dispatch({ type: "lucky_success", pick }))
+      .catch((e) => dispatch({ type: "lucky_error", error: e instanceof ApiError ? e.message : "Lucky pick failed" }))
+      .finally(() => setLuckyLoading(false));
+  }, [state.selectedDetail]);
+
+  const { phase, concepts, selectedDetail, subgraph, luckyPick, error } = state;
+  const pick = luckyPick?.pick as (JsonObject & { concept_id?: number; canonical_name?: string; description?: string; hop_distance?: number | null }) | undefined;
 
   return (
-    <section className="panel stack">
-      <h1>Graph exploration placeholder</h1>
-      <div className="grid two">
-        <label className="field">
-          <span className="field-label">Workspace ID</span>
-          <input type="number" min={1} value={workspace_id} onChange={(e) => setWorkspace(e.target.value)} />
-        </label>
-        <label className="field">
-          <span className="field-label">Concept ID</span>
-          <input type="number" min={1} value={concept_id} onChange={(e) => setConcept(e.target.value)} />
-        </label>
-      </div>
-      <div className="grid two">
-        <label className="field">
-          <span className="field-label">Max hops (subgraph and lucky)</span>
-          <input type="number" min={1} value={max_hops} onChange={(e) => setMaxHops(e.target.value)} />
-        </label>
-        <label className="field">
-          <span className="field-label">Lucky mode</span>
-          <select value={mode} onChange={(e) => setMode(e.target.value as LuckyMode)}>
-            <option value="adjacent">adjacent</option>
-            <option value="wildcard">wildcard</option>
-          </select>
-        </label>
-      </div>
-      <div className="button-row"><button type="button" disabled={loading} onClick={() => run("detail")}>Concept detail</button><button type="button" className="secondary" disabled={loading} onClick={() => run("subgraph")}>Bounded subgraph</button><button type="button" className="secondary" disabled={loading} onClick={() => run("lucky")}>Lucky pick</button></div>
-      <AsyncState loading={loading} error={error} empty={!data} emptyLabel="Choose a graph action." />
-      {data ? <pre>{JSON.stringify(data, null, 2)}</pre> : null}
-    </section>
+    <div className="graph-explorer">
+      {/* Graph visualization */}
+      <section className="panel graph-viz-panel">
+        <div className="graph-viz-header">
+          <h2>Concept Graph</h2>
+          <input
+            className="concept-search"
+            type="search"
+            placeholder="Filter concepts..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <AsyncState loading={phase === "loading_list" || phase === "loading_detail"} error={phase === "error" && !selectedDetail ? error : null} empty={phase === "list_ready" && concepts.length === 0} emptyLabel="No concepts found." />
+        {subgraph ? (
+          <ConceptGraph
+            nodes={subgraph.nodes}
+            edges={subgraph.edges}
+            selectedId={selectedDetail?.concept.concept_id}
+            onSelect={selectConcept}
+            width={600}
+            height={400}
+          />
+        ) : concepts.length > 0 && !selectedDetail ? (
+          <div className="concept-list">
+            {concepts.map((c) => (
+              <button
+                key={c.concept_id}
+                type="button"
+                className="concept-item"
+                onClick={() => selectConcept(c.concept_id)}
+              >
+                <strong>{c.canonical_name}</strong>
+                <span className="field-label">{c.description.slice(0, 80)}{c.description.length > 80 ? "…" : ""}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      {/* Detail panel */}
+      <section className="panel stack">
+        <AsyncState loading={phase === "loading_detail"} error={phase === "error" && !!selectedDetail ? error : null} empty={!selectedDetail && phase !== "loading_detail"} emptyLabel="Select a concept to explore." />
+
+        {selectedDetail ? (
+          <div className="stack">
+            <h1>{selectedDetail.concept.canonical_name}</h1>
+            <p>{selectedDetail.concept.description}</p>
+            {selectedDetail.concept.aliases.length > 0 ? (
+              <p className="field-label">Aliases: {selectedDetail.concept.aliases.join(", ")}</p>
+            ) : null}
+            <p className="field-label">Connections: {selectedDetail.concept.degree}</p>
+
+            {/* Lucky buttons */}
+            <div className="button-row">
+              <button type="button" className="secondary" disabled={luckyLoading} onClick={() => lucky("adjacent")}>Adjacent suggestion</button>
+              <button type="button" className="secondary" disabled={luckyLoading} onClick={() => lucky("wildcard")}>Wildcard suggestion</button>
+            </div>
+
+            {/* Lucky pick display */}
+            {pick ? (
+              <div className="lucky-pick panel stack">
+                <h3>🎲 {luckyPick?.mode === "adjacent" ? "Adjacent" : "Wildcard"} suggestion</h3>
+                <p><strong>{String(pick.canonical_name ?? "")}</strong></p>
+                <p>{String(pick.description ?? "")}</p>
+                {pick.hop_distance != null ? <p className="field-label">Hop distance: {pick.hop_distance}</p> : null}
+                {typeof pick.concept_id === "number" ? (
+                  <button type="button" onClick={() => selectConcept(pick.concept_id as number)}>Select →</button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Practice entry */}
+            <div className="button-row">
+              <a href={`/practice?workspace_id=${WS_ID}&concept_id=${selectedDetail.concept.concept_id}`}>
+                <button type="button">Generate flashcards</button>
+              </a>
+              <a href={`/practice?workspace_id=${WS_ID}&concept_id=${selectedDetail.concept.concept_id}&mode=quiz`}>
+                <button type="button" className="secondary">Practice quiz</button>
+              </a>
+            </div>
+          </div>
+        ) : null}
+      </section>
+    </div>
   );
 }

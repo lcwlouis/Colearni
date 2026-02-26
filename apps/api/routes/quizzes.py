@@ -74,6 +74,11 @@ def create_quiz_level_up(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Level-up quiz creation failed: {exc}",
+        ) from exc
 
 
 @router.post("/{quiz_id}/submit", response_model=LevelUpQuizSubmitResponse)
