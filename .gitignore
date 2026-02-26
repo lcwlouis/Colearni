@@ -5,12 +5,10 @@ __pycache__/
 .pytest_cache/
 .codex/
 tmp/
-<<<<<<< ours
 .env
-=======
+.env.local
 node_modules/
 apps/web/.next/
 apps/web/coverage/
 package-lock.json
 apps/web/package-lock.json
->>>>>>> theirs
