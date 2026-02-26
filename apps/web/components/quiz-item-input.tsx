@@ -24,17 +24,23 @@ export function QuizItemInput({ item, value, disabled, onChange }: Props) {
     return (
       <fieldset className="quiz-choices" disabled={disabled}>
         <legend className="field-label">Choose one answer</legend>
-        {item.choices.map((choice) => (
-          <label key={choice.id} className="quiz-choice">
-            <input
-              type="radio"
-              name={`item-${item.item_id}`}
-              checked={value === choice.id}
-              onChange={() => onChange(item.item_id, choice.id)}
-            />
-            <span>{choice.text}</span>
-          </label>
-        ))}
+        {item.choices.map((choice, idx) => {
+          const isSelected = value === choice.id;
+          const letter = String.fromCharCode(65 + idx); // A, B, C, D...
+          return (
+            <button
+              key={choice.id}
+              type="button"
+              className={`quiz-choice-card${isSelected ? " selected" : ""}`}
+              onClick={() => { if (!disabled) onChange(item.item_id, choice.id); }}
+              disabled={disabled && !isSelected}
+            >
+              <span className="quiz-choice-letter">{letter}</span>
+              <span className="quiz-choice-text">{choice.text}</span>
+              {isSelected && <span className="quiz-choice-check">✓</span>}
+            </button>
+          );
+        })}
       </fieldset>
     );
   }

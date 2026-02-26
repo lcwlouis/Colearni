@@ -30,7 +30,8 @@ export type LevelUpAction =
   | { type: "submit_start" }
   | { type: "submit_success"; result: LevelUpQuizSubmitResponse }
   | { type: "submit_error"; error: string }
-  | { type: "reset" };
+  | { type: "reset" }
+  | { type: "restore"; state: LevelUpState };
 
 export const initialLevelUpState: LevelUpState = {
   phase: "idle",
@@ -117,6 +118,10 @@ export function levelUpReducer(state: LevelUpState, action: LevelUpAction): Leve
 
   if (action.type === "reset") {
     return initialLevelUpState;
+  }
+
+  if (action.type === "restore") {
+    return action.state;
   }
 
   return state;

@@ -1,4 +1,4 @@
-import type { LevelUpQuizSubmitResponse } from "@/lib/api/types";
+import type { LevelUpQuizSubmitResponse, QuizFeedbackItem } from "@/lib/api/types";
 import { QuizItemInput } from "@/components/quiz-item-input";
 import { canSubmitLevelUp, type LevelUpState } from "@/lib/tutor/level-up-state";
 
@@ -23,6 +23,20 @@ function nextSteps(result: LevelUpQuizSubmitResponse): string {
     return `You did not pass. ${result.retry_hint}.`;
   }
   return "You did not pass. Review the per-item feedback and retry with a new quiz.";
+}
+
+/** Strip leading numbering like "1. " or "2) " from a prompt to avoid double-numbering */
+function stripLeadingNumber(text: string): string {
+  return text.replace(/^\d+[\.\)]\s*/, "");
+}
+
+function feedbackForItem(result: LevelUpQuizSubmitResponse | null, itemId: number): QuizFeedbackItem | undefined {
+  return result?.items.find((fb) => fb.item_id === itemId);
+}
+
+function resultClass(fb: QuizFeedbackItem | undefined): string {
+  if (!fb) return "";
+  return fb.is_correct ? " correct" : " incorrect";
 }
 
 export function LevelUpCard({
@@ -63,22 +77,37 @@ export function LevelUpCard({
       {quiz ? (
         <div className="stack">
           <ol className="quiz-items">
-            {quiz.items.map((item) => (
-              <li key={item.item_id} className="quiz-item">
-                <p>
-                  <strong>
-                    {item.position}. {item.prompt}
-                  </strong>
-                </p>
-                <p className="field-label">Type: {item.item_type}</p>
-                <QuizItemInput
-                  item={item}
-                  value={answers[item.item_id] ?? ""}
-                  disabled={phase === "submitting" || phase === "submitted"}
-                  onChange={onAnswerChange}
-                />
-              </li>
-            ))}
+            {quiz.items.map((item) => {
+              const fb = feedbackForItem(result, item.item_id);
+              return (
+                <li key={item.item_id} className={`quiz-item${resultClass(fb)}`}>
+                  <p>
+                    <strong>
+                      {item.position}. {stripLeadingNumber(item.prompt)}
+                    </strong>
+                  </p>
+                  <p className="field-label">Type: {item.item_type}</p>
+                  <QuizItemInput
+                    item={item}
+                    value={answers[item.item_id] ?? ""}
+                    disabled={phase === "submitting" || phase === "submitted"}
+                    onChange={onAnswerChange}
+                  />
+                  {fb ? (
+                    <div className="quiz-item-feedback">
+                      <span className={`quiz-item-result-label ${fb.is_correct ? "correct" : "incorrect"}`}>
+                        {fb.is_correct ? "✓ Correct" : "✗ Incorrect"}
+                      </span>
+                      <p>{fb.feedback}</p>
+                      <p className="field-label">
+                        Score: {typeof fb.score === "number" ? fb.score.toFixed(2) : "n/a"}
+                        {fb.critical_misconception ? " · critical misconception" : ""}
+                      </p>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
           </ol>
 
           {phase !== "submitted" ? (
@@ -132,24 +161,6 @@ export function LevelUpCard({
               {result.replayed && result.retry_hint ? (
                 <p className="field-label">Replay notice: {result.retry_hint}</p>
               ) : null}
-
-              <h3>Per-item feedback</h3>
-              <ul className="quiz-feedback-list">
-                {result.items.map((item) => (
-                  <li key={item.item_id}>
-                    <p>
-                      <strong>
-                        Item {item.item_id}: {item.result}
-                      </strong>
-                    </p>
-                    <p>{item.feedback}</p>
-                    <p className="field-label">
-                      Score: {typeof item.score === "number" ? item.score.toFixed(2) : "n/a"}
-                      {item.critical_misconception ? " · critical misconception" : ""}
-                    </p>
-                  </li>
-                ))}
-              </ul>
             </div>
           ) : null}
         </div>

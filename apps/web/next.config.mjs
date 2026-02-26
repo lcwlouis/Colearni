@@ -6,6 +6,9 @@ const nextConfig = {
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${backendBaseUrl}/:path*` }];
   },
+  experimental: {
+    proxyTimeout: 120000,
+  },
 };
 
 export default nextConfig;

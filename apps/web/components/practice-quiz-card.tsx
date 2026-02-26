@@ -1,4 +1,4 @@
-import type { PracticeQuizSubmitResponse } from "@/lib/api/types";
+import type { PracticeQuizSubmitResponse, QuizFeedbackItem } from "@/lib/api/types";
 import { QuizItemInput } from "@/components/quiz-item-input";
 import { canSubmitPractice, type PracticeState } from "@/lib/practice/practice-state";
 
@@ -15,7 +15,21 @@ function practiceFeedbackLabel(result: PracticeQuizSubmitResponse): string {
     }
     return result.passed
         ? "Good work! Remember: this is practice only."
-        : "Keep practising — review the per-item feedback below.";
+        : "Keep practising — review the feedback above.";
+}
+
+/** Strip leading numbering like "1. " or "2) " from a prompt to avoid double-numbering */
+function stripLeadingNumber(text: string): string {
+    return text.replace(/^\d+[\.\)]\s*/, "");
+}
+
+function feedbackForItem(result: PracticeQuizSubmitResponse | null, itemId: number): QuizFeedbackItem | undefined {
+    return result?.items.find((fb) => fb.item_id === itemId);
+}
+
+function resultClass(fb: QuizFeedbackItem | undefined): string {
+    if (!fb) return "";
+    return fb.is_correct ? " correct" : " incorrect";
 }
 
 export function PracticeQuizCard({ state, onAnswerChange, onSubmitQuiz, onReset }: Props) {
@@ -34,18 +48,33 @@ export function PracticeQuizCard({ state, onAnswerChange, onSubmitQuiz, onReset 
             {quiz ? (
                 <div className="stack">
                     <ol className="quiz-items">
-                        {quiz.items.map((item) => (
-                            <li key={item.item_id} className="quiz-item">
-                                <p><strong>{item.position}. {item.prompt}</strong></p>
-                                <p className="field-label">Type: {item.item_type}</p>
-                                <QuizItemInput
-                                    item={item}
-                                    value={answers[item.item_id] ?? ""}
-                                    disabled={phase === "submitting_quiz" || phase === "quiz_submitted"}
-                                    onChange={onAnswerChange}
-                                />
-                            </li>
-                        ))}
+                        {quiz.items.map((item) => {
+                            const fb = feedbackForItem(result, item.item_id);
+                            return (
+                                <li key={item.item_id} className={`quiz-item${resultClass(fb)}`}>
+                                    <p><strong>{item.position}. {stripLeadingNumber(item.prompt)}</strong></p>
+                                    <p className="field-label">Type: {item.item_type}</p>
+                                    <QuizItemInput
+                                        item={item}
+                                        value={answers[item.item_id] ?? ""}
+                                        disabled={phase === "submitting_quiz" || phase === "quiz_submitted"}
+                                        onChange={onAnswerChange}
+                                    />
+                                    {fb ? (
+                                        <div className="quiz-item-feedback">
+                                            <span className={`quiz-item-result-label ${fb.is_correct ? "correct" : "incorrect"}`}>
+                                                {fb.is_correct ? "✓ Correct" : "✗ Incorrect"}
+                                            </span>
+                                            <p>{fb.feedback}</p>
+                                            <p className="field-label">
+                                                Score: {typeof fb.score === "number" ? fb.score.toFixed(2) : "n/a"}
+                                                {fb.critical_misconception ? " · critical misconception" : ""}
+                                            </p>
+                                        </div>
+                                    ) : null}
+                                </li>
+                            );
+                        })}
                     </ol>
 
                     {phase !== "quiz_submitted" ? (
@@ -71,20 +100,6 @@ export function PracticeQuizCard({ state, onAnswerChange, onSubmitQuiz, onReset 
                             <p>{result.overall_feedback}</p>
                             <p className="field-label">Score: {Math.round(result.score * 100)}%</p>
                             <p className="field-label">{practiceFeedbackLabel(result)}</p>
-
-                            <h3>Per-item feedback</h3>
-                            <ul className="quiz-feedback-list">
-                                {result.items.map((item) => (
-                                    <li key={item.item_id}>
-                                        <p><strong>Item {item.item_id}: {item.result}</strong></p>
-                                        <p>{item.feedback}</p>
-                                        <p className="field-label">
-                                            Score: {typeof item.score === "number" ? item.score.toFixed(2) : "n/a"}
-                                            {item.critical_misconception ? " · critical misconception" : ""}
-                                        </p>
-                                    </li>
-                                ))}
-                            </ul>
                         </div>
                     ) : null}
                 </div>
