@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     env: str = "dev"
     host: str = "0.0.0.0"
     port: int = 8000
+    cors_allowed_origins: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("APP_CORS_ALLOWED_ORIGINS", "CORS_ALLOWED_ORIGINS"),
+    )
+    cors_allowed_methods: list[str] = Field(
+        default_factory=lambda: ["*"],
+        validation_alias=AliasChoices("APP_CORS_ALLOWED_METHODS", "CORS_ALLOWED_METHODS"),
+    )
     database_url: str = Field(
         default="postgresql+psycopg://colearni:colearni@localhost:5432/colearni",
         validation_alias=AliasChoices("APP_DATABASE_URL", "DATABASE_URL"),
@@ -273,6 +281,14 @@ class Settings(BaseSettings):
         ),
         ge=1,
     )
+
+    @field_validator("cors_allowed_origins", "cors_allowed_methods", mode="before")
+    @classmethod
+    def assemble_cors_list(cls, value: str | list[str]) -> list[str]:
+        """Parse comma-separated strings into lists."""
+        if isinstance(value, str):
+            return [v.strip() for v in value.split(",") if v.strip()]
+        return value
 
     @field_validator("database_url")
     @classmethod
