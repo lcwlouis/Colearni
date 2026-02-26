@@ -1,4 +1,4 @@
-"""Minimal observability helpers for structured events and OpenTelemetry spans."""
+"""Observability helpers with OpenInference semantic conventions for Phoenix."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import contextvars
 import json
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from opentelemetry import trace
@@ -15,6 +15,7 @@ from opentelemetry import trace
 _LOGGER = logging.getLogger("colearni.observability")
 _LOCK = threading.Lock()
 _OBSERVABILITY_ENABLED = False
+_RECORD_CONTENT = True
 _CONFIG_SIGNATURE: tuple[str, str | None] | None = None
 _EVENT_SINK: list[dict[str, Any]] | None = None
 
@@ -23,6 +24,37 @@ _OBSERVATION_CONTEXT: contextvars.ContextVar[dict[str, Any]] = contextvars.Conte
     default={},
 )
 
+# ---------------------------------------------------------------------------
+# OpenInference semantic convention attribute keys
+# ---------------------------------------------------------------------------
+OPENINFERENCE_SPAN_KIND = "openinference.span.kind"
+LLM_MODEL_NAME = "llm.model_name"
+LLM_INPUT_MESSAGES = "llm.input_messages"
+LLM_OUTPUT_MESSAGES = "llm.output_messages"
+LLM_INVOCATION_PARAMETERS = "llm.invocation_parameters"
+LLM_TOKEN_COUNT_PROMPT = "llm.token_count.prompt"
+LLM_TOKEN_COUNT_COMPLETION = "llm.token_count.completion"
+LLM_TOKEN_COUNT_TOTAL = "llm.token_count.total"
+INPUT_VALUE = "input.value"
+INPUT_MIME_TYPE = "input.mime_type"
+OUTPUT_VALUE = "output.value"
+OUTPUT_MIME_TYPE = "output.mime_type"
+SESSION_ID = "session.id"
+USER_ID = "user.id"
+RETRIEVAL_DOCUMENTS = "retrieval.documents"
+METADATA = "metadata"
+
+# Span kind constants (values recognised by Phoenix)
+SPAN_KIND_LLM = "LLM"
+SPAN_KIND_CHAIN = "CHAIN"
+SPAN_KIND_RETRIEVER = "RETRIEVER"
+SPAN_KIND_EMBEDDING = "EMBEDDING"
+SPAN_KIND_TOOL = "TOOL"
+SPAN_KIND_AGENT = "AGENT"
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 _COMMON_EVENT_KEYS = (
     "event_name",
     "status",
@@ -39,27 +71,44 @@ _COMMON_EVENT_KEYS = (
     "token_total",
     "error_type",
 )
-_SAFE_TOKEN_KEYS = {"token_prompt", "token_completion", "token_total"}
+_SAFE_KEYS = {
+    "token_prompt",
+    "token_completion",
+    "token_total",
+    # OpenInference attribute keys that must never be redacted
+    LLM_INPUT_MESSAGES,
+    LLM_OUTPUT_MESSAGES,
+    LLM_INVOCATION_PARAMETERS,
+    LLM_TOKEN_COUNT_PROMPT,
+    LLM_TOKEN_COUNT_COMPLETION,
+    LLM_TOKEN_COUNT_TOTAL,
+    LLM_MODEL_NAME,
+    INPUT_VALUE,
+    OUTPUT_VALUE,
+    INPUT_MIME_TYPE,
+    OUTPUT_MIME_TYPE,
+    OPENINFERENCE_SPAN_KIND,
+    SESSION_ID,
+    USER_ID,
+    RETRIEVAL_DOCUMENTS,
+    METADATA,
+}
 _SENSITIVE_MARKERS = (
     "api_key",
     "authorization",
     "password",
     "secret",
-    "token",
-    "prompt",
-    "content",
-    "payload",
-    "body",
 )
-_MAX_VALUE_CHARS = 512
+_MAX_VALUE_CHARS = 4096
 
 
 def configure_observability(settings: Any) -> None:
     """Initialize observability wiring from settings in an idempotent way."""
-    global _OBSERVABILITY_ENABLED, _CONFIG_SIGNATURE
+    global _OBSERVABILITY_ENABLED, _CONFIG_SIGNATURE, _RECORD_CONTENT
 
     enabled = bool(getattr(settings, "observability_enabled", False))
     _OBSERVABILITY_ENABLED = enabled
+    _RECORD_CONTENT = bool(getattr(settings, "observability_record_content", True))
     if not enabled:
         return
 
@@ -132,6 +181,87 @@ def get_observation_context() -> dict[str, Any]:
     return dict(_OBSERVATION_CONTEXT.get())
 
 
+def record_content_enabled() -> bool:
+    """Return whether LLM content recording is enabled."""
+    return _OBSERVABILITY_ENABLED and _RECORD_CONTENT
+
+
+def set_llm_span_attributes(
+    span: Any,
+    *,
+    messages: Sequence[Mapping[str, object]] | None = None,
+    response_message: str | None = None,
+    model: str | None = None,
+    invocation_params: Mapping[str, object] | None = None,
+    token_usage: Mapping[str, int | None] | None = None,
+) -> None:
+    """Set OpenInference LLM span attributes on a trace span.
+
+    Respects the ``record_content_enabled()`` toggle for message content.
+    """
+    if span is None:
+        return
+
+    span.set_attribute(OPENINFERENCE_SPAN_KIND, SPAN_KIND_LLM)
+
+    if model:
+        span.set_attribute(LLM_MODEL_NAME, model)
+
+    if invocation_params:
+        span.set_attribute(
+            LLM_INVOCATION_PARAMETERS,
+            json.dumps(dict(invocation_params), default=str)[:_MAX_VALUE_CHARS],
+        )
+
+    if record_content_enabled():
+        if messages is not None:
+            span.set_attribute(
+                LLM_INPUT_MESSAGES,
+                json.dumps(list(messages), default=str)[:_MAX_VALUE_CHARS],
+            )
+        if response_message is not None:
+            span.set_attribute(
+                LLM_OUTPUT_MESSAGES,
+                json.dumps(
+                    [{"role": "assistant", "content": response_message}], default=str
+                )[:_MAX_VALUE_CHARS],
+            )
+
+    if token_usage:
+        if token_usage.get("token_prompt") is not None:
+            span.set_attribute(LLM_TOKEN_COUNT_PROMPT, int(token_usage["token_prompt"]))
+        if token_usage.get("token_completion") is not None:
+            span.set_attribute(LLM_TOKEN_COUNT_COMPLETION, int(token_usage["token_completion"]))
+        if token_usage.get("token_total") is not None:
+            span.set_attribute(LLM_TOKEN_COUNT_TOTAL, int(token_usage["token_total"]))
+
+
+def set_span_kind(span: Any, kind: str) -> None:
+    """Set the OpenInference span kind on a trace span."""
+    if span is not None:
+        span.set_attribute(OPENINFERENCE_SPAN_KIND, kind)
+
+
+def set_input_output(
+    span: Any,
+    *,
+    input_value: str | None = None,
+    output_value: str | None = None,
+    input_mime_type: str = "text/plain",
+    output_mime_type: str = "text/plain",
+) -> None:
+    """Set input/output values on a trace span, gated by content recording toggle."""
+    if span is None:
+        return
+    if record_content_enabled():
+        if input_value is not None:
+            span.set_attribute(INPUT_VALUE, input_value[:_MAX_VALUE_CHARS])
+            span.set_attribute(INPUT_MIME_TYPE, input_mime_type)
+        if output_value is not None:
+            span.set_attribute(OUTPUT_VALUE, output_value[:_MAX_VALUE_CHARS])
+            span.set_attribute(OUTPUT_MIME_TYPE, output_mime_type)
+
+
 def emit_event(event_name: str, *, status: str, **fields: Any) -> dict[str, Any] | None:
     """Emit a structured observability event with null-safe common fields."""
     if not _OBSERVABILITY_ENABLED:
@@ -185,6 +315,8 @@ def set_event_sink(events: list[dict[str, Any]] | None) -> None:
 def _build_otlp_http_exporter(endpoint: str | None):
     if endpoint is None:
         return None
+    if not endpoint.rstrip("/").endswith("/v1/traces"):
+        endpoint = endpoint.rstrip("/") + "/v1/traces"
     try:
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     except ImportError:
@@ -211,7 +343,7 @@ def _sanitize_mapping(values: Mapping[str, Any]) -> dict[str, Any]:
 
 def _sanitize_value(key: str, value: Any) -> Any:
     lowered = key.strip().lower()
-    if lowered not in _SAFE_TOKEN_KEYS and any(marker in lowered for marker in _SENSITIVE_MARKERS):
+    if lowered not in _SAFE_KEYS and any(marker in lowered for marker in _SENSITIVE_MARKERS):
         return "[REDACTED]"
     if value is None:
         return None
@@ -260,11 +392,35 @@ def _non_empty_or_none(value: Any) -> str | None:
 
 
 __all__ = [
+    "OPENINFERENCE_SPAN_KIND",
+    "LLM_MODEL_NAME",
+    "LLM_INPUT_MESSAGES",
+    "LLM_OUTPUT_MESSAGES",
+    "LLM_INVOCATION_PARAMETERS",
+    "LLM_TOKEN_COUNT_PROMPT",
+    "LLM_TOKEN_COUNT_COMPLETION",
+    "LLM_TOKEN_COUNT_TOTAL",
+    "INPUT_VALUE",
+    "INPUT_MIME_TYPE",
+    "OUTPUT_VALUE",
+    "OUTPUT_MIME_TYPE",
+    "SESSION_ID",
+    "USER_ID",
+    "SPAN_KIND_LLM",
+    "SPAN_KIND_CHAIN",
+    "SPAN_KIND_RETRIEVER",
+    "SPAN_KIND_EMBEDDING",
+    "SPAN_KIND_TOOL",
+    "SPAN_KIND_AGENT",
     "configure_observability",
     "emit_event",
     "extract_token_usage",
     "get_observation_context",
     "observation_context",
+    "record_content_enabled",
     "set_event_sink",
+    "set_input_output",
+    "set_llm_span_attributes",
+    "set_span_kind",
     "start_span",
 ]

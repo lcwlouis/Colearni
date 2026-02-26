@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Minimal app settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env.local",
         env_prefix="APP_",
         case_sensitive=False,
         extra="ignore",
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
         ge=1,
     )
     embedding_provider: str = Field(
-        default="openai",
+        default="mock",
         validation_alias=AliasChoices("APP_EMBEDDING_PROVIDER", "EMBEDDING_PROVIDER"),
     )
     embedding_model: str = Field(
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
         gt=0,
     )
     graph_llm_provider: str = Field(
-        default="openai",
+        default="mock",
         validation_alias=AliasChoices("APP_GRAPH_LLM_PROVIDER", "GRAPH_LLM_PROVIDER"),
     )
     graph_llm_model: str = Field(
@@ -119,6 +119,13 @@ class Settings(BaseSettings):
             "APP_OBSERVABILITY_SERVICE_NAME",
             "OBSERVABILITY_SERVICE_NAME",
             "OTEL_SERVICE_NAME",
+        ),
+    )
+    observability_record_content: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "APP_OBSERVABILITY_RECORD_CONTENT",
+            "OBSERVABILITY_RECORD_CONTENT",
         ),
     )
     litellm_base_url: str = Field(
@@ -289,8 +296,8 @@ class Settings(BaseSettings):
     def validate_graph_llm_provider(cls, value: str) -> str:
         """Restrict graph LLM provider options."""
         normalized = value.strip().lower()
-        if normalized not in {"openai", "litellm"}:
-            raise ValueError("graph_llm_provider must be one of: openai, litellm")
+        if normalized not in {"openai", "litellm", "mock"}:
+            raise ValueError("graph_llm_provider must be one of: openai, litellm, mock")
         return normalized
 
     @field_validator("default_grounding_mode")
