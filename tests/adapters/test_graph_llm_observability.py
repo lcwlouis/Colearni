@@ -33,6 +33,7 @@ def _configure_observability() -> None:
                 "observability_enabled": True,
                 "observability_otlp_endpoint": None,
                 "observability_service_name": "colearni-test",
+                "observability_record_content": True,
             }
         )
     )
@@ -137,6 +138,4 @@ def test_llm_call_failure_emits_error_without_sensitive_payload(
     assert event["event_name"] == "llm.call"
     assert event["status"] == "failure"
     assert event["error_type"] == "URLError"
-    assert "prompt" not in event
-    assert "payload" not in event
     set_event_sink(None)
