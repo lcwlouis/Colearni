@@ -5,6 +5,7 @@ export type QuizItemType = "short_answer" | "mcq";
 export type QuizItemResult = "correct" | "partial" | "incorrect";
 export type MasteryStatus = "locked" | "learning" | "learned";
 export type CitationLabel = "From your notes" | "General context";
+export type ConceptSwitchDecision = "accept" | "reject";
 
 export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 export type JsonObject = { [key: string]: JsonValue };
@@ -33,6 +34,23 @@ export interface Citation {
   quote: string | null;
 }
 
+export interface ConceptSwitchSuggestion {
+  from_concept_id: number;
+  from_concept_name: string;
+  to_concept_id: number;
+  to_concept_name: string;
+  reason: string;
+}
+
+export interface ConversationMeta {
+  session_id: number | null;
+  resolved_concept_id: number | null;
+  resolved_concept_name: string | null;
+  concept_confidence: number | null;
+  requires_clarification: boolean;
+  concept_switch_suggestion: ConceptSwitchSuggestion | null;
+}
+
 export interface AssistantResponseEnvelope {
   kind: "answer" | "refusal";
   text: string;
@@ -40,15 +58,62 @@ export interface AssistantResponseEnvelope {
   evidence: EvidenceItem[];
   citations: Citation[];
   refusal_reason: RefusalReason | null;
+  conversation_meta: ConversationMeta | null;
 }
 
 export interface ChatRespondRequest {
   workspace_id: number;
   query: string;
+  session_id?: number;
   user_id?: number;
   concept_id?: number;
+  suggested_concept_id?: number;
+  concept_switch_decision?: ConceptSwitchDecision;
   top_k?: number;
   grounding_mode?: GroundingMode;
+}
+
+export type ChatMessageType = "user" | "assistant" | "system" | "tool" | "card";
+
+export interface ChatSessionSummary {
+  session_id: number;
+  workspace_id: number;
+  user_id: number;
+  title: string | null;
+  last_activity_at: string;
+}
+
+export interface ChatSessionListResponse {
+  workspace_id: number;
+  user_id: number;
+  sessions: ChatSessionSummary[];
+}
+
+export interface ChatMessageRecord {
+  message_id: number;
+  session_id: number;
+  type: ChatMessageType;
+  payload: JsonObject;
+  created_at: string;
+}
+
+export interface ChatMessagesResponse {
+  workspace_id: number;
+  user_id: number;
+  session_id: number;
+  messages: ChatMessageRecord[];
+}
+
+export interface CreateChatSessionRequest {
+  workspace_id: number;
+  user_id: number;
+  title?: string;
+}
+
+export interface DeleteChatSessionRequest {
+  workspace_id: number;
+  user_id: number;
+  session_id: number;
 }
 
 export interface QuizChoiceSummary {
@@ -113,17 +178,59 @@ export interface PracticeFlashcardsResponse {
   flashcards: PracticeFlashcard[];
 }
 
+export interface GraphConceptDetail {
+  concept_id: number;
+  canonical_name: string;
+  description: string;
+  aliases: string[];
+  degree: number;
+}
+
 export interface GraphConceptDetailResponse {
   workspace_id: number;
-  concept: JsonObject;
+  concept: GraphConceptDetail;
+}
+
+export interface GraphConceptSummary {
+  concept_id: number;
+  canonical_name: string;
+  description: string;
+  degree: number;
+  mastery_status: MasteryStatus | null;
+  mastery_score: number | null;
+}
+
+export interface GraphConceptListResponse {
+  workspace_id: number;
+  user_id: number | null;
+  concepts: GraphConceptSummary[];
+}
+
+export interface GraphSubgraphNode {
+  concept_id: number;
+  canonical_name: string;
+  description: string;
+  hop_distance: number;
+  mastery_status: MasteryStatus | null;
+  mastery_score: number | null;
+}
+
+export interface GraphSubgraphEdge {
+  edge_id: number;
+  src_concept_id: number;
+  tgt_concept_id: number;
+  relation_type: string;
+  description: string;
+  keywords: string[];
+  weight: number;
 }
 
 export interface GraphSubgraphResponse {
   workspace_id: number;
   root_concept_id: number;
   max_hops: number;
-  nodes: JsonObject[];
-  edges: JsonObject[];
+  nodes: GraphSubgraphNode[];
+  edges: GraphSubgraphEdge[];
 }
 
 export interface GraphLuckyResponse {

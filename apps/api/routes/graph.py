@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Literal
 
 from adapters.db.dependencies import get_db_session
-from core.schemas import GraphConceptDetailResponse, GraphLuckyResponse, GraphSubgraphResponse
+from core.schemas import (
+    GraphConceptDetailResponse,
+    GraphConceptListResponse,
+    GraphLuckyResponse,
+    GraphSubgraphResponse,
+)
 from domain.graph.explore import (
     MAX_EDGES_CAP,
     MAX_HOPS_CAP,
@@ -12,6 +17,7 @@ from domain.graph.explore import (
     LuckyNoCandidateError,
     get_bounded_subgraph,
     get_concept_detail,
+    list_concepts,
     pick_lucky,
 )
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -38,10 +44,30 @@ def concept_detail(
         _not_found(exc)
 
 
+@router.get("/concepts", response_model=GraphConceptListResponse)
+def concepts(
+    workspace_id: int = Query(gt=0),
+    user_id: int | None = Query(default=None, gt=0),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db_session),
+) -> GraphConceptListResponse:
+    return GraphConceptListResponse.model_validate(
+        list_concepts(
+            db,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            q=q,
+            limit=limit,
+        )
+    )
+
+
 @router.get("/concepts/{concept_id}/subgraph", response_model=GraphSubgraphResponse)
 def concept_subgraph(
     concept_id: int = Path(gt=0),
     workspace_id: int = Query(gt=0),
+    user_id: int | None = Query(default=None, gt=0),
     max_hops: int = Query(default=1, ge=1, le=MAX_HOPS_CAP),
     max_nodes: int = Query(default=40, ge=1, le=MAX_NODES_CAP),
     max_edges: int = Query(default=80, ge=1, le=MAX_EDGES_CAP),
@@ -56,6 +82,7 @@ def concept_subgraph(
                 max_hops=max_hops,
                 max_nodes=max_nodes,
                 max_edges=max_edges,
+                user_id=user_id,
             )
         )
     except GraphNotFoundError as exc:

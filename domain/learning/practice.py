@@ -88,26 +88,32 @@ def create_practice_quiz(
     question_count: int,
     llm_client: GraphLLMClient | None,
 ) -> dict[str, Any]:
-    if llm_client is None:
-        raise PracticeUnavailableError("LLM generation client is unavailable.")
     if not (MIN_ITEMS <= question_count <= MAX_ITEMS):
         raise PracticeValidationError(f"question_count must be between {MIN_ITEMS} and {MAX_ITEMS}")
 
     context = _context(session, workspace_id=workspace_id, concept_id=concept_id)
-    prompt = (
-        "Return JSON practice quiz only. "
-        "Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\",\"prompt\":\"...\","
-        "\"payload\":{...}}]}\n"
-        "Include at least one short_answer and one mcq.\n"
-        f"QUESTION_COUNT: {question_count}\n"
-        f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
-    )
-    with observation_context(
-        component="practice",
-        operation="practice.quiz.generate",
-        workspace_id=workspace_id,
-    ):
-        items = _generate_practice_items_with_retries(llm_client=llm_client, prompt=prompt)
+    if llm_client is None:
+        items = _fallback_practice_items(context=context, question_count=question_count)
+    else:
+        prompt = (
+            "Return JSON practice quiz only. "
+            "Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\",\"prompt\":\"...\","
+            "\"payload\":{...}}]}\n"
+            "Include at least one short_answer and one mcq.\n"
+            f"QUESTION_COUNT: {question_count}\n"
+            f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
+        )
+        with observation_context(
+            component="practice",
+            operation="practice.quiz.generate",
+            workspace_id=workspace_id,
+        ):
+            items = _generate_practice_items_with_retries(
+                llm_client=llm_client,
+                prompt=prompt,
+                context=context,
+                question_count=question_count,
+            )
 
     return level_up.create_level_up_quiz(
         session,
@@ -150,14 +156,23 @@ def _generate_practice_items_with_retries(
     *,
     llm_client: GraphLLMClient,
     prompt: str,
+    context: dict[str, Any],
+    question_count: int,
 ) -> list[dict[str, Any]]:
     last_error: Exception | None = None
     retry_prompt = prompt
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         try:
             with observation_context(retry_attempt=attempt):
+                try:
+                    llm_text = llm_client.generate_tutor_text(prompt=retry_prompt)
+                except Exception:
+                    return _fallback_practice_items(
+                        context=context,
+                        question_count=question_count,
+                    )
                 payload = _parse_json(
-                    llm_client.generate_tutor_text(prompt=retry_prompt),
+                    llm_text,
                     "Practice quiz generation response is not valid JSON.",
                 )
             raw_items = _coerce_generated_items(payload.get("items"))
@@ -184,10 +199,24 @@ def _generate_practice_items_with_retries(
             )
 
     if last_error is None:
-        raise PracticeGenerationError("Practice quiz generation failed.")
-    raise PracticeGenerationError(
-        f"Practice quiz generation failed after {MAX_GENERATION_ATTEMPTS} attempts: {last_error}"
-    ) from last_error
+        return _fallback_practice_items(context=context, question_count=question_count)
+    return _fallback_practice_items(context=context, question_count=question_count)
+
+
+def _fallback_practice_items(
+    *,
+    context: dict[str, Any],
+    question_count: int,
+) -> list[dict[str, Any]]:
+    return level_up._auto_items(
+        {
+            "canonical_name": context["concept_name"],
+            "description": context["concept_description"],
+        },
+        question_count,
+        min_items=MIN_ITEMS,
+        max_items=MAX_ITEMS,
+    )
 
 
 def _coerce_generated_items(raw_items: Any) -> Any:

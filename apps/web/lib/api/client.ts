@@ -1,9 +1,15 @@
 import type {
   AssistantResponseEnvelope,
   ChatRespondRequest,
+  ChatMessagesResponse,
+  ChatSessionListResponse,
+  ChatSessionSummary,
+  CreateChatSessionRequest,
+  DeleteChatSessionRequest,
   CreateLevelUpQuizRequest,
   CreateQuizRequest,
   FlashcardsRequest,
+  GraphConceptListResponse,
   GraphConceptDetailResponse,
   GraphLuckyResponse,
   GraphSubgraphResponse,
@@ -70,9 +76,14 @@ export class ApiClient {
   }
 
   healthz() { return this.request<HealthzResponse>("/healthz", { method: "GET" }); }
+  createChatSession(p: CreateChatSessionRequest) { return this.request<ChatSessionSummary>("/chat/sessions", { method: "POST", body: JSON.stringify(p) }); }
+  listChatSessions(p: { workspace_id: number; user_id: number; limit?: number }) { return this.request<ChatSessionListResponse>("/chat/sessions", { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, limit: p.limit }); }
+  getChatMessages(p: { workspace_id: number; user_id: number; session_id: number; limit?: number }) { return this.request<ChatMessagesResponse>(`/chat/sessions/${p.session_id}/messages`, { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, limit: p.limit }); }
+  deleteChatSession(p: DeleteChatSessionRequest) { return this.request<null>(`/chat/sessions/${p.session_id}`, { method: "DELETE" }, { workspace_id: p.workspace_id, user_id: p.user_id }); }
   respondChat(p: ChatRespondRequest) { return this.request<AssistantResponseEnvelope>("/chat/respond", { method: "POST", body: JSON.stringify(p) }); }
+  listConcepts(p: { workspace_id: number; user_id?: number; q?: string; limit?: number }) { return this.request<GraphConceptListResponse>("/graph/concepts", { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, q: p.q, limit: p.limit }); }
   getConceptDetail(p: { workspace_id: number; concept_id: number }) { return this.request<GraphConceptDetailResponse>(`/graph/concepts/${p.concept_id}`, { method: "GET" }, { workspace_id: p.workspace_id }); }
-  getConceptSubgraph(p: { workspace_id: number; concept_id: number; max_hops?: number; max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/graph/concepts/${p.concept_id}/subgraph`, { method: "GET" }, { workspace_id: p.workspace_id, max_hops: p.max_hops, max_nodes: p.max_nodes, max_edges: p.max_edges }); }
+  getConceptSubgraph(p: { workspace_id: number; concept_id: number; user_id?: number; max_hops?: number; max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/graph/concepts/${p.concept_id}/subgraph`, { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, max_hops: p.max_hops, max_nodes: p.max_nodes, max_edges: p.max_edges }); }
   getLuckyPick(p: { workspace_id: number; concept_id: number; mode: LuckyMode; k_hops?: number }) { return this.request<GraphLuckyResponse>("/graph/lucky", { method: "GET" }, { workspace_id: p.workspace_id, concept_id: p.concept_id, mode: p.mode, k_hops: p.k_hops }); }
   createLevelUpQuiz(p: CreateLevelUpQuizRequest) { return this.request<QuizCreateResponse>("/quizzes/level-up", { method: "POST", body: JSON.stringify(p) }); }
   submitLevelUpQuiz(quizId: number, p: SubmitLevelUpQuizRequest) { return this.request<LevelUpQuizSubmitResponse>(`/quizzes/${quizId}/submit`, { method: "POST", body: JSON.stringify(p) }); }

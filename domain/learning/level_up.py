@@ -11,9 +11,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 MIN_ITEMS = 5
-MAX_ITEMS = 10
+MAX_ITEMS = 12
 PASS_SCORE = 0.75
 RETRY_HINT = "create a new level-up quiz to retry"
+MAX_GENERATION_ATTEMPTS = 3
 
 
 class LevelUpQuizNotFoundError(ValueError):
@@ -39,13 +40,22 @@ def create_level_up_quiz(
     user_id: int,
     concept_id: int,
     session_id: int | None,
-    question_count: int,
+    question_count: int | None,
     items: list[dict[str, Any]] | None,
+    llm_client: GraphLLMClient | None = None,
     quiz_type: str = "level_up",
     min_items: int = MIN_ITEMS,
     max_items: int = MAX_ITEMS,
     context_source: str | None = None,
 ) -> dict[str, Any]:
+    if session_id is not None:
+        _validate_session_scope(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
     concept = (
         session.execute(
             text(
@@ -67,10 +77,16 @@ def create_level_up_quiz(
     concept_description = str(concept["description"] or "")
     resolved_context_source = context_source or ("provided" if items else "generated")
 
-    normalized_items = (
-        _normalize_items(items, min_items=min_items, max_items=max_items)
-        if items
-        else _auto_items(concept, question_count, min_items=min_items, max_items=max_items)
+    normalized_items = _choose_items(
+        session,
+        workspace_id=workspace_id,
+        concept_id=concept_id,
+        concept=concept,
+        question_count=question_count,
+        items=items,
+        llm_client=llm_client,
+        min_items=min_items,
+        max_items=max_items,
     )
     normalized_items = _attach_generation_context(
         normalized_items,
@@ -367,12 +383,13 @@ def submit_level_up_quiz(
             if short_items:
                 stage = "grade_short_answer"
                 if llm_client is None:
-                    raise LevelUpQuizUnavailableError("LLM grading client is unavailable.")
-                short_prompt = _grading_prompt(short_items, answer_map)
-                short_grading = _parse_grading(
-                    llm_client.generate_tutor_text(prompt=short_prompt),
-                    [item["item_id"] for item in short_items],
-                )
+                    short_grading = _grade_short_items_without_llm(short_items, answer_map)
+                else:
+                    short_prompt = _grading_prompt(short_items, answer_map)
+                    short_grading = _parse_grading(
+                        llm_client.generate_tutor_text(prompt=short_prompt),
+                        [item["item_id"] for item in short_items],
+                    )
                 short_overall_feedback = short_grading["overall_feedback"]
                 for graded_item in short_grading["items"]:
                     graded_by_id[int(graded_item["item_id"])] = graded_item
@@ -516,6 +533,206 @@ def submit_level_up_quiz(
                 error_type=type(exc).__name__,
             )
             raise
+
+
+def _choose_items(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+    concept: dict[str, Any],
+    question_count: int | None,
+    items: list[dict[str, Any]] | None,
+    llm_client: GraphLLMClient | None,
+    min_items: int,
+    max_items: int,
+) -> list[dict[str, Any]]:
+    if items:
+        return _normalize_items(items, min_items=min_items, max_items=max_items)
+
+    target = _validate_question_count(
+        question_count=question_count,
+        min_items=min_items,
+        max_items=max_items,
+    )
+    if llm_client is not None and _supports_quiz_generation(llm_client):
+        generated = _generate_level_up_items_with_retries(
+            session,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            llm_client=llm_client,
+            target_count=target,
+            min_items=min_items,
+            max_items=max_items,
+        )
+        if generated:
+            return generated
+
+    return _auto_items(concept, target, min_items=min_items, max_items=max_items)
+
+
+def _supports_quiz_generation(llm_client: GraphLLMClient) -> bool:
+    return callable(getattr(llm_client, "extract_raw_graph", None)) and callable(
+        getattr(llm_client, "disambiguate", None)
+    )
+
+
+def _validate_question_count(
+    *,
+    question_count: int | None,
+    min_items: int,
+    max_items: int,
+) -> int:
+    if question_count is None:
+        return min_items
+    if question_count < min_items or question_count > max_items:
+        raise LevelUpQuizValidationError(
+            f"question_count must be between {min_items} and {max_items}"
+        )
+    return question_count
+
+
+def _generate_level_up_items_with_retries(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+    llm_client: GraphLLMClient,
+    target_count: int,
+    min_items: int,
+    max_items: int,
+) -> list[dict[str, Any]] | None:
+    context = _generation_context(session, workspace_id=workspace_id, concept_id=concept_id)
+    prompt = (
+        "Return JSON only. Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\","
+        "\"prompt\":\"...\",\"payload\":{...}}]}.\n"
+        "Rules: produce a level-up quiz with mixed item types and diverse prompts.\n"
+        "MCQ payload must include choices[{id,text}], correct_choice_id, critical_choice_ids,"
+        " and optional choice_explanations.\n"
+        f"TARGET_COUNT: {target_count}\n"
+        f"MIN_ITEMS: {min_items}\n"
+        f"MAX_ITEMS: {max_items}\n"
+        f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
+    )
+    retry_prompt = prompt
+    for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
+        try:
+            llm_response = llm_client.generate_tutor_text(prompt=retry_prompt)
+        except Exception:
+            return None
+        try:
+            payload = _parse_json(
+                llm_response,
+                "Level-up generation response is not valid JSON.",
+            )
+            raw_items = payload.get("items")
+            if not isinstance(raw_items, list):
+                raise LevelUpQuizValidationError("Level-up generation response must include items.")
+            normalized = _normalize_items(raw_items, min_items=min_items, max_items=max_items)
+            _ensure_diversity(normalized)
+            if len(normalized) != target_count:
+                raise LevelUpQuizValidationError(
+                    f"Generated quiz must have exactly {target_count} items."
+                )
+            return normalized
+        except LevelUpQuizValidationError as exc:
+            if attempt == MAX_GENERATION_ATTEMPTS:
+                return None
+            retry_prompt = (
+                f"{prompt}\n"
+                f"RETRY_ATTEMPT: {attempt + 1}/{MAX_GENERATION_ATTEMPTS}\n"
+                f"PREVIOUS_OUTPUT_INVALID_REASON: {exc}\n"
+                "Regenerate from scratch with fully valid JSON."
+            )
+    return None
+
+
+def _generation_context(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+) -> dict[str, Any]:
+    concept = (
+        session.execute(
+            text(
+                """
+                SELECT canonical_name, description
+                FROM concepts_canon
+                WHERE id = :concept_id
+                  AND workspace_id = :workspace_id
+                  AND is_active = TRUE
+                LIMIT 1
+                """
+            ),
+            {"workspace_id": workspace_id, "concept_id": concept_id},
+        )
+        .mappings()
+        .first()
+    )
+    if concept is None:
+        raise LevelUpQuizNotFoundError("Concept not found in workspace.")
+
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT src.canonical_name AS src_name, tgt.canonical_name AS tgt_name
+                FROM edges_canon e
+                JOIN concepts_canon src ON src.id = e.src_id
+                JOIN concepts_canon tgt ON tgt.id = e.tgt_id
+                WHERE e.workspace_id = :workspace_id
+                  AND ((e.src_id = :concept_id AND tgt.is_active = TRUE)
+                       OR (e.tgt_id = :concept_id AND src.is_active = TRUE))
+                ORDER BY e.weight DESC, e.id ASC
+                LIMIT 8
+                """
+            ),
+            {"workspace_id": workspace_id, "concept_id": concept_id},
+        )
+        .mappings()
+        .all()
+    )
+
+    concept_name = str(concept["canonical_name"])
+    adjacent = [
+        str(row["tgt_name"]) if str(row["src_name"]) == concept_name else str(row["src_name"])
+        for row in rows
+    ]
+    return {
+        "concept_name": concept_name,
+        "concept_description": str(concept["description"] or ""),
+        "adjacent_concepts": adjacent,
+    }
+
+
+def _parse_json(response: str, message: str) -> dict[str, Any]:
+    text_value = response.strip()
+    if text_value.startswith("```"):
+        text_value = "\n".join(
+            line for line in text_value.splitlines() if not line.strip().startswith("```")
+        ).strip()
+    try:
+        payload = json.loads(text_value)
+    except json.JSONDecodeError as exc:
+        raise LevelUpQuizValidationError(message) from exc
+    if not isinstance(payload, dict):
+        raise LevelUpQuizValidationError(message)
+    return payload
+
+
+def _ensure_diversity(items: list[dict[str, Any]]) -> None:
+    types = {item["item_type"] for item in items}
+    if types != {"short_answer", "mcq"}:
+        raise LevelUpQuizValidationError(
+            "level-up quiz requires at least one short_answer and one mcq."
+        )
+    seen: set[str] = set()
+    for item in items:
+        normalized_prompt = " ".join(str(item["prompt"]).lower().split())
+        if normalized_prompt in seen:
+            raise LevelUpQuizValidationError("level-up quiz prompts must be diverse.")
+        seen.add(normalized_prompt)
 
 
 def _normalize_items(
@@ -739,39 +956,58 @@ def _auto_items(
         question_count - 1,
     )
     mcq_count = question_count - short_count
+    short_templates = [
+        f"Explain the core idea of {name} in one concise paragraph.",
+        f"What misconception about {name} causes the most errors?",
+        f"How would you teach {name} to a beginner using one example?",
+        f"Why is {name} important in solving real problems?",
+        f"Compare {name} with a closely related concept and highlight one difference.",
+        f"What is the minimum definition needed to correctly identify {name}?",
+        f"Give one test you can apply to verify understanding of {name}.",
+        f"What mistake would invalidate reasoning about {name}?",
+    ]
+    mcq_templates = [
+        f"Which option best captures the definition of {name}?",
+        f"Which statement about {name} is most accurate?",
+        f"Which choice correctly applies {name} in context?",
+        f"Which option reveals a critical misunderstanding of {name}?",
+        f"Which statement distinguishes {name} from a similar concept?",
+        f"Which answer best explains why {name} matters?",
+    ]
+
     short = [
         {
             "item_type": "short_answer",
-            "prompt": f"Explain the core idea of {name}.",
+            "prompt": short_templates[index],
             "payload": {
                 "rubric_keywords": keywords,
                 "critical_misconception_keywords": ["contradiction", "unrelated"],
             },
         }
-        for _ in range(short_count)
+        for index in range(short_count)
     ]
     mcq = [
         {
             "item_type": "mcq",
-            "prompt": f"Which option best describes {name}?",
+            "prompt": mcq_templates[index],
             "payload": {
                 "choices": [
                     {"id": "a", "text": f"Aligned with {name}."},
-                    {"id": "b", "text": "Partially relevant."},
-                    {"id": "c", "text": "Too generic."},
-                    {"id": "d", "text": "Contradicts the concept."},
+                    {"id": "b", "text": f"Partially related to {name} but incomplete."},
+                    {"id": "c", "text": f"Generic statement not specific to {name}."},
+                    {"id": "d", "text": f"Contradicts the core definition of {name}."},
                 ],
                 "correct_choice_id": "a",
                 "critical_choice_ids": ["d"],
                 "choice_explanations": {
                     "a": "Correct: this option best matches the concept.",
-                    "b": "Incorrect: this option is only partially relevant.",
-                    "c": "Incorrect: this option is too generic to be correct.",
+                    "b": "Incorrect: partially relevant but not sufficient.",
+                    "c": "Incorrect: too generic to be the best answer.",
                     "d": "Incorrect (critical): this option contradicts the concept.",
                 },
             },
         }
-        for _ in range(mcq_count)
+        for index in range(mcq_count)
     ]
     return short + mcq
 
@@ -800,6 +1036,58 @@ def _validate_answers(items: list[dict[str, Any]], answers: list[dict[str, Any]]
         if mapped[item["item_id"]] not in choices:
             raise LevelUpQuizValidationError("mcq answers must match a valid choice id.")
     return mapped
+
+
+def _grade_short_items_without_llm(
+    items: list[dict[str, Any]],
+    answer_map: dict[int, str],
+) -> dict[str, Any]:
+    graded: list[dict[str, Any]] = []
+    total_score = 0.0
+    for item in items:
+        payload = item["payload"]
+        answer = answer_map[item["item_id"]].strip().lower()
+        rubric_keywords = [
+            str(v).strip().lower()
+            for v in payload.get("rubric_keywords", [])
+            if str(v).strip()
+        ]
+        critical_keywords = [
+            str(v).strip().lower()
+            for v in payload.get("critical_misconception_keywords", [])
+            if str(v).strip()
+        ]
+        rubric_hits = sum(1 for keyword in rubric_keywords if keyword in answer)
+        score = (
+            min(1.0, rubric_hits / max(1, len(rubric_keywords)))
+            if rubric_keywords
+            else (0.5 if answer else 0.0)
+        )
+        critical = any(keyword in answer for keyword in critical_keywords)
+        if critical:
+            feedback = "Critical misconception detected; revisit the concept definition."
+        elif score >= 0.95:
+            feedback = "Strong answer that covered the key rubric points."
+        elif score > 0.0:
+            feedback = "Partially correct; include more core keywords from the concept."
+        else:
+            feedback = "Answer missed the core rubric points; review the concept and retry."
+        graded.append(
+            {
+                "item_id": item["item_id"],
+                "score": score,
+                "critical_misconception": critical,
+                "feedback": feedback,
+            }
+        )
+        total_score += score
+
+    average = total_score / max(1, len(items))
+    overall = (
+        "Short-answer graded using rubric keyword coverage because LLM grading was unavailable. "
+        f"Average short-answer score: {average:.2f}."
+    )
+    return {"items": graded, "overall_feedback": overall}
 
 
 def _grading_prompt(items: list[dict[str, Any]], answer_map: dict[int, str]) -> str:
@@ -1004,6 +1292,38 @@ def _build_overall_feedback(
     else:
         parts.append("You did not pass; review feedback and retry with a new quiz.")
     return " ".join(parts)
+
+
+def _validate_session_scope(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    session_id: int,
+) -> None:
+    row = (
+        session.execute(
+            text(
+                """
+                SELECT id
+                FROM chat_sessions
+                WHERE id = :session_id
+                  AND workspace_id = :workspace_id
+                  AND user_id = :user_id
+                LIMIT 1
+                """
+            ),
+            {
+                "session_id": session_id,
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+            },
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise LevelUpQuizValidationError("session_id is not valid for workspace/user scope.")
 
 
 __all__ = [

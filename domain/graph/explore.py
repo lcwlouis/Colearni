@@ -94,6 +94,88 @@ def get_concept_detail(session: Session, *, workspace_id: int, concept_id: int) 
     }
 
 
+def list_concepts(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int | None,
+    q: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    pattern = f"%{(q or '').strip()}%"
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT
+                    c.id AS concept_id,
+                    c.canonical_name,
+                    c.description,
+                    (
+                        SELECT count(*)
+                        FROM edges_canon e
+                        JOIN concepts_canon src
+                          ON src.id = e.src_id
+                         AND src.workspace_id = e.workspace_id
+                         AND src.is_active = TRUE
+                        JOIN concepts_canon tgt
+                          ON tgt.id = e.tgt_id
+                         AND tgt.workspace_id = e.workspace_id
+                         AND tgt.is_active = TRUE
+                        WHERE e.workspace_id = :workspace_id
+                          AND (e.src_id = c.id OR e.tgt_id = c.id)
+                    ) AS degree,
+                    m.status AS mastery_status,
+                    m.score AS mastery_score
+                FROM concepts_canon c
+                LEFT JOIN mastery m
+                  ON m.workspace_id = c.workspace_id
+                 AND m.concept_id = c.id
+                 AND m.user_id = :user_id
+                WHERE c.workspace_id = :workspace_id
+                  AND c.is_active = TRUE
+                  AND (
+                        :pattern = '%%'
+                        OR c.canonical_name ILIKE :pattern
+                        OR EXISTS (
+                            SELECT 1
+                            FROM unnest(c.aliases) AS alias
+                            WHERE alias ILIKE :pattern
+                        )
+                      )
+                ORDER BY lower(c.canonical_name) ASC, c.id ASC
+                LIMIT :limit
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "pattern": pattern,
+                "limit": limit,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    return {
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "concepts": [
+            {
+                "concept_id": int(row["concept_id"]),
+                "canonical_name": str(row["canonical_name"]),
+                "description": str(row["description"] or ""),
+                "degree": int(row["degree"] or 0),
+                "mastery_status": str(row["mastery_status"]) if row["mastery_status"] else None,
+                "mastery_score": (
+                    float(row["mastery_score"]) if row["mastery_score"] is not None else None
+                ),
+            }
+            for row in rows
+        ],
+    }
+
+
 def get_bounded_subgraph(
     session: Session,
     *,
@@ -102,18 +184,29 @@ def get_bounded_subgraph(
     max_hops: int,
     max_nodes: int,
     max_edges: int,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     node_rows = (
         session.execute(
             text(
                 _RANKED_REACH_CTE
                 + """
-                SELECT ranked.concept_id, ranked.hop_distance, c.canonical_name, c.description
+                SELECT
+                    ranked.concept_id,
+                    ranked.hop_distance,
+                    c.canonical_name,
+                    c.description,
+                    m.status AS mastery_status,
+                    m.score AS mastery_score
                 FROM ranked
                 JOIN concepts_canon c
                   ON c.id = ranked.concept_id
                  AND c.workspace_id = :workspace_id
                  AND c.is_active = TRUE
+                LEFT JOIN mastery m
+                  ON m.workspace_id = c.workspace_id
+                 AND m.concept_id = c.id
+                 AND m.user_id = :user_id
                 ORDER BY ranked.hop_distance ASC, lower(c.canonical_name) ASC, ranked.concept_id ASC
                 LIMIT :max_nodes
                 """
@@ -123,6 +216,7 @@ def get_bounded_subgraph(
                 "concept_id": concept_id,
                 "hop_limit": max_hops,
                 "max_nodes": max_nodes,
+                "user_id": user_id,
             },
         )
         .mappings()
@@ -172,6 +266,10 @@ def get_bounded_subgraph(
                 "canonical_name": str(r["canonical_name"]),
                 "description": str(r["description"] or ""),
                 "hop_distance": int(r["hop_distance"]),
+                "mastery_status": str(r["mastery_status"]) if r["mastery_status"] else None,
+                "mastery_score": (
+                    float(r["mastery_score"]) if r["mastery_score"] is not None else None
+                ),
             }
             for r in node_rows
         ],

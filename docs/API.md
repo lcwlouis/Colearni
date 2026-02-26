@@ -14,8 +14,13 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 ### Endpoint Index
 
 - `GET /healthz`
+- `POST /chat/sessions`
+- `GET /chat/sessions`
+- `GET /chat/sessions/{session_id}/messages`
+- `DELETE /chat/sessions/{session_id}`
 - `POST /chat/respond`
 - `POST /documents/upload`
+- `GET /graph/concepts`
 - `GET /graph/concepts/{concept_id}`
 - `GET /graph/concepts/{concept_id}/subgraph`
 - `GET /graph/lucky`
@@ -137,6 +142,97 @@ curl -sS http://localhost:8000/chat/respond \
 }
 ```
 
+### POST /chat/sessions
+
+Tag/group: `chat`
+
+Purpose: create a chat session for one `workspace_id` + `user_id`.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | JSON body | integer | yes | `> 0` |
+| `user_id` | JSON body | integer | yes | `> 0` |
+| `title` | JSON body | string | no | optional custom title |
+
+Success responses:
+
+- `201 Created` with `ChatSessionSummary`
+
+Error responses:
+
+- `422 Unprocessable Entity` for validation failures
+
+### GET /chat/sessions
+
+Tag/group: `chat`
+
+Purpose: list sessions for one `workspace_id` + `user_id`.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+| `user_id` | query | integer | yes | `> 0` |
+| `limit` | query | integer | no | default `30`, range `1..100` |
+
+Success responses:
+
+- `200 OK` with `ChatSessionListResponse`
+
+Error responses:
+
+- `422 Unprocessable Entity` for validation failures
+
+### GET /chat/sessions/{session_id}/messages
+
+Tag/group: `chat`
+
+Purpose: fetch timeline messages for one session.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `session_id` | path | integer | yes | `> 0` |
+| `workspace_id` | query | integer | yes | `> 0` |
+| `user_id` | query | integer | yes | `> 0` |
+| `limit` | query | integer | no | default `300`, range `1..1000` |
+
+Success responses:
+
+- `200 OK` with `ChatMessagesResponse`
+
+Error responses:
+
+- `404 Not Found` when the session is not scoped to workspace/user
+- `422 Unprocessable Entity` for validation failures
+
+### DELETE /chat/sessions/{session_id}
+
+Tag/group: `chat`
+
+Purpose: delete a chat session and its timeline messages.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `session_id` | path | integer | yes | `> 0` |
+| `workspace_id` | query | integer | yes | `> 0` |
+| `user_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `204 No Content`
+
+Error responses:
+
+- `404 Not Found` when the session is not scoped to workspace/user
+- `422 Unprocessable Entity` for validation failures
+
 ### POST /documents/upload
 
 Tag/group: `documents`
@@ -199,6 +295,29 @@ curl -sS -X POST \
   "created": true
 }
 ```
+
+### GET /graph/concepts
+
+Tag/group: `graph`
+
+Purpose: list canonical concepts in a workspace, optionally enriched with user mastery.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+| `user_id` | query | integer | no | `> 0`; includes mastery fields when provided |
+| `q` | query | string | no | optional name/alias search |
+| `limit` | query | integer | no | default `50`, range `1..200` |
+
+Success responses:
+
+- `200 OK` with `GraphConceptListResponse`
+
+Error responses:
+
+- `422 Unprocessable Entity` for validation failures
 
 ### GET /graph/concepts/{concept_id}
 

@@ -57,6 +57,85 @@ pre {
   font-family: Menlo, Monaco, "Courier New", monospace; font-size: 0.82rem;
 }
 .chat-thread { display: grid; gap: 0.7rem; }
+.tutor-shell { display: grid; gap: 1rem; align-items: start; }
+.session-sidebar, .graph-drawer { display: grid; gap: 0.75rem; }
+.session-list, .concept-list, .subgraph-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 24rem;
+  overflow: auto;
+}
+.session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+.session-item, .concept-item {
+  text-align: left;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.session-item {
+  display: grid;
+  justify-items: start;
+  gap: 0.15rem;
+}
+.session-item.active, .concept-item.active {
+  border-color: var(--accent);
+  background: #e9f4ff;
+}
+.chat-main {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-rows: auto minmax(18rem, 1fr) auto;
+}
+.chat-header {
+  display: grid;
+  gap: 0.5rem;
+}
+.chat-header h1, .graph-drawer h2 { margin: 0; }
+.field-inline {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.field-inline select { width: auto; min-width: 8rem; }
+.chat-timeline {
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: #ffffffc7;
+  padding: 0.75rem;
+  overflow: auto;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+}
+.chat-message.assistant { border-color: #c9ddf2; }
+.chat-message.system { border-style: dashed; }
+.chat-composer {
+  display: grid;
+  gap: 0.5rem;
+}
+.chat-composer textarea {
+  min-height: 5.2rem;
+  resize: vertical;
+}
+.switch-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #0b1d3366;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 40;
+}
+.switch-modal {
+  width: min(28rem, 100%);
+  display: grid;
+  gap: 0.7rem;
+}
+.switch-modal h3 { margin: 0; }
 .chat-message {
   border: 1px solid var(--line);
   border-radius: 0.8rem;
@@ -88,4 +167,18 @@ pre {
 @media (min-width: 768px) {
   .topbar { flex-direction: row; justify-content: space-between; align-items: center; }
   .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tutor-shell {
+    grid-template-columns: 16rem minmax(0, 1fr);
+  }
+  .graph-drawer {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1200px) {
+  .tutor-shell {
+    grid-template-columns: 16rem minmax(0, 1fr) 19rem;
+  }
+  .graph-drawer {
+    grid-column: auto;
+  }
 }

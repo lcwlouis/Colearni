@@ -38,6 +38,7 @@ function answerEnvelope(): AssistantResponseEnvelope {
       },
     ],
     refusal_reason: null,
+    conversation_meta: null,
   };
 }
 
@@ -49,6 +50,7 @@ function refusalEnvelope(): AssistantResponseEnvelope {
     evidence: [],
     citations: [],
     refusal_reason: "insufficient_evidence",
+    conversation_meta: null,
   };
 }
 

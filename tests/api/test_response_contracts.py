@@ -70,8 +70,13 @@ def _submit(with_mastery: bool) -> dict[str, Any]:
 
 OPENAPI_ROUTES = {
     ("/healthz", "get"),
+    ("/chat/sessions", "get"),
+    ("/chat/sessions", "post"),
+    ("/chat/sessions/{session_id}", "delete"),
+    ("/chat/sessions/{session_id}/messages", "get"),
     ("/chat/respond", "post"),
     ("/documents/upload", "post"),
+    ("/graph/concepts", "get"),
     ("/graph/concepts/{concept_id}", "get"),
     ("/graph/concepts/{concept_id}/subgraph", "get"),
     ("/graph/lucky", "get"),
@@ -84,6 +89,14 @@ OPENAPI_ROUTES = {
 
 
 OPENAPI_REFS = [
+    ("/chat/sessions", "post", "201", "#/components/schemas/ChatSessionSummary"),
+    ("/chat/sessions", "get", "200", "#/components/schemas/ChatSessionListResponse"),
+    (
+        "/chat/sessions/{session_id}/messages",
+        "get",
+        "200",
+        "#/components/schemas/ChatMessagesResponse",
+    ),
     ("/chat/respond", "post", "200", "#/components/schemas/AssistantResponseEnvelope"),
     ("/documents/upload", "post", "201", "#/components/schemas/DocumentUploadResponse"),
     ("/quizzes/level-up", "post", "201", "#/components/schemas/QuizCreateResponse"),
@@ -95,6 +108,12 @@ OPENAPI_REFS = [
         "post",
         "200",
         "#/components/schemas/PracticeQuizSubmitResponse",
+    ),
+    (
+        "/graph/concepts",
+        "get",
+        "200",
+        "#/components/schemas/GraphConceptListResponse",
     ),
     (
         "/graph/concepts/{concept_id}",
@@ -122,10 +141,19 @@ SUBMIT_FIELDS = {
     "retry_hint",
 }
 REQUIRED_FIELDS = {
+    "ChatSessionSummary": {
+        "session_id",
+        "workspace_id",
+        "user_id",
+        "last_activity_at",
+    },
+    "ChatSessionListResponse": {"workspace_id", "user_id", "sessions"},
+    "ChatMessagesResponse": {"workspace_id", "user_id", "session_id", "messages"},
     "QuizCreateResponse": {"quiz_id", "workspace_id", "user_id", "concept_id", "status", "items"},
     "LevelUpQuizSubmitResponse": SUBMIT_FIELDS | {"mastery_status", "mastery_score"},
     "PracticeFlashcardsResponse": {"workspace_id", "concept_id", "concept_name", "flashcards"},
     "PracticeQuizSubmitResponse": SUBMIT_FIELDS,
+    "GraphConceptListResponse": {"workspace_id", "concepts"},
     "GraphConceptDetailResponse": {"workspace_id", "concept"},
     "GraphSubgraphResponse": {"workspace_id", "root_concept_id", "max_hops", "nodes", "edges"},
     "GraphLuckyResponse": {"workspace_id", "seed_concept_id", "mode", "pick"},
@@ -224,3 +252,95 @@ def test_practice_runtime_response_contracts(client: Any, monkeypatch: Any) -> N
         "prompt",
         "choices",
     }
+
+
+def test_chat_and_graph_runtime_response_contracts(client: Any, monkeypatch: Any) -> None:
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.create_session",
+        {
+            "session_id": 1,
+            "workspace_id": 2,
+            "user_id": 3,
+            "title": "Linear maps",
+            "last_activity_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.list_sessions",
+        {
+            "workspace_id": 2,
+            "user_id": 3,
+            "sessions": [
+                {
+                    "session_id": 1,
+                    "workspace_id": 2,
+                    "user_id": 3,
+                    "title": "Linear maps",
+                    "last_activity_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        },
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.get_messages",
+        {
+            "workspace_id": 2,
+            "user_id": 3,
+            "session_id": 1,
+            "messages": [
+                {
+                    "message_id": 5,
+                    "session_id": 1,
+                    "type": "assistant",
+                    "payload": {"text": "hello"},
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        },
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.graph.list_concepts",
+        {
+            "workspace_id": 2,
+            "user_id": 3,
+            "concepts": [
+                {
+                    "concept_id": 4,
+                    "canonical_name": "Linear Map",
+                    "description": "Preserves vector operations.",
+                    "degree": 2,
+                    "mastery_status": "learning",
+                    "mastery_score": 0.4,
+                }
+            ],
+        },
+    )
+    _patch(monkeypatch, "apps.api.routes.chat.delete_session", {})
+
+    created = client.post("/chat/sessions", json={"workspace_id": 2, "user_id": 3})
+    sessions = client.get("/chat/sessions?workspace_id=2&user_id=3")
+    messages = client.get("/chat/sessions/1/messages?workspace_id=2&user_id=3")
+    deleted = client.delete("/chat/sessions/1?workspace_id=2&user_id=3")
+    concepts = client.get("/graph/concepts?workspace_id=2&user_id=3")
+
+    assert (
+        created.status_code,
+        sessions.status_code,
+        messages.status_code,
+        deleted.status_code,
+        concepts.status_code,
+    ) == (
+        201,
+        200,
+        200,
+        204,
+        200,
+    )
+    assert REQUIRED_FIELDS["ChatSessionSummary"] <= set(created.json())
+    assert REQUIRED_FIELDS["ChatSessionListResponse"] <= set(sessions.json())
+    assert REQUIRED_FIELDS["ChatMessagesResponse"] <= set(messages.json())
+    assert REQUIRED_FIELDS["GraphConceptListResponse"] <= set(concepts.json())

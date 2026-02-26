@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Literal
 
@@ -34,6 +35,7 @@ CITATION_LABEL_GENERAL_CONTEXT = "General context"
 
 CitationLabel = Literal[CITATION_LABEL_FROM_NOTES, CITATION_LABEL_GENERAL_CONTEXT]
 RefusalReason = Literal["insufficient_evidence", "invalid_citations"]
+ConceptSwitchDecision = Literal["accept", "reject"]
 
 
 def _require_non_empty(value: str, field_name: str) -> str:
@@ -137,6 +139,23 @@ class AssistantDraft(BaseModel):
         return self
 
 
+class ConceptSwitchSuggestion(BaseModel):
+    from_concept_id: int = Field(gt=0)
+    from_concept_name: str = Field(min_length=1)
+    to_concept_id: int = Field(gt=0)
+    to_concept_name: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class ConversationMeta(BaseModel):
+    session_id: int | None = Field(default=None, gt=0)
+    resolved_concept_id: int | None = Field(default=None, gt=0)
+    resolved_concept_name: str | None = None
+    concept_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    requires_clarification: bool = False
+    concept_switch_suggestion: ConceptSwitchSuggestion | None = None
+
+
 class AssistantResponseEnvelope(BaseModel):
     """Verified assistant response payload returned to clients."""
 
@@ -146,6 +165,7 @@ class AssistantResponseEnvelope(BaseModel):
     evidence: list[EvidenceItem] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
     refusal_reason: RefusalReason | None = None
+    conversation_meta: ConversationMeta | None = None
 
     @field_validator("text")
     @classmethod
@@ -174,8 +194,11 @@ class ChatRespondRequest(BaseModel):
 
     workspace_id: int = Field(gt=0)
     query: str = Field(min_length=1)
+    session_id: int | None = Field(default=None, gt=0)
     user_id: int | None = Field(default=None, gt=0)
     concept_id: int | None = Field(default=None, gt=0)
+    suggested_concept_id: int | None = Field(default=None, gt=0)
+    concept_switch_decision: ConceptSwitchDecision | None = None
     top_k: int = Field(default=5, ge=1)
     grounding_mode: GroundingMode | None = None
 
@@ -183,6 +206,38 @@ class ChatRespondRequest(BaseModel):
     @classmethod
     def _normalize_query(cls, value: str) -> str:
         return _require_non_empty(value, "query")
+
+
+ChatMessageType = Literal["user", "assistant", "system", "tool", "card"]
+
+
+class ChatSessionSummary(BaseModel):
+    session_id: int = Field(gt=0)
+    workspace_id: int = Field(gt=0)
+    user_id: int = Field(gt=0)
+    title: str | None = None
+    last_activity_at: datetime
+
+
+class ChatSessionListResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    user_id: int = Field(gt=0)
+    sessions: list[ChatSessionSummary]
+
+
+class ChatMessageRecord(BaseModel):
+    message_id: int = Field(gt=0)
+    session_id: int = Field(gt=0)
+    type: ChatMessageType
+    payload: dict[str, object]
+    created_at: datetime
+
+
+class ChatMessagesResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    user_id: int = Field(gt=0)
+    session_id: int = Field(gt=0)
+    messages: list[ChatMessageRecord]
 
 
 QuizItemType = Literal["short_answer", "mcq"]
@@ -266,11 +321,28 @@ class GraphConceptDetailResponse(BaseModel):
     concept: GraphConceptDetail
 
 
+class GraphConceptSummary(BaseModel):
+    concept_id: int = Field(gt=0)
+    canonical_name: str = Field(min_length=1)
+    description: str
+    degree: int = Field(ge=0)
+    mastery_status: MasteryStatus | None = None
+    mastery_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class GraphConceptListResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    user_id: int | None = Field(default=None, gt=0)
+    concepts: list[GraphConceptSummary]
+
+
 class GraphSubgraphNode(BaseModel):
     concept_id: int = Field(gt=0)
     canonical_name: str = Field(min_length=1)
     description: str
     hop_distance: int = Field(ge=0)
+    mastery_status: MasteryStatus | None = None
+    mastery_score: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class GraphSubgraphEdge(BaseModel):
@@ -339,12 +411,22 @@ __all__ = [
     "CITATION_LABEL_FROM_NOTES",
     "CITATION_LABEL_GENERAL_CONTEXT",
     "ChatRespondRequest",
+    "ChatMessageRecord",
+    "ChatMessageType",
+    "ChatMessagesResponse",
+    "ChatSessionListResponse",
+    "ChatSessionSummary",
     "Citation",
     "CitationLabel",
+    "ConceptSwitchDecision",
+    "ConceptSwitchSuggestion",
+    "ConversationMeta",
     "EvidenceItem",
     "EvidenceSourceType",
     "GraphConceptDetail",
     "GraphConceptDetailResponse",
+    "GraphConceptListResponse",
+    "GraphConceptSummary",
     "GraphLuckyAdjacentScoreComponents",
     "GraphLuckyPickAdjacent",
     "GraphLuckyPickWildcard",

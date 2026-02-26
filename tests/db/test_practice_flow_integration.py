@@ -6,7 +6,12 @@ from typing import Any
 from core.observability import configure_observability, set_event_sink
 from core.settings import get_settings
 from sqlalchemy import text
-from tests.db.test_level_up_quiz_flow_integration import _client, _seed, _session_or_skip
+from tests.db.test_level_up_quiz_flow_integration import (
+    _client,
+    _client_without_llm,
+    _seed,
+    _session_or_skip,
+)
 
 
 class PracticeLLM:
@@ -253,6 +258,41 @@ def test_practice_quiz_generation_retries_when_first_payload_is_invalid() -> Non
         )
         assert created.status_code == 201
         assert llm.quiz_calls == 2
+    finally:
+        _close(session, app, client)
+
+
+def test_practice_quiz_create_and_submit_without_llm_uses_fallback() -> None:
+    session = _session_or_skip()
+    workspace_id, user_id, concept_id = _seed(session)
+    app, client = _client_without_llm(session)
+    try:
+        created = client.post(
+            "/practice/quizzes",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "question_count": 4,
+            },
+        )
+        assert created.status_code == 201
+        quiz = created.json()
+        assert len(quiz["items"]) == 4
+        assert {item["item_type"] for item in quiz["items"]} == {"short_answer", "mcq"}
+
+        submitted = client.post(
+            f"/practice/quizzes/{quiz['quiz_id']}/submit",
+            json={
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "answers": _answers(quiz["items"]),
+            },
+        )
+        assert submitted.status_code == 200
+        payload = submitted.json()
+        assert payload["overall_feedback"]
+        assert len(payload["items"]) == len(quiz["items"])
     finally:
         _close(session, app, client)
 

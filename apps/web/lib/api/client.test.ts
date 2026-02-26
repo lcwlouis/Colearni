@@ -34,4 +34,38 @@ describe("ApiClient", () => {
     await new ApiClient({ baseUrl: "/api/", fetchImpl }).getConceptSubgraph({ workspace_id: 1, concept_id: 2, max_hops: 1, max_nodes: 40, max_edges: 80 });
     expect(calledUrl).toBe("/api/graph/concepts/2/subgraph?workspace_id=1&max_hops=1&max_nodes=40&max_edges=80");
   });
+
+  it("builds chat session query strings", async () => {
+    let calledUrl = "";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      calledUrl = String(input);
+      return new Response(
+        JSON.stringify({ workspace_id: 1, user_id: 2, sessions: [] }),
+        { status: 200 },
+      );
+    });
+    await new ApiClient({ baseUrl: "/api/", fetchImpl }).listChatSessions({
+      workspace_id: 1,
+      user_id: 2,
+      limit: 20,
+    });
+    expect(calledUrl).toBe("/api/chat/sessions?workspace_id=1&user_id=2&limit=20");
+  });
+
+  it("builds chat delete query strings", async () => {
+    let calledUrl = "";
+    let calledMethod = "";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calledUrl = String(input);
+      calledMethod = String(init?.method);
+      return new Response(null, { status: 204 });
+    });
+    await new ApiClient({ baseUrl: "/api/", fetchImpl }).deleteChatSession({
+      workspace_id: 1,
+      user_id: 2,
+      session_id: 7,
+    });
+    expect(calledUrl).toBe("/api/chat/sessions/7?workspace_id=1&user_id=2");
+    expect(calledMethod).toBe("DELETE");
+  });
 });
