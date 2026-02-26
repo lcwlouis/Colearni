@@ -16,5 +16,17 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: colearni-phoenix
+    profiles: ["observability"]
+    ports:
+      - "6006:6006"   # Phoenix UI & OTLP HTTP receiver
+    environment:
+      PHOENIX_WORKING_DIR: /phoenix-data
+    volumes:
+      - phoenix-data:/phoenix-data
+
 volumes:
   pgdata:
+  phoenix-data:

@@ -15,3 +15,9 @@ db-downgrade:
 
 db-revision:
 	alembic revision -m "$${m}"
+
+phoenix:
+	docker compose --profile observability up -d phoenix
+
+phoenix-down:
+	docker compose --profile observability down

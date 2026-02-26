@@ -185,6 +185,8 @@ Requirements:
 - Keep observability provider-agnostic; Phoenix should be optional and enabled by env.
 - Never log secrets or full sensitive payloads.
 
+See [OBSERVABILITY.md](OBSERVABILITY.md) for local Phoenix setup and event reference.
+
 ---
 
 ## Non-goals (MVP)
