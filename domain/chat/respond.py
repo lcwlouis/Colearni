@@ -6,7 +6,13 @@ from adapters.db.documents import DocumentRow, get_document_by_id
 from adapters.db.mastery import get_mastery_status
 from adapters.embeddings.factory import build_embedding_provider
 from adapters.llm.factory import build_graph_llm_client
-from core.observability import observation_context
+from core.observability import (
+    SPAN_KIND_CHAIN,
+    observation_context,
+    set_input_output,
+    set_span_kind,
+    start_span,
+)
 from core.schemas import (
     CITATION_LABEL_FROM_NOTES,
     AssistantDraft,
@@ -43,7 +49,14 @@ def generate_chat_response(
         component="chat",
         operation="chat.respond",
         workspace_id=request.workspace_id,
-    ):
+    ), start_span(
+        "chat.respond",
+        component="chat",
+        operation="chat.respond",
+        workspace_id=request.workspace_id,
+    ) as span:
+        set_span_kind(span, SPAN_KIND_CHAIN)
+        set_input_output(span, input_value=request.query)
         active_settings = settings or get_settings()
         grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
 
@@ -148,6 +161,8 @@ def generate_chat_response(
             ),
         )
         envelope = envelope.model_copy(update={"conversation_meta": meta})
+
+        set_input_output(span, output_value=envelope.text)
 
         persist_turn(
             session,

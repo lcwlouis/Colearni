@@ -6,7 +6,14 @@ from typing import Any
 from uuid import uuid4
 
 from core.contracts import GraphLLMClient
-from core.observability import emit_event, observation_context, start_span
+from core.observability import (
+    SPAN_KIND_CHAIN,
+    emit_event,
+    observation_context,
+    set_input_output,
+    set_span_kind,
+    start_span,
+)
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -209,7 +216,8 @@ def submit_level_up_quiz(
         workspace_id=workspace_id,
         quiz_id=quiz_id,
         run_id=resolved_run_id,
-    ):
+    ) as span:
+        set_span_kind(span, SPAN_KIND_CHAIN)
         try:
             quiz = (
                 session.execute(
@@ -507,6 +515,13 @@ def submit_level_up_quiz(
             if update_mastery:
                 payload["mastery_status"] = mastery_status
                 payload["mastery_score"] = mastery_score
+            set_input_output(
+                span,
+                output_value=json.dumps(
+                    {"score": mastery_score, "passed": passed, "critical": critical},
+                ),
+                output_mime_type="application/json",
+            )
             emit_event(
                 f"{event_prefix}.result",
                 status="success",

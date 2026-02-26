@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from core.contracts import GraphLLMClient
-from core.observability import observation_context
+from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_kind, start_span
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -52,7 +52,13 @@ def generate_practice_flashcards(
         component="practice",
         operation="practice.flashcards.generate",
         workspace_id=workspace_id,
-    ):
+    ), start_span(
+        "practice.flashcards.generate",
+        component="practice",
+        operation="practice.flashcards.generate",
+        workspace_id=workspace_id,
+    ) as span:
+        set_span_kind(span, SPAN_KIND_CHAIN)
         payload = _parse_json(
             llm_client.generate_tutor_text(prompt=prompt),
             "Flashcard generation response is not valid JSON.",
@@ -107,7 +113,13 @@ def create_practice_quiz(
             component="practice",
             operation="practice.quiz.generate",
             workspace_id=workspace_id,
-        ):
+        ), start_span(
+            "practice.quiz.generate",
+            component="practice",
+            operation="practice.quiz.generate",
+            workspace_id=workspace_id,
+        ) as span:
+            set_span_kind(span, SPAN_KIND_CHAIN)
             items = _generate_practice_items_with_retries(
                 llm_client=llm_client,
                 prompt=prompt,

@@ -9,7 +9,13 @@ from uuid import uuid4
 
 from adapters.db import graph_repository
 from core.contracts import GraphLLMClient
-from core.observability import emit_event, observation_context, start_span
+from core.observability import (
+    SPAN_KIND_CHAIN,
+    emit_event,
+    observation_context,
+    set_span_kind,
+    start_span,
+)
 from core.settings import Settings
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
@@ -136,7 +142,8 @@ def run_graph_gardener(
         operation="graph.gardener.run",
         workspace_id=workspace_id,
         run_id=resolved_run_id,
-    ):
+    ) as span:
+        set_span_kind(span, SPAN_KIND_CHAIN)
         config = GardenerConfig.from_settings(settings)
         effective_max_dirty_nodes = config.max_dirty_nodes_per_run
         if max_dirty_nodes is not None:

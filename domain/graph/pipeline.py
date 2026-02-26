@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from adapters.db import graph_repository
 from core.contracts import EmbeddingProvider, GraphLLMClient
-from core.observability import observation_context, start_span
+from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_kind, start_span
 from core.settings import Settings
 from sqlalchemy.orm import Session
 
@@ -43,7 +43,10 @@ def build_graph_for_chunks(
         operation="graph.resolver.run",
         workspace_id=workspace_id,
         run_id=resolved_run_id,
-    ):
+    ) as span:
+        set_span_kind(span, SPAN_KIND_CHAIN)
+        if span is not None:
+            span.set_attribute("graph.chunk_count", len(chunks))
         config = ResolverConfig.from_settings(settings)
         resolver = OnlineResolver(
             session=session,

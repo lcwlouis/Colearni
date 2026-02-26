@@ -8,7 +8,13 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from core.observability import emit_event, extract_token_usage, get_observation_context, start_span
+from core.observability import (
+    emit_event,
+    extract_token_usage,
+    get_observation_context,
+    set_llm_span_attributes,
+    start_span,
+)
 
 _RAW_GRAPH_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -137,13 +143,27 @@ class _OpenAICompatibleGraphLLMClient:
         )
         context = get_observation_context()
         operation = str(context.get("operation") or "llm.call")
+        messages = payload.get("messages")
+
         with start_span(
             "llm.call",
             component="llm",
             operation=operation,
             provider=self._provider,
             model=self._model,
-        ):
+        ) as span:
+            # Set OpenInference LLM attributes at the start of the span
+            set_llm_span_attributes(
+                span,
+                model=self._model,
+                invocation_params={
+                    "model": self._model,
+                    "temperature": payload.get("temperature", 0),
+                    "provider": self._provider,
+                },
+                messages=list(messages) if isinstance(messages, (list, tuple)) else None,
+            )
+
             try:
                 with urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
                     response_body = response.read().decode("utf-8")
@@ -210,6 +230,16 @@ class _OpenAICompatibleGraphLLMClient:
                 )
                 raise ValueError("Graph LLM response payload must decode to an object")
 
+            token_usage = extract_token_usage(parsed)
+            response_content = self._extract_message_content_safe(parsed)
+
+            # Enrich span with response and token data
+            set_llm_span_attributes(
+                span,
+                response_message=response_content,
+                token_usage=token_usage,
+            )
+
             emit_event(
                 "llm.call",
                 status="success",
@@ -217,7 +247,7 @@ class _OpenAICompatibleGraphLLMClient:
                 operation=operation,
                 provider=self._provider,
                 model=self._model,
-                **extract_token_usage(parsed),
+                **token_usage,
             )
             return parsed
 
@@ -241,6 +271,13 @@ class _OpenAICompatibleGraphLLMClient:
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Graph LLM response missing textual content")
         return content
+
+    def _extract_message_content_safe(self, payload: Mapping[str, object]) -> str | None:
+        """Extract message content without raising — used for span attributes."""
+        try:
+            return self._extract_message_content(payload)
+        except (ValueError, KeyError, TypeError):
+            return None
 
 
 class OpenAIGraphLLMClient(_OpenAICompatibleGraphLLMClient):
