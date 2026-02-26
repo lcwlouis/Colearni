@@ -132,7 +132,7 @@ def create_level_up_quiz(
         session.execute(
             text(
                 """
-                SELECT id AS item_id, position, item_type, prompt
+                SELECT id AS item_id, position, item_type, prompt, payload
                 FROM quiz_items
                 WHERE quiz_id = :quiz_id
                 ORDER BY position
@@ -155,6 +155,7 @@ def create_level_up_quiz(
                 "position": int(row["position"]),
                 "item_type": str(row["item_type"]),
                 "prompt": str(row["prompt"]),
+                "choices": _safe_mcq_choices(row["payload"]),
             }
             for row in rows
         ],
@@ -660,6 +661,26 @@ def _normalize_generation_context(raw_context: Any) -> dict[str, Any] | None:
         "context_keywords": context_keywords,
         "context_source": context_source,
     }
+
+
+def _safe_mcq_choices(raw_payload: Any) -> list[dict[str, str]] | None:
+    if not isinstance(raw_payload, dict):
+        return None
+    raw_choices = raw_payload.get("choices")
+    if not isinstance(raw_choices, list):
+        return None
+
+    out: list[dict[str, str]] = []
+    for choice in raw_choices:
+        if not isinstance(choice, dict):
+            continue
+        choice_id = str(choice.get("id", "")).strip()
+        text_value = str(choice.get("text", "")).strip()
+        if not choice_id or not text_value:
+            continue
+        out.append({"id": choice_id, "text": text_value})
+
+    return out or None
 
 
 def _extract_context_keywords(*, concept_name: str, concept_description: str) -> list[str]:

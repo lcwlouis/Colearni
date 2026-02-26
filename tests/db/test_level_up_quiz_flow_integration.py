@@ -187,6 +187,16 @@ def test_level_up_pass_fail_transitions(
         create_payload = created.json()
         item_types = {item["item_type"] for item in create_payload["items"]}
         assert item_types == {"short_answer", "mcq"}
+        create_items_by_type = {item["item_type"]: item for item in create_payload["items"]}
+        assert create_items_by_type["short_answer"]["choices"] is None
+        assert create_items_by_type["mcq"]["choices"] == [
+            {"id": choice["id"], "text": choice["text"]}
+            for choice in create_items_by_type["mcq"]["choices"]
+        ]
+        assert "correct_choice_id" not in create_items_by_type["mcq"]
+        assert "critical_choice_ids" not in create_items_by_type["mcq"]
+        assert "choice_explanations" not in create_items_by_type["mcq"]
+        assert "_generation_context" not in create_items_by_type["mcq"]
         mcq_payload = session.execute(
             text(
                 """
@@ -476,6 +486,9 @@ def test_level_up_mcq_only_submission_works_without_llm() -> None:
         )
         assert created.status_code == 201
         quiz = created.json()
+        assert all(item["choices"] for item in quiz["items"])
+        assert all("correct_choice_id" not in item for item in quiz["items"])
+        assert all("critical_choice_ids" not in item for item in quiz["items"])
         mcq_payload = session.execute(
             text(
                 """

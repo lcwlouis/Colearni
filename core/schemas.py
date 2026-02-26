@@ -196,6 +196,12 @@ class QuizItemSummary(BaseModel):
     position: int = Field(ge=1)
     item_type: QuizItemType
     prompt: str = Field(min_length=1)
+    choices: list["QuizChoiceSummary"] | None
+
+
+class QuizChoiceSummary(BaseModel):
+    id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
 
 
 class QuizCreateResponse(BaseModel):
@@ -354,6 +360,7 @@ __all__ = [
     "PracticeFlashcard",
     "PracticeFlashcardsResponse",
     "PracticeQuizSubmitResponse",
+    "QuizChoiceSummary",
     "QuizCreateResponse",
     "QuizFeedbackItem",
     "QuizItemResult",

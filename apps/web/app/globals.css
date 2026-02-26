@@ -56,6 +56,34 @@ pre {
   border: 1px solid var(--line); border-radius: 0.6rem; background: #fff;
   font-family: Menlo, Monaco, "Courier New", monospace; font-size: 0.82rem;
 }
+.chat-thread { display: grid; gap: 0.7rem; }
+.chat-message {
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: #fff;
+  padding: 0.7rem;
+}
+.chat-message.user { background: #f2f8ff; border-color: #b7d5ef; }
+.chat-role { margin: 0 0 0.35rem; font-size: 0.85rem; color: var(--muted); }
+.chat-text { margin: 0; white-space: pre-wrap; }
+.chat-response { display: grid; gap: 0.55rem; }
+.chat-refusal-callout {
+  border: 1px solid #f5c9c3;
+  border-radius: 0.6rem;
+  background: #fff2f1;
+  padding: 0.55rem 0.65rem;
+}
+.chat-refusal-title { margin: 0; font-weight: 600; color: var(--danger); }
+.chat-refusal-reason { margin: 0.2rem 0 0; color: var(--danger); }
+.chat-citations { margin: 0; padding-left: 1rem; display: grid; gap: 0.35rem; }
+.chat-citation-item p { margin: 0; }
+.quiz-items { margin: 0; padding-left: 1.15rem; display: grid; gap: 0.8rem; }
+.quiz-item p { margin: 0.15rem 0; }
+.quiz-choices { margin: 0; padding: 0; border: none; display: grid; gap: 0.35rem; }
+.quiz-choice { display: flex; gap: 0.45rem; align-items: flex-start; }
+.level-up-feedback h3 { margin: 0; }
+.quiz-feedback-list { margin: 0; padding-left: 1rem; display: grid; gap: 0.5rem; }
+.quiz-feedback-list p { margin: 0.1rem 0; }
 @keyframes fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (min-width: 768px) {
   .topbar { flex-direction: row; justify-content: space-between; align-items: center; }

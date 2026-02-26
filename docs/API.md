@@ -404,7 +404,7 @@ Success responses:
 | `user_id` | integer | quiz owner |
 | `concept_id` | integer | target concept |
 | `status` | string | quiz lifecycle state |
-| `items` | array | item summaries (`item_id`, `position`, `item_type`, `prompt`) |
+| `items` | array | item summaries (`item_id`, `position`, `item_type`, `prompt`, `choices`) |
 
 Error responses:
 
@@ -436,7 +436,11 @@ curl -sS -X POST http://localhost:8000/quizzes/level-up \
       "item_id": 1001,
       "position": 1,
       "item_type": "mcq",
-      "prompt": "Which statement best describes a linear map?"
+      "prompt": "Which statement best describes a linear map?",
+      "choices": [
+        {"id": "a", "text": "Preserves vector addition and scalar multiplication."},
+        {"id": "b", "text": "Maps every vector to zero."}
+      ]
     }
   ]
 }
@@ -634,7 +638,8 @@ curl -sS -X POST http://localhost:8000/practice/quizzes \
       "item_id": 2001,
       "position": 1,
       "item_type": "short_answer",
-      "prompt": "Explain why kernels matter."
+      "prompt": "Explain why kernels matter.",
+      "choices": null
     }
   ]
 }

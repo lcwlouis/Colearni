@@ -28,7 +28,15 @@ def _quiz_create() -> dict[str, Any]:
         "user_id": 3,
         "concept_id": 4,
         "status": "ready",
-        "items": [{"item_id": 11, "position": 1, "item_type": "mcq", "prompt": "q"}],
+        "items": [
+            {
+                "item_id": 11,
+                "position": 1,
+                "item_type": "mcq",
+                "prompt": "q",
+                "choices": [{"id": "a", "text": "Choice A"}],
+            }
+        ],
     }
 
 
@@ -172,6 +180,9 @@ def test_quizzes_runtime_response_contracts(client: Any, monkeypatch: Any) -> No
         "mastery_status",
         "mastery_score",
     } <= set(submitted.json())
+    item = created.json()["items"][0]
+    assert set(item) == {"item_id", "position", "item_type", "prompt", "choices"}
+    assert item["choices"] == [{"id": "a", "text": "Choice A"}]
 
 def test_practice_runtime_response_contracts(client: Any, monkeypatch: Any) -> None:
     _patch(
@@ -206,3 +217,10 @@ def test_practice_runtime_response_contracts(client: Any, monkeypatch: Any) -> N
         "mastery_status",
         "mastery_score",
     }.isdisjoint(set(submitted.json()))
+    assert set(created.json()["items"][0]) == {
+        "item_id",
+        "position",
+        "item_type",
+        "prompt",
+        "choices",
+    }
