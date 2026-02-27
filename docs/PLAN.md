@@ -145,9 +145,25 @@
     - `APP_GRAPH_LLM_JSON_TEMPERATURE` (structured extraction/disambiguation)
     - `APP_GRAPH_LLM_TUTOR_TEMPERATURE` (tutor-style text generation)
 
-## Session 6 Reliability + Upload UX Plan (Current)
+## Session 6 Reliability + Upload UX Plan (Completed)
 - Graph extraction reliability hotfix + SDK migration:
   - Reproduce the ingestion failure with `APP_INGEST_BUILD_GRAPH=true` using KB upload endpoint.
+  - Fix JSON schema validation shapes to comply with strict-mode standards (`items` definitions, nullability, required arrays).
+  - Migrate internal `urllib` HTTP requests inside `adapters/llm/providers.py` to official `openai`/`litellm` SDK packages.
+  - Surface downstream provider errors securely as HTTP 502 with structured `IngestionGraphProviderError` exceptions instead of internal 500 stack traces.
+
+## Session 9 Polish + Document Ingestion Upgrades (Completed)
+- **Tutor Graph Context**:
+  - Restrict the Tutor sidebar drawer so it does not carelessly render the full unlearned topology. It should only show the strictly mastered subgraph, or heavily limit the bounds (e.g., 2 hops max) when focusing on an actively learning concept.
+- **Graph Layout Standardization**:
+  - Uncouple the `Search concepts...` input from the concept graph visual card to make the panel native.
+- **Document Summarization**:
+  - Augment the KB ingestion pipeline (`build_graph_for_chunks`) to also derive and save a short 2-3 sentence overview (`summary` TEXT column).
+  - Surface the generated summary in the UI (KB Table) to confirm file contents.
+  - Pass the summary string natively into the Tutor context window as an active RAG signal.
+- **Knowledge Base Table Fixing**:
+  - Ensure `DELETE` endpoints accurately clear out the files and prevent stray orphaned database rows.
+  - Resolve trailing whitespace and right-margin discrepancies on the table flex container layouts.
   - Add a regression test covering OpenAI structured output schema validation for graph extraction/disambiguation payloads.
   - Fix `_RAW_GRAPH_SCHEMA` and related schemas to be OpenAI-strict compliant (arrays require explicit `items` definitions).
   - Migrate graph LLM provider calls away from hand-rolled `urllib` HTTP toward SDK-backed clients:
@@ -160,6 +176,142 @@
   - Keep selected files visible with explicit in-page upload queue state (`queued`/`uploading`/`uploaded`/`failed`).
   - Support selecting and uploading multiple files in one action.
   - Keep document list refresh after batch upload completion so canonical table stays current.
+
+## Session 10 UX Polish, Quiz Quality & Robustness (Completed)
+
+### S28 Sidebar & Layout Polish (Completed)
+- **Sidebar recent chats overflow**: The recent-chats list can expand unboundedly, pushing footer controls off-screen and clipping the context menu (rename/delete). Cap the chat list to a scrollable area with `overflow-y: auto` and ensure the context menu renders above the scroll boundary using fixed/portal positioning.
+- **Chat horizontal scroll containment**: Long code blocks currently make the entire chat area scroll sideways. Constrain overflow to within the code block itself (`overflow-x: auto` on `pre`/`code` blocks) while keeping the chat thread at `max-width` without horizontal scroll.
+- **Profile/logout layout**: The email, theme toggle, and logout button in the sidebar footer look unprofessional—the logout button stretches with email length. Redesign the profile block with a fixed-height, well-spaced row layout: email (truncated), then a row of icon actions (theme toggle, logout) evenly spaced.
+
+### S29 Graph & Knowledge Explorer Polish (Completed)
+- **Graph page box padding**: Add more spacing between the graph visualization panel and the concept detail panel. Make both panels dynamic/responsive (cards with proper margin, border-radius, shadow). Ensure the graph page doesn't look flat or left-crammed.
+- **Tutor sidebar graph detail**: Show the concept description (not just mastery label) in the graph drawer on the tutor page. Restrict how far the user can hop from the node they started learning from (enforce `max_hops` parameter).
+- **Graph suggestion strategy**: Adjacent and wildcard suggestions (`pick_lucky`) always deterministically return the same 2 items. Add randomization by sampling from the top-N candidates with weighted random selection instead of always taking `LIMIT 1`.
+- **Graph edge weight normalization**: Change graph extraction weight to be integer 1–99 (round down all LLM responses to max 99). The LLM can produce samples between 1–20 but post-processing clamps to 1–99 range. No need to tell the LLM about the cap.
+
+### S30 Quiz Generation Quality & Statefulness (Completed)
+- **Fix quiz generation falling back to templates**: The `_auto_items` fallback produces identical template-based questions for every concept. The LLM-based generation path (`_generate_level_up_items_with_retries`) is failing silently. Fix `_supports_quiz_generation` to check for the correct method (`generate_tutor_text`), improve the generation prompt with richer context (concept description, neighboring concepts, document chunks), and make MCQ choices concept-specific rather than generic templates.
+- **Level-up quiz tied to chat session**: Level-up quizzes should be tagged to each chat session ID and be stateful. The quiz drawer should persist across navigation and show status (building/ready/submitted) per chat.
+- **New quiz button broken**: The "Start new quiz" button resets state but doesn't indicate generation is in progress, then gets stuck on internal server error. Add loading state, proper error display, and auto-retry logic.
+
+### S31 Onboarding Flow (Future)
+- When a user has no topics chosen as a starting point but has uploaded documents, the tutor/onboarding agent should list potential topics the user can start learning from.
+- The onboarding process should ask the user what they want to learn, search for that knowledge, then lock the graph and navigate from there within the tutoring area.
+- This should happen both for fresh workspaces and when documents are uploaded without prior topic selection.
+
+### S32 Robustness & Testing
+- ✅ Handle the `summary` column missing error (migration `20260227_0005` applied).
+- ✅ Add robust integration tests for quiz generation + graph suggestion randomization paths.
+- ⏳ Remaining: add/finish coverage for chat respond with document lookups, sidebar session CRUD, KB delete cascade.
+- ⏳ Remaining: resolve legacy contract/doc sync + ingestion test debt (`test_api_docs_sync`, `test_response_contracts`, `test_ingestion_embeddings`, `test_document_ingestion_integration`).
+
+## Session 11 UI Resilience + Quiz Lifecycle + Scalable Graph UX (Current Plan)
+
+### Session 11 Implementation Map (Do-Not-Rediscover Notes)
+- **Tutor shell/layout baseline (already implemented in Session 10)**:
+  - Main shell and sidebar composition live in `apps/web/app/layout.tsx` + `apps/web/components/global-sidebar.tsx`.
+  - Tutor page orchestration (timeline, drawers, quiz wiring, graph drawer) is in `apps/web/app/tutor/page.tsx`.
+  - Global tutor/chat styling and sidebar overflow behavior are in `apps/web/app/globals.css`.
+- **Current right-drawer architecture**:
+  - Graph and quiz drawers are stateful toggles in `apps/web/app/tutor/page.tsx`.
+  - Existing open animation is present; close transitions are still abrupt and need explicit exit-state handling.
+  - Width behavior is currently constrained and should be upgraded to responsive clamp/minmax values.
+- **Current code/markdown rendering path**:
+  - Assistant message rendering and markdown style hooks are in tutor message rendering code and `.markdown-content` CSS rules (`apps/web/app/tutor/page.tsx`, `apps/web/app/globals.css`).
+  - Session 10 fixed broad chat horizontal overflow; Session 11 still needs code-frame-specific clipping/scroll polish.
+- **Quiz data path (already live, missing automation)**:
+  - API routes: `apps/api/routes/quizzes.py`.
+  - Domain generation/grading and persistence: `domain/learning/level_up.py`.
+  - DB contract includes concept + optional session linkage (see `quizzes` table and repository usage).
+  - Tutor response path currently does not actively query concept-scoped latest quiz status as first-class context.
+- **Background job baseline**:
+  - Existing scheduler-like recurring logic is readiness-only (`apps/jobs/readiness_analyzer.py`).
+  - No current job auto-creates level-up quizzes when a concept becomes active.
+- **Graph scalability baseline in Colearni**:
+  - Graph UI: `apps/web/app/graph/page.tsx`, `apps/web/components/concept-graph.tsx`.
+  - Tutor graph drawer reuse: `apps/web/app/tutor/page.tsx`.
+  - Graph exploration backend: `apps/api/routes/graph.py`, `domain/graph/explore.py`, `adapters/db/graph_repository.py`.
+  - Session 10 already added weighted randomization + normalized weights; Session 11 should focus on large-graph rendering strategy and controls.
+
+### S33 Tutor UI Layout & Drawer Polish
+- **Code block frame clipping**: normalize assistant markdown code blocks to use the app panel tokenized frame (`border`, `radius`, `surface`) and ensure full visible bounds with no clipping.
+- **Code block horizontal overflow**: keep chat column width fixed while enabling in-frame horizontal scrolling for long lines (`overflow-x: auto` on code frame only).
+- **Composer bottom anchoring**: ensure message composer is always pinned to bottom of tutor viewport while timeline independently scrolls.
+- **Right drawer adaptive width**: allow quiz/graph drawer to expand on wider screens (responsive clamp/minmax), instead of fixed narrow width.
+- **Closing animations**: implement exit animation for graph/quiz drawers to match existing entry animation (no abrupt disappear).
+- **Left sidebar collapse**: add a first-class collapse/expand control for global sidebar mirroring the graph/quiz toggle pattern.
+- **Sidebar footer clipping**: make workspace selector/profile/footer dynamically size to viewport height and avoid bottom cutoff across resolutions.
+- **Implementation notes (next session)**:
+  - Primary files: `apps/web/app/tutor/page.tsx`, `apps/web/app/globals.css`, `apps/web/components/global-sidebar.tsx`.
+  - Keep changes CSS-first where possible; only introduce JS state for drawer close animation and sidebar collapse state persistence.
+  - Validate against current behavior that already fixed session-list overflow and context-menu z-index (avoid regressing Session 10 fixes).
+
+### S34 Quiz Lifecycle Automation & Concept Grounding
+- **Scheduler verification + implementation**: there is currently no in-app cron/scheduler that auto-creates level-up quizzes on topic introduction. Add explicit job orchestration policy (internal scheduler or external cron contract) and implementation.
+- **Auto quiz trigger**: when a concept transitions into active learning scope, enqueue/generate a level-up quiz asynchronously.
+- **Mastered-neighbor context**: augment quiz generation context to include surrounding mastered nodes (bounded top-K by edge weight) and use that context in generation prompt payload.
+- **Concept-attached canonical quiz access**: keep quiz attachment at `concept_id` as primary key for learning state, with optional `session_id` linkage for chat continuity.
+- **Tutor queryability**: add retrieval/query helpers so tutor can fetch latest quiz status/results by concept and reference them during response generation.
+- **Implementation notes (next session)**:
+  - Generation logic extension point: `domain/learning/level_up.py`.
+  - Trigger surfaces to evaluate: concept activation path in tutor/graph progression (`domain/chat/respond.py` and graph-learning transitions).
+  - Add read helper(s) in adapters/domain for “latest quiz by concept/workspace” and inject into tutor prompt composition path (`domain/chat/prompt_kit.py` / `domain/chat/respond.py`).
+  - Keep API routes thin (`apps/api/routes/quizzes.py`), business logic in domain/adapters only.
+
+### S35 Scalable Graph Experience (External LightRAG Comparative)
+- **External reference boundary (explicit)**: HKUDS/LightRAG is a separate repository and stack. We only adapt proven interaction/scaling patterns, not copy architecture or couple our APIs/models to LightRAG internals.
+- **Verified comparative inputs**:
+  - LightRAG `/graphs` endpoint exposes `label + max_depth + max_nodes` and returns truncation signals (`is_truncated`).
+  - LightRAG WebUI combines Sigma.js + Graphology with runtime controls (depth/nodes/layout iterations), graph search indexing, and multiple layout engines/workers.
+- **Adoptable patterns for Colearni (native implementation only)**:
+  - Introduce progressive graph loading strategy (seed/subgraph first, incremental expand) within existing Colearni graph endpoints.
+  - Add user controls for max nodes/depth/layout iterations and explicit truncation messaging in Graph/Tutor graph surfaces.
+  - Add client-side graph indexing/search and selective rendering/hide-unselected-edge behavior for dense graphs.
+  - Add background/worker layout iterations to keep interaction smooth under high node counts.
+- **Non-goals / do-not-port**:
+  - No direct dependency on LightRAG packages, stores, route layout, or frontend component structure.
+  - No wholesale swap of Colearni graph APIs, tenancy rules, or data model to mirror LightRAG.
+- **Performance target slice**: define and validate baseline target for >=1k nodes interactive rendering in Colearni Graph page without UI lockups.
+- **Implementation notes (next session)**:
+  - Keep Colearni graph endpoints and tenancy contracts unchanged; layer in pagination/progressive-expansion semantics if needed, but without introducing LightRAG-specific route contracts.
+  - Start by instrumenting current render bottlenecks in `apps/web/components/concept-graph.tsx` before adding worker/layout complexity.
+  - If adding node/depth controls, wire through existing graph query state and route params rather than introducing parallel API surfaces.
+
+### S36 Documentation Integrity
+- Create and maintain `docs/PROMPTS.md` as source-of-truth inventory of prompts by agent/domain with direct code paths.
+- Before closing any future PLAN slice, ensure implementation details are reflected in `docs/PROGRESS.md` (and API/architecture docs when contract/design changes).
+
+### Incorporated from SUGGESTIONS.md
+- **Spaced Repetition Optimization Engine** (S2): ML-driven spaced repetition to dynamically identify weakest graph links and push micro-assessments. (Future)
+- **Markdown-Based Skills Architecture** (S9): Migrate away from hardcoded prompts toward file-system-based "skills" directory with discoverable Markdown prompt files. (Future — aligns with S25 Agentic RAG)
+- **Autonomous Learning Path Generation** (S4): Tutor proactively generates personalized daily/weekly syllabus based on KB and readiness scores. (Future — aligns with S31 Onboarding)
+- **Proactive Knowledge Graph Curation** (S1): Background agents continuously refine the graph—merge duplicates, highlight contradictions, suggest new relationships. (Future)
+
+- S22 App Shell & Sidebar Redesign:
+  - Move page navigation buttons from the top bar into the left sidebar (similar to ChatGPT/Gemini).
+  - Standardize the layout of KB and Graph pages to match the Tutor chat page style.
+  - Implement workspace management UI (rename existing workspaces, add new workspaces).
+- S23 Unified Graph & Practice UX:
+  - Collapse the Practice page into the Graph page.
+  - Always display the full knowledge graph by default on the Graph page (similar to LightRAG WebUI).
+  - Add visual indicators for edge directions (arrows) and improve edge weight rendering, as the backend already stores `src_id`, `tgt_id`, and `weight`.
+  - Ensure all flashcards are stateful, eliminating non-stateful flashcards. Flashcards are stored per concept per workspace.
+- S24 Tutor Context Expansion & Quiz Grading UI:
+  - Add chat state URL persistence so refreshing the Tutor chat page restores the active chat session ID instead of jumping to the latest or losing state. Evaluate if chat session IDs should be migrated to UUID `public_id` paths.
+  - Store practice quizzes persistently so they are referenceable by the tutor and the user can revisit old quizzes.
+  - Revise the practice quiz workflow so clicking "Start new quiz" automatically generates the next one without needing to manually click generate again.
+  - Adjust practice quiz frontend grading: scores >= 0.7 for non-MCQ questions display as green (correct/pass).
+- S25 Agentic RAG Tutor:
+  - Upgrade the Tutor from a static KB query pipeline into an Agentic RAG system based on the prompt.
+  - Implement a "skills folder" architecture (inspired by nanobot/openclaw) using Markdown files to guide the agent in dynamic discovery of prompts and capabilities.
+  - Dynamically build the tutor prompt to include summarized flashcards, practice quizzes, and level-up quizzes.
+  - Provide tools to the agent so it can access granular details of the user's history and knowledge base when needed.
+- S26 Agent Thoughts Chat UI:
+  - Introduce an interactive "thoughts" UI in the chat (like ChatGPT/Copilot).
+  - Display the agent's current step: thinking, searching history, navigating graph, etc.
+- S27 Architecture Documentation:
+  - Document the current prompting system, agent architecture, and how agents are looping.
 
 ## Test Cases and Scenarios
 - Auth:
@@ -200,6 +352,21 @@
 12. Research agent schema + cron + review queue.
 13. Prompt kit + persona profile + social intent mode.
 14. Eval suite + observability expansion + hardening.
+15. S22 App Shell & Sidebar Redesign
+16. S23 Unified Graph & Practice UX
+17. S24 Tutor Context Expansion & Quiz Grading UI
+18. S25 Layout & Tutor Graph Context (was Agentic RAG — deferred)
+19. S26 Document Summaries & Deletion Fixes (was Agent Thoughts — deferred)
+20. S27 UUID Navigation & Dashboard Widgets (was Architecture Docs — deferred)
+21. S28 Sidebar & Layout Polish
+22. S29 Graph & Knowledge Explorer Polish
+23. S30 Quiz Generation Quality & Statefulness
+24. S31 Onboarding Flow
+25. S32 Robustness & Testing
+26. S33 Tutor UI Layout & Drawer Polish
+27. S34 Quiz Lifecycle Automation & Concept Grounding
+28. S35 Scalable Graph Experience (LightRAG-Informed)
+29. S36 Documentation Integrity
 
 ## Assumptions and Defaults
 - OpenClaw exact style snippet is not yet available; placeholder persona ships first.
