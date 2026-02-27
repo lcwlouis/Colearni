@@ -42,6 +42,8 @@ class _OpenAICompatibleGraphLLMClient:
         *,
         model: str,
         timeout_seconds: float,
+        json_temperature: float = 0.0,
+        tutor_temperature: float = 0.0,
         base_url: str,
         api_key: str | None,
         provider: str,
@@ -52,8 +54,14 @@ class _OpenAICompatibleGraphLLMClient:
             raise ValueError("graph_llm timeout_seconds must be positive")
         if not base_url.strip():
             raise ValueError("graph_llm base_url cannot be empty")
+        if not 0.0 <= json_temperature <= 2.0:
+            raise ValueError("graph_llm json_temperature must be between 0 and 2")
+        if not 0.0 <= tutor_temperature <= 2.0:
+            raise ValueError("graph_llm tutor_temperature must be between 0 and 2")
         self._model = model.strip()
         self._timeout_seconds = timeout_seconds
+        self._json_temperature = float(json_temperature)
+        self._tutor_temperature = float(tutor_temperature)
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self._api_key = api_key.strip() if api_key is not None and api_key.strip() else None
         self._provider = provider.strip() or "unknown"
@@ -100,7 +108,7 @@ class _OpenAICompatibleGraphLLMClient:
     ) -> dict[str, Any]:
         payload: dict[str, object] = {
             "model": self._model,
-            "temperature": 0,
+            "temperature": self._json_temperature,
             "messages": [
                 {
                     "role": "system",
@@ -122,7 +130,7 @@ class _OpenAICompatibleGraphLLMClient:
     def _chat_text(self, *, prompt: str, system_instruction: str) -> str:
         payload: dict[str, object] = {
             "model": self._model,
-            "temperature": 0,
+            "temperature": self._tutor_temperature,
             "messages": [
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": prompt},
@@ -281,12 +289,22 @@ class _OpenAICompatibleGraphLLMClient:
 
 
 class OpenAIGraphLLMClient(_OpenAICompatibleGraphLLMClient):
-    def __init__(self, *, api_key: str, model: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        json_temperature: float = 0.0,
+        tutor_temperature: float = 0.0,
+    ) -> None:
         if not api_key.strip():
             raise ValueError("OpenAI API key is required for graph_llm_provider=openai")
         super().__init__(
             model=model,
             timeout_seconds=timeout_seconds,
+            json_temperature=json_temperature,
+            tutor_temperature=tutor_temperature,
             base_url="https://api.openai.com/v1",
             api_key=api_key,
             provider="openai",
@@ -299,12 +317,16 @@ class LiteLLMGraphLLMClient(_OpenAICompatibleGraphLLMClient):
         *,
         model: str,
         timeout_seconds: float,
+        json_temperature: float = 0.0,
+        tutor_temperature: float = 0.0,
         base_url: str,
         api_key: str | None = None,
     ) -> None:
         super().__init__(
             model=model,
             timeout_seconds=timeout_seconds,
+            json_temperature=json_temperature,
+            tutor_temperature=tutor_temperature,
             base_url=base_url,
             api_key=api_key,
             provider="litellm",

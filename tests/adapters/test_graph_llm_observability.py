@@ -139,3 +139,33 @@ def test_llm_call_failure_emits_error_without_sensitive_payload(
     assert event["status"] == "failure"
     assert event["error_type"] == "URLError"
     set_event_sink(None)
+
+
+def test_llm_call_uses_case_specific_temperatures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payloads: list[dict[str, Any]] = []
+
+    def _capture_request(request, timeout):  # noqa: ANN001, ARG001
+        payload = json.loads(request.data.decode("utf-8"))
+        payloads.append(payload)
+        if "response_format" in payload:
+            return _FakeResponse(
+                {"choices": [{"message": {"content": '{"concepts": [], "edges": []}'}}]}
+            )
+        return _FakeResponse({"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr("adapters.llm.providers.urlopen", _capture_request)
+    client = LiteLLMGraphLLMClient(
+        model="gpt-4o-mini",
+        timeout_seconds=5.0,
+        base_url="http://localhost:4000/v1",
+        json_temperature=0.1,
+        tutor_temperature=0.7,
+    )
+
+    _ = client.extract_raw_graph(chunk_text="Newton's second law")
+    _ = client.generate_tutor_text(prompt="Explain this concept")
+
+    assert payloads[0]["temperature"] == pytest.approx(0.1)
+    assert payloads[1]["temperature"] == pytest.approx(0.7)

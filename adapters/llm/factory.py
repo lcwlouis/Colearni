@@ -21,6 +21,8 @@ def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             api_key=api_key,
             model=active_settings.graph_llm_model,
             timeout_seconds=active_settings.graph_llm_timeout_seconds,
+            json_temperature=active_settings.graph_llm_json_temperature,
+            tutor_temperature=active_settings.graph_llm_tutor_temperature,
         )
 
     if active_settings.graph_llm_provider == "litellm":
@@ -29,6 +31,8 @@ def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             timeout_seconds=active_settings.graph_llm_timeout_seconds,
             base_url=active_settings.litellm_base_url,
             api_key=active_settings.litellm_api_key,
+            json_temperature=active_settings.graph_llm_json_temperature,
+            tutor_temperature=active_settings.graph_llm_tutor_temperature,
         )
 
     raise ValueError(f"Unsupported graph_llm_provider: {active_settings.graph_llm_provider}")
