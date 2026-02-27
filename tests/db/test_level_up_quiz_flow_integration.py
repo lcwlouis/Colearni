@@ -5,7 +5,9 @@ import uuid
 from typing import Any
 
 import pytest
+from adapters.db.auth import UserRow
 from adapters.db.dependencies import get_db_session
+from apps.api.dependencies import get_current_user
 from apps.api.main import create_app
 from core.observability import configure_observability, set_event_sink
 from core.settings import get_settings
@@ -58,22 +60,40 @@ def _session_or_skip() -> Session:
     return session
 
 
-def _seed(session: Session) -> tuple[int, int, int]:
+def _seed(session: Session) -> tuple[int, str, int, int]:
+    """Create user, workspace (with membership), and concept.
+
+    Returns (workspace_id, workspace_public_id, user_id, concept_id).
+    """
     suffix = uuid.uuid4().hex
-    user_id = int(
+    user_row = (
         session.execute(
-            text("INSERT INTO users (email) VALUES (:email) RETURNING id"),
+            text("INSERT INTO users (email) VALUES (:email) RETURNING id, public_id"),
             {"email": f"quiz-{suffix}@example.com"},
-        ).scalar_one()
+        )
+        .mappings()
+        .one()
     )
-    workspace_id = int(
+    user_id = int(user_row["id"])
+    ws_row = (
         session.execute(
             text(
                 "INSERT INTO workspaces (name, owner_user_id) "
-                "VALUES (:name, :owner_user_id) RETURNING id"
+                "VALUES (:name, :owner_user_id) RETURNING id, public_id"
             ),
             {"name": f"ws-{suffix}", "owner_user_id": user_id},
-        ).scalar_one()
+        )
+        .mappings()
+        .one()
+    )
+    workspace_id = int(ws_row["id"])
+    workspace_public_id = str(ws_row["public_id"])
+    session.execute(
+        text(
+            "INSERT INTO workspace_members (workspace_id, user_id, role) "
+            "VALUES (:wid, :uid, 'owner')"
+        ),
+        {"wid": workspace_id, "uid": user_id},
     )
     concept_id = int(
         session.execute(
@@ -88,10 +108,28 @@ def _seed(session: Session) -> tuple[int, int, int]:
         ).scalar_one()
     )
     session.commit()
-    return workspace_id, user_id, concept_id
+    return workspace_id, workspace_public_id, user_id, concept_id
 
 
-def _client(session: Session, grader: DeterministicQuizGrader) -> tuple[Any, TestClient]:
+def _make_user_row(session: Session, user_id: int) -> UserRow:
+    """Build a UserRow from a user_id for auth override."""
+    row = (
+        session.execute(
+            text("SELECT id, public_id, email, display_name FROM users WHERE id = :uid"),
+            {"uid": user_id},
+        )
+        .mappings()
+        .one()
+    )
+    return UserRow(
+        id=int(row["id"]),
+        public_id=str(row["public_id"]),
+        email=str(row["email"]),
+        display_name=row["display_name"],
+    )
+
+
+def _client(session: Session, grader: DeterministicQuizGrader, *, user: UserRow | None = None) -> tuple[Any, TestClient]:
     app = create_app(settings=get_settings().model_copy(update={"ingest_build_graph": False}))
     app.state.graph_llm_client = grader
 
@@ -99,16 +137,20 @@ def _client(session: Session, grader: DeterministicQuizGrader) -> tuple[Any, Tes
         yield session
 
     app.dependency_overrides[get_db_session] = override_db
+    if user is not None:
+        app.dependency_overrides[get_current_user] = lambda: user
     return app, TestClient(app)
 
 
-def _client_without_llm(session: Session) -> tuple[Any, TestClient]:
+def _client_without_llm(session: Session, *, user: UserRow | None = None) -> tuple[Any, TestClient]:
     app = create_app(settings=get_settings().model_copy(update={"ingest_build_graph": False}))
 
     def override_db() -> Any:
         yield session
 
     app.dependency_overrides[get_db_session] = override_db
+    if user is not None:
+        app.dependency_overrides[get_current_user] = lambda: user
     return app, TestClient(app)
 
 
@@ -150,7 +192,7 @@ def test_level_up_pass_fail_transitions(
     )
     session = _session_or_skip()
     grader = DeterministicQuizGrader(score=score, critical=critical)
-    workspace_id, user_id, concept_id = _seed(session)
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
     if seed_mastery:
         session.execute(
             text(
@@ -162,7 +204,8 @@ def test_level_up_pass_fail_transitions(
             {"workspace_id": workspace_id, "user_id": user_id, "concept_id": concept_id},
         )
         session.commit()
-    app, client = _client(session, grader)
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client(session, grader, user=mock_user)
     configure_observability(
         get_settings().model_copy(
             update={
@@ -175,10 +218,8 @@ def test_level_up_pass_fail_transitions(
 
     try:
         created = client.post(
-            "/quizzes/level-up",
+            f"/workspaces/{ws_pid}/quizzes/level-up",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "concept_id": concept_id,
                 "question_count": 5,
             },
@@ -233,10 +274,8 @@ def test_level_up_pass_fail_transitions(
         assert generation_context["context_keywords"]
 
         submitted = client.post(
-            f"/quizzes/{create_payload['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/quizzes/{create_payload['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(create_payload["items"], mcq=mcq),
             },
         )
@@ -337,28 +376,25 @@ def test_level_up_pass_fail_transitions(
 def test_level_up_submit_replay_is_idempotent() -> None:
     session = _session_or_skip()
     grader = DeterministicQuizGrader(score=0.9, critical=False)
-    workspace_id, user_id, concept_id = _seed(session)
-    app, client = _client(session, grader)
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client(session, grader, user=mock_user)
 
     try:
         created = client.post(
-            "/quizzes/level-up",
-            json={"workspace_id": workspace_id, "user_id": user_id, "concept_id": concept_id},
+            f"/workspaces/{ws_pid}/quizzes/level-up",
+            json={"concept_id": concept_id},
         )
         quiz = created.json()
         first = client.post(
-            f"/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"], mcq="a"),
             },
         )
         second = client.post(
-            f"/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"], mcq="d"),
             },
         )
@@ -405,8 +441,9 @@ def test_level_up_submit_failure_emits_observability_event() -> None:
     )
     session = _session_or_skip()
     grader = DeterministicQuizGrader(score=0.8, critical=False)
-    workspace_id, user_id, concept_id = _seed(session)
-    app, client = _client(session, grader)
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client(session, grader, user=mock_user)
     configure_observability(
         get_settings().model_copy(
             update={
@@ -419,10 +456,8 @@ def test_level_up_submit_failure_emits_observability_event() -> None:
 
     try:
         created = client.post(
-            "/quizzes/level-up",
+            f"/workspaces/{ws_pid}/quizzes/level-up",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "concept_id": concept_id,
                 "question_count": 5,
             },
@@ -431,10 +466,8 @@ def test_level_up_submit_failure_emits_observability_event() -> None:
         quiz = created.json()
 
         submitted = client.post(
-            f"/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"], mcq="a")[:1],
             },
         )
@@ -453,8 +486,9 @@ def test_level_up_submit_failure_emits_observability_event() -> None:
 
 def test_level_up_mcq_only_submission_works_without_llm() -> None:
     session = _session_or_skip()
-    workspace_id, user_id, concept_id = _seed(session)
-    app, client = _client_without_llm(session)
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client_without_llm(session, user=mock_user)
     items = [
         {
             "item_type": "mcq",
@@ -476,10 +510,8 @@ def test_level_up_mcq_only_submission_works_without_llm() -> None:
     ]
     try:
         created = client.post(
-            "/quizzes/level-up",
+            f"/workspaces/{ws_pid}/quizzes/level-up",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "concept_id": concept_id,
                 "items": items,
             },
@@ -506,10 +538,8 @@ def test_level_up_mcq_only_submission_works_without_llm() -> None:
         assert generation_context.get("context_source") == "provided"
 
         submitted = client.post(
-            f"/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"], mcq="a"),
             },
         )

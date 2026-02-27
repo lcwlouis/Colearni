@@ -166,6 +166,8 @@ class AssistantResponseEnvelope(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     refusal_reason: RefusalReason | None = None
     conversation_meta: ConversationMeta | None = None
+    response_mode: str = Field(default="grounded")
+    actions: list[dict[str, object]] = Field(default_factory=list)
 
     @field_validator("text")
     @classmethod
@@ -178,7 +180,8 @@ class AssistantResponseEnvelope(BaseModel):
         _ensure_unique_ids([item.citation_id for item in self.citations], field_name="citation_id")
 
         if self.kind == AssistantResponseKind.ANSWER:
-            if not self.citations:
+            # Social and onboarding responses are exempt from citation requirements.
+            if not self.citations and self.response_mode not in ("social", "onboarding"):
                 raise ValueError("answer responses must include at least one citation")
             if self.refusal_reason is not None:
                 raise ValueError("answer responses must not include refusal_reason")
@@ -404,7 +407,149 @@ class GraphLuckyResponse(BaseModel):
         return self
 
 
+# ── Slice 3+4: UUID-based envelope IDs ────────────────────────────────
+
+# ResponseMode indicates whether the answer came from grounded retrieval or
+# social/chitchat handling (Slice 13).
+ResponseMode = Literal["grounded", "social"]
+
+
+# ── Slice 6: Knowledge-base explorer schemas ──────────────────────────
+
+
+class KBDocumentSummary(BaseModel):
+    document_id: int = Field(gt=0)
+    public_id: str = Field(min_length=1)
+    title: str | None = None
+    source_uri: str | None = None
+    chunk_count: int = Field(ge=0)
+    ingestion_status: Literal["pending", "ingested"]
+    graph_status: Literal["disabled", "pending", "extracted"]
+    graph_concept_count: int = Field(ge=0)
+    created_at: datetime
+
+
+class KBDocumentListResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    documents: list[KBDocumentSummary]
+
+
+# ── Slice 7: Assessment card persisted in chat ────────────────────────
+
+
+class AssessmentCard(BaseModel):
+    """Structured quiz/practice summary persisted as a 'card' message."""
+
+    card_type: Literal["quiz_result", "practice_result"]
+    quiz_id: int | None = Field(default=None, gt=0)
+    concept_id: int | None = Field(default=None, gt=0)
+    concept_name: str | None = None
+    score: float = Field(ge=0.0, le=1.0)
+    passed: bool
+    summary: str = Field(min_length=1)
+
+
+# ── Slice 9: Readiness CTA actions ───────────────────────────────────
+
+
+class ActionCTA(BaseModel):
+    """Call-to-action surfaced inside the chat response envelope."""
+
+    action_type: Literal["quiz_cta", "review_cta", "research_cta"]
+    label: str = Field(min_length=1)
+    concept_id: int | None = Field(default=None, gt=0)
+    concept_name: str | None = None
+
+
+class ReadinessTopicState(BaseModel):
+    """Per-topic readiness summary for the readiness dashboard."""
+
+    concept_id: int = Field(gt=0)
+    concept_name: str = Field(min_length=1)
+    readiness_score: float = Field(ge=0.0, le=1.0)
+    recommend_quiz: bool
+    last_assessed_at: datetime | None = None
+
+
+class ReadinessSnapshotResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    user_id: int = Field(gt=0)
+    topics: list[ReadinessTopicState]
+
+
+# ── Slice 10: Stateful flashcard responses ────────────────────────────
+
+FlashcardSelfRating = Literal["again", "hard", "good", "easy"]
+
+
+class StatefulFlashcard(BaseModel):
+    flashcard_id: str = Field(min_length=1)
+    front: str = Field(min_length=1)
+    back: str = Field(min_length=1)
+    hint: str = Field(min_length=1)
+    self_rating: FlashcardSelfRating | None = None
+    passed: bool = False
+
+
+class StatefulFlashcardsResponse(BaseModel):
+    workspace_id: int = Field(gt=0)
+    concept_id: int = Field(gt=0)
+    concept_name: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    flashcards: list[StatefulFlashcard]
+    has_more: bool = True
+    exhausted_reason: str | None = None
+
+
+class FlashcardRateRequest(BaseModel):
+    flashcard_id: str = Field(min_length=1)
+    self_rating: FlashcardSelfRating
+
+
+class FlashcardRateResponse(BaseModel):
+    flashcard_id: str
+    self_rating: FlashcardSelfRating
+    passed: bool
+
+
+# ── Slice 12: Research agent schemas ──────────────────────────────────
+
+
+class ResearchSourceCreate(BaseModel):
+    url: str = Field(min_length=1)
+    label: str | None = None
+
+
+class ResearchSourceSummary(BaseModel):
+    source_id: int = Field(gt=0)
+    url: str
+    label: str | None = None
+    active: bool
+
+
+class ResearchRunSummary(BaseModel):
+    run_id: int = Field(gt=0)
+    status: Literal["pending", "running", "completed", "failed"]
+    candidates_found: int = Field(ge=0)
+    started_at: datetime
+    finished_at: datetime | None = None
+
+
+class ResearchCandidateSummary(BaseModel):
+    candidate_id: int = Field(gt=0)
+    source_url: str
+    title: str | None = None
+    snippet: str | None = None
+    status: Literal["pending", "approved", "rejected", "ingested"]
+
+
+class ResearchCandidateReviewRequest(BaseModel):
+    status: Literal["approved", "rejected"]
+
+
 __all__ = [
+    "ActionCTA",
+    "AssessmentCard",
     "AssistantDraft",
     "AssistantResponseEnvelope",
     "AssistantResponseKind",
@@ -423,6 +568,9 @@ __all__ = [
     "ConversationMeta",
     "EvidenceItem",
     "EvidenceSourceType",
+    "FlashcardRateRequest",
+    "FlashcardRateResponse",
+    "FlashcardSelfRating",
     "GraphConceptDetail",
     "GraphConceptDetailResponse",
     "GraphConceptListResponse",
@@ -436,6 +584,8 @@ __all__ = [
     "GraphSubgraphNode",
     "GraphSubgraphResponse",
     "GroundingMode",
+    "KBDocumentListResponse",
+    "KBDocumentSummary",
     "LevelUpQuizSubmitResponse",
     "LuckyMode",
     "MasteryStatus",
@@ -448,5 +598,15 @@ __all__ = [
     "QuizItemResult",
     "QuizItemSummary",
     "QuizItemType",
+    "ReadinessSnapshotResponse",
+    "ReadinessTopicState",
     "RefusalReason",
+    "ResearchCandidateReviewRequest",
+    "ResearchCandidateSummary",
+    "ResearchRunSummary",
+    "ResearchSourceCreate",
+    "ResearchSourceSummary",
+    "ResponseMode",
+    "StatefulFlashcard",
+    "StatefulFlashcardsResponse",
 ]

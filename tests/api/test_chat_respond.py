@@ -7,12 +7,17 @@ from typing import Any
 import pytest
 from adapters.db.dependencies import get_db_session
 from adapters.db.documents import DocumentRow
+from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from apps.api.main import app
 from core.schemas import GroundingMode
 from domain.retrieval.hybrid_retriever import HybridRetriever
 from domain.retrieval.types import RankedChunk
 from domain.retrieval.vector_retriever import PgVectorRetriever
 from fastapi.testclient import TestClient
+
+_FAKE_USER = type("FakeUser", (), {"id": 5, "public_id": "u-fake", "email": "t@t.com", "display_name": None})()
+_FAKE_WS_CTX = WorkspaceContext(workspace_id=7, user=_FAKE_USER)
+_TEST_WS = "test-ws-uuid"
 
 
 class DummyEmbeddingProvider:
@@ -26,7 +31,7 @@ class DummyTutorLLMClient:
     """Tutor LLM client double used by chat API tests."""
 
     def generate_tutor_text(self, *, prompt: str) -> str:
-        if "STYLE: direct" in prompt:
+        if "STYLE: direct" in prompt.lower() or "TEACHING STYLE: Direct" in prompt:
             return "DIRECT: concise explanation"
         return "SOCRATIC: guiding question first"
 
@@ -60,11 +65,12 @@ def test_chat_respond_uses_default_grounding_mode_when_request_omits_mode(
     monkeypatch.setattr(app.state.settings, "default_grounding_mode", GroundingMode.HYBRID)
 
     app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = lambda: _FAKE_WS_CTX
     try:
         client = TestClient(app)
         response = client.post(
-            "/chat/respond",
-            json={"workspace_id": 7, "query": "what is a tensor"},
+            f"/workspaces/{_TEST_WS}/chat/respond",
+            json={"query": "what is a tensor"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -91,12 +97,12 @@ def test_chat_respond_request_mode_overrides_default(monkeypatch: Any) -> None:
     monkeypatch.setattr(app.state.settings, "default_grounding_mode", GroundingMode.HYBRID)
 
     app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = lambda: _FAKE_WS_CTX
     try:
         client = TestClient(app)
         response = client.post(
-            "/chat/respond",
+            f"/workspaces/{_TEST_WS}/chat/respond",
             json={
-                "workspace_id": 7,
                 "query": "what is a tensor",
                 "grounding_mode": "strict",
             },
@@ -151,11 +157,12 @@ def test_chat_respond_returns_answer_envelope_with_workspace_citations(
     monkeypatch.setattr(app.state.settings, "default_grounding_mode", GroundingMode.STRICT)
 
     app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = lambda: _FAKE_WS_CTX
     try:
         client = TestClient(app)
         response = client.post(
-            "/chat/respond",
-            json={"workspace_id": 7, "query": "describe linear maps"},
+            f"/workspaces/{_TEST_WS}/chat/respond",
+            json={"query": "describe linear maps"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -204,17 +211,18 @@ def test_chat_respond_uses_hybrid_retriever_path(monkeypatch: Any) -> None:
     monkeypatch.setattr(app.state.settings, "default_grounding_mode", GroundingMode.HYBRID)
 
     app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = lambda: _FAKE_WS_CTX
     try:
         client = TestClient(app)
         response = client.post(
-            "/chat/respond",
-            json={"workspace_id": 12, "query": "hybrid path", "top_k": 4},
+            f"/workspaces/{_TEST_WS}/chat/respond",
+            json={"query": "hybrid path", "top_k": 4},
         )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert captured == {"query": "hybrid path", "workspace_id": 12, "top_k": 4}
+    assert captured == {"query": "hybrid path", "workspace_id": 7, "top_k": 4}
 
 
 @pytest.mark.parametrize(
@@ -271,14 +279,13 @@ def test_chat_respond_mastery_gating_matrix_with_evidence(
     _patch_tutor_llm(monkeypatch)
 
     app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = lambda: _FAKE_WS_CTX
     try:
         client = TestClient(app)
         response = client.post(
-            "/chat/respond",
+            f"/workspaces/{_TEST_WS}/chat/respond",
             json={
-                "workspace_id": 7,
                 "query": "describe linear maps",
-                "user_id": 5,
                 "concept_id": 11,
                 "grounding_mode": grounding_mode,
             },
@@ -325,14 +332,13 @@ def test_chat_respond_refusal_policy_unchanged_across_mastery_states(
     _patch_tutor_llm(monkeypatch)
 
     app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = lambda: _FAKE_WS_CTX
     try:
         client = TestClient(app)
         response = client.post(
-            "/chat/respond",
+            f"/workspaces/{_TEST_WS}/chat/respond",
             json={
-                "workspace_id": 7,
                 "query": "what is a tensor",
-                "user_id": 5,
                 "concept_id": 11,
                 "grounding_mode": grounding_mode,
             },

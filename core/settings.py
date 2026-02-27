@@ -109,6 +109,24 @@ class Settings(BaseSettings):
         ),
         gt=0,
     )
+    graph_llm_json_temperature: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "APP_GRAPH_LLM_JSON_TEMPERATURE",
+            "GRAPH_LLM_JSON_TEMPERATURE",
+        ),
+        ge=0.0,
+        le=2.0,
+    )
+    graph_llm_tutor_temperature: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "APP_GRAPH_LLM_TUTOR_TEMPERATURE",
+            "GRAPH_LLM_TUTOR_TEMPERATURE",
+        ),
+        ge=0.0,
+        le=2.0,
+    )
     observability_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("APP_OBSERVABILITY_ENABLED", "OBSERVABILITY_ENABLED"),
@@ -280,6 +298,73 @@ class Settings(BaseSettings):
             "GARDENER_RECENT_WINDOW_DAYS",
         ),
         ge=1,
+    )
+
+    # ── Auth settings ──────────────────────────────────────────────────
+    auth_magic_link_ttl_minutes: int = Field(
+        default=30,
+        validation_alias=AliasChoices(
+            "APP_AUTH_MAGIC_LINK_TTL_MINUTES",
+            "AUTH_MAGIC_LINK_TTL_MINUTES",
+        ),
+        ge=1,
+    )
+    auth_session_ttl_days: int = Field(
+        default=14,
+        validation_alias=AliasChoices(
+            "APP_AUTH_SESSION_TTL_DAYS",
+            "AUTH_SESSION_TTL_DAYS",
+        ),
+        ge=1,
+    )
+
+    # ── Readiness / half-life settings ─────────────────────────────────
+    readiness_cadence_hours: int = Field(
+        default=24,
+        validation_alias=AliasChoices(
+            "APP_READINESS_CADENCE_HOURS",
+            "READINESS_CADENCE_HOURS",
+        ),
+        ge=1,
+    )
+    readiness_half_life_days: float = Field(
+        default=7.0,
+        validation_alias=AliasChoices(
+            "APP_READINESS_HALF_LIFE_DAYS",
+            "READINESS_HALF_LIFE_DAYS",
+        ),
+        gt=0.0,
+    )
+
+    # ── Research agent settings ────────────────────────────────────────
+    research_max_sources_per_workspace: int = Field(
+        default=20,
+        validation_alias=AliasChoices(
+            "APP_RESEARCH_MAX_SOURCES_PER_WORKSPACE",
+            "RESEARCH_MAX_SOURCES_PER_WORKSPACE",
+        ),
+        ge=1,
+    )
+    research_max_candidates_per_run: int = Field(
+        default=50,
+        validation_alias=AliasChoices(
+            "APP_RESEARCH_MAX_CANDIDATES_PER_RUN",
+            "RESEARCH_MAX_CANDIDATES_PER_RUN",
+        ),
+        ge=1,
+    )
+
+    # ── Prompt kit / persona ──────────────────────────────────────────
+    tutor_persona: str = Field(
+        default="openclaw",
+        validation_alias=AliasChoices("APP_TUTOR_PERSONA", "TUTOR_PERSONA"),
+    )
+    social_intent_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "APP_SOCIAL_INTENT_ENABLED",
+            "SOCIAL_INTENT_ENABLED",
+        ),
     )
 
     @field_validator("cors_allowed_origins", "cors_allowed_methods", mode="before")

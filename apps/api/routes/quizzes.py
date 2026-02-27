@@ -1,9 +1,12 @@
+"""Level-up quiz routes (workspace-scoped)."""
+
 from __future__ import annotations
 
 from typing import Any
 
 from adapters.db.dependencies import get_db_session
 from adapters.llm.factory import build_graph_llm_client
+from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.schemas import LevelUpQuizSubmitResponse, QuizCreateResponse
 from core.settings import Settings
 from domain.learning.level_up import (
@@ -18,12 +21,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-router = APIRouter(prefix="/quizzes", tags=["quizzes"])
+router = APIRouter(prefix="/workspaces/{ws_id}/quizzes", tags=["quizzes"])
 
 
 class CreateLevelUpQuizRequest(BaseModel):
-    workspace_id: int = Field(gt=0)
-    user_id: int = Field(gt=0)
     concept_id: int = Field(gt=0)
     session_id: int | None = Field(default=None, gt=0)
     question_count: int | None = Field(default=None, ge=5, le=12)
@@ -31,8 +32,6 @@ class CreateLevelUpQuizRequest(BaseModel):
 
 
 class SubmitLevelUpQuizRequest(BaseModel):
-    workspace_id: int = Field(gt=0)
-    user_id: int = Field(gt=0)
     answers: list[dict[str, Any]] = Field(min_length=1)
 
 
@@ -44,6 +43,7 @@ class SubmitLevelUpQuizRequest(BaseModel):
 def create_quiz_level_up(
     payload: CreateLevelUpQuizRequest,
     request: Request,
+    ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> QuizCreateResponse:
     llm_client = getattr(request.app.state, "graph_llm_client", None)
@@ -58,8 +58,8 @@ def create_quiz_level_up(
         return QuizCreateResponse.model_validate(
             create_level_up_quiz(
                 db,
-                workspace_id=payload.workspace_id,
-                user_id=payload.user_id,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
                 concept_id=payload.concept_id,
                 session_id=payload.session_id,
                 question_count=payload.question_count,
@@ -86,6 +86,7 @@ def submit_quiz_level_up(
     quiz_id: int,
     payload: SubmitLevelUpQuizRequest,
     request: Request,
+    ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> LevelUpQuizSubmitResponse:
     llm_client = getattr(request.app.state, "graph_llm_client", None)
@@ -102,8 +103,8 @@ def submit_quiz_level_up(
             submit_level_up_quiz(
                 db,
                 quiz_id=quiz_id,
-                workspace_id=payload.workspace_id,
-                user_id=payload.user_id,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
                 answers=payload.answers,
                 llm_client=llm_client,
             )

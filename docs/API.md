@@ -7,28 +7,51 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 ### Conventions
 
 - Base URL: `http://localhost:8000`
-- Authentication: none currently required
+- Authentication: Bearer session token (obtained via `/auth/verify`). Some routes require workspace membership.
 - Transport: JSON unless otherwise noted
 - Validation errors are returned as HTTP `422` (`HTTPValidationError` schema)
 
 ### Endpoint Index
 
 - `GET /healthz`
-- `POST /chat/sessions`
-- `GET /chat/sessions`
-- `GET /chat/sessions/{session_id}/messages`
-- `DELETE /chat/sessions/{session_id}`
-- `POST /chat/respond`
+- `POST /auth/magic-link`
+- `POST /auth/verify`
+- `POST /auth/logout`
+- `GET /auth/me`
+- `GET /auth/me/tutor-profile`
 - `POST /documents/upload`
-- `GET /graph/concepts`
-- `GET /graph/concepts/{concept_id}`
-- `GET /graph/concepts/{concept_id}/subgraph`
-- `GET /graph/lucky`
-- `POST /quizzes/level-up`
-- `POST /quizzes/{quiz_id}/submit`
-- `POST /practice/flashcards`
-- `POST /practice/quizzes`
-- `POST /practice/quizzes/{quiz_id}/submit`
+- `GET /workspaces`
+- `POST /workspaces`
+- `GET /workspaces/{ws_id}`
+- `PATCH /workspaces/{ws_id}/settings`
+- `POST /workspaces/{ws_id}/chat/respond`
+- `POST /workspaces/{ws_id}/chat/sessions`
+- `GET /workspaces/{ws_id}/chat/sessions`
+- `DELETE /workspaces/{ws_id}/chat/sessions/{session_id}`
+- `GET /workspaces/{ws_id}/chat/sessions/{session_id}/messages`
+- `GET /workspaces/{ws_id}/graph/concepts`
+- `GET /workspaces/{ws_id}/graph/concepts/{concept_id}`
+- `GET /workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph`
+- `GET /workspaces/{ws_id}/graph/lucky`
+- `GET /workspaces/{ws_id}/knowledge-base/documents`
+- `POST /workspaces/{ws_id}/knowledge-base/documents/upload`
+- `DELETE /workspaces/{ws_id}/knowledge-base/documents/{document_id}`
+- `POST /workspaces/{ws_id}/knowledge-base/documents/{document_id}/reprocess`
+- `POST /workspaces/{ws_id}/practice/flashcards`
+- `POST /workspaces/{ws_id}/practice/flashcards/rate`
+- `POST /workspaces/{ws_id}/practice/flashcards/stateful`
+- `POST /workspaces/{ws_id}/practice/quizzes`
+- `POST /workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit`
+- `POST /workspaces/{ws_id}/quizzes/level-up`
+- `POST /workspaces/{ws_id}/quizzes/{quiz_id}/submit`
+- `GET /workspaces/{ws_id}/readiness/snapshot`
+- `GET /workspaces/{ws_id}/research/candidates`
+- `PATCH /workspaces/{ws_id}/research/candidates/{candidate_id}`
+- `POST /workspaces/{ws_id}/research/runs`
+- `GET /workspaces/{ws_id}/research/runs`
+- `POST /workspaces/{ws_id}/research/sources`
+- `GET /workspaces/{ws_id}/research/sources`
+- `DELETE /workspaces/{ws_id}/research/sources/{source_id}`
 
 ### GET /healthz
 
@@ -62,7 +85,241 @@ curl -sS http://localhost:8000/healthz
 }
 ```
 
-### POST /chat/respond
+### POST /auth/magic-link
+
+Tag/group: `auth`
+
+Purpose: issue a magic-link token for the given email address. In dev mode the token is echoed back; in production it would be emailed.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `email` | JSON body | string (email) | yes | valid email address |
+
+Success responses:
+
+- `200 OK` with `MagicLinkResponse`
+
+`MagicLinkResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `message` | string | confirmation message |
+| `debug_token` | string/null | raw token echoed in dev mode |
+
+Error responses:
+
+- `422 Unprocessable Entity` for validation failures
+
+### POST /auth/verify
+
+Tag/group: `auth`
+
+Purpose: exchange a magic-link token for a session token and user record.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `token` | JSON body | string | yes | non-empty magic-link token |
+
+Success responses:
+
+- `200 OK` with `VerifyTokenResponse`
+
+`VerifyTokenResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `session_token` | string | Bearer session token |
+| `user` | object | `UserPublic` with `public_id`, `email`, `display_name` |
+
+Error responses:
+
+- `401 Unauthorized` when token is invalid or expired
+- `422 Unprocessable Entity` for validation failures
+
+### POST /auth/logout
+
+Tag/group: `auth`
+
+Purpose: revoke the current session token. Requires Bearer auth.
+
+Request contract:
+
+- Body: none
+- Headers: `Authorization: Bearer <session_token>`
+
+Success responses:
+
+- `204 No Content`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+
+### GET /auth/me
+
+Tag/group: `auth`
+
+Purpose: return the authenticated user profile.
+
+Request contract:
+
+- Body: none
+- Headers: `Authorization: Bearer <session_token>`
+
+Success responses:
+
+- `200 OK` with `UserPublic`
+
+`UserPublic` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `public_id` | string | UUID public identifier |
+| `email` | string | user email |
+| `display_name` | string/null | optional display name |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+
+### GET /auth/me/tutor-profile
+
+Tag/group: `auth`
+
+Purpose: return or initialize the tutor profile for the authenticated user.
+
+Request contract:
+
+- Body: none
+- Headers: `Authorization: Bearer <session_token>`
+
+Success responses:
+
+- `200 OK` with `TutorProfileResponse`
+
+`TutorProfileResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `readiness_summary` | string | aggregated readiness notes |
+| `learning_style_notes` | string | inferred learning style |
+| `last_activity_at` | string/null | ISO timestamp |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+
+### POST /workspaces
+
+Tag/group: `workspaces`
+
+Purpose: create a workspace and add the current user as owner-member.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `name` | JSON body | string | yes | 1–255 chars |
+| `description` | JSON body | string | no | optional description |
+
+Success responses:
+
+- `201 Created` with `WorkspaceSummary`
+
+`WorkspaceSummary` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | integer | workspace row ID |
+| `public_id` | string | UUID public identifier |
+| `name` | string | workspace name |
+| `description` | string/null | optional description |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `422 Unprocessable Entity` for validation failures
+
+### GET /workspaces
+
+Tag/group: `workspaces`
+
+Purpose: list workspaces the current user is a member of.
+
+Request contract:
+
+- Body: none
+- Headers: `Authorization: Bearer <session_token>`
+
+Success responses:
+
+- `200 OK` with `WorkspaceListResponse`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+
+### GET /workspaces/{ws_id}
+
+Tag/group: `workspaces`
+
+Purpose: get workspace details including settings (requires membership).
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+
+Success responses:
+
+- `200 OK` with `WorkspaceDetail`
+
+`WorkspaceDetail` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | integer | workspace row ID |
+| `public_id` | string | UUID public identifier |
+| `name` | string | workspace name |
+| `description` | string/null | optional description |
+| `settings` | object | JSONB settings blob |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when workspace does not exist
+
+### PATCH /workspaces/{ws_id}/settings
+
+Tag/group: `workspaces`
+
+Purpose: merge new settings into the workspace JSONB settings column.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `settings` | JSON body | object | yes | key-value pairs to merge |
+
+Success responses:
+
+- `200 OK` with `WorkspaceDetail`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when workspace does not exist
+- `422 Unprocessable Entity` for validation failures
+
+### POST /workspaces/{ws_id}/chat/respond
 
 Tag/group: `chat`
 
@@ -142,7 +399,7 @@ curl -sS http://localhost:8000/chat/respond \
 }
 ```
 
-### POST /chat/sessions
+### POST /workspaces/{ws_id}/chat/sessions
 
 Tag/group: `chat`
 
@@ -164,7 +421,7 @@ Error responses:
 
 - `422 Unprocessable Entity` for validation failures
 
-### GET /chat/sessions
+### GET /workspaces/{ws_id}/chat/sessions
 
 Tag/group: `chat`
 
@@ -186,7 +443,7 @@ Error responses:
 
 - `422 Unprocessable Entity` for validation failures
 
-### GET /chat/sessions/{session_id}/messages
+### GET /workspaces/{ws_id}/chat/sessions/{session_id}/messages
 
 Tag/group: `chat`
 
@@ -210,7 +467,7 @@ Error responses:
 - `404 Not Found` when the session is not scoped to workspace/user
 - `422 Unprocessable Entity` for validation failures
 
-### DELETE /chat/sessions/{session_id}
+### DELETE /workspaces/{ws_id}/chat/sessions/{session_id}
 
 Tag/group: `chat`
 
@@ -296,7 +553,7 @@ curl -sS -X POST \
 }
 ```
 
-### GET /graph/concepts
+### GET /workspaces/{ws_id}/graph/concepts
 
 Tag/group: `graph`
 
@@ -319,7 +576,7 @@ Error responses:
 
 - `422 Unprocessable Entity` for validation failures
 
-### GET /graph/concepts/{concept_id}
+### GET /workspaces/{ws_id}/graph/concepts/{concept_id}
 
 Tag/group: `graph`
 
@@ -372,7 +629,7 @@ curl -sS 'http://localhost:8000/graph/concepts/42?workspace_id=7'
 }
 ```
 
-### GET /graph/concepts/{concept_id}/subgraph
+### GET /workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph
 
 Tag/group: `graph`
 
@@ -431,7 +688,7 @@ curl -sS \
 }
 ```
 
-### GET /graph/lucky
+### GET /workspaces/{ws_id}/graph/lucky
 
 Tag/group: `graph`
 
@@ -493,7 +750,7 @@ curl -sS 'http://localhost:8000/graph/lucky?workspace_id=7&concept_id=42&mode=ad
 }
 ```
 
-### POST /quizzes/level-up
+### POST /workspaces/{ws_id}/quizzes/level-up
 
 Tag/group: `quizzes`
 
@@ -565,7 +822,7 @@ curl -sS -X POST http://localhost:8000/quizzes/level-up \
 }
 ```
 
-### POST /quizzes/{quiz_id}/submit
+### POST /workspaces/{ws_id}/quizzes/{quiz_id}/submit
 
 Tag/group: `quizzes`
 
@@ -646,7 +903,7 @@ curl -sS -X POST http://localhost:8000/quizzes/101/submit \
 }
 ```
 
-### POST /practice/flashcards
+### POST /workspaces/{ws_id}/practice/flashcards
 
 Tag/group: `practice`
 
@@ -706,7 +963,75 @@ curl -sS -X POST http://localhost:8000/practice/flashcards \
 }
 ```
 
-### POST /practice/quizzes
+### POST /workspaces/{ws_id}/practice/flashcards/stateful
+
+Tag/group: `practice`
+
+Purpose: generate stateful flashcards persisted to the bank with novelty dedup.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | JSON body | integer | yes | `> 0` |
+| `concept_id` | JSON body | integer | yes | `> 0` |
+| `card_count` | JSON body | integer | no | default `6`, range `3..12` |
+
+Success responses:
+
+- `200 OK` with `StatefulFlashcardsResponse`
+
+`StatefulFlashcardsResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | integer | workspace scope |
+| `concept_id` | integer | target concept |
+| `concept_name` | string | canonical concept name |
+| `run_id` | string | UUID of the generation run |
+| `flashcards` | array | `StatefulFlashcard` objects with `flashcard_id`, `front`, `back`, `hint` |
+| `has_more` | boolean | whether more cards can be generated |
+| `exhausted_reason` | string/null | reason when no more cards available |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `404 Not Found` when concept/workspace scope is invalid
+- `422 Unprocessable Entity` for validation or generation errors
+- `503 Service Unavailable` when LLM is unavailable
+
+### POST /workspaces/{ws_id}/practice/flashcards/rate
+
+Tag/group: `practice`
+
+Purpose: submit a self-rating for a stateful flashcard.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `flashcard_id` | JSON body | string | yes | UUID of the flashcard |
+| `self_rating` | JSON body | enum | yes | `"again"`, `"hard"`, `"good"`, or `"easy"` |
+
+Success responses:
+
+- `200 OK` with `FlashcardRateResponse`
+
+`FlashcardRateResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `flashcard_id` | string | echoed flashcard UUID |
+| `self_rating` | enum | recorded rating |
+| `passed` | boolean | true for `good`/`easy`, false for `again`/`hard` |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `404 Not Found` when flashcard not found
+- `422 Unprocessable Entity` for validation failures
+
+### POST /workspaces/{ws_id}/practice/quizzes
 
 Tag/group: `practice`
 
@@ -764,7 +1089,7 @@ curl -sS -X POST http://localhost:8000/practice/quizzes \
 }
 ```
 
-### POST /practice/quizzes/{quiz_id}/submit
+### POST /workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit
 
 Tag/group: `practice`
 
@@ -840,3 +1165,342 @@ curl -sS -X POST http://localhost:8000/practice/quizzes/201/submit \
   "retry_hint": null
 }
 ```
+
+### GET /workspaces/{ws_id}/knowledge-base/documents
+
+Tag/group: `knowledge-base`
+
+Purpose: list documents in the workspace knowledge base with chunk counts.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `200 OK` with `KBDocumentListResponse`
+
+`KBDocumentListResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | integer | workspace scope |
+| `documents` | array | list of `KBDocumentSummary` |
+
+`KBDocumentSummary` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `document_id` | integer | document row ID |
+| `public_id` | string | UUID public identifier |
+| `title` | string/null | document title |
+| `source_uri` | string/null | original source URI |
+| `chunk_count` | integer | number of chunks |
+| `ingestion_status` | string | `pending` \| `ingested` |
+| `graph_status` | string | `disabled` \| `pending` \| `extracted` |
+| `graph_concept_count` | integer | distinct concept links extracted for this document |
+| `created_at` | datetime | ingestion timestamp |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
+### DELETE /workspaces/{ws_id}/knowledge-base/documents/{document_id}
+
+Tag/group: `knowledge-base`
+
+Purpose: delete a document and its chunks from the knowledge base (cascading delete).
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `document_id` | path | integer | yes | document ID |
+| `workspace_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `204 No Content`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when document not found in workspace
+
+### POST /workspaces/{ws_id}/knowledge-base/documents/upload
+
+Tag/group: `knowledge-base`
+
+Purpose: upload a document (txt, md, pdf) to the workspace knowledge base.
+
+Request contract (multipart/form-data):
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `file` | body (multipart) | file | yes | txt, md, or pdf; max 20 MB |
+| `workspace_id` | body (form) | integer | yes | `> 0` |
+| `title` | body (form) | string | no | optional document title |
+
+Success responses:
+
+- `201 Created` with payload `{"document_id", "workspace_id", "title", "chunk_count", "created"}`
+
+Error responses:
+
+- `400 Bad Request` when uploaded file is empty
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `413 Request Entity Too Large` when file exceeds 20 MB
+- `422 Unprocessable Entity` when document content is invalid
+- `503 Service Unavailable` when graph dependencies unavailable
+
+### POST /workspaces/{ws_id}/knowledge-base/documents/{document_id}/reprocess
+
+Tag/group: `knowledge-base`
+
+Purpose: re-chunk and re-embed a document (returns 202 — async stub).
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `document_id` | path | integer | yes | document ID |
+| `workspace_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `202 Accepted` with status payload `{"document_id", "workspace_id", "status": "queued", "message"}`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when document not found in workspace
+
+### GET /workspaces/{ws_id}/readiness/snapshot
+
+Tag/group: `readiness`
+
+Purpose: return per-topic readiness scores for the current user in a workspace.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `200 OK` with `ReadinessSnapshotResponse`
+
+`ReadinessSnapshotResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | integer | workspace scope |
+| `user_id` | integer | user scope |
+| `topics` | array | list of `ReadinessTopicState` |
+
+`ReadinessTopicState` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `concept_id` | integer | canonical concept ID |
+| `concept_name` | string | canonical concept name |
+| `readiness_score` | number | `0.0..1.0`, exponential-decay adjusted |
+| `recommend_quiz` | boolean | true when readiness < 0.5 and mastery >= 0.3 |
+| `last_assessed_at` | datetime/null | last mastery assessment timestamp |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+
+### POST /workspaces/{ws_id}/research/sources
+
+Tag/group: `research`
+
+Purpose: register a new research source URL for the workspace.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+| `url` | JSON body | string | yes | non-empty URL |
+| `label` | JSON body | string | no | optional display label |
+
+Success responses:
+
+- `201 Created` with `ResearchSourceSummary`
+
+`ResearchSourceSummary` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `source_id` | integer | source row ID |
+| `url` | string | source URL |
+| `label` | string/null | display label |
+| `active` | boolean | whether source is active |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `422 Unprocessable Entity` for validation failures
+
+### GET /workspaces/{ws_id}/research/sources
+
+Tag/group: `research`
+
+Purpose: list registered research sources for the workspace.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `200 OK` with array of `ResearchSourceSummary`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
+### DELETE /workspaces/{ws_id}/research/sources/{source_id}
+
+Tag/group: `research`
+
+Purpose: deactivate (soft-delete) a research source.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `source_id` | path | integer | yes | source ID |
+| `workspace_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `204 No Content`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
+### POST /workspaces/{ws_id}/research/runs
+
+Tag/group: `research`
+
+Purpose: trigger a new research run (actual crawling is async).
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+
+Success responses:
+
+- `201 Created` with `ResearchRunSummary`
+
+`ResearchRunSummary` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `run_id` | integer | run row ID |
+| `status` | string | run lifecycle state |
+| `candidates_found` | integer | number of candidates discovered |
+| `started_at` | datetime | run start timestamp |
+| `finished_at` | datetime/null | run completion timestamp |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
+### GET /workspaces/{ws_id}/research/runs
+
+Tag/group: `research`
+
+Purpose: list recent research runs for the workspace.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+| `limit` | query | integer | no | default `10`, range `1..50` |
+
+Success responses:
+
+- `200 OK` with array of `ResearchRunSummary`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
+### GET /workspaces/{ws_id}/research/candidates
+
+Tag/group: `research`
+
+Purpose: list research candidates, optionally filtered by run or status.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+| `run_id` | query | integer | no | filter by run ID |
+| `status` | query | string | no | filter by candidate status |
+
+Success responses:
+
+- `200 OK` with array of `ResearchCandidateSummary`
+
+`ResearchCandidateSummary` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `candidate_id` | integer | candidate row ID |
+| `source_url` | string | origin source URL |
+| `title` | string/null | extracted title |
+| `snippet` | string/null | text snippet |
+| `status` | string | `pending`, `approved`, `rejected`, `ingested` |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
+### PATCH /workspaces/{ws_id}/research/candidates/{candidate_id}
+
+Tag/group: `research`
+
+Purpose: approve or reject a research candidate.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `candidate_id` | path | integer | yes | candidate ID |
+| `workspace_id` | query | integer | yes | `> 0` |
+| `status` | JSON body | string | yes | `"approved"` or `"rejected"` |
+
+Success responses:
+
+- `200 OK` with `ResearchCandidateSummary`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when candidate not found

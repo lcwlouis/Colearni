@@ -9,6 +9,7 @@ from sqlalchemy import text
 from tests.db.test_level_up_quiz_flow_integration import (
     _client,
     _client_without_llm,
+    _make_user_row,
     _seed,
     _session_or_skip,
 )
@@ -118,12 +119,13 @@ def _answers(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def test_practice_flashcards_generation_success() -> None:
     session = _session_or_skip()
-    workspace_id, _, concept_id = _seed(session)
-    app, client = _client(session, PracticeLLM())
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client(session, PracticeLLM(), user=mock_user)
     try:
         response = client.post(
-            "/practice/flashcards",
-            json={"workspace_id": workspace_id, "concept_id": concept_id, "card_count": 4},
+            f"/workspaces/{ws_pid}/practice/flashcards",
+            json={"concept_id": concept_id, "card_count": 4},
         )
         assert response.status_code == 200
         assert len(response.json()["flashcards"]) == 4
@@ -144,8 +146,8 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
         )
     )
     session = _session_or_skip()
-    workspace_id, user_id, concept_id = _seed(session)
-    wrong_workspace_id, _, _ = _seed(session)
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    _wrong_workspace_id, wrong_ws_pid, _wrong_user_id, _ = _seed(session)
     session.execute(
         text(
             "INSERT INTO mastery (workspace_id, user_id, concept_id, score, status) "
@@ -155,7 +157,8 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
     )
     session.commit()
 
-    app, client = _client(session, PracticeLLM())
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client(session, PracticeLLM(), user=mock_user)
     configure_observability(
         get_settings().model_copy(
             update={
@@ -166,38 +169,34 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
         )
     )
     try:
+        # User is not a member of wrong workspace → 403
         wrong = client.post(
-            "/practice/quizzes",
-            json={"workspace_id": wrong_workspace_id, "user_id": user_id, "concept_id": concept_id},
+            f"/workspaces/{wrong_ws_pid}/practice/quizzes",
+            json={"concept_id": concept_id, "question_count": 4},
         )
-        assert wrong.status_code == 404
+        assert wrong.status_code == 403
 
         created = client.post(
-            "/practice/quizzes",
+            f"/workspaces/{ws_pid}/practice/quizzes",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "concept_id": concept_id,
                 "question_count": 4,
             },
         )
         quiz = created.json()
 
+        # Submit to wrong workspace → 403
         wrong_submit = client.post(
-            f"/practice/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{wrong_ws_pid}/practice/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": wrong_workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"]),
             },
         )
-        assert wrong_submit.status_code == 404
+        assert wrong_submit.status_code == 403
 
         submitted = client.post(
-            f"/practice/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/practice/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"]),
             },
         )
@@ -243,15 +242,14 @@ def test_practice_quiz_feedback_mastery_unchanged_and_workspace_scoping() -> Non
 
 def test_practice_quiz_generation_retries_when_first_payload_is_invalid() -> None:
     session = _session_or_skip()
-    workspace_id, user_id, concept_id = _seed(session)
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
     llm = FlakyPracticeLLM()
-    app, client = _client(session, llm)
+    app, client = _client(session, llm, user=mock_user)
     try:
         created = client.post(
-            "/practice/quizzes",
+            f"/workspaces/{ws_pid}/practice/quizzes",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "concept_id": concept_id,
                 "question_count": 4,
             },
@@ -264,14 +262,13 @@ def test_practice_quiz_generation_retries_when_first_payload_is_invalid() -> Non
 
 def test_practice_quiz_create_and_submit_without_llm_uses_fallback() -> None:
     session = _session_or_skip()
-    workspace_id, user_id, concept_id = _seed(session)
-    app, client = _client_without_llm(session)
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client_without_llm(session, user=mock_user)
     try:
         created = client.post(
-            "/practice/quizzes",
+            f"/workspaces/{ws_pid}/practice/quizzes",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "concept_id": concept_id,
                 "question_count": 4,
             },
@@ -282,10 +279,8 @@ def test_practice_quiz_create_and_submit_without_llm_uses_fallback() -> None:
         assert {item["item_type"] for item in quiz["items"]} == {"short_answer", "mcq"}
 
         submitted = client.post(
-            f"/practice/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/practice/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"]),
             },
         )
@@ -310,8 +305,9 @@ def test_practice_quiz_submit_failure_emits_observability_event() -> None:
         )
     )
     session = _session_or_skip()
-    workspace_id, user_id, concept_id = _seed(session)
-    app, client = _client(session, PracticeLLM())
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
+    app, client = _client(session, PracticeLLM(), user=mock_user)
     configure_observability(
         get_settings().model_copy(
             update={
@@ -323,10 +319,8 @@ def test_practice_quiz_submit_failure_emits_observability_event() -> None:
     )
     try:
         created = client.post(
-            "/practice/quizzes",
+            f"/workspaces/{ws_pid}/practice/quizzes",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "concept_id": concept_id,
                 "question_count": 4,
             },
@@ -335,10 +329,8 @@ def test_practice_quiz_submit_failure_emits_observability_event() -> None:
         quiz = created.json()
 
         submitted = client.post(
-            f"/practice/quizzes/{quiz['quiz_id']}/submit",
+            f"/workspaces/{ws_pid}/practice/quizzes/{quiz['quiz_id']}/submit",
             json={
-                "workspace_id": workspace_id,
-                "user_id": user_id,
                 "answers": _answers(quiz["items"])[:1],
             },
         )
