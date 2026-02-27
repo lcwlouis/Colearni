@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import uuid
 from typing import Any
 
 from core.contracts import GraphLLMClient
@@ -23,6 +25,73 @@ PracticeValidationError = level_up.LevelUpQuizValidationError
 PracticeGenerationError = level_up.LevelUpQuizValidationError
 PracticeGradingError = level_up.LevelUpQuizGradingError
 PracticeUnavailableError = level_up.LevelUpQuizUnavailableError
+
+
+# ── Fingerprint helpers (Slice 11: Novelty Engine) ────────────────────
+
+
+def fingerprint_text(text_value: str) -> str:
+    """Produce a SHA-256 fingerprint for dedup purposes."""
+    return hashlib.sha256(text_value.strip().lower().encode("utf-8")).hexdigest()
+
+
+def _load_existing_fingerprints(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int,
+    item_type: str,
+) -> set[str]:
+    """Return fingerprints of items the user has already seen for this concept."""
+    rows = session.execute(
+        text(
+            """
+            SELECT fingerprint
+            FROM practice_item_history
+            WHERE workspace_id = :workspace_id
+              AND user_id = :user_id
+              AND concept_id = :concept_id
+              AND item_type = :item_type
+            """
+        ),
+        {
+            "workspace_id": workspace_id,
+            "user_id": user_id,
+            "concept_id": concept_id,
+            "item_type": item_type,
+        },
+    ).all()
+    return {str(row[0]) for row in rows}
+
+
+def _record_item_fingerprints(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int,
+    item_type: str,
+    fingerprints: list[str],
+) -> None:
+    """Record fingerprints so future generations avoid duplicates."""
+    for fp in fingerprints:
+        session.execute(
+            text(
+                """
+                INSERT INTO practice_item_history
+                    (workspace_id, user_id, concept_id, item_type, fingerprint)
+                VALUES (:workspace_id, :user_id, :concept_id, :item_type, :fingerprint)
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "item_type": item_type,
+                "fingerprint": fp,
+            },
+        )
 
 
 def generate_practice_flashcards(
@@ -97,16 +166,28 @@ def create_practice_quiz(
     if not (MIN_ITEMS <= question_count <= MAX_ITEMS):
         raise PracticeValidationError(f"question_count must be between {MIN_ITEMS} and {MAX_ITEMS}")
 
+    # Slice 11: Load seen quiz fingerprints for novelty dedup
+    seen_fps = _load_existing_fingerprints(
+        session,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        concept_id=concept_id,
+        item_type="quiz",
+    )
+
     context = _context(session, workspace_id=workspace_id, concept_id=concept_id)
+    # Ask for extra items to compensate for dedup filtering
+    overfetch = question_count + len(seen_fps) if seen_fps else question_count
+
     if llm_client is None:
-        items = _fallback_practice_items(context=context, question_count=question_count)
+        items = _fallback_practice_items(context=context, question_count=overfetch)
     else:
         prompt = (
             "Return JSON practice quiz only. "
             "Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\",\"prompt\":\"...\","
             "\"payload\":{...}}]}\n"
             "Include at least one short_answer and one mcq.\n"
-            f"QUESTION_COUNT: {question_count}\n"
+            f"QUESTION_COUNT: {overfetch}\n"
             f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
         )
         with observation_context(
@@ -124,8 +205,33 @@ def create_practice_quiz(
                 llm_client=llm_client,
                 prompt=prompt,
                 context=context,
-                question_count=question_count,
+                question_count=overfetch,
             )
+
+    # Slice 11: Filter out already-seen quiz items
+    if seen_fps:
+        novel_items: list[dict[str, Any]] = []
+        for item in items:
+            fp = fingerprint_text(str(item.get("prompt", "")))
+            if fp not in seen_fps:
+                novel_items.append(item)
+        if len(novel_items) < MIN_ITEMS:
+            novel_items = items[:question_count]  # fallback to unfiltered if too few
+        items = novel_items[:question_count]
+
+    # Record new fingerprints
+    new_fps = [fingerprint_text(str(item.get("prompt", ""))) for item in items]
+    try:
+        _record_item_fingerprints(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            concept_id=concept_id,
+            item_type="quiz",
+            fingerprints=new_fps,
+        )
+    except Exception:
+        pass  # Non-critical: don't fail quiz creation if fingerprint recording fails
 
     return level_up.create_level_up_quiz(
         session,
@@ -334,3 +440,266 @@ def _parse_json(response: str, message: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise PracticeGenerationError(message)
     return payload
+
+
+# ── Slice 10: Stateful flashcard generation + rating ──────────────────
+
+
+def generate_stateful_flashcards(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int,
+    card_count: int,
+    llm_client: GraphLLMClient | None,
+) -> dict[str, Any]:
+    """Generate flashcards, persist to bank, return with run_id.
+
+    Unlike the basic ``generate_practice_flashcards``, this function:
+    * Creates a ``practice_generation_runs`` record.
+    * Inserts cards into ``practice_flashcard_bank`` with fingerprints.
+    * Initialises ``practice_flashcard_progress`` rows for the user.
+    * Skips cards whose fingerprints already exist (novelty, Slice 11).
+    * Returns ``StatefulFlashcardsResponse``-shaped dict.
+    """
+    if llm_client is None:
+        raise PracticeUnavailableError("LLM generation client is unavailable.")
+    if not (MIN_FLASHCARDS <= card_count <= MAX_FLASHCARDS):
+        raise PracticeValidationError(
+            f"card_count must be between {MIN_FLASHCARDS} and {MAX_FLASHCARDS}"
+        )
+
+    context = _context(session, workspace_id=workspace_id, concept_id=concept_id)
+
+    # Load already-seen fingerprints (Slice 11 – novelty)
+    existing_fps = _load_existing_fingerprints(
+        session,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        concept_id=concept_id,
+        item_type="flashcard",
+    )
+
+    # Ask for extra cards to compensate for dedup
+    request_count = card_count + min(len(existing_fps), card_count)
+
+    prompt = (
+        "Return JSON flashcards only. "
+        "Schema: {\"flashcards\":[{\"front\":\"...\",\"back\":\"...\","
+        "\"hint\":\"...\"}]}\n"
+        f"CARD_COUNT: {request_count}\n"
+        f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
+    )
+    with observation_context(
+        component="practice",
+        operation="practice.flashcards.generate_stateful",
+        workspace_id=workspace_id,
+    ), start_span(
+        "practice.flashcards.generate_stateful",
+        component="practice",
+        operation="practice.flashcards.generate_stateful",
+        workspace_id=workspace_id,
+    ) as span:
+        set_span_kind(span, SPAN_KIND_CHAIN)
+        payload = _parse_json(
+            llm_client.generate_tutor_text(prompt=prompt),
+            "Flashcard generation response is not valid JSON.",
+        )
+
+    raw_cards = payload.get("flashcards")
+    if not isinstance(raw_cards, list) or not raw_cards:
+        raise PracticeGenerationError("Flashcard response must contain flashcard entries.")
+
+    # Create generation run
+    run_row = (
+        session.execute(
+            text(
+                """
+                INSERT INTO practice_generation_runs
+                    (workspace_id, user_id, concept_id, generation_type, item_count)
+                VALUES (:workspace_id, :user_id, :concept_id, 'flashcard', 0)
+                RETURNING id, run_id
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+            },
+        )
+        .mappings()
+        .one()
+    )
+    run_pk = int(run_row["id"])
+    run_uuid = str(run_row["run_id"])
+
+    # Normalize + dedup + persist
+    persisted: list[dict[str, Any]] = []
+    new_fps: list[str] = []
+    for card in raw_cards:
+        if not isinstance(card, dict):
+            continue
+        front = str(card.get("front", "")).strip()
+        back = str(card.get("back", "")).strip()
+        hint = str(card.get("hint", "")).strip()
+        if not front or not back or not hint:
+            continue
+        fp = fingerprint_text(f"{front}|{back}")
+        if fp in existing_fps:
+            continue  # novelty skip
+        existing_fps.add(fp)  # prevent within-batch dupes
+        new_fps.append(fp)
+
+        bank_row = (
+            session.execute(
+                text(
+                    """
+                    INSERT INTO practice_flashcard_bank
+                        (run_id, workspace_id, concept_id, front, back, hint, fingerprint)
+                    VALUES (:run_id, :workspace_id, :concept_id, :front, :back, :hint, :fingerprint)
+                    RETURNING id, flashcard_id
+                    """
+                ),
+                {
+                    "run_id": run_pk,
+                    "workspace_id": workspace_id,
+                    "concept_id": concept_id,
+                    "front": front,
+                    "back": back,
+                    "hint": hint,
+                    "fingerprint": fp,
+                },
+            )
+            .mappings()
+            .one()
+        )
+
+        # Initialize progress row
+        session.execute(
+            text(
+                """
+                INSERT INTO practice_flashcard_progress (flashcard_id, user_id)
+                VALUES (:flashcard_id, :user_id)
+                ON CONFLICT (flashcard_id, user_id) DO NOTHING
+                """
+            ),
+            {"flashcard_id": int(bank_row["id"]), "user_id": user_id},
+        )
+
+        persisted.append({
+            "flashcard_id": str(bank_row["flashcard_id"]),
+            "front": front,
+            "back": back,
+            "hint": hint,
+            "self_rating": None,
+            "passed": False,
+        })
+        if len(persisted) >= card_count:
+            break
+
+    # Record fingerprints for novelty engine
+    _record_item_fingerprints(
+        session,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        concept_id=concept_id,
+        item_type="flashcard",
+        fingerprints=new_fps,
+    )
+
+    # Check exhaustion
+    has_more = len(persisted) >= card_count
+    exhausted_reason: str | None = None
+    if not persisted:
+        exhausted_reason = "All available flashcards have been studied."
+        has_more = False
+
+    # Update run record
+    session.execute(
+        text(
+            """
+            UPDATE practice_generation_runs
+            SET item_count = :count, has_more = :has_more, exhausted_reason = :exhausted_reason
+            WHERE id = :run_id
+            """
+        ),
+        {
+            "count": len(persisted),
+            "has_more": has_more,
+            "exhausted_reason": exhausted_reason,
+            "run_id": run_pk,
+        },
+    )
+    session.commit()
+
+    return {
+        "workspace_id": workspace_id,
+        "concept_id": concept_id,
+        "concept_name": context["concept_name"],
+        "run_id": run_uuid,
+        "flashcards": persisted,
+        "has_more": has_more,
+        "exhausted_reason": exhausted_reason,
+    }
+
+
+def rate_flashcard(
+    session: Session,
+    *,
+    flashcard_id: str,
+    user_id: int,
+    self_rating: str,
+) -> dict[str, Any]:
+    """Record a self-rating for a flashcard and compute passed status.
+
+    Rating intervals (simplified SM-2 variant):
+    * again → not passed, due immediately
+    * hard  → not passed, due in shorter interval
+    * good  → passed
+    * easy  → passed
+    """
+    if self_rating not in ("again", "hard", "good", "easy"):
+        raise PracticeValidationError(
+            "self_rating must be one of: again, hard, good, easy"
+        )
+
+    passed = self_rating in ("good", "easy")
+
+    # Look up the flashcard by UUID
+    bank_row = session.execute(
+        text(
+            """
+            SELECT id FROM practice_flashcard_bank
+            WHERE flashcard_id = :flashcard_id
+            LIMIT 1
+            """
+        ),
+        {"flashcard_id": flashcard_id},
+    ).mappings().first()
+    if bank_row is None:
+        raise PracticeNotFoundError("Flashcard not found.")
+
+    session.execute(
+        text(
+            """
+            INSERT INTO practice_flashcard_progress (flashcard_id, user_id, self_rating, passed, updated_at)
+            VALUES (:flashcard_id, :user_id, :self_rating, :passed, now())
+            ON CONFLICT (flashcard_id, user_id)
+            DO UPDATE SET self_rating = :self_rating, passed = :passed, updated_at = now()
+            """
+        ),
+        {
+            "flashcard_id": int(bank_row["id"]),
+            "user_id": user_id,
+            "self_rating": self_rating,
+            "passed": passed,
+        },
+    )
+    session.commit()
+
+    return {
+        "flashcard_id": flashcard_id,
+        "self_rating": self_rating,
+        "passed": passed,
+    }

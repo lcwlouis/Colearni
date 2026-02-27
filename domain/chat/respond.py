@@ -6,6 +6,7 @@ from adapters.db.documents import DocumentRow, get_document_by_id
 from adapters.db.mastery import get_mastery_status
 from adapters.embeddings.factory import build_embedding_provider
 from adapters.llm.factory import build_graph_llm_client
+from core.contracts import GraphLLMClient
 from core.observability import (
     SPAN_KIND_CHAIN,
     observation_context,
@@ -17,12 +18,14 @@ from core.schemas import (
     CITATION_LABEL_FROM_NOTES,
     AssistantDraft,
     AssistantResponseEnvelope,
+    AssistantResponseKind,
     ChatRespondRequest,
     Citation,
     ConceptSwitchSuggestion,
     ConversationMeta,
     EvidenceItem,
     EvidenceSourceType,
+    GroundingMode,
 )
 from core.settings import Settings, get_settings
 from core.verifier import verify_assistant_draft
@@ -30,8 +33,15 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from domain.chat.concept_resolver import resolve_concept_for_turn
-from domain.chat.session_memory import load_history_text, persist_turn
-from domain.chat.tutor_agent import build_tutor_response_text
+from domain.chat.prompt_kit import (
+    build_full_tutor_prompt,
+    build_social_response,
+    classify_social_intent,
+    get_persona,
+)
+from domain.chat.session_memory import load_assessment_context, load_history_text, persist_turn
+from domain.chat.tutor_agent import build_tutor_response_text, resolve_tutor_style
+from domain.readiness.analyzer import build_readiness_actions
 from domain.retrieval.fts_retriever import PgFtsRetriever
 from domain.retrieval.hybrid_retriever import HybridRetriever
 from domain.retrieval.types import RankedChunk
@@ -60,7 +70,38 @@ def generate_chat_response(
         active_settings = settings or get_settings()
         grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
 
+        # ── Slice 13: Social intent fast-path ─────────────────────────
+        if active_settings.social_intent_enabled and classify_social_intent(request.query):
+            persona = get_persona(active_settings.tutor_persona)
+            social_text = build_social_response(request.query, persona=persona)
+            envelope = AssistantResponseEnvelope(
+                kind=AssistantResponseKind.ANSWER,
+                text=social_text,
+                grounding_mode=grounding_mode,
+                evidence=[],
+                citations=[],
+                response_mode="social",
+                actions=[],
+            )
+            persist_turn(
+                session,
+                workspace_id=request.workspace_id,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                user_text=request.query,
+                assistant_payload=envelope.model_dump(mode="json"),
+            )
+            set_input_output(span, output_value=envelope.text)
+            return envelope
+
+        # ── Standard grounded path ────────────────────────────────────
         history_text = load_history_text(session, session_id=request.session_id)
+
+        # Slice 8: Load recent assessment context for tutor prompt
+        assessment_context = load_assessment_context(
+            session, session_id=request.session_id
+        )
+
         concept_resolution = resolve_concept_for_turn(
             session,
             workspace_id=request.workspace_id,
@@ -91,6 +132,39 @@ def generate_chat_response(
             workspace_id=request.workspace_id,
             top_k=request.top_k,
         )
+
+        # ── Empty workspace fast-path: guide user to upload docs ──────
+        if not ranked_chunks and _workspace_has_no_chunks(session, request.workspace_id):
+            no_docs_text = (
+                "It looks like your workspace doesn't have any documents yet! "
+                "I'd love to help you learn, but I need some study material first.\n\n"
+                "**Here's how to get started:**\n"
+                "1. Head over to the **Knowledge Base** page\n"
+                "2. Upload your notes, textbooks, or any study material (Markdown or text files)\n"
+                "3. Come back here and ask me anything about them!\n\n"
+                "Once you upload documents, I can provide Socratic guidance, "
+                "generate quizzes, and help you master the material. 📚"
+            )
+            empty_ws_envelope = AssistantResponseEnvelope(
+                kind=AssistantResponseKind.ANSWER,
+                text=no_docs_text,
+                grounding_mode=grounding_mode,
+                evidence=[],
+                citations=[],
+                response_mode="onboarding",
+                actions=[],
+            )
+            persist_turn(
+                session,
+                workspace_id=request.workspace_id,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                user_text=request.query,
+                assistant_payload=empty_ws_envelope.model_dump(mode="json"),
+            )
+            set_input_output(span, output_value=empty_ws_envelope.text)
+            return empty_ws_envelope
+
         if concept_resolution.resolved_concept is not None:
             ranked_chunks = _apply_concept_bias(
                 session,
@@ -119,11 +193,13 @@ def generate_chat_response(
         assistant_text = (
             concept_resolution.clarification_prompt
             if concept_resolution.requires_clarification
-            else build_tutor_response_text(
+            else _generate_tutor_text(
                 query=request.query,
                 evidence=evidence,
                 mastery_status=mastery_status,
                 llm_client=tutor_llm_client,
+                history_text=history_text,
+                assessment_context=assessment_context,
             )
         )
 
@@ -162,6 +238,22 @@ def generate_chat_response(
         )
         envelope = envelope.model_copy(update={"conversation_meta": meta})
 
+        # ── Slice 9: Readiness CTA actions ────────────────────────────
+        actions: list[dict[str, object]] = []
+        if request.user_id is not None:
+            try:
+                actions = build_readiness_actions(
+                    session,
+                    workspace_id=request.workspace_id,
+                    user_id=request.user_id,
+                    limit=2,
+                )
+            except Exception:
+                pass  # Non-critical: don't fail chat if readiness is unavailable
+        envelope = envelope.model_copy(
+            update={"actions": actions, "response_mode": "grounded"}
+        )
+
         set_input_output(span, output_value=envelope.text)
 
         persist_turn(
@@ -173,6 +265,46 @@ def generate_chat_response(
             assistant_payload=envelope.model_dump(mode="json"),
         )
         return envelope
+
+
+def _generate_tutor_text(
+    *,
+    query: str,
+    evidence: list[EvidenceItem],
+    mastery_status: str | None,
+    llm_client: GraphLLMClient | None,
+    history_text: str,
+    assessment_context: str,
+) -> str:
+    """Build a rich tutor prompt via prompt_kit and call the LLM.
+
+    Falls back to the simpler build_tutor_response_text when the full
+    prompt fails or the LLM is unavailable.
+    """
+    style = resolve_tutor_style(mastery_status=mastery_status)
+    persona = get_persona("openclaw")
+    prompt = build_full_tutor_prompt(
+        query=query,
+        evidence=evidence,
+        persona=persona,
+        style=style,
+        assessment_context=assessment_context,
+        history_summary=history_text,
+    )
+    if llm_client is not None:
+        try:
+            text = llm_client.generate_tutor_text(prompt=prompt).strip()
+        except (RuntimeError, ValueError):
+            text = ""
+        if text:
+            return text
+    # Fall back to the simpler pipeline
+    return build_tutor_response_text(
+        query=query,
+        evidence=evidence,
+        mastery_status=mastery_status,
+        llm_client=None,
+    )
 
 
 def _build_workspace_evidence(
@@ -330,6 +462,22 @@ def _single_line(value: str) -> str:
 
 def _clamp_score(score: float) -> float:
     return max(0.0, min(1.0, score))
+
+
+def _workspace_has_no_chunks(session: Session, workspace_id: int) -> bool:
+    """Return True if the workspace has zero indexed chunks."""
+    try:
+        row = (
+            session.execute(
+                text("SELECT 1 FROM chunks WHERE workspace_id = :wid LIMIT 1"),
+                {"wid": workspace_id},
+            )
+            .mappings()
+            .first()
+        )
+        return row is None
+    except Exception:
+        return False
 
 
 __all__ = ["generate_chat_response"]

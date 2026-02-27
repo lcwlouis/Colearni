@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 COMPACTION_THRESHOLD = 40
 COMPACTION_KEEP_RECENT = 16
 SUMMARY_SOURCE_LIMIT = 24
+ASSESSMENT_CARD_LIMIT = 5
 
 
 def load_history_text(
@@ -150,7 +151,87 @@ def maybe_compact_session_context(
 
 
 __all__ = [
+    "load_assessment_context",
     "load_history_text",
     "maybe_compact_session_context",
+    "persist_assessment_card",
     "persist_turn",
 ]
+
+
+# ── Slice 7: Assessment card persistence ──────────────────────────────
+
+
+def persist_assessment_card(
+    session: Session,
+    *,
+    workspace_id: int,
+    session_id: int | None,
+    user_id: int | None,
+    card_payload: dict[str, Any],
+) -> None:
+    """Persist a quiz/practice result as a structured 'card' message."""
+    if session_id is None or user_id is None:
+        return
+    assert_chat_session(
+        session,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+    append_chat_message(
+        session,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        message_type="card",
+        payload=card_payload,
+    )
+    session.commit()
+
+
+# ── Slice 8: Assessment history for tutor prompt context ──────────────
+
+
+def load_assessment_context(
+    session: Session,
+    *,
+    session_id: int | None,
+) -> str:
+    """Load recent assessment cards from the session to include in tutor prompt.
+
+    Returns a formatted string summarizing recent quiz/practice results.
+    """
+    if session_id is None:
+        return ""
+
+    recent = list_recent_chat_messages(session, session_id=session_id, limit=50)
+    cards: list[dict[str, Any]] = []
+    for message in recent:
+        if not isinstance(message, dict):
+            continue
+        if message.get("type") != "card":
+            continue
+        payload = message.get("payload")
+        if isinstance(payload, dict) and payload.get("card_type") in (
+            "quiz_result",
+            "practice_result",
+        ):
+            cards.append(payload)
+        if len(cards) >= ASSESSMENT_CARD_LIMIT:
+            break
+
+    if not cards:
+        return ""
+
+    lines: list[str] = []
+    for card in cards:
+        concept = card.get("concept_name", "unknown")
+        score = card.get("score", 0)
+        passed = "passed" if card.get("passed") else "not passed"
+        summary = card.get("summary", "")
+        lines.append(
+            f"- {card.get('card_type', 'result')}: {concept} "
+            f"— score {score:.0%}, {passed}. {summary}"
+        )
+    return "\n".join(lines)
