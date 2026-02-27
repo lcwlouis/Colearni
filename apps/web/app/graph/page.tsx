@@ -8,11 +8,12 @@ import { PracticeQuizCard } from "@/components/practice-quiz-card";
 import { ApiError, apiClient } from "@/lib/api/client";
 import { graphReducer, initialGraphState } from "@/lib/graph/graph-state";
 import { practiceReducer, initialPracticeState, toPracticeAnswers } from "@/lib/practice/practice-state";
+import { useRequireAuth } from "@/lib/auth";
 import type { LuckyMode, JsonObject } from "@/lib/api/types";
 
-const WS_ID = 1;
-
 export default function GraphPage() {
+  const auth = useRequireAuth();
+  const wsId = auth.activeWorkspaceId ?? "";
   const [state, dispatch] = useReducer(graphReducer, initialGraphState);
   const [query, setQuery] = useState("");
   const [luckyLoading, setLuckyLoading] = useState(false);
@@ -22,11 +23,12 @@ export default function GraphPage() {
   const [practiceMode, setPracticeMode] = useState<"none" | "flashcards" | "quiz">("none");
 
   useEffect(() => {
+    if (!wsId) return;
     dispatch({ type: "list_start" });
-    apiClient.listConcepts({ workspace_id: WS_ID, q: query || undefined, limit: 50 })
+    apiClient.listConcepts(wsId, { q: query || undefined, limit: 50 })
       .then((r) => dispatch({ type: "list_success", concepts: r.concepts }))
       .catch((e) => dispatch({ type: "list_error", error: e instanceof ApiError ? e.message : "Failed to load concepts" }));
-  }, [query]);
+  }, [query, wsId]);
 
   const selectConcept = useCallback((conceptId: number) => {
     dispatch({ type: "detail_start" });
@@ -34,19 +36,19 @@ export default function GraphPage() {
     dispatchPractice({ type: "reset" });
     setPracticeMode("none");
     Promise.all([
-      apiClient.getConceptDetail({ workspace_id: WS_ID, concept_id: conceptId }),
-      apiClient.getConceptSubgraph({ workspace_id: WS_ID, concept_id: conceptId, max_hops: 2, max_nodes: 40, max_edges: 80 }),
+      apiClient.getConceptDetail(wsId, conceptId),
+      apiClient.getConceptSubgraph(wsId, conceptId, { max_hops: 2, max_nodes: 40, max_edges: 80 }),
     ])
       .then(([detail, subgraph]) => dispatch({ type: "detail_success", detail, subgraph }))
       .catch((e) => dispatch({ type: "detail_error", error: e instanceof ApiError ? e.message : "Failed to load detail" }));
-  }, []);
+  }, [wsId]);
 
   const lucky = useCallback((mode: LuckyMode) => {
     const conceptId = state.selectedDetail?.concept.concept_id;
     if (!conceptId) return;
     setLuckyLoading(true);
     dispatch({ type: "clear_lucky" });
-    apiClient.getLuckyPick({ workspace_id: WS_ID, concept_id: conceptId, mode, k_hops: 2 })
+    apiClient.getLuckyPick(wsId, { concept_id: conceptId, mode, k_hops: 2 })
       .then((pick) => dispatch({ type: "lucky_success", pick }))
       .catch((e) => dispatch({ type: "lucky_error", error: e instanceof ApiError ? e.message : "Lucky pick failed" }))
       .finally(() => setLuckyLoading(false));
@@ -58,32 +60,32 @@ export default function GraphPage() {
     if (!conceptId) return;
     setPracticeMode("flashcards");
     dispatchPractice({ type: "flashcards_start" });
-    apiClient.generatePracticeFlashcards({ workspace_id: WS_ID, concept_id: conceptId })
+    apiClient.generatePracticeFlashcards(wsId, { concept_id: conceptId })
       .then((data) => dispatchPractice({ type: "flashcards_success", data }))
       .catch((e) => dispatchPractice({ type: "flashcards_error", error: e instanceof ApiError ? e.message : "Failed to generate flashcards" }));
-  }, [state.selectedDetail]);
+  }, [state.selectedDetail, wsId]);
 
   const loadQuiz = useCallback(() => {
     const conceptId = state.selectedDetail?.concept.concept_id;
     if (!conceptId) return;
     setPracticeMode("quiz");
     dispatchPractice({ type: "quiz_start" });
-    apiClient.createPracticeQuiz({ workspace_id: WS_ID, user_id: 1, concept_id: conceptId })
+    apiClient.createPracticeQuiz(wsId, { concept_id: conceptId })
       .then((quiz) => dispatchPractice({ type: "quiz_success", quiz }))
       .catch((e) => dispatchPractice({ type: "quiz_error", error: e instanceof ApiError ? e.message : "Failed to create practice quiz" }));
-  }, [state.selectedDetail]);
+  }, [state.selectedDetail, wsId]);
 
   const submitQuiz = useCallback(() => {
     if (!practiceState.quiz) return;
     dispatchPractice({ type: "submit_start" });
-    apiClient.submitPracticeQuiz(practiceState.quiz.quiz_id, {
-      workspace_id: WS_ID,
-      user_id: 1,
+    apiClient.submitPracticeQuiz(wsId, practiceState.quiz.quiz_id, {
       answers: toPracticeAnswers(practiceState.quiz.items, practiceState.answers),
     })
       .then((result) => dispatchPractice({ type: "submit_success", result }))
       .catch((e) => dispatchPractice({ type: "submit_error", error: e instanceof ApiError ? e.message : "Failed to submit practice quiz" }));
   }, [practiceState.quiz, practiceState.answers]);
+
+  if (auth.isLoading) return <p>Loading…</p>;
 
   const { phase, concepts, selectedDetail, subgraph, luckyPick, error } = state;
   const pick = luckyPick?.pick as (JsonObject & { concept_id?: number; canonical_name?: string; description?: string; hop_distance?: number | null }) | undefined;

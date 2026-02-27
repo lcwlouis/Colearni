@@ -59,13 +59,13 @@ export interface AssistantResponseEnvelope {
   citations: Citation[];
   refusal_reason: RefusalReason | null;
   conversation_meta: ConversationMeta | null;
+  response_mode?: "grounded" | "social";
+  actions?: ActionCTA[];
 }
 
 export interface ChatRespondRequest {
-  workspace_id: number;
   query: string;
   session_id?: number;
-  user_id?: number;
   concept_id?: number;
   suggested_concept_id?: number;
   concept_switch_decision?: ConceptSwitchDecision;
@@ -105,14 +105,10 @@ export interface ChatMessagesResponse {
 }
 
 export interface CreateChatSessionRequest {
-  workspace_id: number;
-  user_id: number;
   title?: string;
 }
 
 export interface DeleteChatSessionRequest {
-  workspace_id: number;
-  user_id: number;
   session_id: number;
 }
 
@@ -247,8 +243,6 @@ export interface QuizItemCreateDraft {
 }
 
 export interface CreateLevelUpQuizRequest {
-  workspace_id: number;
-  user_id: number;
   concept_id: number;
   session_id?: number;
   question_count?: number;
@@ -261,27 +255,170 @@ export interface QuizSubmitAnswer {
 }
 
 export interface SubmitLevelUpQuizRequest {
-  workspace_id: number;
-  user_id: number;
   answers: QuizSubmitAnswer[];
 }
 
 export interface FlashcardsRequest {
-  workspace_id: number;
   concept_id: number;
   card_count?: number;
 }
 
 export interface CreateQuizRequest {
-  workspace_id: number;
-  user_id: number;
   concept_id: number;
   session_id?: number;
   question_count?: number;
 }
 
 export interface SubmitQuizRequest {
+  answers: QuizSubmitAnswer[];
+}
+
+// ── WOW Release Types ──────────────────────────────────────────────
+
+export type ResponseMode = "grounded" | "social";
+export type FlashcardSelfRating = "again" | "hard" | "good" | "easy";
+
+export interface ActionCTA {
+  action_type: "quiz_cta" | "review_cta" | "research_cta";
+  label: string;
+  concept_id?: number;
+  concept_name?: string;
+}
+
+export interface AssessmentCard {
+  card_type: "quiz_result" | "practice_result";
+  quiz_id?: number;
+  concept_id?: number;
+  concept_name?: string;
+  score: number;
+  passed: boolean;
+  summary: string;
+}
+
+// ── Auth ─────────────────────────────────────────────────────────────
+
+export interface UserPublic {
+  public_id: string;
+  email: string;
+  display_name: string | null;
+}
+
+export interface MagicLinkResponse {
+  message: string;
+  debug_token: string | null;
+}
+
+export interface VerifyTokenResponse {
+  session_token: string;
+  user: UserPublic;
+}
+
+export interface TutorProfileResponse {
+  readiness_summary: string;
+  learning_style_notes: string;
+  last_activity_at: string | null;
+}
+
+// ── Workspaces ───────────────────────────────────────────────────────
+
+export interface WorkspaceSummary {
+  workspace_id: number;
+  public_id: string;
+  name: string;
+  description: string | null;
+}
+
+export interface WorkspaceListResponse {
+  workspaces: WorkspaceSummary[];
+}
+
+export interface WorkspaceDetail extends WorkspaceSummary {
+  settings: JsonObject;
+}
+
+// ── Knowledge Base ───────────────────────────────────────────────────
+
+export interface KBDocumentSummary {
+  document_id: number;
+  public_id: string;
+  title: string | null;
+  source_uri: string | null;
+  chunk_count: number;
+  ingestion_status: "pending" | "ingested";
+  graph_status: "disabled" | "pending" | "extracted";
+  graph_concept_count: number;
+  created_at: string;
+}
+
+export interface KBDocumentListResponse {
+  workspace_id: number;
+  documents: KBDocumentSummary[];
+}
+
+// ── Readiness ────────────────────────────────────────────────────────
+
+export interface ReadinessTopicState {
+  concept_id: number;
+  concept_name: string;
+  readiness_score: number;
+  recommend_quiz: boolean;
+  last_assessed_at: string | null;
+}
+
+export interface ReadinessSnapshotResponse {
   workspace_id: number;
   user_id: number;
-  answers: QuizSubmitAnswer[];
+  topics: ReadinessTopicState[];
+}
+
+// ── Stateful Flashcards ──────────────────────────────────────────────
+
+export interface StatefulFlashcard {
+  flashcard_id: string;
+  front: string;
+  back: string;
+  hint: string;
+  self_rating: FlashcardSelfRating | null;
+  passed: boolean;
+}
+
+export interface StatefulFlashcardsResponse {
+  workspace_id: number;
+  concept_id: number;
+  concept_name: string;
+  run_id: string;
+  flashcards: StatefulFlashcard[];
+  has_more: boolean;
+  exhausted_reason: string | null;
+}
+
+export interface FlashcardRateResponse {
+  flashcard_id: string;
+  self_rating: FlashcardSelfRating;
+  passed: boolean;
+}
+
+// ── Research ─────────────────────────────────────────────────────────
+
+export interface ResearchSourceSummary {
+  source_id: number;
+  url: string;
+  label: string | null;
+  active: boolean;
+}
+
+export interface ResearchRunSummary {
+  run_id: number;
+  status: "pending" | "running" | "completed" | "failed";
+  candidates_found: number;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface ResearchCandidateSummary {
+  candidate_id: number;
+  source_url: string;
+  title: string | null;
+  snippet: string | null;
+  status: "pending" | "approved" | "rejected" | "ingested";
 }

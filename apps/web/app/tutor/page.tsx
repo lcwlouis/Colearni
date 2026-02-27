@@ -6,6 +6,7 @@ import { ChatResponse } from "@/components/chat-response";
 import { ConceptGraph } from "@/components/concept-graph";
 import { LevelUpCard } from "@/components/level-up-card";
 import { MarkdownContent } from "@/components/markdown-content";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { ApiError, apiClient } from "@/lib/api/client";
 import type {
   AssistantResponseEnvelope,
@@ -21,6 +22,7 @@ import {
   levelUpReducer,
   toSubmitAnswers,
 } from "@/lib/tutor/level-up-state";
+import { useRequireAuth } from "@/lib/auth";
 
 type TimelineMessage = {
   id: string;
@@ -82,8 +84,8 @@ function masteryLabel(status: string | null, score: number | null): string {
 }
 
 export default function TutorPage() {
-  const [workspace_id, setWorkspace] = useState("1");
-  const [user_id, setUser] = useState("1");
+  const auth = useRequireAuth();
+  const { user, isLoading: authLoading, activeWorkspaceId } = auth;
   const [grounding_mode, setGroundingMode] = useState<GroundingMode>("hybrid");
   const [query, setQuery] = useState("");
 
@@ -123,12 +125,11 @@ export default function TutorPage() {
   const [renameValue, setRenameValue] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
-  const workspaceId = asPositiveInt(workspace_id);
-  const userId = asPositiveInt(user_id);
+  const wsId = activeWorkspaceId ?? undefined;
 
   useEffect(() => {
-    if (!workspaceId || !userId || !activeSessionId) return;
-    const key = `colearni_levelup_${workspaceId}_${userId}_${activeSessionId}`;
+    if (!wsId || !activeSessionId) return;
+    const key = `colearni_levelup_${wsId}_${activeSessionId}`;
     try {
       const saved = localStorage.getItem(key);
       if (saved) {
@@ -139,33 +140,33 @@ export default function TutorPage() {
     } catch {
       dispatchLevelUp({ type: "reset" });
     }
-  }, [workspaceId, userId, activeSessionId]);
+  }, [wsId, activeSessionId]);
 
   useEffect(() => {
-    if (!workspaceId || !userId || !activeSessionId) return;
-    const key = `colearni_levelup_${workspaceId}_${userId}_${activeSessionId}`;
+    if (!wsId || !activeSessionId) return;
+    const key = `colearni_levelup_${wsId}_${activeSessionId}`;
     if (levelUpState.phase === "idle") {
       localStorage.removeItem(key);
     } else {
       localStorage.setItem(key, JSON.stringify(levelUpState));
     }
-  }, [workspaceId, userId, activeSessionId, levelUpState]);
+  }, [wsId, activeSessionId, levelUpState]);
 
   async function ensureSession(): Promise<number | null> {
-    if (!workspaceId || !userId) {
+    if (!wsId) {
       return null;
     }
     if (activeSessionId) {
       return activeSessionId;
     }
-    const created = await apiClient.createChatSession({ workspace_id: workspaceId, user_id: userId });
+    const created = await apiClient.createChatSession(wsId, {});
     setSessions((prev) => [created, ...prev]);
     setActiveSessionId(created.session_id);
     return created.session_id;
   }
 
   async function refreshSessions() {
-    if (!workspaceId || !userId) {
+    if (!wsId) {
       setSessions([]);
       setActiveSessionId(null);
       return;
@@ -173,10 +174,10 @@ export default function TutorPage() {
     setSessionsLoading(true);
     setSessionsError(null);
     try {
-      const payload = await apiClient.listChatSessions({ workspace_id: workspaceId, user_id: userId, limit: 50 });
+      const payload = await apiClient.listChatSessions(wsId, { limit: 50 });
       let nextSessions = payload.sessions;
       if (!nextSessions.length) {
-        const created = await apiClient.createChatSession({ workspace_id: workspaceId, user_id: userId });
+        const created = await apiClient.createChatSession(wsId, {});
         nextSessions = [created];
       }
       setSessions(nextSessions);
@@ -196,16 +197,13 @@ export default function TutorPage() {
   }
 
   async function loadMessages(sessionId: number) {
-    if (!workspaceId || !userId) {
+    if (!wsId) {
       return;
     }
     setChatLoading(true);
     setChatError(null);
     try {
-      const payload = await apiClient.getChatMessages({
-        workspace_id: workspaceId,
-        user_id: userId,
-        session_id: sessionId,
+      const payload = await apiClient.getChatMessages(wsId, sessionId, {
         limit: 500,
       });
       setMessages(payload.messages.map(mapMessage));
@@ -237,15 +235,13 @@ export default function TutorPage() {
   }
 
   async function loadConcepts() {
-    if (!workspaceId || !userId) {
+    if (!wsId) {
       return;
     }
     setConceptsLoading(true);
     setConceptsError(null);
     try {
-      const payload = await apiClient.listConcepts({
-        workspace_id: workspaceId,
-        user_id: userId,
+      const payload = await apiClient.listConcepts(wsId, {
         limit: 120,
       });
       setConcepts(payload.concepts);
@@ -268,14 +264,11 @@ export default function TutorPage() {
   }
 
   async function loadSubgraph(conceptId: number) {
-    if (!workspaceId || !userId) {
+    if (!wsId) {
       return;
     }
     try {
-      const payload = await apiClient.getConceptSubgraph({
-        workspace_id: workspaceId,
-        concept_id: conceptId,
-        user_id: userId,
+      const payload = await apiClient.getConceptSubgraph(wsId, conceptId, {
         max_hops: 1,
       });
       setSubgraph(payload);
@@ -287,7 +280,7 @@ export default function TutorPage() {
   async function onSubmitChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = query.trim();
-    if (!text || !workspaceId || !userId) {
+    if (!text || !wsId) {
       return;
     }
     const sessionId = await ensureSession();
@@ -306,9 +299,7 @@ export default function TutorPage() {
     setChatError(null);
 
     try {
-      const response = await apiClient.respondChat({
-        workspace_id: workspaceId,
-        user_id: userId,
+      const response = await apiClient.respondChat(wsId, {
         session_id: sessionId,
         query: text,
         concept_id: currentConcept?.concept_id,
@@ -349,12 +340,12 @@ export default function TutorPage() {
   }
 
   async function startNewSession() {
-    if (!workspaceId || !userId) {
+    if (!wsId) {
       return;
     }
     setChatError(null);
     try {
-      const created = await apiClient.createChatSession({ workspace_id: workspaceId, user_id: userId });
+      const created = await apiClient.createChatSession(wsId, {});
       setSessions((prev) => [created, ...prev]);
       setActiveSessionId(created.session_id);
       setMessages([]);
@@ -365,21 +356,17 @@ export default function TutorPage() {
   }
 
   async function deleteSession(sessionId: number) {
-    if (!workspaceId || !userId) {
+    if (!wsId) {
       return;
     }
     setSessionsError(null);
     try {
-      await apiClient.deleteChatSession({
-        workspace_id: workspaceId,
-        user_id: userId,
-        session_id: sessionId,
-      });
+      await apiClient.deleteChatSession(wsId, sessionId);
       if (activeSessionId === sessionId) {
         setMessages([]);
         dispatchLevelUp({ type: "reset" });
       }
-      localStorage.removeItem(`colearni_levelup_${workspaceId}_${userId}_${sessionId}`);
+      localStorage.removeItem(`colearni_levelup_${wsId}_${sessionId}`);
       await refreshSessions();
     } catch (error: unknown) {
       setSessionsError(errorText(error, "Could not delete chat session"));
@@ -387,7 +374,7 @@ export default function TutorPage() {
   }
 
   async function startLevelUp() {
-    if (!workspaceId || !userId || !currentConcept) {
+    if (!wsId || !currentConcept) {
       dispatchLevelUp({ type: "create_error", error: "Pick a concept from the graph first." });
       return;
     }
@@ -399,9 +386,7 @@ export default function TutorPage() {
 
     dispatchLevelUp({ type: "create_start" });
     try {
-      const quiz = await apiClient.createLevelUpQuiz({
-        workspace_id: workspaceId,
-        user_id: userId,
+      const quiz = await apiClient.createLevelUpQuiz(wsId, {
         concept_id: currentConcept.concept_id,
         session_id: sessionId,
       });
@@ -412,15 +397,13 @@ export default function TutorPage() {
   }
 
   async function submitLevelUp() {
-    if (!workspaceId || !userId || !levelUpState.quiz) {
+    if (!wsId || !levelUpState.quiz) {
       return;
     }
 
     dispatchLevelUp({ type: "submit_start" });
     try {
-      const result = await apiClient.submitLevelUpQuiz(levelUpState.quiz.quiz_id, {
-        workspace_id: workspaceId,
-        user_id: userId,
+      const result = await apiClient.submitLevelUpQuiz(wsId, levelUpState.quiz.quiz_id, {
         answers: toSubmitAnswers(levelUpState.quiz.items, levelUpState.answers),
       });
       dispatchLevelUp({ type: "submit_success", result });
@@ -435,7 +418,7 @@ export default function TutorPage() {
     void refreshSessions();
     void loadConcepts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, userId]);
+  }, [wsId]);
 
   useEffect(() => {
     const handleGlobalClick = () => {
@@ -460,7 +443,15 @@ export default function TutorPage() {
       void loadSubgraph(currentConcept.concept_id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGraph, currentConcept?.concept_id, workspaceId, userId]);
+  }, [showGraph, currentConcept?.concept_id, wsId]);
+
+  if (authLoading || !user) {
+    return (
+      <div className="flex items-center justify-center" style={{ minHeight: "60vh" }}>
+        <p style={{ color: "var(--muted)" }}>Loading…</p>
+      </div>
+    );
+  }
 
   return (
     <section className={`tutor-shell${(showGraph || showQuiz) ? " with-drawer" : ""}`}>
@@ -587,20 +578,35 @@ export default function TutorPage() {
             </div>
           ))}
         </div>
-        {sessionsError ? <p className="status error">{sessionsError}</p> : null}
-        {sessionsLoading ? <p className="status loading">Loading chats...</p> : null}
-        <div className="sidebar-test-ids">
-          <div className="grid">
-            <label className="field">
-              <span className="field-label">Workspace ID</span>
-              <input type="number" min={1} value={workspace_id} onChange={(event) => setWorkspace(event.target.value)} />
-            </label>
-            <label className="field">
-              <span className="field-label">User ID</span>
-              <input type="number" min={1} value={user_id} onChange={(event) => setUser(event.target.value)} />
-            </label>
+        <div className="sidebar-footer">
+          <div className="sidebar-workspace-block">
+            <label htmlFor="sidebar-workspace" className="field-label">Workspace</label>
+            <select
+              id="sidebar-workspace"
+              value={activeWorkspaceId ?? ""}
+              onChange={(event) => auth.setActiveWorkspaceId(event.target.value)}
+              aria-label="Select workspace"
+            >
+              {auth.workspaces.map((workspace) => (
+                <option key={workspace.public_id} value={workspace.public_id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="sidebar-profile-block">
+            <div>
+              <p className="sidebar-user-name">{user.display_name || user.email}</p>
+              {user.display_name ? <p className="sidebar-user-email">{user.email}</p> : null}
+            </div>
+            <div className="sidebar-profile-actions">
+              <ThemeToggle />
+              <button type="button" className="secondary" onClick={auth.logout}>Logout</button>
+            </div>
           </div>
         </div>
+        {sessionsError ? <p className="status error">{sessionsError}</p> : null}
+        {sessionsLoading ? <p className="status loading">Loading chats...</p> : null}
       </aside>
 
       <section className="chat-main" style={{ background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100%' }}>

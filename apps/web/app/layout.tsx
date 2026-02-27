@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { AppNav } from "@/components/app-nav";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { HealthDot } from "@/components/health-dot";
+import { Providers } from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = { title: "CoLearni", description: "Learning-first tutor workspace" };
@@ -10,19 +10,20 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <div className="shell">
-          <header className="topbar">
-            <div className="topbar-left">
-              <p className="brand">CoLearni</p>
-              <HealthDot />
-            </div>
-            <div className="topbar-right">
-              <AppNav />
-              <ThemeToggle />
-            </div>
-          </header>
-          <main className="content">{children}</main>
-        </div>
+        <Providers>
+          <div className="shell">
+            <header className="topbar">
+              <div className="topbar-left">
+                <p className="brand">CoLearni</p>
+                <HealthDot />
+              </div>
+              <div className="topbar-right">
+                <AppNav />
+              </div>
+            </header>
+            <main className="content">{children}</main>
+          </div>
+        </Providers>
       </body>
     </html>
   );

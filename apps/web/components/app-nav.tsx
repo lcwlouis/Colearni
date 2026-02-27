@@ -7,6 +7,7 @@ const links = [
   ["/tutor", "Tutor"],
   ["/graph", "Graph"],
   ["/practice", "Practice"],
+  ["/kb", "KB"],
 ] as const;
 
 export function AppNav() {

@@ -4,9 +4,7 @@ import type { AssistantResponseEnvelope, ChatRespondRequest } from "@/lib/api/ty
 import { canRetryChat, chatReducer, initialChatState } from "@/lib/tutor/chat-state";
 
 const request: ChatRespondRequest = {
-  workspace_id: 1,
   query: "What is a linear map?",
-  user_id: 2,
   concept_id: 3,
   grounding_mode: "strict",
 };

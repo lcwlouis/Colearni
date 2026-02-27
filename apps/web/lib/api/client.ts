@@ -8,19 +8,32 @@ import type {
   DeleteChatSessionRequest,
   CreateLevelUpQuizRequest,
   CreateQuizRequest,
+  FlashcardRateResponse,
   FlashcardsRequest,
   GraphConceptListResponse,
   GraphConceptDetailResponse,
   GraphLuckyResponse,
   GraphSubgraphResponse,
   HealthzResponse,
+  KBDocumentListResponse,
   LevelUpQuizSubmitResponse,
   LuckyMode,
+  MagicLinkResponse,
   PracticeFlashcardsResponse,
   PracticeQuizSubmitResponse,
   QuizCreateResponse,
+  ReadinessSnapshotResponse,
+  ResearchCandidateSummary,
+  ResearchRunSummary,
+  ResearchSourceSummary,
+  StatefulFlashcardsResponse,
   SubmitLevelUpQuizRequest,
   SubmitQuizRequest,
+  UserPublic,
+  VerifyTokenResponse,
+  WorkspaceDetail,
+  WorkspaceListResponse,
+  WorkspaceSummary,
 } from "@/lib/api/types";
 
 export const DEFAULT_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
@@ -54,6 +67,8 @@ async function parse(res: Response) {
   try { return JSON.parse(text) as unknown; } catch { return text; }
 }
 
+const SESSION_TOKEN_KEY = "colearni_session_token";
+
 export class ApiClient {
   private baseUrl: string;
   private fetchImpl: FetchLike;
@@ -63,9 +78,18 @@ export class ApiClient {
     this.fetchImpl = opts?.fetchImpl ?? defaultFetch;
   }
 
+  private getToken(): string | null {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(SESSION_TOKEN_KEY);
+  }
+
   private async request<T>(path: string, init: RequestInit, params?: Query): Promise<T> {
     const headers = new Headers(init.headers);
     if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+    const token = this.getToken();
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
     const res = await this.fetchImpl(`${this.baseUrl}${path}${query(params)}`, { ...init, headers });
     const body = await parse(res);
     if (!res.ok) {
@@ -75,21 +99,77 @@ export class ApiClient {
     return body as T;
   }
 
+  async uploadFile<T>(path: string, formData: FormData, params?: Query): Promise<T> {
+    const headers = new Headers();
+    const token = this.getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const res = await this.fetchImpl(`${this.baseUrl}${path}${query(params)}`, { method: "POST", headers, body: formData });
+    const body = await parse(res);
+    if (!res.ok) {
+      const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : body;
+      throw new ApiError(res.status, detail, body);
+    }
+    return body as T;
+  }
+
   healthz() { return this.request<HealthzResponse>("/healthz", { method: "GET" }); }
-  createChatSession(p: CreateChatSessionRequest) { return this.request<ChatSessionSummary>("/chat/sessions", { method: "POST", body: JSON.stringify(p) }); }
-  listChatSessions(p: { workspace_id: number; user_id: number; limit?: number }) { return this.request<ChatSessionListResponse>("/chat/sessions", { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, limit: p.limit }); }
-  getChatMessages(p: { workspace_id: number; user_id: number; session_id: number; limit?: number }) { return this.request<ChatMessagesResponse>(`/chat/sessions/${p.session_id}/messages`, { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, limit: p.limit }); }
-  deleteChatSession(p: DeleteChatSessionRequest) { return this.request<null>(`/chat/sessions/${p.session_id}`, { method: "DELETE" }, { workspace_id: p.workspace_id, user_id: p.user_id }); }
-  respondChat(p: ChatRespondRequest) { return this.request<AssistantResponseEnvelope>("/chat/respond", { method: "POST", body: JSON.stringify(p) }); }
-  listConcepts(p: { workspace_id: number; user_id?: number; q?: string; limit?: number }) { return this.request<GraphConceptListResponse>("/graph/concepts", { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, q: p.q, limit: p.limit }); }
-  getConceptDetail(p: { workspace_id: number; concept_id: number }) { return this.request<GraphConceptDetailResponse>(`/graph/concepts/${p.concept_id}`, { method: "GET" }, { workspace_id: p.workspace_id }); }
-  getConceptSubgraph(p: { workspace_id: number; concept_id: number; user_id?: number; max_hops?: number; max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/graph/concepts/${p.concept_id}/subgraph`, { method: "GET" }, { workspace_id: p.workspace_id, user_id: p.user_id, max_hops: p.max_hops, max_nodes: p.max_nodes, max_edges: p.max_edges }); }
-  getLuckyPick(p: { workspace_id: number; concept_id: number; mode: LuckyMode; k_hops?: number }) { return this.request<GraphLuckyResponse>("/graph/lucky", { method: "GET" }, { workspace_id: p.workspace_id, concept_id: p.concept_id, mode: p.mode, k_hops: p.k_hops }); }
-  createLevelUpQuiz(p: CreateLevelUpQuizRequest) { return this.request<QuizCreateResponse>("/quizzes/level-up", { method: "POST", body: JSON.stringify(p) }); }
-  submitLevelUpQuiz(quizId: number, p: SubmitLevelUpQuizRequest) { return this.request<LevelUpQuizSubmitResponse>(`/quizzes/${quizId}/submit`, { method: "POST", body: JSON.stringify(p) }); }
-  generatePracticeFlashcards(p: FlashcardsRequest) { return this.request<PracticeFlashcardsResponse>("/practice/flashcards", { method: "POST", body: JSON.stringify(p) }); }
-  createPracticeQuiz(p: CreateQuizRequest) { return this.request<QuizCreateResponse>("/practice/quizzes", { method: "POST", body: JSON.stringify(p) }); }
-  submitPracticeQuiz(quizId: number, p: SubmitQuizRequest) { return this.request<PracticeQuizSubmitResponse>(`/practice/quizzes/${quizId}/submit`, { method: "POST", body: JSON.stringify(p) }); }
+
+  // ── Chat (workspace-scoped) ─────────────────────────────────────
+  createChatSession(wsId: string, p: CreateChatSessionRequest) { return this.request<ChatSessionSummary>(`/workspaces/${wsId}/chat/sessions`, { method: "POST", body: JSON.stringify(p) }); }
+  listChatSessions(wsId: string, p?: { limit?: number }) { return this.request<ChatSessionListResponse>(`/workspaces/${wsId}/chat/sessions`, { method: "GET" }, { limit: p?.limit }); }
+  getChatMessages(wsId: string, sessionId: number, p?: { limit?: number }) { return this.request<ChatMessagesResponse>(`/workspaces/${wsId}/chat/sessions/${sessionId}/messages`, { method: "GET" }, { limit: p?.limit }); }
+  deleteChatSession(wsId: string, sessionId: number) { return this.request<null>(`/workspaces/${wsId}/chat/sessions/${sessionId}`, { method: "DELETE" }); }
+  respondChat(wsId: string, p: ChatRespondRequest) { return this.request<AssistantResponseEnvelope>(`/workspaces/${wsId}/chat/respond`, { method: "POST", body: JSON.stringify(p) }); }
+
+  // ── Graph (workspace-scoped) ────────────────────────────────────
+  listConcepts(wsId: string, p?: { q?: string; limit?: number }) { return this.request<GraphConceptListResponse>(`/workspaces/${wsId}/graph/concepts`, { method: "GET" }, { q: p?.q, limit: p?.limit }); }
+  getConceptDetail(wsId: string, conceptId: number) { return this.request<GraphConceptDetailResponse>(`/workspaces/${wsId}/graph/concepts/${conceptId}`, { method: "GET" }); }
+  getConceptSubgraph(wsId: string, conceptId: number, p?: { max_hops?: number; max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/workspaces/${wsId}/graph/concepts/${conceptId}/subgraph`, { method: "GET" }, { max_hops: p?.max_hops, max_nodes: p?.max_nodes, max_edges: p?.max_edges }); }
+  getLuckyPick(wsId: string, p: { concept_id: number; mode: LuckyMode; k_hops?: number }) { return this.request<GraphLuckyResponse>(`/workspaces/${wsId}/graph/lucky`, { method: "GET" }, { concept_id: p.concept_id, mode: p.mode, k_hops: p.k_hops }); }
+
+  // ── Quizzes (workspace-scoped) ──────────────────────────────────
+  createLevelUpQuiz(wsId: string, p: CreateLevelUpQuizRequest) { return this.request<QuizCreateResponse>(`/workspaces/${wsId}/quizzes/level-up`, { method: "POST", body: JSON.stringify(p) }); }
+  submitLevelUpQuiz(wsId: string, quizId: number, p: SubmitLevelUpQuizRequest) { return this.request<LevelUpQuizSubmitResponse>(`/workspaces/${wsId}/quizzes/${quizId}/submit`, { method: "POST", body: JSON.stringify(p) }); }
+
+  // ── Practice (workspace-scoped) ─────────────────────────────────
+  generatePracticeFlashcards(wsId: string, p: FlashcardsRequest) { return this.request<PracticeFlashcardsResponse>(`/workspaces/${wsId}/practice/flashcards`, { method: "POST", body: JSON.stringify(p) }); }
+  createPracticeQuiz(wsId: string, p: CreateQuizRequest) { return this.request<QuizCreateResponse>(`/workspaces/${wsId}/practice/quizzes`, { method: "POST", body: JSON.stringify(p) }); }
+  submitPracticeQuiz(wsId: string, quizId: number, p: SubmitQuizRequest) { return this.request<PracticeQuizSubmitResponse>(`/workspaces/${wsId}/practice/quizzes/${quizId}/submit`, { method: "POST", body: JSON.stringify(p) }); }
+  generateStatefulFlashcards(wsId: string, p: { concept_id: number; card_count?: number }) { return this.request<StatefulFlashcardsResponse>(`/workspaces/${wsId}/practice/flashcards/stateful`, { method: "POST", body: JSON.stringify(p) }); }
+  rateFlashcard(wsId: string, p: { flashcard_id: string; self_rating: string }) { return this.request<FlashcardRateResponse>(`/workspaces/${wsId}/practice/flashcards/rate`, { method: "POST", body: JSON.stringify(p) }); }
+
+  // ── Auth ─────────────────────────────────────────────────────────
+  requestMagicLink(email: string) { return this.request<MagicLinkResponse>("/auth/magic-link", { method: "POST", body: JSON.stringify({ email }) }); }
+  verifyMagicLink(token: string) { return this.request<VerifyTokenResponse>("/auth/verify", { method: "POST", body: JSON.stringify({ token }) }); }
+  logout() { return this.request<null>("/auth/logout", { method: "POST" }); }
+  getMe() { return this.request<UserPublic>("/auth/me", { method: "GET" }); }
+
+  // ── Workspaces ──────────────────────────────────────────────────
+  listWorkspaces() { return this.request<WorkspaceListResponse>("/workspaces", { method: "GET" }); }
+  createWorkspace(p: { name: string; description?: string }) { return this.request<WorkspaceSummary>("/workspaces", { method: "POST", body: JSON.stringify(p) }); }
+  getWorkspace(wsId: string) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}`, { method: "GET" }); }
+  updateWorkspaceSettings(wsId: string, settings: Record<string, unknown>) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}/settings`, { method: "PATCH", body: JSON.stringify({ settings }) }); }
+
+  // ── Knowledge Base (workspace-scoped) ───────────────────────────
+  listKBDocuments(wsId: string) { return this.request<KBDocumentListResponse>(`/workspaces/${wsId}/knowledge-base/documents`, { method: "GET" }); }
+  deleteKBDocument(wsId: string, documentId: number) { return this.request<null>(`/workspaces/${wsId}/knowledge-base/documents/${documentId}`, { method: "DELETE" }); }
+  reprocessKBDocument(wsId: string, documentId: number) { return this.request<Record<string, unknown>>(`/workspaces/${wsId}/knowledge-base/documents/${documentId}/reprocess`, { method: "POST" }); }
+  uploadKBDocument(wsId: string, p: { file: File; title?: string }) {
+    const form = new FormData();
+    form.append("file", p.file);
+    if (p.title) form.append("title", p.title);
+    return this.uploadFile<{ document_id: number; workspace_id: number; title: string; chunk_count: number; created: boolean }>(`/workspaces/${wsId}/knowledge-base/documents/upload`, form);
+  }
+
+  // ── Readiness (workspace-scoped) ────────────────────────────────
+  getReadinessSnapshot(wsId: string) { return this.request<ReadinessSnapshotResponse>(`/workspaces/${wsId}/readiness/snapshot`, { method: "GET" }); }
+
+  // ── Research (workspace-scoped) ─────────────────────────────────
+  listResearchSources(wsId: string) { return this.request<ResearchSourceSummary[]>(`/workspaces/${wsId}/research/sources`, { method: "GET" }); }
+  addResearchSource(wsId: string, p: { url: string; label?: string }) { return this.request<ResearchSourceSummary>(`/workspaces/${wsId}/research/sources`, { method: "POST", body: JSON.stringify({ url: p.url, label: p.label }) }); }
+  triggerResearchRun(wsId: string) { return this.request<ResearchRunSummary>(`/workspaces/${wsId}/research/runs`, { method: "POST" }); }
+  listResearchCandidates(wsId: string, p?: { run_id?: number; status?: string }) { return this.request<ResearchCandidateSummary[]>(`/workspaces/${wsId}/research/candidates`, { method: "GET" }, { run_id: p?.run_id, status: p?.status }); }
+  reviewResearchCandidate(wsId: string, candidateId: number, p: { status: "approved" | "rejected" }) { return this.request<ResearchCandidateSummary>(`/workspaces/${wsId}/research/candidates/${candidateId}`, { method: "PATCH", body: JSON.stringify({ status: p.status }) }); }
 }
 
 export const apiClient = new ApiClient();
