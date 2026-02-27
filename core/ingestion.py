@@ -11,7 +11,7 @@ from adapters.db.chunks import (
     insert_chunks_bulk,
     list_chunks_for_document,
 )
-from adapters.db.documents import get_document_by_content_hash, insert_document
+from adapters.db.documents import get_document_by_content_hash, insert_document, update_document_summary
 from adapters.embeddings.factory import build_embedding_provider
 from adapters.parsers.chunker import chunk_text_deterministic
 from adapters.parsers.text import UnsupportedTextDocumentError, parse_text_payload
@@ -34,6 +34,10 @@ class IngestionEmbeddingUnavailableError(RuntimeError):
 
 class IngestionGraphUnavailableError(RuntimeError):
     """Raised when graph building is enabled but graph dependencies are unavailable."""
+
+
+class IngestionGraphProviderError(RuntimeError):
+    """Raised when graph LLM provider returns an error during ingestion."""
 
 
 @dataclass(frozen=True)
@@ -182,19 +186,36 @@ def ingest_text_document(
             raise IngestionGraphUnavailableError(
                 "Graph builder is unavailable while APP_INGEST_BUILD_GRAPH=true."
             )
-        effective_graph_embedding_provider = graph_embedding_provider or chunk_embedding_provider
-        build_graph_for_chunks(
-            db,
-            workspace_id=request.workspace_id,
-            chunks=list_chunks_for_document(
+        # Generate document summary using the LLM (best-effort, non-blocking)
+        summary = _generate_document_summary(
+            chunks=chunks,
+            llm_client=graph_llm_client,
+        )
+        if summary:
+            update_document_summary(
                 db,
                 workspace_id=request.workspace_id,
                 document_id=document.id,
-            ),
-            llm_client=graph_llm_client,
-            settings=active_settings,
-            embedding_provider=effective_graph_embedding_provider,
-        )
+                summary=summary,
+            )
+        effective_graph_embedding_provider = graph_embedding_provider or chunk_embedding_provider
+        try:
+            build_graph_for_chunks(
+                db,
+                workspace_id=request.workspace_id,
+                chunks=list_chunks_for_document(
+                    db,
+                    workspace_id=request.workspace_id,
+                    document_id=document.id,
+                ),
+                llm_client=graph_llm_client,
+                settings=active_settings,
+                embedding_provider=effective_graph_embedding_provider,
+            )
+        except RuntimeError as exc:
+            raise IngestionGraphProviderError(
+                f"Graph extraction failed: {exc}"
+            ) from exc
 
     db.commit()
     return IngestionResult(
@@ -216,10 +237,46 @@ def _resolve_title(*, title: str | None, filename: str | None) -> str:
     return "untitled"
 
 
+def _generate_document_summary(
+    *,
+    chunks: list[str],
+    llm_client: GraphLLMClient,
+    max_chunks: int = 5,
+    max_chars: int = 3000,
+) -> str | None:
+    """Generate a short 2-3 sentence summary from the first few chunks."""
+    if not chunks:
+        return None
+    sample_text = ""
+    for chunk in chunks[:max_chunks]:
+        if len(sample_text) + len(chunk) > max_chars:
+            remaining = max_chars - len(sample_text)
+            if remaining > 100:
+                sample_text += chunk[:remaining]
+            break
+        sample_text += chunk + "\n\n"
+    if not sample_text.strip():
+        return None
+    prompt = (
+        "Summarize the following document excerpt in 2-3 concise sentences. "
+        "Focus on the main topics and key concepts covered.\n\n"
+        f"DOCUMENT EXCERPT:\n{sample_text.strip()}\n\n"
+        "SUMMARY:"
+    )
+    try:
+        summary = llm_client.generate_tutor_text(prompt=prompt).strip()
+        if summary and len(summary) > 10:
+            return summary[:500]
+    except (RuntimeError, ValueError):
+        pass
+    return None
+
+
 __all__ = [
     "IngestionRequest",
     "IngestionResult",
     "IngestionEmbeddingUnavailableError",
+    "IngestionGraphProviderError",
     "IngestionGraphUnavailableError",
     "IngestionValidationError",
     "UnsupportedTextDocumentError",

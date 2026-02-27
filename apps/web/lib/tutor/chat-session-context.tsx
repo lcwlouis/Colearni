@@ -1,0 +1,153 @@
+"use client";
+
+import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { apiClient } from "@/lib/api/client";
+import type { ChatSessionSummary } from "@/lib/api/types";
+import { useRequireAuth } from "@/lib/auth";
+import { usePathname, useRouter } from "next/navigation";
+
+interface ChatSessionContextType {
+    sessions: ChatSessionSummary[];
+    activeSessionId: string | null;
+    sessionsLoading: boolean;
+    sessionsError: string | null;
+    setActiveSessionId: (id: string | null) => void;
+    refreshSessions: () => Promise<void>;
+    startNewSession: () => Promise<string | null>;
+    deleteSession: (sessionId: string) => Promise<void>;
+    renameSession: (sessionId: string, title: string) => void; // Optimistic rename
+    syncUrl: (sessionId: string) => void;
+}
+
+const ChatSessionContext = createContext<ChatSessionContextType | null>(null);
+
+function errorText(error: unknown, fallback: string): string {
+    if (error instanceof Error) return error.message;
+    return fallback;
+}
+
+export function ChatSessionProvider({ children }: { children: ReactNode }) {
+    const { activeWorkspaceId } = useRequireAuth();
+    const wsId = activeWorkspaceId ?? undefined;
+    const router = useRouter();
+    const pathname = usePathname();
+
+    const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+    const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+    const [sessionsLoading, setSessionsLoading] = useState(false);
+    const [sessionsError, setSessionsError] = useState<string | null>(null);
+
+    const syncUrl = (sessionId: string) => {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get("chat") !== sessionId) {
+            router.replace(`${pathname}?chat=${sessionId}`);
+        }
+    };
+
+    const refreshSessions = async (preferredId?: string | null) => {
+        if (!wsId) {
+            setSessions([]);
+            setActiveSessionId(null);
+            return;
+        }
+        setSessionsLoading(true);
+        setSessionsError(null);
+        try {
+            const payload = await apiClient.listChatSessions(wsId, { limit: 50 });
+            let nextSessions = payload.sessions;
+            if (!nextSessions.length) {
+                const created = await apiClient.createChatSession(wsId, {});
+                nextSessions = [created];
+            }
+            setSessions(nextSessions);
+            setActiveSessionId((prev) => {
+                const target = preferredId ?? prev;
+                if (target && nextSessions.some((item) => item.public_id === target)) {
+                    if (pathname === "/tutor") syncUrl(target);
+                    return target;
+                }
+                const fallback = nextSessions[0]?.public_id ?? null;
+                if (fallback && pathname === "/tutor") syncUrl(fallback);
+                return fallback;
+            });
+        } catch (error: unknown) {
+            setSessionsError(errorText(error, "Failed to load chat sessions"));
+            setSessions([]);
+            setActiveSessionId(null);
+        } finally {
+            setSessionsLoading(false);
+        }
+    };
+
+    const startNewSession = async (): Promise<string | null> => {
+        if (!wsId) return null;
+        setSessionsError(null);
+        try {
+            const created = await apiClient.createChatSession(wsId, {});
+            setSessions((prev) => [created, ...prev]);
+            setActiveSessionId(created.public_id);
+            if (pathname !== "/tutor") {
+                router.push(`/tutor?chat=${created.public_id}`);
+            } else {
+                syncUrl(created.public_id);
+            }
+            return created.public_id;
+        } catch (error: unknown) {
+            setSessionsError(errorText(error, "Could not create chat session"));
+            return null;
+        }
+    };
+
+    const deleteSession = async (sessionId: string) => {
+        if (!wsId) return;
+        setSessionsError(null);
+        try {
+            await apiClient.deleteChatSession(wsId, sessionId);
+            localStorage.removeItem(`colearni_levelup_${wsId}_${sessionId}`);
+            await refreshSessions();
+        } catch (error: unknown) {
+            setSessionsError(errorText(error, "Could not delete chat session"));
+        }
+    };
+
+    const renameSession = (sessionId: string, title: string) => {
+        setSessions((prev) =>
+            prev.map((s) => (s.public_id === sessionId ? { ...s, title } : s))
+        );
+    };
+
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const chatParam = urlParams.get("chat");
+        if (chatParam) {
+            setActiveSessionId(chatParam);
+        }
+        void refreshSessions(chatParam ?? null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [wsId]);
+
+    return (
+        <ChatSessionContext.Provider
+            value={{
+                sessions,
+                activeSessionId,
+                sessionsLoading,
+                sessionsError,
+                setActiveSessionId,
+                refreshSessions,
+                startNewSession,
+                deleteSession,
+                renameSession,
+                syncUrl,
+            }}
+        >
+            {children}
+        </ChatSessionContext.Provider>
+    );
+}
+
+export function useChatSession() {
+    const ctx = useContext(ChatSessionContext);
+    if (!ctx) throw new Error("useChatSession must be used within ChatSessionProvider");
+    return ctx;
+}

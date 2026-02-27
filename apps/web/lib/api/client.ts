@@ -117,14 +117,15 @@ export class ApiClient {
   // ── Chat (workspace-scoped) ─────────────────────────────────────
   createChatSession(wsId: string, p: CreateChatSessionRequest) { return this.request<ChatSessionSummary>(`/workspaces/${wsId}/chat/sessions`, { method: "POST", body: JSON.stringify(p) }); }
   listChatSessions(wsId: string, p?: { limit?: number }) { return this.request<ChatSessionListResponse>(`/workspaces/${wsId}/chat/sessions`, { method: "GET" }, { limit: p?.limit }); }
-  getChatMessages(wsId: string, sessionId: number, p?: { limit?: number }) { return this.request<ChatMessagesResponse>(`/workspaces/${wsId}/chat/sessions/${sessionId}/messages`, { method: "GET" }, { limit: p?.limit }); }
-  deleteChatSession(wsId: string, sessionId: number) { return this.request<null>(`/workspaces/${wsId}/chat/sessions/${sessionId}`, { method: "DELETE" }); }
+  getChatMessages(wsId: string, sessionId: string, p?: { limit?: number }) { return this.request<ChatMessagesResponse>(`/workspaces/${wsId}/chat/sessions/${sessionId}/messages`, { method: "GET" }, { limit: p?.limit }); }
+  deleteChatSession(wsId: string, sessionId: string) { return this.request<null>(`/workspaces/${wsId}/chat/sessions/${sessionId}`, { method: "DELETE" }); }
   respondChat(wsId: string, p: ChatRespondRequest) { return this.request<AssistantResponseEnvelope>(`/workspaces/${wsId}/chat/respond`, { method: "POST", body: JSON.stringify(p) }); }
 
   // ── Graph (workspace-scoped) ────────────────────────────────────
   listConcepts(wsId: string, p?: { q?: string; limit?: number }) { return this.request<GraphConceptListResponse>(`/workspaces/${wsId}/graph/concepts`, { method: "GET" }, { q: p?.q, limit: p?.limit }); }
   getConceptDetail(wsId: string, conceptId: number) { return this.request<GraphConceptDetailResponse>(`/workspaces/${wsId}/graph/concepts/${conceptId}`, { method: "GET" }); }
   getConceptSubgraph(wsId: string, conceptId: number, p?: { max_hops?: number; max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/workspaces/${wsId}/graph/concepts/${conceptId}/subgraph`, { method: "GET" }, { max_hops: p?.max_hops, max_nodes: p?.max_nodes, max_edges: p?.max_edges }); }
+  getFullGraph(wsId: string, p?: { max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/workspaces/${wsId}/graph/full`, { method: "GET" }, { max_nodes: p?.max_nodes, max_edges: p?.max_edges }); }
   getLuckyPick(wsId: string, p: { concept_id: number; mode: LuckyMode; k_hops?: number }) { return this.request<GraphLuckyResponse>(`/workspaces/${wsId}/graph/lucky`, { method: "GET" }, { concept_id: p.concept_id, mode: p.mode, k_hops: p.k_hops }); }
 
   // ── Quizzes (workspace-scoped) ──────────────────────────────────
@@ -148,6 +149,7 @@ export class ApiClient {
   listWorkspaces() { return this.request<WorkspaceListResponse>("/workspaces", { method: "GET" }); }
   createWorkspace(p: { name: string; description?: string }) { return this.request<WorkspaceSummary>("/workspaces", { method: "POST", body: JSON.stringify(p) }); }
   getWorkspace(wsId: string) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}`, { method: "GET" }); }
+  updateWorkspace(wsId: string, p: { name: string; description?: string }) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}`, { method: "PATCH", body: JSON.stringify(p) }); }
   updateWorkspaceSettings(wsId: string, settings: Record<string, unknown>) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}/settings`, { method: "PATCH", body: JSON.stringify({ settings }) }); }
 
   // ── Knowledge Base (workspace-scoped) ───────────────────────────

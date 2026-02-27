@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from adapters.db.chat import ChatNotFoundError, resolve_session_by_public_id
 from adapters.db.dependencies import get_db_session
 from adapters.llm.factory import build_graph_llm_client
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/workspaces/{ws_id}/quizzes", tags=["quizzes"])
 
 class CreateLevelUpQuizRequest(BaseModel):
     concept_id: int = Field(gt=0)
-    session_id: int | None = Field(default=None, gt=0)
+    session_id: str | None = Field(default=None, description="Session UUID public_id")
     question_count: int | None = Field(default=None, ge=5, le=12)
     items: list[dict[str, Any]] | None = None
 
@@ -54,6 +55,18 @@ def create_quiz_level_up(
             llm_client = build_graph_llm_client(settings=settings)
         except ValueError:
             llm_client = None
+
+    # Resolve UUID session_id → internal int
+    resolved_session_id: int | None = None
+    if payload.session_id:
+        try:
+            resolved_session_id = resolve_session_by_public_id(
+                db, public_id=payload.session_id,
+                workspace_id=ws.workspace_id, user_id=ws.user.id,
+            )
+        except ChatNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
     try:
         return QuizCreateResponse.model_validate(
             create_level_up_quiz(
@@ -61,7 +74,7 @@ def create_quiz_level_up(
                 workspace_id=ws.workspace_id,
                 user_id=ws.user.id,
                 concept_id=payload.concept_id,
-                session_id=payload.session_id,
+                session_id=resolved_session_id,
                 question_count=payload.question_count,
                 items=payload.items,
                 llm_client=llm_client,

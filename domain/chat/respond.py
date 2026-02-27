@@ -200,6 +200,11 @@ def generate_chat_response(
                 llm_client=tutor_llm_client,
                 history_text=history_text,
                 assessment_context=assessment_context,
+                document_summaries=_build_document_summaries_context(
+                    session=session,
+                    workspace_id=request.workspace_id,
+                    chunks=ranked_chunks,
+                ),
             )
         )
 
@@ -275,6 +280,7 @@ def _generate_tutor_text(
     llm_client: GraphLLMClient | None,
     history_text: str,
     assessment_context: str,
+    document_summaries: str = "",
 ) -> str:
     """Build a rich tutor prompt via prompt_kit and call the LLM.
 
@@ -290,6 +296,7 @@ def _generate_tutor_text(
         style=style,
         assessment_context=assessment_context,
         history_summary=history_text,
+        document_summaries=document_summaries,
     )
     if llm_client is not None:
         try:
@@ -478,6 +485,24 @@ def _workspace_has_no_chunks(session: Session, workspace_id: int) -> bool:
         return row is None
     except Exception:
         return False
+
+
+def _build_document_summaries_context(
+    *,
+    session: Session,
+    workspace_id: int,
+    chunks: list[RankedChunk],
+) -> str:
+    """Build a context string of document summaries referenced by retrieved chunks."""
+    doc_ids = list(dict.fromkeys(c.document_id for c in chunks))[:5]
+    if not doc_ids:
+        return ""
+    summaries: list[str] = []
+    for doc_id in doc_ids:
+        doc = get_document_by_id(session, workspace_id=workspace_id, document_id=doc_id)
+        if doc and doc.summary:
+            summaries.append(f"- {doc.title}: {doc.summary}")
+    return "\n".join(summaries)
 
 
 __all__ = ["generate_chat_response"]

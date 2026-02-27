@@ -55,7 +55,7 @@ class ExtractedEdge:
     relation_type: str
     description: str = ""
     keywords: list[str] = field(default_factory=list)
-    weight: float = 1.0
+    weight: int = 1
 
 
 @dataclass(frozen=True, slots=True)

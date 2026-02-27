@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
-from urllib.error import URLError
 
 import pytest
 from adapters.llm.providers import LiteLLMGraphLLMClient
@@ -12,18 +12,14 @@ from core.observability import configure_observability, observation_context, set
 from core.settings import get_settings
 
 
-class _FakeResponse:
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self._payload = payload
-
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001, ANN201
-        return False
-
-    def read(self) -> bytes:
-        return json.dumps(self._payload).encode("utf-8")
+def _make_sdk_response(content: str, usage: dict[str, int] | None = None) -> Any:
+    """Build a litellm-style ModelResponse mock that supports .model_dump()."""
+    base: dict[str, Any] = {
+        "choices": [{"message": {"content": content}}],
+    }
+    if usage:
+        base["usage"] = usage
+    return SimpleNamespace(model_dump=lambda: base)
 
 
 def _configure_observability() -> None:
@@ -46,16 +42,10 @@ def test_llm_call_emits_provider_model_operation_and_tokens(
     set_event_sink(events)
     _configure_observability()
     monkeypatch.setattr(
-        "adapters.llm.providers.urlopen",
-        lambda request, timeout: _FakeResponse(  # noqa: ARG005
-            {
-                "choices": [{"message": {"content": "ok"}}],
-                "usage": {
-                    "prompt_tokens": 11,
-                    "completion_tokens": 5,
-                    "total_tokens": 16,
-                },
-            }
+        "litellm.completion",
+        lambda **kwargs: _make_sdk_response(
+            "ok",
+            {"prompt_tokens": 11, "completion_tokens": 5, "total_tokens": 16},
         ),
     )
     client = LiteLLMGraphLLMClient(
@@ -89,10 +79,8 @@ def test_llm_call_emits_null_safe_token_fields_when_missing_usage(
     set_event_sink(events)
     _configure_observability()
     monkeypatch.setattr(
-        "adapters.llm.providers.urlopen",
-        lambda request, timeout: _FakeResponse(  # noqa: ARG005
-            {"choices": [{"message": {"content": "ok"}}]}
-        ),
+        "litellm.completion",
+        lambda **kwargs: _make_sdk_response("ok"),
     )
     client = LiteLLMGraphLLMClient(
         model="gpt-4o-mini",
@@ -119,10 +107,11 @@ def test_llm_call_failure_emits_error_without_sensitive_payload(
     events: list[dict[str, Any]] = []
     set_event_sink(events)
     _configure_observability()
-    monkeypatch.setattr(
-        "adapters.llm.providers.urlopen",
-        lambda request, timeout: (_ for _ in ()).throw(URLError("boom")),  # noqa: ARG005
-    )
+
+    def _raise(**kwargs: Any) -> None:  # noqa: ARG001
+        raise ConnectionError("boom")
+
+    monkeypatch.setattr("litellm.completion", _raise)
     client = LiteLLMGraphLLMClient(
         model="gpt-4o-mini",
         timeout_seconds=5.0,
@@ -137,25 +126,22 @@ def test_llm_call_failure_emits_error_without_sensitive_payload(
     event = events[0]
     assert event["event_name"] == "llm.call"
     assert event["status"] == "failure"
-    assert event["error_type"] == "URLError"
+    assert event["error_type"] == "ConnectionError"
     set_event_sink(None)
 
 
 def test_llm_call_uses_case_specific_temperatures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payloads: list[dict[str, Any]] = []
+    captured: list[dict[str, Any]] = []
 
-    def _capture_request(request, timeout):  # noqa: ANN001, ARG001
-        payload = json.loads(request.data.decode("utf-8"))
-        payloads.append(payload)
-        if "response_format" in payload:
-            return _FakeResponse(
-                {"choices": [{"message": {"content": '{"concepts": [], "edges": []}'}}]}
-            )
-        return _FakeResponse({"choices": [{"message": {"content": "ok"}}]})
+    def _capture(**kwargs: Any) -> Any:
+        captured.append(kwargs)
+        if "response_format" in kwargs:
+            return _make_sdk_response('{"concepts": [], "edges": []}')
+        return _make_sdk_response("ok")
 
-    monkeypatch.setattr("adapters.llm.providers.urlopen", _capture_request)
+    monkeypatch.setattr("litellm.completion", _capture)
     client = LiteLLMGraphLLMClient(
         model="gpt-4o-mini",
         timeout_seconds=5.0,
@@ -167,5 +153,5 @@ def test_llm_call_uses_case_specific_temperatures(
     _ = client.extract_raw_graph(chunk_text="Newton's second law")
     _ = client.generate_tutor_text(prompt="Explain this concept")
 
-    assert payloads[0]["temperature"] == pytest.approx(0.1)
-    assert payloads[1]["temperature"] == pytest.approx(0.7)
+    assert captured[0]["temperature"] == pytest.approx(0.1)
+    assert captured[1]["temperature"] == pytest.approx(0.7)

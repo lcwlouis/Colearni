@@ -25,7 +25,7 @@ def create_chat_session(
                 """
                 INSERT INTO chat_sessions (workspace_id, user_id, title)
                 VALUES (:workspace_id, :user_id, :title)
-                RETURNING id, workspace_id, user_id, title, created_at, updated_at
+                RETURNING id, public_id, workspace_id, user_id, title, created_at, updated_at
                 """
             ),
             {
@@ -40,6 +40,7 @@ def create_chat_session(
     session.commit()
     return {
         "session_id": int(row["id"]),
+        "public_id": str(row["public_id"]),
         "workspace_id": int(row["workspace_id"]),
         "user_id": int(row["user_id"]),
         "title": str(row["title"] or "").strip() or None,
@@ -60,6 +61,7 @@ def list_chat_sessions(
                 """
                 SELECT
                     s.id AS session_id,
+                    s.public_id,
                     s.workspace_id,
                     s.user_id,
                     s.title,
@@ -69,7 +71,7 @@ def list_chat_sessions(
                   ON m.session_id = s.id
                 WHERE s.workspace_id = :workspace_id
                   AND s.user_id = :user_id
-                GROUP BY s.id, s.workspace_id, s.user_id, s.title, s.updated_at
+                GROUP BY s.id, s.public_id, s.workspace_id, s.user_id, s.title, s.updated_at
                 ORDER BY COALESCE(MAX(m.created_at), s.updated_at) DESC, s.id DESC
                 LIMIT :limit
                 """
@@ -82,6 +84,7 @@ def list_chat_sessions(
     return [
         {
             "session_id": int(row["session_id"]),
+            "public_id": str(row["public_id"]),
             "workspace_id": int(row["workspace_id"]),
             "user_id": int(row["user_id"]),
             "title": str(row["title"] or "").strip() or None,
@@ -117,6 +120,39 @@ def assert_chat_session(
     )
     if row is None:
         raise ChatNotFoundError("Chat session not found in workspace for user.")
+
+
+def resolve_session_by_public_id(
+    session: Session,
+    *,
+    public_id: str,
+    workspace_id: int,
+    user_id: int,
+) -> int:
+    """Resolve a session UUID public_id to the internal integer ID.
+
+    Raises ChatNotFoundError when no matching session exists.
+    """
+    row = (
+        session.execute(
+            text(
+                """
+                SELECT id
+                FROM chat_sessions
+                WHERE public_id = CAST(:public_id AS uuid)
+                  AND workspace_id = :workspace_id
+                  AND user_id = :user_id
+                LIMIT 1
+                """
+            ),
+            {"public_id": public_id, "workspace_id": workspace_id, "user_id": user_id},
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise ChatNotFoundError("Chat session not found in workspace for user.")
+    return int(row["id"])
 
 
 def append_chat_message(
@@ -372,5 +408,6 @@ __all__ = [
     "list_chat_messages",
     "list_chat_sessions",
     "list_recent_chat_messages",
+    "resolve_session_by_public_id",
     "set_chat_session_title_if_missing",
 ]

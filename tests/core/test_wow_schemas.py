@@ -93,6 +93,9 @@ class TestKBDocumentSummary:
             title="Lecture notes",
             source_uri="file://notes.pdf",
             chunk_count=42,
+            ingestion_status="ingested",
+            graph_status="extracted",
+            graph_concept_count=5,
             created_at="2026-01-01T00:00:00Z",
         )
         assert doc.chunk_count == 42

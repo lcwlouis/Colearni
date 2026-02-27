@@ -87,14 +87,16 @@ def build_system_prompt(
     style: Literal["socratic", "direct"],
     assessment_context: str = "",
     history_summary: str = "",
+    document_summaries: str = "",
 ) -> str:
     """Compose the full system prompt for the tutor LLM call.
 
     Components (in order):
       1. Persona system prefix
       2. Teaching style rules
-      3. Assessment history summary (if available)
-      4. Conversation history summary (if available)
+      3. Document summaries (if available)
+      4. Assessment history summary (if available)
+      5. Conversation history summary (if available)
     """
     lines: list[str] = [
         persona.get("system_prefix", PERSONA_OPENCLAW["system_prefix"]),
@@ -115,6 +117,13 @@ def build_system_prompt(
             "- Provide a clear, concise explanation.",
             "- Be grounded in the cited evidence.",
             "- Summarize key points efficiently.",
+            "",
+        ])
+
+    if document_summaries:
+        lines.extend([
+            "DOCUMENT SUMMARIES (for context about the user's study material):",
+            document_summaries,
             "",
         ])
 
@@ -155,6 +164,7 @@ def build_full_tutor_prompt(
     style: Literal["socratic", "direct"],
     assessment_context: str = "",
     history_summary: str = "",
+    document_summaries: str = "",
 ) -> str:
     """Build the complete prompt: system + evidence + user question."""
     system = build_system_prompt(
@@ -162,6 +172,7 @@ def build_full_tutor_prompt(
         style=style,
         assessment_context=assessment_context,
         history_summary=history_summary,
+        document_summaries=document_summaries,
     )
     evidence_block = build_evidence_block(evidence)
     return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}"

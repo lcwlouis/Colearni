@@ -1088,4 +1088,12 @@ def _to_canonical_concept_required(row: dict[str, object]) -> CanonicalConceptRo
 def _coerce_embedding(value: object) -> list[float] | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        import json
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            pass
+    if not isinstance(value, (list, tuple)):
+        return None
     return [float(item) for item in value]

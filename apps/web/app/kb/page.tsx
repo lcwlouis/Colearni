@@ -140,7 +140,7 @@ export default function KBPage() {
   if (auth.isLoading) return <p>Loading…</p>;
 
   return (
-    <div className="kb-page">
+    <div className="kb-page" style={{ height: "100%", overflowY: "auto", background: "var(--bg)" }}>
       <div className="kb-header">
         <div>
           <h1 className="kb-title">Knowledge Base</h1>
@@ -154,6 +154,7 @@ export default function KBPage() {
             multiple
             onChange={handleFileSelect}
             className="hidden"
+            style={{ display: "none" }}
             id="kb-upload"
             aria-label="Choose knowledge base file"
           />
@@ -211,10 +212,10 @@ export default function KBPage() {
                   {item.phase === "uploading"
                     ? "Ingesting document and graph..."
                     : item.phase === "uploaded"
-                    ? `Ingested ${item.chunkCount ?? 0} chunk${item.chunkCount === 1 ? "" : "s"}.`
-                    : item.phase === "failed"
-                    ? item.error ?? "Upload failed."
-                    : "Waiting to upload..."}
+                      ? `Ingested ${item.chunkCount ?? 0} chunk${item.chunkCount === 1 ? "" : "s"}.`
+                      : item.phase === "failed"
+                        ? item.error ?? "Upload failed."
+                        : "Waiting to upload..."}
                 </span>
               </li>
             ))}
@@ -245,7 +246,12 @@ export default function KBPage() {
               {documents.map((doc) => (
                 <tr key={doc.document_id}>
                   <td className="px-4 py-3">
-                    {doc.title || doc.source_uri || `Document #${doc.document_id}`}
+                    <div>
+                      {doc.title || doc.source_uri || `Document #${doc.document_id}`}
+                      {doc.summary && (
+                        <p className="kb-doc-summary">{doc.summary}</p>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`kb-badge ${doc.ingestion_status === "ingested" ? "ok" : "pending"}`}>

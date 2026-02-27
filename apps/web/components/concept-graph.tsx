@@ -17,6 +17,7 @@ type Props = {
   edges: GraphSubgraphEdge[];
   selectedId?: number;
   onSelect: (conceptId: number) => void;
+  onBackgroundClick?: () => void;
   width?: number;
   height?: number;
 };
@@ -43,6 +44,7 @@ export function ConceptGraph({
   edges,
   selectedId,
   onSelect,
+  onBackgroundClick,
   width = 600,
   height = 380,
 }: Props) {
@@ -95,18 +97,46 @@ export function ConceptGraph({
     const lineColor = cs.getPropertyValue('--line').trim() || '#c8d8e9';
     const bgColor = cs.getPropertyValue('--bg').trim() || '#fff';
 
-    const edgeLines = gLinks.map((link) => {
+    // Create marker definition for edge arrows
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    marker.setAttribute("id", "arrow");
+    marker.setAttribute("viewBox", "0 -5 10 10");
+    marker.setAttribute("refX", "8");
+    marker.setAttribute("refY", "0");
+    marker.setAttribute("markerWidth", "6");
+    marker.setAttribute("markerHeight", "6");
+    marker.setAttribute("orient", "auto");
+    const markerPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    markerPath.setAttribute("d", "M0,-5L10,0L0,5");
+    markerPath.setAttribute("fill", lineColor);
+    marker.appendChild(markerPath);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+
+    const edgeGroups = gLinks.map((link) => {
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
       const line = document.createElementNS(
         "http://www.w3.org/2000/svg",
         "line",
       );
       line.setAttribute("stroke", lineColor);
+      line.setAttribute("marker-end", "url(#arrow)");
       line.setAttribute(
         "stroke-width",
         String(Math.min(3, Math.max(1, link.weight * 0.5))),
       );
-      svg.appendChild(line);
-      return { link, line };
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("fill", lineColor);
+      label.setAttribute("font-size", "9");
+      label.setAttribute("text-anchor", "middle");
+      label.textContent = link.weight.toFixed(2);
+
+      g.appendChild(line);
+      g.appendChild(label);
+      svg.appendChild(g);
+      return { link, line, label };
     });
 
     const nodeGroups = gNodes.map((n) => {
@@ -150,13 +180,25 @@ export function ConceptGraph({
         text.setAttribute("y", String(node.y + r + 14));
       }
 
-      for (const { link, line } of edgeLines) {
+      for (const { link, line, label } of edgeGroups) {
         const s = link.source as GNode;
         const t = link.target as GNode;
+        const targetR = t.id === selectedId ? 18 : 14;
+
+        // Calculate offset so arrow doesn't hide under the circle
+        const dx = (t.x ?? 0) - (s.x ?? 0);
+        const dy = (t.y ?? 0) - (s.y ?? 0);
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const offsetX = (dx * (targetR + 4)) / len;
+        const offsetY = (dy * (targetR + 4)) / len;
+
         line.setAttribute("x1", String(s.x ?? 0));
         line.setAttribute("y1", String(s.y ?? 0));
-        line.setAttribute("x2", String(t.x ?? 0));
-        line.setAttribute("y2", String(t.y ?? 0));
+        line.setAttribute("x2", String((t.x ?? 0) - offsetX));
+        line.setAttribute("y2", String((t.y ?? 0) - offsetY));
+
+        label.setAttribute("x", String(((s.x ?? 0) + (t.x ?? 0)) / 2));
+        label.setAttribute("y", String(((s.y ?? 0) + (t.y ?? 0)) / 2 - 4));
       }
     });
 
@@ -183,6 +225,11 @@ export function ConceptGraph({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      onClick={(e) => {
+        if (e.target === svgRef.current && onBackgroundClick) {
+          onBackgroundClick();
+        }
+      }}
     />
   );
 }

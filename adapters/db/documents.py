@@ -18,6 +18,7 @@ class DocumentRow:
     source_uri: str | None
     mime_type: str | None
     content_hash: str
+    summary: str | None = None
 
 
 def get_document_by_content_hash(
@@ -30,7 +31,7 @@ def get_document_by_content_hash(
     row = db.execute(
         text(
             """
-            SELECT id, workspace_id, title, source_uri, mime_type, content_hash
+            SELECT id, workspace_id, title, source_uri, mime_type, content_hash, summary
             FROM documents
             WHERE workspace_id = :workspace_id AND content_hash = :content_hash
             """
@@ -50,7 +51,7 @@ def get_document_by_id(
     row = db.execute(
         text(
             """
-            SELECT id, workspace_id, title, source_uri, mime_type, content_hash
+            SELECT id, workspace_id, title, source_uri, mime_type, content_hash, summary
             FROM documents
             WHERE workspace_id = :workspace_id AND id = :document_id
             """
@@ -90,7 +91,7 @@ def insert_document(
                 :mime_type,
                 :content_hash
             )
-            RETURNING id, workspace_id, title, source_uri, mime_type, content_hash
+            RETURNING id, workspace_id, title, source_uri, mime_type, content_hash, summary
             """
         ),
         {
@@ -115,4 +116,29 @@ def _to_document_row(row: dict[str, object] | None) -> DocumentRow | None:
         source_uri=row["source_uri"] if row["source_uri"] is None else str(row["source_uri"]),
         mime_type=row["mime_type"] if row["mime_type"] is None else str(row["mime_type"]),
         content_hash=str(row["content_hash"]),
+        summary=str(row["summary"]) if row.get("summary") else None,
+    )
+
+
+def update_document_summary(
+    db: Session,
+    *,
+    workspace_id: int,
+    document_id: int,
+    summary: str,
+) -> None:
+    """Update the summary field on a document row."""
+    db.execute(
+        text(
+            """
+            UPDATE documents
+            SET summary = :summary, updated_at = now()
+            WHERE id = :document_id AND workspace_id = :workspace_id
+            """
+        ),
+        {
+            "document_id": document_id,
+            "workspace_id": workspace_id,
+            "summary": summary,
+        },
     )

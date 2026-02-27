@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from typing import Any, Literal
 
 from sqlalchemy import bindparam, text
@@ -288,6 +289,121 @@ def get_bounded_subgraph(
     }
 
 
+def get_full_subgraph(
+    session: Session,
+    *,
+    workspace_id: int,
+    max_nodes: int,
+    max_edges: int,
+    user_id: int | None = None,
+) -> dict[str, Any]:
+    node_rows = (
+        session.execute(
+            text(
+                """
+                SELECT
+                    c.id AS concept_id,
+                    c.canonical_name,
+                    c.description,
+                    m.status AS mastery_status,
+                    m.score AS mastery_score,
+                    (
+                        SELECT count(*) FROM edges_canon e 
+                        WHERE e.workspace_id = :workspace_id AND (e.src_id = c.id OR e.tgt_id = c.id)
+                    ) as degree
+                FROM concepts_canon c
+                LEFT JOIN mastery m
+                  ON m.workspace_id = c.workspace_id
+                 AND m.concept_id = c.id
+                 AND m.user_id = :user_id
+                WHERE c.workspace_id = :workspace_id
+                  AND c.is_active = TRUE
+                ORDER BY degree DESC, c.id ASC
+                LIMIT :max_nodes
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "max_nodes": max_nodes,
+                "user_id": user_id,
+            },
+        )
+        .mappings()
+        .all()
+    )
+
+    if not node_rows:
+        return {
+            "workspace_id": workspace_id,
+            "root_concept_id": None,
+            "max_hops": None,
+            "nodes": [],
+            "edges": [],
+        }
+
+    edge_rows = (
+        session.execute(
+            text(
+                """
+                SELECT e.id AS edge_id, e.src_id, e.tgt_id, e.relation_type, e.description,
+                       e.keywords, e.weight
+                FROM edges_canon e
+                JOIN concepts_canon src
+                  ON src.id = e.src_id
+                 AND src.workspace_id = e.workspace_id
+                 AND src.is_active = TRUE
+                JOIN concepts_canon tgt
+                  ON tgt.id = e.tgt_id
+                 AND tgt.workspace_id = e.workspace_id
+                 AND tgt.is_active = TRUE
+                WHERE e.workspace_id = :workspace_id
+                  AND e.src_id IN :node_ids
+                  AND e.tgt_id IN :node_ids
+                ORDER BY e.weight DESC, e.id ASC
+                LIMIT :max_edges
+                """
+            ).bindparams(bindparam("node_ids", expanding=True)),
+            {
+                "workspace_id": workspace_id,
+                "node_ids": [int(row["concept_id"]) for row in node_rows],
+                "max_edges": max_edges,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    return {
+        "workspace_id": workspace_id,
+        "root_concept_id": None,
+        "max_hops": None,
+        "nodes": [
+            {
+                "concept_id": int(r["concept_id"]),
+                "canonical_name": str(r["canonical_name"]),
+                "description": str(r["description"] or ""),
+                "hop_distance": 0,
+                "mastery_status": str(r["mastery_status"]) if r["mastery_status"] else None,
+                "mastery_score": (
+                    float(r["mastery_score"]) if r["mastery_score"] is not None else None
+                ),
+            }
+            for r in node_rows
+        ],
+        "edges": [
+            {
+                "edge_id": int(r["edge_id"]),
+                "src_concept_id": int(r["src_id"]),
+                "tgt_concept_id": int(r["tgt_id"]),
+                "relation_type": str(r["relation_type"]),
+                "description": str(r["description"] or ""),
+                "keywords": [str(k) for k in (r["keywords"] or [])],
+                "weight": float(r["weight"]),
+            }
+            for r in edge_rows
+        ],
+    }
+
+
 def pick_lucky(
     session: Session,
     *,
@@ -329,7 +445,7 @@ def pick_lucky(
 
 
 def _pick_adjacent(session: Session, workspace_id: int, concept_id: int, k_hops: int):
-    return (
+    candidates = (
         session.execute(
             text(
                 _RANKED_REACH_CTE
@@ -358,18 +474,21 @@ def _pick_adjacent(session: Session, workspace_id: int, concept_id: int, k_hops:
                  AND c.is_active = TRUE
                 WHERE ranked.concept_id <> :concept_id
                 ORDER BY ranked.hop_distance ASC, strongest_link_weight DESC, ranked.concept_id ASC
-                LIMIT 1
+                LIMIT 5
                 """
             ),
             {"workspace_id": workspace_id, "concept_id": concept_id, "hop_limit": k_hops},
         )
         .mappings()
-        .first()
+        .all()
     )
+    if not candidates:
+        return None
+    return random.choice(candidates)
 
 
 def _pick_wildcard(session: Session, workspace_id: int, concept_id: int, k_hops: int):
-    return (
+    candidates = (
         session.execute(
             text(
                 _RANKED_REACH_CTE
@@ -401,11 +520,14 @@ def _pick_wildcard(session: Session, workspace_id: int, concept_id: int, k_hops:
                 FROM metrics
                 WHERE degree > 0
                 ORDER BY degree DESC, total_incident_weight DESC, concept_id ASC
-                LIMIT 1
+                LIMIT 5
                 """
             ),
             {"workspace_id": workspace_id, "concept_id": concept_id, "hop_limit": k_hops},
         )
         .mappings()
-        .first()
+        .all()
     )
+    if not candidates:
+        return None
+    return random.choice(candidates)

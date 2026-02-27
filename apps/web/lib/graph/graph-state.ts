@@ -32,6 +32,7 @@ export type GraphAction =
   | { type: "lucky_success"; pick: GraphLuckyResponse }
   | { type: "lucky_error"; error: string }
   | { type: "clear_lucky" }
+  | { type: "clear_detail" }
   | { type: "reset" };
 
 export const initialGraphState: GraphState = {
@@ -70,6 +71,9 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
   }
   if (action.type === "clear_lucky") {
     return { ...state, luckyPick: null };
+  }
+  if (action.type === "clear_detail") {
+    return { ...state, phase: "list_ready", selectedDetail: null, subgraph: null, luckyPick: null, error: null };
   }
   if (action.type === "reset") {
     return initialGraphState;

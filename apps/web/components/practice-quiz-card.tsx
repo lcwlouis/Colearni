@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { PracticeQuizSubmitResponse, QuizFeedbackItem } from "@/lib/api/types";
 import { QuizItemInput } from "@/components/quiz-item-input";
 import { canSubmitPractice, type PracticeState } from "@/lib/practice/practice-state";
@@ -7,6 +8,7 @@ type Props = {
     onAnswerChange: (itemId: number, value: string) => void;
     onSubmitQuiz: () => void;
     onReset: () => void;
+    onNextQuiz: () => void;
 };
 
 function practiceFeedbackLabel(result: PracticeQuizSubmitResponse): string {
@@ -29,11 +31,39 @@ function feedbackForItem(result: PracticeQuizSubmitResponse | null, itemId: numb
 
 function resultClass(fb: QuizFeedbackItem | undefined): string {
     if (!fb) return "";
-    return fb.is_correct ? " correct" : " incorrect";
+    if (fb.is_correct) return " correct";
+    // Green style for passing non-MCQ scores
+    if (typeof fb.score === "number" && fb.score >= 0.7 && !fb.critical_misconception) return " correct";
+    return " incorrect";
 }
 
-export function PracticeQuizCard({ state, onAnswerChange, onSubmitQuiz, onReset }: Props) {
+export function PracticeQuizCard({ state, onAnswerChange, onSubmitQuiz, onReset, onNextQuiz }: Props) {
     const { phase, quiz, answers, result, error } = state;
+    const [minimized, setMinimized] = useState(false);
+
+    // Minimized summary card after submission
+    if (minimized && result) {
+        const scorePercent = Math.round(result.score * 100);
+        return (
+            <section className="panel practice-minimized" aria-label="Practice quiz result">
+                <div className="practice-minimized-row">
+                    <span className={`practice-minimized-score ${result.passed ? "passed" : "failed"}`}>
+                        {scorePercent}%
+                    </span>
+                    <span className="practice-minimized-label">
+                        Practice quiz {result.passed ? "passed" : "needs review"}
+                    </span>
+                    <div className="button-row">
+                        <button type="button" className="secondary" onClick={() => setMinimized(false)}>
+                            Expand
+                        </button>
+                        <button type="button" onClick={onNextQuiz}>Next Quiz</button>
+                        <button type="button" className="secondary" onClick={onReset}>Close</button>
+                    </div>
+                </div>
+            </section>
+        );
+    }
 
     return (
         <section className="panel stack" aria-label="Practice quiz">
@@ -62,8 +92,8 @@ export function PracticeQuizCard({ state, onAnswerChange, onSubmitQuiz, onReset 
                                     />
                                     {fb ? (
                                         <div className="quiz-item-feedback">
-                                            <span className={`quiz-item-result-label ${fb.is_correct ? "correct" : "incorrect"}`}>
-                                                {fb.is_correct ? "✓ Correct" : "✗ Incorrect"}
+                                            <span className={`quiz-item-result-label ${fb.is_correct || (typeof fb.score === "number" && fb.score >= 0.7 && !fb.critical_misconception) ? "correct" : "incorrect"}`}>
+                                                {fb.is_correct || (typeof fb.score === "number" && fb.score >= 0.7 && !fb.critical_misconception) ? "✓ Correct" : "✗ Incorrect"}
                                             </span>
                                             <p>{fb.feedback}</p>
                                             <p className="field-label">
@@ -82,11 +112,13 @@ export function PracticeQuizCard({ state, onAnswerChange, onSubmitQuiz, onReset 
                             <button type="button" onClick={onSubmitQuiz} disabled={!canSubmitPractice(state) || phase === "submitting_quiz"}>
                                 Submit practice
                             </button>
-                            <button type="button" className="secondary" onClick={onReset}>Back</button>
+                            <button type="button" className="secondary" onClick={onReset}>End practice</button>
                         </div>
                     ) : (
                         <div className="button-row">
-                            <button type="button" className="secondary" onClick={onReset}>Back</button>
+                            <button type="button" onClick={onNextQuiz}>Next Quiz</button>
+                            <button type="button" className="secondary" onClick={() => setMinimized(true)}>Minimize</button>
+                            <button type="button" className="secondary" onClick={onReset}>End practice</button>
                         </div>
                     )}
 

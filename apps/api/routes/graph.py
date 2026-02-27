@@ -20,6 +20,7 @@ from domain.graph.explore import (
     LuckyNoCandidateError,
     get_bounded_subgraph,
     get_concept_detail,
+    get_full_subgraph,
     list_concepts,
     pick_lucky,
 )
@@ -61,6 +62,24 @@ def concepts(
             user_id=ws.user.id,
             q=q,
             limit=limit,
+        )
+    )
+
+
+@router.get("/full", response_model=GraphSubgraphResponse)
+def full_graph(
+    max_nodes: int = Query(default=100, ge=1, le=500),
+    max_edges: int = Query(default=300, ge=1, le=1000),
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> GraphSubgraphResponse:
+    return GraphSubgraphResponse.model_validate(
+        get_full_subgraph(
+            db,
+            workspace_id=ws.workspace_id,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            user_id=ws.user.id,
         )
     )
 

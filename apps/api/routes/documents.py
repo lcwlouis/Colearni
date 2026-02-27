@@ -8,6 +8,7 @@ from typing import Annotated, Any
 from adapters.db.dependencies import get_db_session
 from core.ingestion import (
     IngestionEmbeddingUnavailableError,
+    IngestionGraphProviderError,
     IngestionGraphUnavailableError,
     IngestionRequest,
     IngestionValidationError,
@@ -101,6 +102,11 @@ async def upload_document(
     except IngestionGraphUnavailableError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except IngestionGraphProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
             detail=str(exc),
         ) from exc
 

@@ -216,6 +216,7 @@ ChatMessageType = Literal["user", "assistant", "system", "tool", "card"]
 
 class ChatSessionSummary(BaseModel):
     session_id: int = Field(gt=0)
+    public_id: str = Field(min_length=1)
     workspace_id: int = Field(gt=0)
     user_id: int = Field(gt=0)
     title: str | None = None
@@ -360,8 +361,8 @@ class GraphSubgraphEdge(BaseModel):
 
 class GraphSubgraphResponse(BaseModel):
     workspace_id: int = Field(gt=0)
-    root_concept_id: int = Field(gt=0)
-    max_hops: int = Field(ge=1)
+    root_concept_id: int | None = Field(default=None, gt=0)
+    max_hops: int | None = Field(default=None, ge=1)
     nodes: list[GraphSubgraphNode]
     edges: list[GraphSubgraphEdge]
 
@@ -421,6 +422,7 @@ class KBDocumentSummary(BaseModel):
     document_id: int = Field(gt=0)
     public_id: str = Field(min_length=1)
     title: str | None = None
+    summary: str | None = None
     source_uri: str | None = None
     chunk_count: int = Field(ge=0)
     ingestion_status: Literal["pending", "ingested"]

@@ -90,7 +90,7 @@ def test_extract_raw_graph_dedupes_and_normalizes_payload() -> None:
     assert edge.tgt_name == "Basis"
     assert edge.description == "longer description for this relation"
     assert edge.keywords == ["span", "closure", "dimension"]
-    assert edge.weight == pytest.approx(1.2)
+    assert edge.weight == 1  # Clamped to int: min(99, max(1, int(1.2))) = 1
 
 
 def test_extract_raw_graph_rejects_invalid_schema() -> None:

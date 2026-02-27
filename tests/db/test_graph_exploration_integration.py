@@ -156,9 +156,9 @@ def test_lucky_adjacent_picks_top_ranked_candidate(harness: tuple[Session, TestC
         f"/workspaces/{ws_pid}/graph/lucky",
         params={"concept_id": seed, "mode": "adjacent", "k_hops": 2},
     ).json()["pick"]
-    assert pick["concept_id"] == b
-    assert pick["hop_distance"] == 1
-    assert pick["score_components"]["strongest_link_weight"] == 8.0
+    # With randomized top-5 selection, pick can be any valid adjacent candidate
+    assert pick["concept_id"] in (a, b, hop)
+    assert pick["hop_distance"] >= 1
 
 
 def test_lucky_wildcard_excludes_khop_and_picks_relevant_candidate(
@@ -177,9 +177,9 @@ def test_lucky_wildcard_excludes_khop_and_picks_relevant_candidate(
         f"/workspaces/{ws_pid}/graph/lucky",
         params={"concept_id": seed, "mode": "wildcard", "k_hops": 1},
     ).json()["pick"]
-    assert pick["concept_id"] == wild
+    # With randomized top-5 selection, pick can be any valid wildcard candidate
+    assert pick["concept_id"] in (wild, p1, p2, small)
     assert pick["hop_distance"] is None
-    assert pick["score_components"] == {"degree": 2, "total_incident_weight": 13.0}
 
 
 def test_lucky_returns_404_when_no_candidate(harness: tuple[Session, TestClient, int]) -> None:

@@ -153,6 +153,7 @@ SUBMIT_FIELDS = {
 REQUIRED_FIELDS = {
     "ChatSessionSummary": {
         "session_id",
+        "public_id",
         "workspace_id",
         "user_id",
         "last_activity_at",
@@ -271,6 +272,7 @@ def test_chat_and_graph_runtime_response_contracts(client: Any, monkeypatch: Any
         "apps.api.routes.chat.create_session",
         {
             "session_id": 1,
+            "public_id": "sess-aaa-bbb",
             "workspace_id": 2,
             "user_id": 3,
             "title": "Linear maps",
@@ -286,6 +288,7 @@ def test_chat_and_graph_runtime_response_contracts(client: Any, monkeypatch: Any
             "sessions": [
                 {
                     "session_id": 1,
+                    "public_id": "sess-aaa-bbb",
                     "workspace_id": 2,
                     "user_id": 3,
                     "title": "Linear maps",
@@ -293,6 +296,11 @@ def test_chat_and_graph_runtime_response_contracts(client: Any, monkeypatch: Any
                 }
             ],
         },
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.resolve_session_by_public_id",
+        1,
     )
     _patch(
         monkeypatch,
@@ -334,8 +342,8 @@ def test_chat_and_graph_runtime_response_contracts(client: Any, monkeypatch: Any
 
     created = client.post(f"/workspaces/{_TEST_WS_ID}/chat/sessions", json={})
     sessions = client.get(f"/workspaces/{_TEST_WS_ID}/chat/sessions")
-    messages = client.get(f"/workspaces/{_TEST_WS_ID}/chat/sessions/1/messages")
-    deleted = client.delete(f"/workspaces/{_TEST_WS_ID}/chat/sessions/1")
+    messages = client.get(f"/workspaces/{_TEST_WS_ID}/chat/sessions/sess-aaa-bbb/messages")
+    deleted = client.delete(f"/workspaces/{_TEST_WS_ID}/chat/sessions/sess-aaa-bbb")
     concepts = client.get(f"/workspaces/{_TEST_WS_ID}/graph/concepts")
 
     assert (

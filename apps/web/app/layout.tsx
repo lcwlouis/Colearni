@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { AppNav } from "@/components/app-nav";
-import { HealthDot } from "@/components/health-dot";
+import { GlobalSidebar } from "@/components/global-sidebar";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
@@ -12,15 +11,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <Providers>
           <div className="shell">
-            <header className="topbar">
-              <div className="topbar-left">
-                <p className="brand">CoLearni</p>
-                <HealthDot />
-              </div>
-              <div className="topbar-right">
-                <AppNav />
-              </div>
-            </header>
+            <GlobalSidebar />
             <main className="content">{children}</main>
           </div>
         </Providers>

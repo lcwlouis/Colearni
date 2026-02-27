@@ -19,6 +19,10 @@ class WorkspaceCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
 
+class WorkspaceUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+
 
 class WorkspaceSummary(BaseModel):
     workspace_id: int
@@ -143,6 +147,46 @@ def get_workspace(
     )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+    return WorkspaceDetail(
+        workspace_id=int(row["id"]),
+        public_id=str(row["public_id"]),
+        name=str(row["name"]),
+        description=str(row["description"]) if row["description"] else None,
+        settings=row["settings"] if row["settings"] else {},
+    )
+
+
+@router.patch("/{ws_id}", response_model=WorkspaceDetail)
+def update_workspace(
+    payload: WorkspaceUpdateRequest,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> WorkspaceDetail:
+    """Update workspace name and description."""
+    row = (
+        db.execute(
+            text(
+                """
+                UPDATE workspaces
+                SET name = :name,
+                    description = :description,
+                    updated_at = now()
+                WHERE id = :workspace_id
+                RETURNING id, public_id, name, description, settings
+                """
+            ),
+            {
+                "workspace_id": ws.workspace_id,
+                "name": payload.name.strip(),
+                "description": (payload.description or "").strip() or None,
+            },
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+    db.commit()
     return WorkspaceDetail(
         workspace_id=int(row["id"]),
         public_id=str(row["public_id"]),

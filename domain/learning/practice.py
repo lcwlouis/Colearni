@@ -188,7 +188,8 @@ def create_practice_quiz(
             "\"payload\":{...}}]}\n"
             "Include at least one short_answer and one mcq.\n"
             f"QUESTION_COUNT: {overfetch}\n"
-            f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
+            f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}\n"
+            f"IMPORTANT: Generate completely novel and creative questions. Random seed: {uuid.uuid4()}"
         )
         with observation_context(
             component="practice",

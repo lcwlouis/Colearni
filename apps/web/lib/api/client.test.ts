@@ -58,8 +58,8 @@ describe("ApiClient", () => {
       calledMethod = String(init?.method);
       return new Response(null, { status: 204 });
     });
-    await new ApiClient({ baseUrl: "/api/", fetchImpl }).deleteChatSession("ws-uuid", 7);
-    expect(calledUrl).toBe("/api/workspaces/ws-uuid/chat/sessions/7");
+    await new ApiClient({ baseUrl: "/api/", fetchImpl }).deleteChatSession("ws-uuid", "abc-def-123");
+    expect(calledUrl).toBe("/api/workspaces/ws-uuid/chat/sessions/abc-def-123");
     expect(calledMethod).toBe("DELETE");
   });
 });

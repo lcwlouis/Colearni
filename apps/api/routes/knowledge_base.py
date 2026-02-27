@@ -9,6 +9,7 @@ from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.ingestion import (
     IngestionRequest,
     IngestionValidationError,
+    IngestionGraphProviderError,
     IngestionGraphUnavailableError,
     ingest_text_document,
 )
@@ -38,6 +39,7 @@ def list_kb_documents(
                     d.id,
                     d.public_id,
                     d.title,
+                    d.summary,
                     d.source_uri,
                     d.created_at,
                     COUNT(DISTINCT c.id) AS chunk_count,
@@ -62,6 +64,7 @@ def list_kb_documents(
                 document_id=int(row["id"]),
                 public_id=str(row["public_id"]),
                 title=str(row["title"]) if row["title"] else None,
+                summary=str(row["summary"]) if row["summary"] else None,
                 source_uri=str(row["source_uri"]) if row["source_uri"] else None,
                 chunk_count=int(row["chunk_count"]),
                 ingestion_status="ingested" if int(row["chunk_count"]) > 0 else "pending",
@@ -107,6 +110,17 @@ def delete_kb_document(
             detail="Document not found in workspace.",
         )
 
+    # Delete graph raw rows that reference chunks belonging to this document
+    db.execute(
+        text("DELETE FROM edges_raw WHERE workspace_id = :wid AND chunk_id IN "
+             "(SELECT id FROM chunks WHERE document_id = :did AND workspace_id = :wid)"),
+        {"wid": ws.workspace_id, "did": document_id},
+    )
+    db.execute(
+        text("DELETE FROM concepts_raw WHERE workspace_id = :wid AND chunk_id IN "
+             "(SELECT id FROM chunks WHERE document_id = :did AND workspace_id = :wid)"),
+        {"wid": ws.workspace_id, "did": document_id},
+    )
     db.execute(
         text("DELETE FROM provenance WHERE workspace_id = :wid AND chunk_id IN "
              "(SELECT id FROM chunks WHERE document_id = :did AND workspace_id = :wid)"),
@@ -215,6 +229,8 @@ async def upload_kb_document(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except IngestionGraphUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except IngestionGraphProviderError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return {
         "document_id": result.document_id,

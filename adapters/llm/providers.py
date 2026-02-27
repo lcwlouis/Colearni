@@ -1,12 +1,11 @@
-"""Graph LLM client adapters for OpenAI-compatible chat completions APIs."""
+"""Graph LLM client adapters using OpenAI and LiteLLM SDKs."""
 
 from __future__ import annotations
 
 import json
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from core.observability import (
     emit_event,
@@ -18,7 +17,44 @@ from core.observability import (
 
 _RAW_GRAPH_SCHEMA: dict[str, object] = {
     "type": "object",
-    "properties": {"concepts": {"type": "array"}, "edges": {"type": "array"}},
+    "properties": {
+        "concepts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "context_snippet": {"type": ["string", "null"]},
+                    "description": {"type": ["string", "null"]},
+                },
+                "required": ["name", "context_snippet", "description"],
+                "additionalProperties": False,
+            },
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "src_name": {"type": "string"},
+                    "tgt_name": {"type": "string"},
+                    "relation_type": {"type": "string"},
+                    "description": {"type": ["string", "null"]},
+                    "keywords": {"type": "array", "items": {"type": "string"}},
+                    "weight": {"type": "integer"},
+                },
+                "required": [
+                    "src_name",
+                    "tgt_name",
+                    "relation_type",
+                    "description",
+                    "keywords",
+                    "weight",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
     "required": ["concepts", "edges"],
     "additionalProperties": False,
 }
@@ -26,17 +62,19 @@ _DISAMBIGUATION_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
         "decision": {"type": "string", "enum": ["MERGE_INTO", "CREATE_NEW"]},
-        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-        "merge_into_id": {"type": "integer"},
-        "alias_to_add": {"type": "string"},
-        "proposed_description": {"type": "string"},
+        "confidence": {"type": "number"},
+        "merge_into_id": {"type": ["integer", "null"]},
+        "alias_to_add": {"type": ["string", "null"]},
+        "proposed_description": {"type": ["string", "null"]},
     },
-    "required": ["decision", "confidence"],
+    "required": ["decision", "confidence", "merge_into_id", "alias_to_add", "proposed_description"],
     "additionalProperties": False,
 }
 
 
-class _OpenAICompatibleGraphLLMClient:
+class _BaseGraphLLMClient(ABC):
+    """Shared logic for observability, response parsing, and public interface."""
+
     def __init__(
         self,
         *,
@@ -44,16 +82,12 @@ class _OpenAICompatibleGraphLLMClient:
         timeout_seconds: float,
         json_temperature: float = 0.0,
         tutor_temperature: float = 0.0,
-        base_url: str,
-        api_key: str | None,
         provider: str,
     ) -> None:
         if not model.strip():
             raise ValueError("graph_llm model cannot be empty")
         if timeout_seconds <= 0:
             raise ValueError("graph_llm timeout_seconds must be positive")
-        if not base_url.strip():
-            raise ValueError("graph_llm base_url cannot be empty")
         if not 0.0 <= json_temperature <= 2.0:
             raise ValueError("graph_llm json_temperature must be between 0 and 2")
         if not 0.0 <= tutor_temperature <= 2.0:
@@ -62,8 +96,6 @@ class _OpenAICompatibleGraphLLMClient:
         self._timeout_seconds = timeout_seconds
         self._json_temperature = float(json_temperature)
         self._tutor_temperature = float(tutor_temperature)
-        self._url = f"{base_url.rstrip('/')}/chat/completions"
-        self._api_key = api_key.strip() if api_key is not None and api_key.strip() else None
         self._provider = provider.strip() or "unknown"
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
@@ -106,52 +138,47 @@ class _OpenAICompatibleGraphLLMClient:
         schema: dict[str, object],
         prompt: str,
     ) -> dict[str, Any]:
-        payload: dict[str, object] = {
-            "model": self._model,
-            "temperature": self._json_temperature,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "Return only JSON that satisfies the provided schema.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": schema_name, "strict": True, "schema": schema},
-            },
+        messages = [
+            {"role": "system", "content": "Return only JSON that satisfies the provided schema."},
+            {"role": "user", "content": prompt},
+        ]
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": schema_name, "strict": True, "schema": schema},
         }
-        content = self._extract_message_content(self._post_chat_completion(payload))
+        result = self._call_with_observability(
+            messages=messages,
+            temperature=self._json_temperature,
+            response_format=response_format,
+        )
+        content = self._extract_content(result)
         response_payload = json.loads(content)
         if not isinstance(response_payload, dict):
             raise ValueError("Graph LLM response payload must decode to an object")
         return response_payload
 
     def _chat_text(self, *, prompt: str, system_instruction: str) -> str:
-        payload: dict[str, object] = {
-            "model": self._model,
-            "temperature": self._tutor_temperature,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": prompt},
-            ],
-        }
-        content = self._extract_message_content(self._post_chat_completion(payload))
-        return content.strip()
-
-    def _post_chat_completion(self, payload: Mapping[str, object]) -> Mapping[str, object]:
-        headers = {"Content-Type": "application/json"}
-        if self._api_key is not None:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        request = Request(
-            self._url,
-            data=json.dumps(dict(payload)).encode("utf-8"),
-            headers=headers,
-            method="POST",
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": prompt},
+        ]
+        result = self._call_with_observability(
+            messages=messages,
+            temperature=self._tutor_temperature,
+            response_format=None,
         )
+        return self._extract_content(result).strip()
+
+    def _call_with_observability(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict[str, object] | None,
+    ) -> Mapping[str, Any]:
+        """Wrap the SDK call with observability spans and events."""
         context = get_observation_context()
         operation = str(context.get("operation") or "llm.call")
-        messages = payload.get("messages")
 
         with start_span(
             "llm.call",
@@ -160,22 +187,24 @@ class _OpenAICompatibleGraphLLMClient:
             provider=self._provider,
             model=self._model,
         ) as span:
-            # Set OpenInference LLM attributes at the start of the span
             set_llm_span_attributes(
                 span,
                 model=self._model,
                 invocation_params={
                     "model": self._model,
-                    "temperature": payload.get("temperature", 0),
+                    "temperature": temperature,
                     "provider": self._provider,
                 },
-                messages=list(messages) if isinstance(messages, (list, tuple)) else None,
+                messages=messages,
             )
 
             try:
-                with urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
-                    response_body = response.read().decode("utf-8")
-            except HTTPError as exc:
+                result = self._sdk_call(
+                    messages=messages,
+                    temperature=temperature,
+                    response_format=response_format,
+                )
+            except Exception as exc:
                 emit_event(
                     "llm.call",
                     status="failure",
@@ -188,66 +217,18 @@ class _OpenAICompatibleGraphLLMClient:
                     token_total=None,
                     error_type=type(exc).__name__,
                 )
-                body = exc.read().decode("utf-8", errors="replace") if exc.fp is not None else ""
                 raise RuntimeError(
-                    f"Graph LLM request failed with status {exc.code}: {body}"
+                    f"Graph LLM request failed: {exc}"
                 ) from exc
-            except URLError as exc:
-                emit_event(
-                    "llm.call",
-                    status="failure",
-                    component="llm",
-                    operation=operation,
-                    provider=self._provider,
-                    model=self._model,
-                    token_prompt=None,
-                    token_completion=None,
-                    token_total=None,
-                    error_type=type(exc).__name__,
-                )
-                raise RuntimeError(f"Graph LLM request failed: {exc.reason}") from exc
 
-            try:
-                parsed = json.loads(response_body)
-            except json.JSONDecodeError as exc:
-                emit_event(
-                    "llm.call",
-                    status="failure",
-                    component="llm",
-                    operation=operation,
-                    provider=self._provider,
-                    model=self._model,
-                    token_prompt=None,
-                    token_completion=None,
-                    token_total=None,
-                    error_type=type(exc).__name__,
-                )
-                raise
-            if not isinstance(parsed, Mapping):
-                emit_event(
-                    "llm.call",
-                    status="failure",
-                    component="llm",
-                    operation=operation,
-                    provider=self._provider,
-                    model=self._model,
-                    token_prompt=None,
-                    token_completion=None,
-                    token_total=None,
-                    error_type=ValueError.__name__,
-                )
-                raise ValueError("Graph LLM response payload must decode to an object")
+            token_usage = extract_token_usage(result)
+            response_content = self._extract_content_safe(result)
 
-            token_usage = extract_token_usage(parsed)
-            response_content = self._extract_message_content_safe(parsed)
-
-            # Enrich span with response and token data
             set_llm_span_attributes(
                 span,
                 response_message=response_content,
                 token_usage=token_usage,
             )
-
             emit_event(
                 "llm.call",
                 status="success",
@@ -257,9 +238,20 @@ class _OpenAICompatibleGraphLLMClient:
                 model=self._model,
                 **token_usage,
             )
-            return parsed
+            return result
 
-    def _extract_message_content(self, payload: Mapping[str, object]) -> str:
+    @abstractmethod
+    def _sdk_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict[str, object] | None,
+    ) -> Mapping[str, Any]:
+        """Execute the provider-specific SDK call and return the raw response dict."""
+
+    @staticmethod
+    def _extract_content(payload: Mapping[str, Any]) -> str:
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices:
             raise ValueError("Graph LLM response missing choices")
@@ -280,15 +272,17 @@ class _OpenAICompatibleGraphLLMClient:
             raise ValueError("Graph LLM response missing textual content")
         return content
 
-    def _extract_message_content_safe(self, payload: Mapping[str, object]) -> str | None:
+    def _extract_content_safe(self, payload: Mapping[str, Any]) -> str | None:
         """Extract message content without raising — used for span attributes."""
         try:
-            return self._extract_message_content(payload)
+            return self._extract_content(payload)
         except (ValueError, KeyError, TypeError):
             return None
 
 
-class OpenAIGraphLLMClient(_OpenAICompatibleGraphLLMClient):
+class OpenAIGraphLLMClient(_BaseGraphLLMClient):
+    """Graph LLM adapter using the official OpenAI Python SDK."""
+
     def __init__(
         self,
         *,
@@ -305,13 +299,33 @@ class OpenAIGraphLLMClient(_OpenAICompatibleGraphLLMClient):
             timeout_seconds=timeout_seconds,
             json_temperature=json_temperature,
             tutor_temperature=tutor_temperature,
-            base_url="https://api.openai.com/v1",
-            api_key=api_key,
             provider="openai",
         )
+        from openai import OpenAI  # noqa: PLC0415
+
+        self._client = OpenAI(api_key=api_key.strip(), timeout=timeout_seconds)
+
+    def _sdk_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict[str, object] | None,
+    ) -> Mapping[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+        }
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        response = self._client.chat.completions.create(**kwargs)
+        return response.model_dump()
 
 
-class LiteLLMGraphLLMClient(_OpenAICompatibleGraphLLMClient):
+class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
+    """Graph LLM adapter using the LiteLLM SDK."""
+
     def __init__(
         self,
         *,
@@ -322,12 +336,37 @@ class LiteLLMGraphLLMClient(_OpenAICompatibleGraphLLMClient):
         base_url: str,
         api_key: str | None = None,
     ) -> None:
+        if not base_url.strip():
+            raise ValueError("graph_llm base_url cannot be empty")
         super().__init__(
             model=model,
             timeout_seconds=timeout_seconds,
             json_temperature=json_temperature,
             tutor_temperature=tutor_temperature,
-            base_url=base_url,
-            api_key=api_key,
             provider="litellm",
         )
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key.strip() if api_key and api_key.strip() else None
+
+    def _sdk_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict[str, object] | None,
+    ) -> Mapping[str, Any]:
+        import litellm  # noqa: PLC0415
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+            "api_base": self._base_url,
+            "timeout": self._timeout_seconds,
+        }
+        if self._api_key is not None:
+            kwargs["api_key"] = self._api_key
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        response = litellm.completion(**kwargs)
+        return response.model_dump()

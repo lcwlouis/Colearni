@@ -65,7 +65,7 @@ export interface AssistantResponseEnvelope {
 
 export interface ChatRespondRequest {
   query: string;
-  session_id?: number;
+  session_id?: string;
   concept_id?: number;
   suggested_concept_id?: number;
   concept_switch_decision?: ConceptSwitchDecision;
@@ -77,6 +77,7 @@ export type ChatMessageType = "user" | "assistant" | "system" | "tool" | "card";
 
 export interface ChatSessionSummary {
   session_id: number;
+  public_id: string;
   workspace_id: number;
   user_id: number;
   title: string | null;
@@ -244,7 +245,7 @@ export interface QuizItemCreateDraft {
 
 export interface CreateLevelUpQuizRequest {
   concept_id: number;
-  session_id?: number;
+  session_id?: string;
   question_count?: number;
   items?: QuizItemCreateDraft[];
 }
@@ -265,7 +266,7 @@ export interface FlashcardsRequest {
 
 export interface CreateQuizRequest {
   concept_id: number;
-  session_id?: number;
+  session_id?: string;
   question_count?: number;
 }
 
@@ -342,6 +343,7 @@ export interface KBDocumentSummary {
   document_id: number;
   public_id: string;
   title: string | null;
+  summary: string | null;
   source_uri: string | null;
   chunk_count: number;
   ingestion_status: "pending" | "ingested";

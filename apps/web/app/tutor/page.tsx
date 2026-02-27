@@ -6,12 +6,11 @@ import { ChatResponse } from "@/components/chat-response";
 import { ConceptGraph } from "@/components/concept-graph";
 import { LevelUpCard } from "@/components/level-up-card";
 import { MarkdownContent } from "@/components/markdown-content";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { useChatSession } from "@/lib/tutor/chat-session-context";
 import { ApiError, apiClient } from "@/lib/api/client";
 import type {
   AssistantResponseEnvelope,
   ChatMessageRecord,
-  ChatSessionSummary,
   ConceptSwitchSuggestion,
   GraphConceptSummary,
   GraphSubgraphResponse,
@@ -35,10 +34,6 @@ const asPositiveInt = (value: string) => {
   const num = Number(value);
   return Number.isInteger(num) && num > 0 ? num : undefined;
 };
-
-function toTitleCase(str: string): string {
-  return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
-}
 
 function errorText(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
@@ -84,15 +79,17 @@ function masteryLabel(status: string | null, score: number | null): string {
 }
 
 export default function TutorPage() {
-  const auth = useRequireAuth();
-  const { user, isLoading: authLoading, activeWorkspaceId } = auth;
+  const { user, isLoading: authLoading, activeWorkspaceId } = useRequireAuth();
+  const wsId = activeWorkspaceId ?? undefined;
+
+  const {
+    activeSessionId,
+    startNewSession,
+    refreshSessions
+  } = useChatSession();
+
   const [grounding_mode, setGroundingMode] = useState<GroundingMode>("hybrid");
   const [query, setQuery] = useState("");
-
-  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [sessionsError, setSessionsError] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -112,21 +109,7 @@ export default function TutorPage() {
 
   const [levelUpState, dispatchLevelUp] = useReducer(levelUpReducer, initialLevelUpState);
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // Restore sidebar state from localStorage after hydration
-  useEffect(() => {
-    const stored = localStorage.getItem("colearni-sidebar");
-    if (stored !== "closed") setSidebarOpen(true);
-  }, []);
-  const [contextMenuId, setContextMenuId] = useState<number | null>(null);
-  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number; top?: boolean } | null>(null);
-  const [renamingId, setRenamingId] = useState<number | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
-
-  const wsId = activeWorkspaceId ?? undefined;
-
+  // Restore existing session data for levelup
   useEffect(() => {
     if (!wsId || !activeSessionId) return;
     const key = `colearni_levelup_${wsId}_${activeSessionId}`;
@@ -152,54 +135,14 @@ export default function TutorPage() {
     }
   }, [wsId, activeSessionId, levelUpState]);
 
-  async function ensureSession(): Promise<number | null> {
-    if (!wsId) {
-      return null;
-    }
-    if (activeSessionId) {
-      return activeSessionId;
-    }
-    const created = await apiClient.createChatSession(wsId, {});
-    setSessions((prev) => [created, ...prev]);
-    setActiveSessionId(created.session_id);
-    return created.session_id;
+  async function ensureSession(): Promise<string | null> {
+    if (!wsId) return null;
+    if (activeSessionId) return activeSessionId;
+    return await startNewSession();
   }
 
-  async function refreshSessions() {
-    if (!wsId) {
-      setSessions([]);
-      setActiveSessionId(null);
-      return;
-    }
-    setSessionsLoading(true);
-    setSessionsError(null);
-    try {
-      const payload = await apiClient.listChatSessions(wsId, { limit: 50 });
-      let nextSessions = payload.sessions;
-      if (!nextSessions.length) {
-        const created = await apiClient.createChatSession(wsId, {});
-        nextSessions = [created];
-      }
-      setSessions(nextSessions);
-      setActiveSessionId((prev) => {
-        if (prev && nextSessions.some((item) => item.session_id === prev)) {
-          return prev;
-        }
-        return nextSessions[0]?.session_id ?? null;
-      });
-    } catch (error: unknown) {
-      setSessionsError(errorText(error, "Failed to load chat sessions"));
-      setSessions([]);
-      setActiveSessionId(null);
-    } finally {
-      setSessionsLoading(false);
-    }
-  }
-
-  async function loadMessages(sessionId: number) {
-    if (!wsId) {
-      return;
-    }
+  async function loadMessages(sessionId: string) {
+    if (!wsId) return;
     setChatLoading(true);
     setChatError(null);
     try {
@@ -235,9 +178,7 @@ export default function TutorPage() {
   }
 
   async function loadConcepts() {
-    if (!wsId) {
-      return;
-    }
+    if (!wsId) return;
     setConceptsLoading(true);
     setConceptsError(null);
     try {
@@ -248,9 +189,7 @@ export default function TutorPage() {
       setCurrentConcept((prev) => {
         if (prev) {
           const matched = payload.concepts.find((item) => item.concept_id === prev.concept_id);
-          if (matched) {
-            return matched;
-          }
+          if (matched) return matched;
         }
         return payload.concepts[0] ?? null;
       });
@@ -264,14 +203,26 @@ export default function TutorPage() {
   }
 
   async function loadSubgraph(conceptId: number) {
-    if (!wsId) {
-      return;
-    }
+    if (!wsId) return;
     try {
-      const payload = await apiClient.getConceptSubgraph(wsId, conceptId, {
-        max_hops: 1,
-      });
-      setSubgraph(payload);
+      const payload = await apiClient.getConceptSubgraph(wsId, conceptId, { max_hops: 2, max_nodes: 40, max_edges: 80 });
+      // Filter to mastered/learning nodes + active concept (limit unlearned topology)
+      const allowedIds = new Set<number>();
+      for (const node of payload.nodes) {
+        if (
+          node.concept_id === conceptId ||
+          node.mastery_status === "learned" ||
+          node.mastery_status === "learning" ||
+          node.hop_distance <= 1
+        ) {
+          allowedIds.add(node.concept_id);
+        }
+      }
+      const filteredNodes = payload.nodes.filter((n) => allowedIds.has(n.concept_id));
+      const filteredEdges = payload.edges.filter(
+        (e) => allowedIds.has(e.src_concept_id) && allowedIds.has(e.tgt_concept_id),
+      );
+      setSubgraph({ ...payload, nodes: filteredNodes, edges: filteredEdges });
     } catch {
       setSubgraph(null);
     }
@@ -280,13 +231,10 @@ export default function TutorPage() {
   async function onSubmitChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = query.trim();
-    if (!text || !wsId) {
-      return;
-    }
+    if (!text || !wsId) return;
+
     const sessionId = await ensureSession();
-    if (!sessionId) {
-      return;
-    }
+    if (!sessionId) return;
 
     const optimisticUser: TimelineMessage = {
       id: `tmp-user-${Date.now()}`,
@@ -307,6 +255,7 @@ export default function TutorPage() {
         concept_switch_decision: switchDecision ?? undefined,
         grounding_mode,
       });
+
       setMessages((prev) => [
         ...prev,
         {
@@ -324,52 +273,20 @@ export default function TutorPage() {
           setCurrentConcept(resolved);
         }
       }
+
       if (response.conversation_meta?.concept_switch_suggestion) {
         setSwitchSuggestion(response.conversation_meta.concept_switch_suggestion);
       } else {
         setSwitchSuggestion(null);
       }
+
       setSuggestedConceptId(null);
       setSwitchDecision(null);
-      await refreshSessions();
+      await refreshSessions(); // update session titles if it changed
     } catch (error: unknown) {
       setChatError(errorText(error, "Tutor request failed"));
     } finally {
       setChatLoading(false);
-    }
-  }
-
-  async function startNewSession() {
-    if (!wsId) {
-      return;
-    }
-    setChatError(null);
-    try {
-      const created = await apiClient.createChatSession(wsId, {});
-      setSessions((prev) => [created, ...prev]);
-      setActiveSessionId(created.session_id);
-      setMessages([]);
-      dispatchLevelUp({ type: "reset" });
-    } catch (error: unknown) {
-      setSessionsError(errorText(error, "Could not create chat session"));
-    }
-  }
-
-  async function deleteSession(sessionId: number) {
-    if (!wsId) {
-      return;
-    }
-    setSessionsError(null);
-    try {
-      await apiClient.deleteChatSession(wsId, sessionId);
-      if (activeSessionId === sessionId) {
-        setMessages([]);
-        dispatchLevelUp({ type: "reset" });
-      }
-      localStorage.removeItem(`colearni_levelup_${wsId}_${sessionId}`);
-      await refreshSessions();
-    } catch (error: unknown) {
-      setSessionsError(errorText(error, "Could not delete chat session"));
     }
   }
 
@@ -397,9 +314,7 @@ export default function TutorPage() {
   }
 
   async function submitLevelUp() {
-    if (!wsId || !levelUpState.quiz) {
-      return;
-    }
+    if (!wsId || !levelUpState.quiz) return;
 
     dispatchLevelUp({ type: "submit_start" });
     try {
@@ -415,25 +330,16 @@ export default function TutorPage() {
   const timeline = useMemo(() => messages, [messages]);
 
   useEffect(() => {
-    void refreshSessions();
     void loadConcepts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsId]);
 
   useEffect(() => {
-    const handleGlobalClick = () => {
-      if (contextMenuId) {
-        setContextMenuId(null);
-        setContextMenuPos(null);
-      }
-    };
-    document.addEventListener("click", handleGlobalClick);
-    return () => document.removeEventListener("click", handleGlobalClick);
-  }, [contextMenuId]);
-
-  useEffect(() => {
     if (activeSessionId) {
       void loadMessages(activeSessionId);
+    } else {
+      setMessages([]);
+      dispatchLevelUp({ type: "reset" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId]);
@@ -447,7 +353,7 @@ export default function TutorPage() {
 
   if (authLoading || !user) {
     return (
-      <div className="flex items-center justify-center" style={{ minHeight: "60vh" }}>
+      <div className="flex items-center justify-center" style={{ height: "100%" }}>
         <p style={{ color: "var(--muted)" }}>Loading…</p>
       </div>
     );
@@ -455,168 +361,9 @@ export default function TutorPage() {
 
   return (
     <section className={`tutor-shell${(showGraph || showQuiz) ? " with-drawer" : ""}`}>
-      <aside className={`panel session-sidebar ${sidebarOpen ? "open" : "closed"}`}>
-        <div className="button-row" style={{ justifyContent: "space-between" }}>
-          <h2>Chats</h2>
-          <button type="button" className="secondary icon-btn" onClick={() => { setSidebarOpen(false); localStorage.setItem("colearni-sidebar", "closed"); }} aria-label="Close sidebar">
-            ✕
-          </button>
-        </div>
-        <div className="button-row" style={{ marginTop: "0.5rem" }}>
-          <button type="button" style={{ width: "100%" }} onClick={() => void startNewSession()}>
-            + New chat
-          </button>
-        </div>
-        <div className="session-list">
-          {sessions.map((chat) => (
-            <div key={chat.session_id} className={`session-item ${chat.session_id === activeSessionId ? "active" : ""} ${contextMenuId === chat.session_id ? "menu-open" : ""}`}>
-              {renamingId === chat.session_id ? (
-                <form
-                  className="session-rename-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const trimmed = renameValue.trim();
-                    if (trimmed) {
-                      setSessions((prev) =>
-                        prev.map((s) =>
-                          s.session_id === chat.session_id ? { ...s, title: trimmed } : s
-                        )
-                      );
-                    }
-                    setRenamingId(null);
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onBlur={() => setRenamingId(null)}
-                    onKeyDown={(e) => { if (e.key === "Escape") setRenamingId(null); }}
-                    autoFocus
-                  />
-                </form>
-              ) : (
-                <button
-                  type="button"
-                  className="session-item-btn"
-                  onClick={() => {
-                    setActiveSessionId(chat.session_id);
-                    setContextMenuId(null);
-                    if (window.innerWidth < 768) {
-                      setSidebarOpen(false);
-                    }
-                  }}
-                >
-                  <strong>{toTitleCase(chat.title || `Chat ${chat.session_id}`)}</strong>
-                </button>
-              )}
-              <div className="session-actions">
-                <button
-                  type="button"
-                  className="secondary icon-btn session-more-btn"
-                  title="More options"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (contextMenuId === chat.session_id) {
-                      setContextMenuId(null);
-                      setContextMenuPos(null);
-                    } else {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const isNearBottom = rect.bottom > window.innerHeight - 120;
-                      setContextMenuPos({ x: rect.right, y: isNearBottom ? rect.top : rect.bottom, top: isNearBottom });
-                      setContextMenuId(chat.session_id);
-                    }
-                  }}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="1"></circle>
-                    <circle cx="19" cy="12" r="1"></circle>
-                    <circle cx="5" cy="12" r="1"></circle>
-                  </svg>
-                </button>
-                {contextMenuId === chat.session_id && (
-                  <div
-                    className="session-context-menu"
-                    style={contextMenuPos?.top ? { bottom: '100%', right: 0, marginBottom: '0.25rem' } : { top: '100%', right: 0, marginTop: '0.25rem' }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenameValue(chat.title || `Chat ${chat.session_id}`);
-                        setRenamingId(chat.session_id);
-                        setContextMenuId(null);
-                        setContextMenuPos(null);
-                      }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                      </svg>
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      className="danger-text"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setContextMenuId(null);
-                        setContextMenuPos(null);
-                        setDeleteConfirmId(chat.session_id);
-                      }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                      </svg>
-                      Delete
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="sidebar-footer">
-          <div className="sidebar-workspace-block">
-            <label htmlFor="sidebar-workspace" className="field-label">Workspace</label>
-            <select
-              id="sidebar-workspace"
-              value={activeWorkspaceId ?? ""}
-              onChange={(event) => auth.setActiveWorkspaceId(event.target.value)}
-              aria-label="Select workspace"
-            >
-              {auth.workspaces.map((workspace) => (
-                <option key={workspace.public_id} value={workspace.public_id}>
-                  {workspace.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="sidebar-profile-block">
-            <div>
-              <p className="sidebar-user-name">{user.display_name || user.email}</p>
-              {user.display_name ? <p className="sidebar-user-email">{user.email}</p> : null}
-            </div>
-            <div className="sidebar-profile-actions">
-              <ThemeToggle />
-              <button type="button" className="secondary" onClick={auth.logout}>Logout</button>
-            </div>
-          </div>
-        </div>
-        {sessionsError ? <p className="status error">{sessionsError}</p> : null}
-        {sessionsLoading ? <p className="status loading">Loading chats...</p> : null}
-      </aside>
-
-      <section className="chat-main" style={{ background: 'var(--bg)', display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <section className="chat-main" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)' }}>
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            {!sidebarOpen && (
-              <button type="button" className="icon-btn" onClick={() => { setSidebarOpen(true); localStorage.setItem("colearni-sidebar", "open"); }} aria-label="Open sidebar" style={{ marginRight: '0.5rem' }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
-              </button>
-            )}
             <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>Tutor Chat</span>
             {currentConcept && (
               <span style={{ fontSize: '0.85rem', color: 'var(--muted)', marginLeft: '0.5rem' }}>
@@ -719,132 +466,108 @@ export default function TutorPage() {
         </div>
       </section>
 
-      {
-        showGraph ? (
-          <aside className="panel graph-drawer">
-            <h2>Concept graph</h2>
-            {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
-            {conceptsError ? <p className="status error">{conceptsError}</p> : null}
-            {subgraph ? (
-              <ConceptGraph
-                nodes={subgraph.nodes}
-                edges={subgraph.edges}
-                selectedId={currentConcept?.concept_id}
-                onSelect={(id) => {
-                  setSuggestedConceptId(id);
-                  const matched = concepts.find((item) => item.concept_id === id);
-                  if (matched) {
-                    setCurrentConcept(matched);
-                  }
-                }}
-                width={320}
-                height={350}
-              />
-            ) : !conceptsLoading ? (
-              <p className="status empty">Select a concept to view its graph.</p>
-            ) : null}
-            {currentConcept ? (
-              <div className="graph-legend">
-                <p><strong>{currentConcept.canonical_name}</strong></p>
-                <span className="field-label">{masteryLabel(currentConcept.mastery_status, currentConcept.mastery_score)}</span>
-              </div>
-            ) : null}
-          </aside>
-        ) : null
-      }
-
-      {
-        showQuiz ? (
-          <aside className="panel quiz-drawer">
-            <LevelUpCard
-              state={levelUpState}
-              onStartQuiz={() => void startLevelUp()}
-              onAnswerChange={(itemId, value) =>
-                dispatchLevelUp({ type: "answer", item_id: itemId, answer: value })
-              }
-              onSubmitQuiz={() => void submitLevelUp()}
-              onRetryCreate={() => void startLevelUp()}
-              onRetrySubmit={() => void submitLevelUp()}
-              onStartNew={() => dispatchLevelUp({ type: "reset" })}
+      {showGraph ? (
+        <aside className="panel graph-drawer">
+          <h2>Concept graph</h2>
+          {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
+          {conceptsError ? <p className="status error">{conceptsError}</p> : null}
+          {subgraph ? (
+            <ConceptGraph
+              nodes={subgraph.nodes}
+              edges={subgraph.edges}
+              selectedId={currentConcept?.concept_id}
+              onSelect={(id) => {
+                setSuggestedConceptId(id);
+                const matched = concepts.find((item) => item.concept_id === id);
+                if (matched) {
+                  setCurrentConcept(matched);
+                }
+              }}
+              width={320}
+              height={350}
             />
-          </aside>
-        ) : null
-      }
-
-      {
-        switchSuggestion ? (
-          <div className="switch-modal-backdrop" role="dialog" aria-modal="true">
-            <div className="panel switch-modal">
-              <h3>Concept switch suggested</h3>
-              <p>
-                The tutor inferred your latest message may be about <strong>{switchSuggestion.to_concept_name}</strong>
-                instead of <strong>{switchSuggestion.from_concept_name}</strong>.
-              </p>
-              <p className="field-label">Reason: {switchSuggestion.reason}</p>
-              <div className="button-row">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const matched = concepts.find(
-                      (item) => item.concept_id === switchSuggestion.to_concept_id,
-                    );
-                    if (matched) {
-                      setCurrentConcept(matched);
-                    }
-                    setSuggestedConceptId(switchSuggestion.to_concept_id);
-                    setSwitchDecision("accept");
-                    setSwitchSuggestion(null);
-                  }}
-                >
-                  Switch concept
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    setSwitchDecision("reject");
-                    setSwitchSuggestion(null);
-                    setMessages((prev) => [
-                      ...prev,
-                      {
-                        id: `sys-${Date.now()}`,
-                        role: "system",
-                        text: "Concept switch rejected. Send your next message and the tutor will ask a clarifying question.",
-                      },
-                    ]);
-                  }}
-                >
-                  Keep current
-                </button>
-              </div>
+          ) : !conceptsLoading ? (
+            <p className="status empty">Select a concept to view its graph.</p>
+          ) : null}
+          {currentConcept ? (
+            <div className="graph-legend">
+              <p><strong>{currentConcept.canonical_name}</strong></p>
+              <span className="field-label">{masteryLabel(currentConcept.mastery_status, currentConcept.mastery_score)}</span>
+              {currentConcept.description ? (
+                <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem', lineHeight: 1.5 }}>
+                  {currentConcept.description.length > 200
+                    ? currentConcept.description.slice(0, 200) + '…'
+                    : currentConcept.description}
+                </p>
+              ) : null}
             </div>
-          </div>
-        ) : null
-      }
+          ) : null}
+        </aside>
+      ) : null}
 
-      {deleteConfirmId ? (
+      {showQuiz ? (
+        <aside className="panel quiz-drawer">
+          <LevelUpCard
+            state={levelUpState}
+            onStartQuiz={() => void startLevelUp()}
+            onAnswerChange={(itemId, value) =>
+              dispatchLevelUp({ type: "answer", item_id: itemId, answer: value })
+            }
+            onSubmitQuiz={() => void submitLevelUp()}
+            onRetryCreate={() => void startLevelUp()}
+            onRetrySubmit={() => void submitLevelUp()}
+            onStartNew={() => {
+              dispatchLevelUp({ type: "reset" });
+              // Auto-start new quiz after reset
+              setTimeout(() => void startLevelUp(), 0);
+            }}
+          />
+        </aside>
+      ) : null}
+
+      {switchSuggestion ? (
         <div className="switch-modal-backdrop" role="dialog" aria-modal="true">
           <div className="panel switch-modal">
-            <h3>Delete chat</h3>
-            <p>Are you sure you want to delete this chat session? This action cannot be undone.</p>
+            <h3>Concept switch suggested</h3>
+            <p>
+              The tutor inferred your latest message may be about <strong>{switchSuggestion.to_concept_name}</strong>
+              instead of <strong>{switchSuggestion.from_concept_name}</strong>.
+            </p>
+            <p className="field-label">Reason: {switchSuggestion.reason}</p>
             <div className="button-row">
               <button
                 type="button"
-                style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }}
                 onClick={() => {
-                  const id = deleteConfirmId;
-                  setDeleteConfirmId(null);
-                  void deleteSession(id);
+                  const matched = concepts.find(
+                    (item) => item.concept_id === switchSuggestion.to_concept_id,
+                  );
+                  if (matched) {
+                    setCurrentConcept(matched);
+                  }
+                  setSuggestedConceptId(switchSuggestion.to_concept_id);
+                  setSwitchDecision("accept");
+                  setSwitchSuggestion(null);
                 }}
               >
-                Delete
+                Switch concept
               </button>
               <button
                 type="button"
                 className="secondary"
-                onClick={() => setDeleteConfirmId(null)}
+                onClick={() => {
+                  setSwitchDecision("reject");
+                  setSwitchSuggestion(null);
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: `sys-${Date.now()}`,
+                      role: "system",
+                      text: "Concept switch rejected. Send your next message and the tutor will ask a clarifying question.",
+                    },
+                  ]);
+                }}
               >
-                Cancel
+                Keep current
               </button>
             </div>
           </div>

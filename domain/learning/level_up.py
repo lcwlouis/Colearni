@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from typing import Any
 from uuid import uuid4
 
@@ -587,8 +588,14 @@ def _choose_items(
 
 
 def _supports_quiz_generation(llm_client: GraphLLMClient) -> bool:
-    return callable(getattr(llm_client, "extract_raw_graph", None)) and callable(
-        getattr(llm_client, "disambiguate", None)
+    """Check if the LLM client supports both graph extraction and text generation.
+
+    We require extract_raw_graph as a signal that this is a full LLM client
+    (not a stub/grader), plus generate_tutor_text for actual quiz generation.
+    """
+    return (
+        callable(getattr(llm_client, "extract_raw_graph", None))
+        and callable(getattr(llm_client, "generate_tutor_text", None))
     )
 
 
@@ -618,16 +625,27 @@ def _generate_level_up_items_with_retries(
     max_items: int,
 ) -> list[dict[str, Any]] | None:
     context = _generation_context(session, workspace_id=workspace_id, concept_id=concept_id)
+    concept_name = context["concept_name"]
+    concept_desc = context.get("concept_description", "")
+    adjacent = context.get("adjacent_concepts", [])
+    adjacent_str = ", ".join(adjacent[:6]) if adjacent else "none"
     prompt = (
-        "Return JSON only. Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\","
-        "\"prompt\":\"...\",\"payload\":{...}}]}.\n"
-        "Rules: produce a level-up quiz with mixed item types and diverse prompts.\n"
-        "MCQ payload must include choices[{id,text}], correct_choice_id, critical_choice_ids,"
-        " and optional choice_explanations.\n"
-        f"TARGET_COUNT: {target_count}\n"
-        f"MIN_ITEMS: {min_items}\n"
-        f"MAX_ITEMS: {max_items}\n"
-        f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
+        "You are creating a quiz to assess understanding of a concept.\n"
+        f"CONCEPT: {concept_name}\n"
+        f"DESCRIPTION: {concept_desc}\n"
+        f"RELATED CONCEPTS: {adjacent_str}\n\n"
+        "Return ONLY valid JSON with this schema:\n"
+        '{"items":[{"item_type":"short_answer"|"mcq","prompt":"...","payload":{...}}]}\n\n'
+        "Rules:\n"
+        f"- Produce exactly {target_count} items with a mix of short_answer and mcq types.\n"
+        "- Each question must be SPECIFIC to the concept — reference facts, examples, or properties unique to it.\n"
+        "- short_answer payload: {\"rubric_keywords\":[...],\"critical_misconception_keywords\":[...]}\n"
+        "- mcq payload: {\"choices\":[{\"id\":\"a\",\"text\":\"...\"}, ...], \"correct_choice_id\":\"a\", "
+        "\"critical_choice_ids\":[\"d\"], \"choice_explanations\":{\"a\":\"...\", ...}}\n"
+        "- MCQ choices must contain SPECIFIC, distinct content — not generic placeholders.\n"
+        "  The correct answer must be clearly right, distractors must be plausible but wrong.\n"
+        "- Make questions progressively harder: start with recall, then application, then analysis.\n"
+        "- Do NOT use generic prompts like 'Which is most accurate about X'. Ask specific questions.\n"
     )
     retry_prompt = prompt
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
@@ -971,24 +989,26 @@ def _auto_items(
         question_count - 1,
     )
     mcq_count = question_count - short_count
+
+    # Build context-aware description snippet for choices
+    desc_short = (desc[:120] + "...") if len(desc) > 120 else desc
+
     short_templates = [
-        f"Explain the core idea of {name} in one concise paragraph.",
-        f"What misconception about {name} causes the most errors?",
-        f"How would you teach {name} to a beginner using one example?",
-        f"Why is {name} important in solving real problems?",
-        f"Compare {name} with a closely related concept and highlight one difference.",
-        f"What is the minimum definition needed to correctly identify {name}?",
-        f"Give one test you can apply to verify understanding of {name}.",
-        f"What mistake would invalidate reasoning about {name}?",
+        f"Explain what {name} means and why it matters.",
+        f"What is a common mistake people make when applying {name}?",
+        f"How would you teach {name} to someone new using a concrete example?",
+        f"Why is {name} important in its field?",
+        f"Compare {name} with a closely related concept.",
+        f"What are the key properties that define {name}?",
+        f"Describe a scenario where {name} would be applied.",
+        f"What would go wrong if someone misunderstood {name}?",
     ]
-    mcq_templates = [
-        f"Which option best captures the definition of {name}?",
-        f"Which statement about {name} is most accurate?",
-        f"Which choice correctly applies {name} in context?",
-        f"Which option reveals a critical misunderstanding of {name}?",
-        f"Which statement distinguishes {name} from a similar concept?",
-        f"Which answer best explains why {name} matters?",
-    ]
+    random.shuffle(short_templates)
+
+    # Build concept-specific MCQ questions and choices
+    mcq_items = _build_auto_mcq_items(
+        name=name, desc=desc_short, keywords=keywords, count=mcq_count,
+    )
 
     short = [
         {
@@ -1001,30 +1021,115 @@ def _auto_items(
         }
         for index in range(short_count)
     ]
-    mcq = [
+    return short + mcq_items
+
+
+def _build_auto_mcq_items(
+    *, name: str, desc: str, keywords: list[str], count: int,
+) -> list[dict[str, Any]]:
+    """Build MCQ items with concept-specific choices derived from description."""
+    kw_str = ", ".join(keywords[:4]) if keywords else name
+    mcq_pool = [
         {
+            "prompt": f"Which statement best describes {name}?",
+            "correct": desc if desc else f"{name} is defined by: {kw_str}.",
+            "distractors": [
+                f"{name} is unrelated to {kw_str}.",
+                f"{name} only applies in trivial cases with no real impact.",
+                f"{name} is the opposite of what its name suggests.",
+            ],
+        },
+        {
+            "prompt": f"Which of these is a key property of {name}?",
+            "correct": f"It involves {kw_str}." if keywords else f"It is central to its domain.",
+            "distractors": [
+                f"It has no relationship to any other concepts.",
+                f"It can be ignored without consequence.",
+                f"It contradicts foundational principles.",
+            ],
+        },
+        {
+            "prompt": f"What would indicate a misunderstanding of {name}?",
+            "correct": f"Claiming {name} is irrelevant to {kw_str}.",
+            "distractors": [
+                f"Recognizing {name} as important in its field.",
+                f"Connecting {name} to related concepts.",
+                f"Using {name} in a practical scenario.",
+            ],
+        },
+        {
+            "prompt": f"How does {name} relate to its domain?",
+            "correct": f"It plays a foundational role involving {kw_str}.",
+            "distractors": [
+                f"It is a deprecated idea with no modern use.",
+                f"It exists in isolation with no connections.",
+                f"It is only a theoretical abstraction with no applications.",
+            ],
+        },
+        {
+            "prompt": f"Which scenario correctly applies {name}?",
+            "correct": f"Using {name} where {kw_str} is relevant.",
+            "distractors": [
+                f"Applying {name} to a completely unrelated problem.",
+                f"Ignoring {name} when it is directly applicable.",
+                f"Confusing {name} with its opposite.",
+            ],
+        },
+        {
+            "prompt": f"Why is understanding {name} valuable?",
+            "correct": f"Because it underpins work involving {kw_str}.",
+            "distractors": [
+                f"It is not valuable and can always be skipped.",
+                f"Only because it appears on tests, not in practice.",
+                f"Because everyone else talks about it, not for substance.",
+            ],
+        },
+    ]
+    random.shuffle(mcq_pool)
+    items: list[dict[str, Any]] = []
+    for i in range(count):
+        template = mcq_pool[i % len(mcq_pool)]
+        # Randomize choice order so correct answer isn't always 'a'
+        choices_raw = [
+            {"text": template["correct"], "is_correct": True},
+        ] + [{"text": d, "is_correct": False} for d in template["distractors"]]
+        random.shuffle(choices_raw)
+        choice_ids = ["a", "b", "c", "d"]
+        choices = [
+            {"id": choice_ids[j], "text": choices_raw[j]["text"]}
+            for j in range(len(choices_raw))
+        ]
+        correct_id = next(
+            choice_ids[j] for j in range(len(choices_raw))
+            if choices_raw[j]["is_correct"]
+        )
+        critical_ids = [
+            choice_ids[j] for j in range(len(choices_raw))
+            if not choices_raw[j]["is_correct"]
+            and ("opposite" in choices_raw[j]["text"].lower()
+                 or "contradicts" in choices_raw[j]["text"].lower()
+                 or "irrelevant" in choices_raw[j]["text"].lower())
+        ]
+        # Ensure critical_ids never contains the correct answer
+        critical_ids = [cid for cid in critical_ids if cid != correct_id]
+        if not critical_ids:
+            # Pick any wrong answer as the critical one
+            wrong_ids = [choice_ids[j] for j in range(len(choices_raw)) if not choices_raw[j]["is_correct"]]
+            critical_ids = [wrong_ids[0]] if wrong_ids else []
+        items.append({
             "item_type": "mcq",
-            "prompt": mcq_templates[index],
+            "prompt": template["prompt"],
             "payload": {
-                "choices": [
-                    {"id": "a", "text": f"Aligned with {name}."},
-                    {"id": "b", "text": f"Partially related to {name} but incomplete."},
-                    {"id": "c", "text": f"Generic statement not specific to {name}."},
-                    {"id": "d", "text": f"Contradicts the core definition of {name}."},
-                ],
-                "correct_choice_id": "a",
-                "critical_choice_ids": ["d"],
+                "choices": choices,
+                "correct_choice_id": correct_id,
+                "critical_choice_ids": critical_ids,
                 "choice_explanations": {
-                    "a": "Correct: this option best matches the concept.",
-                    "b": "Incorrect: partially relevant but not sufficient.",
-                    "c": "Incorrect: too generic to be the best answer.",
-                    "d": "Incorrect (critical): this option contradicts the concept.",
+                    c["id"]: ("Correct." if c["id"] == correct_id else "Incorrect.")
+                    for c in choices
                 },
             },
-        }
-        for index in range(mcq_count)
-    ]
-    return short + mcq
+        })
+    return items
 
 
 def _validate_answers(items: list[dict[str, Any]], answers: list[dict[str, Any]]) -> dict[int, str]:

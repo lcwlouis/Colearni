@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from adapters.db.chat import ChatNotFoundError
+from adapters.db.chat import ChatNotFoundError, resolve_session_by_public_id
 from adapters.db.dependencies import get_db_session
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.schemas import (
@@ -36,7 +36,7 @@ class ChatRespondAPIRequest(BaseModel):
     """Client-facing respond request (no workspace_id / user_id)."""
 
     query: str = Field(min_length=1)
-    session_id: int | None = Field(default=None, gt=0)
+    session_id: str | None = Field(default=None, description="Session UUID public_id")
     concept_id: int | None = Field(default=None, gt=0)
     suggested_concept_id: int | None = Field(default=None, gt=0)
     concept_switch_decision: str | None = None
@@ -78,39 +78,45 @@ def get_chat_sessions(
 
 @router.get("/sessions/{session_id}/messages", response_model=ChatMessagesResponse)
 def get_chat_session_messages(
-    session_id: int,
+    session_id: str,
     limit: int = Query(default=300, ge=1, le=1000),
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> ChatMessagesResponse:
     try:
+        internal_id = resolve_session_by_public_id(
+            db, public_id=session_id, workspace_id=ws.workspace_id, user_id=ws.user.id,
+        )
         return ChatMessagesResponse.model_validate(
             get_messages(
                 db,
                 workspace_id=ws.workspace_id,
                 user_id=ws.user.id,
-                session_id=session_id,
+                session_id=internal_id,
                 limit=limit,
             )
         )
-    except ChatSessionNotFoundError as exc:
+    except (ChatSessionNotFoundError, ChatNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_chat_session_route(
-    session_id: int,
+    session_id: str,
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> Response:
     try:
+        internal_id = resolve_session_by_public_id(
+            db, public_id=session_id, workspace_id=ws.workspace_id, user_id=ws.user.id,
+        )
         delete_session(
             db,
             workspace_id=ws.workspace_id,
             user_id=ws.user.id,
-            session_id=session_id,
+            session_id=internal_id,
         )
-    except ChatSessionNotFoundError as exc:
+    except (ChatSessionNotFoundError, ChatNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -125,11 +131,23 @@ def respond_chat(
     """Generate one verified assistant response envelope."""
     settings_state = getattr(request.app.state, "settings", None)
     settings = settings_state if isinstance(settings_state, Settings) else None
+
+    # Resolve UUID session_id → internal int if provided
+    resolved_session_id: int | None = None
+    if payload.session_id:
+        try:
+            resolved_session_id = resolve_session_by_public_id(
+                db, public_id=payload.session_id,
+                workspace_id=ws.workspace_id, user_id=ws.user.id,
+            )
+        except ChatNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
     internal = ChatRespondRequest(
         workspace_id=ws.workspace_id,
         user_id=ws.user.id,
         query=payload.query,
-        session_id=payload.session_id,
+        session_id=resolved_session_id,
         concept_id=payload.concept_id,
         suggested_concept_id=payload.suggested_concept_id,
         concept_switch_decision=payload.concept_switch_decision,

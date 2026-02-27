@@ -110,7 +110,7 @@ def extract_raw_graph_from_chunk(
             relation_type=edge.relation_type.strip(),
             description=truncate_text(edge.description, edge_description_max_chars),
             keywords=dedupe_keywords(edge.keywords),
-            weight=max(0.0, float(edge.weight)),
+            weight=min(99, max(1, int(edge.weight))),
         )
 
         existing = edge_by_key.get(key)
@@ -130,7 +130,7 @@ def extract_raw_graph_from_chunk(
             relation_type=existing.relation_type,
             description=merged_description,
             keywords=merged_keywords,
-            weight=max(existing.weight, candidate.weight),
+            weight=min(99, max(existing.weight, candidate.weight)),
         )
 
     return RawGraphExtraction(

@@ -10,6 +10,7 @@ from adapters.db.dependencies import get_db_session
 from apps.api.main import app, create_app
 from core.ingestion import (
     IngestionEmbeddingUnavailableError,
+    IngestionGraphProviderError,
     IngestionGraphUnavailableError,
     IngestionValidationError,
 )
@@ -328,3 +329,36 @@ def test_create_app_graph_enabled_propagates_client_config_errors(monkeypatch: A
 
     with pytest.raises(ValueError, match="bad graph config"):
         create_app(settings=settings)
+
+
+def test_upload_returns_502_when_graph_provider_fails(monkeypatch: Any) -> None:
+    def fake_ingest(
+        _db: object,
+        *,
+        request: Any,
+        settings: Any = None,  # noqa: ARG001
+        graph_llm_client: Any = None,  # noqa: ARG001
+        graph_embedding_provider: Any = None,  # noqa: ARG001
+    ) -> Any:  # noqa: ARG001
+        raise IngestionGraphProviderError(
+            "Graph extraction failed: Graph LLM request failed: status 400"
+        )
+
+    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document", fake_ingest)
+
+    def override_db() -> Any:
+        yield object()
+
+    app.dependency_overrides[get_db_session] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/documents/upload?workspace_id=9&uploaded_by_user_id=4",
+            content="graph provider test",
+            headers={"content-type": "text/plain"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 502
+    assert "Graph extraction failed" in response.json()["detail"]

@@ -164,6 +164,58 @@ def _answers(items: list[dict[str, Any]], *, mcq: str) -> list[dict[str, Any]]:
     ]
 
 
+def _correct_mcq_answers(session: Session, quiz_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build answers using the actual correct_choice_id for MCQ items."""
+    correct_map: dict[int, str] = {}
+    rows = session.execute(
+        text(
+            "SELECT id, payload FROM quiz_items "
+            "WHERE quiz_id = :quiz_id AND item_type = 'mcq'"
+        ),
+        {"quiz_id": quiz_id},
+    ).all()
+    for row in rows:
+        correct_map[row[0]] = row[1]["correct_choice_id"]
+    return [
+        {
+            "item_id": item["item_id"],
+            "answer": correct_map.get(item["item_id"], "a")
+            if item["item_type"] == "mcq"
+            else "explain",
+        }
+        for item in items
+    ]
+
+
+def _wrong_mcq_answers(session: Session, quiz_id: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build answers using a wrong + critical choice for MCQ items."""
+    wrong_map: dict[int, str] = {}
+    rows = session.execute(
+        text(
+            "SELECT id, payload FROM quiz_items "
+            "WHERE quiz_id = :quiz_id AND item_type = 'mcq'"
+        ),
+        {"quiz_id": quiz_id},
+    ).all()
+    for row in rows:
+        payload = row[1]
+        correct = payload["correct_choice_id"]
+        critical = payload.get("critical_choice_ids", [])
+        # Pick a critical choice if available, else any wrong one
+        choices = [c["id"] for c in payload["choices"] if c["id"] != correct]
+        critical_choices = [c for c in choices if c in critical]
+        wrong_map[row[0]] = critical_choices[0] if critical_choices else (choices[0] if choices else correct)
+    return [
+        {
+            "item_id": item["item_id"],
+            "answer": wrong_map.get(item["item_id"], "d")
+            if item["item_type"] == "mcq"
+            else "explain",
+        }
+        for item in items
+    ]
+
+
 @pytest.mark.parametrize(
     ("score", "critical", "seed_mastery", "expected_pass", "expected_status", "mcq"),
     [
@@ -273,10 +325,16 @@ def test_level_up_pass_fail_transitions(
         assert isinstance(generation_context.get("context_keywords"), list)
         assert generation_context["context_keywords"]
 
+        # Build correct or wrong MCQ answers dynamically (choices are randomized)
+        if mcq == "a":
+            answers_payload = _correct_mcq_answers(session, create_payload["quiz_id"], create_payload["items"])
+        else:
+            answers_payload = _wrong_mcq_answers(session, create_payload["quiz_id"], create_payload["items"])
+
         submitted = client.post(
             f"/workspaces/{ws_pid}/quizzes/{create_payload['quiz_id']}/submit",
             json={
-                "answers": _answers(create_payload["items"], mcq=mcq),
+                "answers": answers_payload,
             },
         )
         assert submitted.status_code == 200

@@ -3,13 +3,13 @@
 import { useReducer, useEffect, useState, useCallback } from "react";
 import { AsyncState } from "@/components/async-state";
 import { ConceptGraph } from "@/components/concept-graph";
-import { FlashcardList } from "@/components/flashcard-list";
+import { StatefulFlashcardList } from "@/components/stateful-flashcard-list";
 import { PracticeQuizCard } from "@/components/practice-quiz-card";
 import { ApiError, apiClient } from "@/lib/api/client";
 import { graphReducer, initialGraphState } from "@/lib/graph/graph-state";
 import { practiceReducer, initialPracticeState, toPracticeAnswers } from "@/lib/practice/practice-state";
 import { useRequireAuth } from "@/lib/auth";
-import type { LuckyMode, JsonObject } from "@/lib/api/types";
+import type { LuckyMode, JsonObject, StatefulFlashcard, FlashcardSelfRating, GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 
 export default function GraphPage() {
   const auth = useRequireAuth();
@@ -22,6 +22,16 @@ export default function GraphPage() {
   const [practiceState, dispatchPractice] = useReducer(practiceReducer, initialPracticeState);
   const [practiceMode, setPracticeMode] = useState<"none" | "flashcards" | "quiz">("none");
 
+  // Stateful flashcards state
+  const [statefulCards, setStatefulCards] = useState<StatefulFlashcard[]>([]);
+  const [statefulConceptName, setStatefulConceptName] = useState("");
+  const [statefulLoading, setStatefulLoading] = useState(false);
+  const [statefulError, setStatefulError] = useState<string | null>(null);
+  const [ratingInFlight, setRatingInFlight] = useState(false);
+
+  // Full graph state
+  const [fullGraph, setFullGraph] = useState<{ nodes: GraphSubgraphNode[], edges: GraphSubgraphEdge[] } | null>(null);
+
   useEffect(() => {
     if (!wsId) return;
     dispatch({ type: "list_start" });
@@ -30,11 +40,20 @@ export default function GraphPage() {
       .catch((e) => dispatch({ type: "list_error", error: e instanceof ApiError ? e.message : "Failed to load concepts" }));
   }, [query, wsId]);
 
+  useEffect(() => {
+    if (!wsId || query.trim().length > 0 || state.selectedDetail) return;
+    apiClient.getFullGraph(wsId, { max_nodes: 100, max_edges: 300 })
+      .then((res) => setFullGraph(res))
+      .catch((e) => console.error("Failed to load full graph overview", e));
+  }, [wsId, query, state.selectedDetail]);
+
   const selectConcept = useCallback((conceptId: number) => {
     dispatch({ type: "detail_start" });
     // Reset practice when switching concepts
     dispatchPractice({ type: "reset" });
     setPracticeMode("none");
+    setStatefulCards([]);
+    setStatefulError(null);
     Promise.all([
       apiClient.getConceptDetail(wsId, conceptId),
       apiClient.getConceptSubgraph(wsId, conceptId, { max_hops: 2, max_nodes: 40, max_edges: 80 }),
@@ -55,15 +74,35 @@ export default function GraphPage() {
   }, [state.selectedDetail]);
 
   // Practice actions
-  const loadFlashcards = useCallback(() => {
+  const loadStatefulFlashcards = useCallback(() => {
     const conceptId = state.selectedDetail?.concept.concept_id;
     if (!conceptId) return;
     setPracticeMode("flashcards");
-    dispatchPractice({ type: "flashcards_start" });
-    apiClient.generatePracticeFlashcards(wsId, { concept_id: conceptId })
-      .then((data) => dispatchPractice({ type: "flashcards_success", data }))
-      .catch((e) => dispatchPractice({ type: "flashcards_error", error: e instanceof ApiError ? e.message : "Failed to generate flashcards" }));
+    setStatefulLoading(true);
+    setStatefulError(null);
+    apiClient.generateStatefulFlashcards(wsId, { concept_id: conceptId })
+      .then((res) => {
+        setStatefulCards(res.flashcards);
+        setStatefulConceptName(res.concept_name);
+      })
+      .catch((e) => setStatefulError(e instanceof ApiError ? e.message : "Failed to generate flashcards"))
+      .finally(() => setStatefulLoading(false));
   }, [state.selectedDetail, wsId]);
+
+  const handleRate = useCallback((flashcardId: string, rating: FlashcardSelfRating) => {
+    setRatingInFlight(true);
+    apiClient.rateFlashcard(wsId, { flashcard_id: flashcardId, self_rating: rating })
+      .then((res) => {
+        setStatefulCards((prev) =>
+          prev.map((c) => c.flashcard_id === res.flashcard_id
+            ? { ...c, self_rating: res.self_rating, passed: res.passed }
+            : c
+          )
+        );
+      })
+      .catch(() => { /* silently fail rating */ })
+      .finally(() => setRatingInFlight(false));
+  }, [wsId]);
 
   const loadQuiz = useCallback(() => {
     const conceptId = state.selectedDetail?.concept.concept_id;
@@ -91,22 +130,29 @@ export default function GraphPage() {
   const pick = luckyPick?.pick as (JsonObject & { concept_id?: number; canonical_name?: string; description?: string; hop_distance?: number | null }) | undefined;
 
   return (
-    <div className="graph-explorer">
+    <div className="graph-explorer" style={{ display: "flex", height: "100%", width: "100%", background: "var(--bg)", overflow: "hidden", flexDirection: "column" }}>
+      {/* Top search bar — native panel header, uncoupled from graph card */}
+      <header className="graph-search-header">
+        <h2 style={{ margin: 0 }}>Knowledge Graph</h2>
+        <input
+          className="concept-search"
+          type="search"
+          placeholder="Search concepts..."
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (selectedDetail) dispatch({ type: "clear_detail" });
+          }}
+        />
+      </header>
+
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
       {/* Graph visualization — left */}
       <section className="panel graph-viz-panel">
         <div className="graph-viz-header">
-          <h2>Knowledge Graph</h2>
-          <input
-            className="concept-search"
-            type="search"
-            placeholder="Search concepts..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{ maxWidth: '16rem' }}
-          />
         </div>
         <AsyncState loading={phase === "loading_list" || phase === "loading_detail"} error={phase === "error" && !selectedDetail ? error : null} empty={phase === "list_ready" && concepts.length === 0} emptyLabel="No concepts found." />
-        {concepts.length > 0 && (!selectedDetail || query.trim().length > 0) ? (
+        {concepts.length > 0 && query.trim().length > 0 && !selectedDetail ? (
           <div className="concept-list">
             {concepts.map((c) => (
               <button
@@ -129,6 +175,16 @@ export default function GraphPage() {
             edges={subgraph.edges}
             selectedId={selectedDetail?.concept.concept_id}
             onSelect={selectConcept}
+            onBackgroundClick={() => dispatch({ type: "clear_detail" })}
+            width={700}
+            height={500}
+          />
+        ) : fullGraph && fullGraph.nodes.length > 0 ? (
+          <ConceptGraph
+            nodes={fullGraph.nodes}
+            edges={fullGraph.edges}
+            onSelect={selectConcept}
+            onBackgroundClick={() => dispatch({ type: "clear_detail" })}
             width={700}
             height={500}
           />
@@ -173,10 +229,10 @@ export default function GraphPage() {
                 <button
                   type="button"
                   className={practiceMode === "flashcards" ? "" : "secondary"}
-                  onClick={loadFlashcards}
-                  disabled={practiceState.phase === "loading_flashcards"}
+                  onClick={loadStatefulFlashcards}
+                  disabled={statefulLoading}
                 >
-                  {practiceState.phase === "loading_flashcards" ? "Generating..." : "Flashcards"}
+                  {statefulLoading ? "Generating..." : "Flashcards"}
                 </button>
                 <button
                   type="button"
@@ -190,7 +246,7 @@ export default function GraphPage() {
                   <button
                     type="button"
                     className="secondary"
-                    onClick={() => { dispatchPractice({ type: "reset" }); setPracticeMode("none"); }}
+                    onClick={() => { dispatchPractice({ type: "reset" }); setPracticeMode("none"); setStatefulCards([]); }}
                     style={{ marginLeft: 'auto' }}
                   >
                     ✕
@@ -199,28 +255,46 @@ export default function GraphPage() {
               </div>
 
               {/* Flashcard display */}
-              {practiceState.flashcards ? (
-                <FlashcardList flashcards={practiceState.flashcards.flashcards} conceptName={practiceState.flashcards.concept_name} />
+              {practiceMode === "flashcards" && statefulCards.length > 0 ? (
+                <div className="stack" style={{ gap: "1rem" }}>
+                  <StatefulFlashcardList
+                    flashcards={statefulCards}
+                    conceptName={statefulConceptName}
+                    onRate={handleRate}
+                    ratingInFlight={ratingInFlight}
+                  />
+                  <div className="button-row">
+                    <button type="button" className="secondary" disabled={statefulLoading} onClick={loadStatefulFlashcards}>Generate more</button>
+                  </div>
+                </div>
               ) : null}
 
               {/* Quiz display */}
               {practiceState.quiz || practiceState.phase === "loading_quiz" || (practiceState.phase === "error" && practiceMode === "quiz") ? (
                 <PracticeQuizCard
                   state={practiceState}
-                  onAnswerChange={(id, val) => dispatchPractice({ type: "answer", item_id: id, answer: val })}
+                  onAnswerChange={(id, v) => dispatchPractice({ type: "answer", item_id: id, answer: v })}
                   onSubmitQuiz={submitQuiz}
-                  onReset={() => { dispatchPractice({ type: "reset" }); setPracticeMode("none"); }}
+                  onReset={() => dispatchPractice({ type: "reset" })}
+                  onNextQuiz={() => {
+                    if (!wsId || !state.selectedDetail) return;
+                    dispatchPractice({ type: "quiz_start" });
+                    apiClient.createPracticeQuiz(wsId, { concept_id: state.selectedDetail.concept.concept_id })
+                      .then((quiz) => dispatchPractice({ type: "quiz_success", quiz }))
+                      .catch((e) => dispatchPractice({ type: "quiz_error", error: e instanceof ApiError ? e.message : "Failed to create practice quiz" }));
+                  }}
                 />
               ) : null}
 
               {/* Flashcard error */}
-              {practiceState.phase === "error" && practiceMode === "flashcards" && !practiceState.flashcards ? (
-                <p className="status error">{practiceState.error}</p>
+              {practiceMode === "flashcards" && statefulError ? (
+                <p className="status error">{statefulError}</p>
               ) : null}
             </div>
           </>
         ) : null}
       </section>
+      </div>
     </div>
   );
 }

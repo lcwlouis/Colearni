@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from adapters.db.chat import ChatNotFoundError, resolve_session_by_public_id
 from adapters.db.dependencies import get_db_session
 from adapters.llm.factory import build_graph_llm_client
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
@@ -42,7 +43,7 @@ class FlashcardsRequest(BaseModel):
 
 class CreateQuizRequest(BaseModel):
     concept_id: int = Field(gt=0)
-    session_id: int | None = Field(default=None, gt=0)
+    session_id: str | None = Field(default=None, description="Session UUID public_id")
     question_count: int = Field(default=4, ge=3, le=6)
 
 
@@ -115,6 +116,17 @@ def create_quiz(
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> QuizCreateResponse:
+    # Resolve UUID session_id → internal int
+    resolved_session_id: int | None = None
+    if payload.session_id:
+        try:
+            resolved_session_id = resolve_session_by_public_id(
+                db, public_id=payload.session_id,
+                workspace_id=ws.workspace_id, user_id=ws.user.id,
+            )
+        except ChatNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
     try:
         return QuizCreateResponse.model_validate(
             create_practice_quiz(
@@ -122,7 +134,7 @@ def create_quiz(
                 workspace_id=ws.workspace_id,
                 user_id=ws.user.id,
                 concept_id=payload.concept_id,
-                session_id=payload.session_id,
+                session_id=resolved_session_id,
                 question_count=payload.question_count,
                 llm_client=_llm_client(request),
             )
