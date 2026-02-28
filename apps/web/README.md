@@ -13,4 +13,8 @@ Copy `apps/web/.env.example` to `apps/web/.env.local`.
 
 Run in `apps/web`: `npm install`, `npm run dev`, `npm run test`, `npm run lint`, `npm run typecheck`, `npm run build`.
 
+Lint uses the ESLint CLI directly (`eslint .`), not `next lint`. The ESLint flat config lives in `apps/web/eslint.config.mjs`.
+
+Typecheck runs `next typegen` before `tsc --noEmit` so that generated route types are always fresh (no prior build required).
+
 PR19 uses same-origin proxying for browser API access; direct backend-origin CORS is deferred to PR22.
