@@ -131,6 +131,24 @@
   place-items: center;
 }
 
+.sidebar-profile-actions .theme-toggle {
+  border: none !important;
+  border-radius: 0.4rem !important;
+  box-shadow: none !important;
+  padding: 0.35rem !important;
+  width: 2rem !important;
+  height: 2rem !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+}
+
+.sidebar-profile-actions .theme-toggle:hover {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
 /* Slideover drawers (graph and quiz, mutually exclusive) */
 .graph-drawer,
 .quiz-drawer {

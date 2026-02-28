@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Check, ChevronDown } from "lucide-react";
 import { apiClient } from "@/lib/api/client";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -104,53 +105,66 @@ export function WorkspaceActions({
       {footerMode === "expanded" && (
         <>
           <div className="sidebar-workspace-block" style={{ padding: "0.5rem", alignItems: "center", gap: "0.25rem", position: "relative" }}>
-            <select
-              value={activeWorkspaceId ?? ""}
-              onChange={(event) => setActiveWorkspaceId(event.target.value)}
-              aria-label="Select workspace"
-              style={{ flex: 1, fontSize: "0.85rem" }}
-            >
-              {workspaces.map((workspace) => (
-                <option key={workspace.public_id} value={workspace.public_id}>
-                  {workspace.name}
-                </option>
-              ))}
-            </select>
             <button
               type="button"
-              className="icon-btn secondary"
-              title="Workspace options"
-              style={{ padding: "0.4rem" }}
+              className="ws-selector-btn"
               onClick={(e) => {
                 e.stopPropagation();
                 setWsMenuOpen((prev) => !prev);
               }}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /><circle cx="5" cy="12" r="1.5" />
-              </svg>
+              <span className="collapsed-ws-initial-small">
+                {workspaces.find(w => w.public_id === activeWorkspaceId)?.name.charAt(0).toUpperCase() || "W"}
+              </span>
+              <span className="ws-selector-name">
+                {workspaces.find(w => w.public_id === activeWorkspaceId)?.name || "Workspace"}
+              </span>
+              <ChevronDown size={14} style={{ flexShrink: 0, color: "var(--muted)" }} />
             </button>
             {wsMenuOpen && (
-              <div className="session-context-menu" style={{ position: "absolute", right: 0, bottom: "100%", marginBottom: "4px", zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
-                <button type="button" onClick={() => {
-                  setWsMenuOpen(false);
-                  setNewWorkspaceName("");
-                  setIsCreatingWorkspace(true);
-                }}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+              <div className="collapsed-ws-popover" onClick={(e) => e.stopPropagation()}>
+                <div className="collapsed-ws-popover-header">Workspaces</div>
+                {workspaces.map((ws) => (
+                  <button
+                    key={ws.public_id}
+                    type="button"
+                    className={`collapsed-ws-item${ws.public_id === activeWorkspaceId ? " active" : ""}`}
+                    onClick={() => {
+                      setActiveWorkspaceId(ws.public_id);
+                      setWsMenuOpen(false);
+                    }}
+                  >
+                    <span className="collapsed-ws-initial-small">{ws.name.charAt(0).toUpperCase()}</span>
+                    <span>{ws.name}</span>
+                    {ws.public_id === activeWorkspaceId && <Check size={14} />}
+                  </button>
+                ))}
+                <div className="collapsed-ws-divider" />
+                <button
+                  type="button"
+                  className="collapsed-ws-action"
+                  onClick={() => {
+                    setWsMenuOpen(false);
+                    setNewWorkspaceName("");
+                    setIsCreatingWorkspace(true);
+                  }}
+                >
                   New workspace
                 </button>
-                <button type="button" onClick={() => {
-                  setWsMenuOpen(false);
-                  if (activeWorkspaceId) {
-                    const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
-                    if (ws) {
-                      setRenameWorkspaceName(ws.name);
-                      setRenamingWorkspaceId(ws.public_id);
+                <button
+                  type="button"
+                  className="collapsed-ws-action"
+                  onClick={() => {
+                    setWsMenuOpen(false);
+                    if (activeWorkspaceId) {
+                      const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
+                      if (ws) {
+                        setRenameWorkspaceName(ws.name);
+                        setRenamingWorkspaceId(ws.public_id);
+                      }
                     }
-                  }
-                }}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                  }}
+                >
                   Rename
                 </button>
               </div>

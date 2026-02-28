@@ -148,11 +148,15 @@
   font-size: 0.85rem;
   font-weight: 600;
   position: relative;
+  box-shadow: none;
 }
 
-.collapsed-icon-btn:hover {
+.collapsed-bottom-controls .collapsed-icon-btn:hover {
   background: var(--surface);
   color: var(--text);
+  box-shadow: none;
+  transform: none;
+  border-color: transparent;
 }
 
 .collapsed-icon-btn:focus-visible {
@@ -293,7 +297,57 @@
   width: 2.5rem !important;
   height: 2.5rem !important;
   border-radius: 0.5rem !important;
-  border-color: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+}
+
+.collapsed-bottom-controls .theme-toggle:hover {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Expanded workspace selector button */
+.ws-selector-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  background: var(--surface) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 0.4rem !important;
+  padding: 0.35rem 0.5rem !important;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text) !important;
+  box-shadow: none !important;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-selector-btn:hover {
+  border-color: var(--muted) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.ws-selector-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Expanded workspace popover — positioned above trigger */
+.sidebar-workspace-block .collapsed-ws-popover {
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.25rem);
+  min-width: unset;
+  max-width: unset;
 }
 
 .collapsed-new-chat {
