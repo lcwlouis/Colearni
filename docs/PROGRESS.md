@@ -1,6 +1,6 @@
 # WOW Release - Implementation Progress
 
-> Last updated: Session 10
+> Last updated: Session 14
 
 ## Slice Status Overview
 
@@ -36,12 +36,21 @@
 | S28 Sidebar & Layout Polish | Done | Sidebar overflow, context menu, profile, chat scroll, graph padding |
 | S29 Graph & Knowledge Explorer Polish | Done | Suggestion randomization, weight normalization, tutor graph description |
 | S30 Quiz Generation Quality & Statefulness | Done | Improved auto_items with concept-specific MCQs, randomized choices, better LLM prompt, auto-start new quiz |
-| S31 Onboarding Flow | Not Started | Planned onboarding/topic-selection flow not implemented yet |
-| S32 Robustness & Testing | In Progress | Migration + major tests done; some legacy test debt + remaining integration coverage pending |
-| S33 Tutor UI Layout & Drawer Polish | Not Started | Code frame clipping/scroll, composer pinning, adaptive drawers, sidebar collapse/sizing |
-| S34 Quiz Lifecycle Automation & Concept Grounding | Not Started | Auto generation trigger/scheduler + mastered-neighbor context + tutor query path |
-| S35 Scalable Graph Experience (LightRAG-Informed) | Not Started | Progressive loading/layout worker/perf hardening for high node counts |
-| S36 Documentation Integrity | In Progress | Prompt inventory + doc reconciliation workflow being added |
+| S31 Onboarding Flow | Done (via S38) | Backend onboarding status API done; frontend onboarding card with topic chips in tutor page |
+| S32 Robustness & Testing | Done | Migration + major tests done; session CRUD round-trip tests added (10 new tests) |
+| S33 Tutor UI Layout & Drawer Polish | Done | Code block frame polish, adaptive drawer width, close animations, sidebar collapse, footer clipping |
+| S34 Quiz Lifecycle Automation & Concept Grounding | Done | Quiz status retrieval, mastered-neighbor context, tutor quiz context injection, quiz gardener job |
+| S35 Scalable Graph Experience (LightRAG-Informed) | Done | Backend truncation signals, frontend node/edge limit controls, truncation messaging, adaptive graph rendering |
+| S36 Documentation Integrity | Done | Comprehensive PROMPTS.md with 14 prompt catalog, flow diagrams, orchestration map |
+| S37 Test Debt & Mock Infrastructure Cleanup | Done | Fixed all 12 pre-existing test failures, _FakeSession stubs, API docs sync, env cleanup |
+| S38 Onboarding Flow | Done | Backend: `domain/onboarding/status.py`, topic suggestions endpoint. Frontend: onboarding card, topic chips, API client integration |
+| S39 Spaced Repetition Foundation | Done | SM-2 scheduler (Again/Hard/Good/Easy multipliers), due flashcards endpoint, migration |
+| S40 Quiz Gardener Operability & Testing | Done | Fixed build_engine→create_db_engine, 5 unit tests, Makefile targets |
+| S45 (Urgent) Reasoning Controls + Full Context Envelope Integrity | Done | 4 reasoning control settings, flashcard progress in tutor context, labeled history sections |
+| S41 Tutor Continuity, Context Memory, and Naming Reliability | Done | Auto session title gen, quiz history context injection, chat-aware quiz prompts. Frontend: composer anchoring, sidebar inline delete confirmation |
+| S42 Markdown Rendering, Sidebar Footer Fit, and Collapsed Sidebar Quality | Done | Code block overflow-y:auto, sidebar footer no nested scroll, collapsed sidebar rail with CSS tooltips |
+| S43 Graph UX Density + LightRAG-Informed Adaptation (Native) | Done | Responsive graph canvas (ResizeObserver), search/focus mode with highlight rings, neighbor-aware dimming |
+| S44 Document Deletion vs Graph Retention Policy + Implementation | Done | Orphan pruner domain service, `prune_orphan_graph` query param on DELETE endpoint, 9 unit tests |
 
 ## Session 4 Changes
 
@@ -312,7 +321,7 @@
 - Frontend tests: `npx vitest run` — 41/41 passed
 - Backend tests: All pass except pre-existing failures (test_api_docs_sync, test_response_contracts, test_ingestion_embeddings, test_document_ingestion_integration)
 
-## Session 11 Planning Audit (Current)
+## Session 11 Planning Audit
 
 ### Verified State Before New Plan Expansion
 - **Quiz auto-generation cron**: no in-app scheduler/job currently creates level-up quizzes on topic introduction. Existing background job is readiness analysis only (`apps/jobs/readiness_analyzer.py`).
@@ -322,6 +331,234 @@
   - Completed: summary migration applied + major quiz/graph integration test coverage added.
   - Remaining: legacy API-doc/contract + ingestion test debt and additional integration scenarios (chat-doc lookup, sidebar CRUD, KB delete cascade).
 
+## Session 11 Changes
+
+### S33 Tutor UI Layout & Drawer Polish (Implemented)
+- **Code block frame styling**: `apps/web/app/globals.css` — `.markdown-content pre` now has `border: 1px solid var(--line)`, `border-radius: var(--radius)`, `box-shadow: var(--shadow-sm)` for consistent framing.
+- **Drawer adaptive width**: Right drawers (graph/quiz) use `clamp(20rem, 25vw, 32rem)` instead of fixed width, expanding on wider screens.
+- **Close animations**: Added `@keyframes slideOutRight` animation. New `closingDrawer` state in `apps/web/app/tutor/page.tsx` drives `.closing` class on drawer `<aside>` elements with 240ms exit animation before state clear.
+- **Sidebar collapse**: Added `collapsed` state to `apps/web/components/global-sidebar.tsx` with chevron toggle button. CSS `.global-sidebar.collapsed` hides nav/chat/profile content, shrinks width to `3.5rem`.
+- **Footer clipping fix**: Sidebar footer gets `flex-shrink: 0; max-height: 40vh; overflow-y: auto`.
+- **Files modified**: `apps/web/app/globals.css`, `apps/web/app/tutor/page.tsx`, `apps/web/components/global-sidebar.tsx`.
+
+### S34 Quiz Lifecycle Automation & Concept Grounding (Implemented)
+- **Quiz status retrieval**: Added `get_latest_quiz_summary_for_concept()` in `domain/learning/level_up.py` — queries latest quiz attempt (score, passed, created_at) for a concept/workspace/user.
+- **Mastered-neighbor context**: Added `get_mastered_neighbor_context()` in `domain/learning/level_up.py` — returns top-K mastered neighboring concepts by edge weight for inclusion in quiz generation prompt.
+- **Generation context enrichment**: Enhanced `_generation_context()` in `domain/learning/level_up.py` to fetch up to 3 document chunk excerpts (300 chars each) for richer quiz generation. Updated LLM prompt with `SOURCE MATERIAL EXCERPTS` block.
+- **Tutor quiz context injection**: Added `_build_quiz_context()` to `domain/chat/respond.py` — builds formatted quiz status string for active concept. `_generate_tutor_text()` now accepts `quiz_context` parameter and merges into `combined_assessment` before calling `build_full_tutor_prompt`.
+- **Quiz gardener job**: Created `apps/jobs/quiz_gardener.py` — background job that auto-generates level-up quizzes for concepts in 'learning' status without existing quizzes. Processes up to `MAX_CONCEPTS_PER_RUN=20` per invocation.
+- **Files modified**: `domain/learning/level_up.py`, `domain/chat/respond.py`.
+- **Files created**: `apps/jobs/quiz_gardener.py`.
+
+### S35 Scalable Graph Experience (Implemented)
+- **Backend truncation signals**: Added `is_truncated: bool` and `total_concept_count: int | None` to `GraphSubgraphResponse` in `core/schemas.py`. Updated `get_full_subgraph()` in `domain/graph/explore.py` to count total concepts and return truncation info when node count exceeds limit.
+- **Frontend graph controls**: Added `maxNodes`/`maxEdges` state variables to `apps/web/app/graph/page.tsx`. Added select dropdowns (50/100/200/500/1000 nodes, 100/300/600/1000/2000 edges) in graph header. `useEffect` passes limits to `apiClient.getFullGraph()` call and re-fetches when changed.
+- **Truncation banner**: When `fullGraph.is_truncated` is true, displays "Showing X of Y concepts (graph truncated)" banner.
+- **Adaptive graph rendering**: Updated `apps/web/components/concept-graph.tsx` with size-aware optimizations:
+  - Adaptive force parameters: reduced charge/distance/collide for large (>200 nodes) and huge (>500 nodes) graphs.
+  - Edge weight labels hidden for large graphs; node labels hidden for huge graphs.
+  - Adaptive node/selection radii and font sizes by graph size.
+  - Shorter simulation timeout for large graphs (1500–2000ms vs 3000ms).
+  - Alpha decay increased for large graphs to reach equilibrium faster.
+- **CSS**: Added `.graph-controls`, `.graph-control-label`, `.graph-truncation-banner` styles.
+- **Files modified**: `core/schemas.py`, `domain/graph/explore.py`, `apps/web/lib/api/types.ts`, `apps/web/app/graph/page.tsx`, `apps/web/components/concept-graph.tsx`, `apps/web/app/globals.css`.
+
+### S36 Documentation Integrity (Implemented)
+- **PROMPTS.md**: Rewrote `docs/PROMPTS.md` as comprehensive source-of-truth catalog of all 14 LLM prompts across the codebase. Includes per-prompt tables (file, function, purpose, inputs, output format), prompt flow diagram, and orchestration file map.
+
+### Session 11 Validation Run
+- Frontend typecheck: `npx tsc --noEmit` — 0 errors
+- Frontend tests: `npx vitest run` — 41/41 passed
+- Backend tests (domain + adapters): 95/95 passed, 0 failed
+- Backend tests (full suite): 11 pre-existing failures (unchanged from Session 10):
+  - `test_api_docs_sync` (1): API.md heading drift
+  - `test_response_contracts` (1): Schema required-fields mismatch
+  - `test_ingestion_embeddings` (5): `_FakeSession` lacks `.execute()` + env-dependent `ingest_build_graph`
+  - `test_settings` (1): Observability alias env mismatch
+  - `test_document_ingestion_integration` (3): Missing graph LLM client mock + `generate_tutor_text` stub
+- No new test failures introduced by Session 11 changes.
+
+### Session 12 Planning
+- Added 5 slices to `docs/PLAN.md` (with urgent execution order):
+  - **S45 (Urgent)**: Reasoning Controls + Full Context Envelope Integrity (toggleable reasoning by task + Phoenix-verified prompt context completeness)
+  - **S37**: Test Debt & Mock Infrastructure Cleanup (fix all 11 pre-existing failures)
+  - **S38**: Onboarding Flow (topic suggestions, onboarding card, tutor prompt path)
+  - **S39**: Spaced Repetition Foundation (SM-2 scheduler, due flashcards, interval tracking)
+  - **S40**: Quiz Gardener Operability & Testing (unit tests, Makefile target, docs)
+
 ### New Planning Tracks Added
 - Added Session 11 slices in `docs/PLAN.md`: `S33` (UI layout/drawer polish), `S34` (quiz lifecycle automation + concept grounding), `S35` (LightRAG-informed graph scalability), `S36` (documentation integrity including prompt catalog).
 - Clarified `S35` scope to external comparative analysis only: LightRAG is treated as a separate repo reference, and Colearni implementation remains native (no direct dependency/porting of LightRAG internals).
+
+## Session 12 Changes
+
+### S45 Reasoning Controls + Full Context Envelope Integrity (Implemented)
+- **Reasoning control settings**: Added 4 toggleable settings in `core/settings.py`:
+  - `llm_reasoning_chat` (default True), `llm_reasoning_quiz_grading` (default True)
+  - `llm_reasoning_graph_generation` (default False), `llm_reasoning_quiz_generation` (default False)
+  - Each with `APP_` and unprefixed `AliasChoices` for env-based configuration.
+- **Session memory upgrade**: Enhanced `load_history_text()` in `domain/chat/session_memory.py` with labeled "COMPACTED PRIOR CONTEXT" / "RECENT CHAT HISTORY" sections.
+- **Flashcard progress context**: Added `load_flashcard_progress()` to session_memory.py, wired through `respond.py` and `prompt_kit.py` with concept-scoped progress snapshot.
+- **Prompt kit updates**: Renamed section headers ("TOPIC ASSESSMENT HISTORY"), added `flashcard_progress` parameter through build functions.
+
+### S37 Test Debt & Mock Infrastructure Cleanup (Implemented)
+- Fixed all 12 pre-existing test failures (from 201 passing to 233 passing):
+  - `test_ingestion_embeddings.py`: Added `_FakeSession.execute()` stubs, `_StubGraphLLM.generate_tutor_text` method, pinned `ingest_build_graph=False`.
+  - `test_settings.py`: Fixed `delenv` for competing observability aliases.
+  - `test_response_contracts.py`: Corrected `GraphSubgraphResponse` required fields (`workspace_id`, `nodes`, `edges`), added `graph/full` and `onboarding` routes to `OPENAPI_ROUTES`.
+  - `test_graph_resolver_integration.py`: Added `generate_tutor_text` to `IntegrationGraphLLM`.
+  - `test_level_up_quiz_flow_integration.py`: Set `graph_llm_provider="mock"` in `_client_without_llm`.
+  - `test_practice_flow_integration.py`: Fixed `_answers` to use actual `item["choices"][0]["id"]`.
+  - `test_prompt_kit.py`: Updated assertions for renamed section headers.
+  - `test_document_ingestion_integration.py`: Pass settings with `ingest_build_graph=False`.
+  - `docs/API.md`: Added missing headings (PATCH workspaces, GET graph/full).
+
+### S38 Onboarding Flow (Implemented)
+- **Domain logic**: Created `domain/onboarding/status.py` with `suggest_starting_topics()` (top-N concepts by graph degree) and `get_onboarding_status()` (has_documents, has_active_concepts, suggested_topics).
+- **API endpoint**: `GET /workspaces/{ws_id}/onboarding/status` returning `OnboardingStatusResponse`.
+- **Schemas**: Added `OnboardingSuggestedTopic` and `OnboardingStatusResponse` to `core/schemas.py`.
+- **Tests**: 5 unit tests in `tests/domain/test_onboarding.py`.
+- **Files created**: `domain/onboarding/__init__.py`, `domain/onboarding/status.py`, `apps/api/routes/onboarding.py`.
+
+### S39 Spaced Repetition Foundation (Implemented)
+- **Migration**: `20260228_0006_spaced_repetition.py` adds `interval_days FLOAT NOT NULL DEFAULT 1.0` to `practice_flashcard_progress`.
+- **SM-2 scheduler**: `domain/learning/spaced_repetition.py` with `compute_next_review()` (multipliers: Again 0.5×, Hard 1.0×, Good 2.5×, Easy 4.0×, minimum 0.25 days).
+- **Wiring**: `rate_flashcard()` in `practice.py` now calls `update_flashcard_schedule()`, returns `interval_days` and `due_at`.
+- **Due flashcards**: `get_due_flashcards(session, workspace_id, user_id, limit)` query + `GET /workspaces/{ws_id}/practice/flashcards/due` endpoint.
+- **Tests**: 8 unit tests in `tests/domain/test_spaced_repetition.py`.
+
+### S40 Quiz Gardener Operability & Testing (Implemented)
+- **Bug fix**: `apps/jobs/quiz_gardener.py` — Fixed `build_engine` → `create_db_engine` import/call.
+- **Unit tests**: 5 tests in `tests/jobs/test_quiz_gardener.py` with mocked DB.
+- **Makefile**: Added `quiz-gardener` and `graph-gardener` targets.
+
+### Session 12 Validation Run
+- Python tests: **233 passed, 0 failed** (up from 201 passing + 12 failing)
+- All Session 12 slices (S45, S37, S38, S39, S40) complete and verified.
+
+## Session 13 Changes
+
+### S41 Tutor Continuity, Context Memory, and Naming Reliability (Backend Implemented)
+- **Auto session title generation**: Created `domain/chat/title_gen.py` with `generate_session_title(user_query, concept_name=None)` — regex-based prefix stripping (removes "can you explain", "what is", etc.), title-casing, 2–5 word clamping, concept_name priority when available.
+- **Title wiring**: Updated `persist_turn()` in `session_memory.py` to accept `concept_name` parameter; `respond.py` passes resolved concept's `canonical_name`.
+- **Chat-history-informed quiz generation**: Added `load_chat_context_for_quiz()` to `session_memory.py` — loads condensed recent exchanges (Learner/Tutor labeled, 200-char truncation per message, max 8 turns).
+- **Quiz prompt injection**: Wired chat history through `_choose_items` → `_generate_level_up_items_with_retries` in `level_up.py`; added `CHAT_HISTORY_CONTEXT` block to quiz generation prompt so quizzes target areas the learner discussed or struggled with.
+- **Tests**: 9 tests in `tests/domain/test_title_gen.py`, 7 tests in `tests/domain/test_chat_context_for_quiz.py`.
+- **Frontend parts deferred**: Composer bottom anchoring, sidebar delete confirmation remain frontend-only scope.
+
+### S42 Markdown Rendering (Deferred — Frontend Only)
+- Requires CSS/layout work in Next.js frontend. Documented in plan; no backend changes needed.
+
+### S43 Graph UX Density (Deferred — Frontend Only)
+- Requires responsive visualization changes in Next.js frontend. Documented in plan; no backend changes needed.
+
+### S44 Document Deletion vs Graph Retention Policy (Implemented)
+- **Orphan pruner**: Created `domain/graph/orphan_pruner.py` with `find_orphan_concept_ids()`, `find_orphan_edge_ids()`, and `prune_orphan_graph_nodes()` — removes canonical concepts/edges with zero remaining provenance rows, cascading edge cleanup before concept removal, mastery row cleanup.
+- **API**: Added `prune_orphan_graph` query parameter (default `false`) to `DELETE /workspaces/{ws_id}/knowledge-base/documents/{document_id}`. When true, runs orphan pruning after document deletion.
+- **API.md**: Updated delete endpoint contract with new query parameter.
+- **Tests**: 9 unit tests in `tests/domain/test_orphan_pruner.py`.
+
+### Session 13 Validation Run
+- Python tests: **258 passed, 0 failed** (up from 233 in Session 12)
+- All backend-implementable Session 13 slices (S41 backend, S44) complete and verified.
+
+### Session 14 Planning
+- Added 5 new slices to `docs/PLAN.md` (S46–S50), drawing from SUGGESTIONS.md:
+  - **S46**: Learning Path Generator — topological concept ordering by mastery + prerequisites (S4 foundation)
+  - **S47**: Concept Strength Analytics & Weakness Detection — aggregate per-concept strength score (S2 foundation)
+  - **S48**: Graph Curation: Duplicate Detection & Merge — alias/similarity-based dedup (S1 foundation)
+  - **S49**: Spaced Repetition Review Session Orchestrator — batched due-card sessions with stats
+  - **S50**: Mastery Decay Alerts & Tutor Proactive Nudges — first-message decay warnings
+
+## Session 13.5 Changes (Bug Fix & Tech Debt)
+
+### Root Cause: Chat 500 Error (`InFailedSqlTransaction`)
+- **Symptom**: `POST /workspaces/{uuid}/chat/respond` returned 500 with `psycopg.errors.InFailedSqlTransaction`
+- **Root cause**: `load_flashcard_progress()` in `session_memory.py` used wrong column names (`fp.rating`, `fp.is_passed`, `fp.created_at`), causing SQL failure. The bare `except Exception: return ""` swallowed the error but left SQLAlchemy session in a poisoned transaction state. All subsequent queries on the same session then failed.
+- **Fix**: Corrected columns to `fp.self_rating`, `fp.passed`, `fp.updated_at` (matching migration 0004 schema)
+
+### Safe Rollback Pattern (7 locations)
+Added `if callable(getattr(session, "rollback", None)): session.rollback()` in all try/except blocks that touch SQL:
+- `domain/chat/session_memory.py` — `load_flashcard_progress`
+- `domain/chat/respond.py` — `build_readiness_actions`, `_workspace_has_no_chunks`, `_build_quiz_context`
+- `domain/learning/practice.py` — `_record_item_fingerprints`, `rate_flashcard`
+- `apps/jobs/quiz_gardener.py` — quiz generation loop
+- `apps/jobs/readiness_analyzer.py` — readiness analysis loop
+- `domain/research/runner.py` — `ingest_approved_candidates` error path
+
+### Column/Schema Mismatches Fixed
+- `domain/readiness/analyzer.py`: `m.mastery_score` → `m.score AS mastery_score` (mastery table column is `score`)
+- `domain/research/runner.py`: Removed references to nonexistent `content_hash` and `source_id` columns on `workspace_research_candidates`; now uses `run_id` and `source_url` for dedup
+- `domain/research/runner.py`: Changed `status = 'failed'` to `'rejected'` (check constraint only allows `pending/approved/rejected/ingested`)
+- `domain/research/runner.py`: Added `session.commit()` after failed-candidate status update
+
+### Import Fix
+- `apps/jobs/readiness_analyzer.py`: `build_engine` → `create_db_engine` (function doesn't exist, was always broken)
+
+### Session 13.5 Validation Run
+- Python tests: **283 passed, 0 failed** (up from 258 in Session 13)
+- All identified critical/high bugs from comprehensive SQL audit resolved
+
+## Session 14 Changes (Frontend Completion + Tests)
+
+### S41 Frontend (Completed)
+- **Composer anchoring**: Replaced competing grid/inline-flex layouts on `.chat-main` with a single flex-column layout. Timeline gets `flex: 1`, composer dock gets `flex-shrink: 0`.
+- **Sidebar delete confirmation**: Wired the already-declared `deleteConfirmId` state to show an inline "Delete? [Yes] [No]" bar instead of immediate deletion.
+
+### S42 Frontend (Completed)
+- **Code block clipping**: Changed `.markdown-content pre` from `overflow-y: hidden` to `overflow-y: auto` with `max-height: 36rem`.
+- **Sidebar footer scroll**: Removed `max-height: 40vh; overflow-y: auto` from `.sidebar-footer`.
+- **Collapsed sidebar rail**: Added CSS tooltips via `::after` pseudo-element with `content: attr(title)`, hover effects, icon sizing, hidden non-essential elements. Added `title` attributes to nav Links.
+
+### S43 Frontend (Completed)
+- **Responsive graph canvas**: Added `ResizeObserver` in `ConceptGraph` component with container ref, removed hardcoded 700×500 dimensions.
+- **Graph search/focus**: Added `searchHighlight` prop with yellow `#eab308` ring rendering and `focusNodeId` prop with neighbor-aware dimming (`opacity: 0.2` for non-focused nodes).
+- **Graph page**: Added "Highlight node..." search input and "Clear focus" button in graph header.
+
+### S38 Frontend — Onboarding Card (Completed)
+- Added `OnboardingSuggestedTopic` and `OnboardingStatusResponse` types to `apps/web/lib/api/types.ts`.
+- Added `getOnboardingStatus(wsId)` method to API client.
+- Added onboarding card in tutor page: shows when timeline is empty and workspace has documents with suggested topics. Renders topic chips that populate the query input and set concept context.
+- Added CSS for `.onboarding-card`, `.onboarding-chips`, `.onboarding-chip` with hover effects.
+
+### S32 — Session CRUD Tests (Completed)
+- New test file: `tests/api/test_session_crud.py` with 10 tests covering:
+  - Create returns 201 with public_id
+  - Create without title returns null title
+  - List returns created sessions
+  - List respects limit
+  - Delete returns 204
+  - Delete then messages returns 404
+  - Delete nonexistent returns 404
+  - Deleted session disappears from list
+  - Empty session returns empty messages
+  - Messages for nonexistent session returns 404
+- Uses in-memory store with monkeypatched route-level imports.
+
+### Session 14 Validation Run
+- Python tests: **293 passed, 0 failed** (up from 283 in Session 13.5)
+- Frontend tests (vitest): **41 passed, 0 failed**
+- TypeScript: Clean (0 errors)
+
+### Session 15 — Run-Verify Fixes
+
+#### C1 — Upload/Async Ingestion (Completed)
+- Root cause: `upload_kb_document` in `knowledge_base.py` called `ingest_text_document()` which runs embeddings, summary, and graph extraction synchronously — blocking the HTTP request for 10–60s.
+- Fix: Switched to `ingest_text_document_fast()` (parse + chunks only) + `BackgroundTasks` + `run_post_ingest_tasks()`. Endpoint returns 202 immediately.
+- Files: `apps/api/routes/knowledge_base.py`
+
+#### B2 — Queue Auto-Clear (Completed)
+- Root cause: Upload queue was purely client-side fire-and-forget — items stayed in `uploaded` phase forever, requiring manual Refresh.
+- Fix: Added `processing`/`done` phases to upload queue, polls `listKBDocuments` every 4s while items are processing, auto-marks items as `done` when `ingestion_status === "ingested"`, auto-dismisses done items after 5s.
+- Files: `apps/web/app/kb/page.tsx`, `apps/web/lib/kb/upload-queue.ts`, `apps/web/lib/kb/upload-queue.test.ts`
+
+#### E1 — Chat State Persistence (Completed)
+- Root cause: When user sends a chat message and navigates to another session, the in-flight `respondChat` fetch continues unaborted. On completion it calls `setMessages()` targeting stale state. When user returns, `loadMessages()` reloads from backend — but if the API call hasn't completed yet, messages are lost. No `AbortController`, no cleanup, no stale-request guarding existed.
+- Fix: Added `AbortController` ref (`chatAbortRef`) + request-id counter (`activeRequestIdRef`). Session-change effect aborts in-flight requests and increments the counter. After `respondChat` succeeds, messages are reloaded from backend (not optimistic append) ensuring persistence. Stale callbacks guarded with `requestId !== activeRequestIdRef.current`. Converted `loadMessages` to `useCallback` for stable reference.
+- Files: `apps/web/app/tutor/page.tsx`
+
+#### E2 — Async Status Indicators (Completed)
+- Root cause: Only a static "Thinking..." text existed with no animated indicator or phase progression, giving no feedback during multi-second AI responses.
+- Fix: Added `ChatPhase` state machine (`idle → thinking → searching → responding`) with timed transitions (1.5s → searching, 4s → responding). Replaced static text with animated CSS typing dots (`.chat-typing-dots` with `typingBounce` keyframe) and descriptive phase labels. All styling extracted to CSS classes (`.chat-status-indicator`, `.chat-status-content`, `.chat-status-label`).
+- Files: `apps/web/app/tutor/page.tsx`, `apps/web/app/globals.css`
+

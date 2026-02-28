@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useReducer, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { ChatResponse } from "@/components/chat-response";
 import { ConceptGraph } from "@/components/concept-graph";
@@ -15,6 +15,7 @@ import type {
   GraphConceptSummary,
   GraphSubgraphResponse,
   GroundingMode,
+  OnboardingStatusResponse,
 } from "@/lib/api/types";
 import {
   initialLevelUpState,
@@ -28,6 +29,16 @@ type TimelineMessage = {
   role: "user" | "assistant" | "system";
   text: string;
   response?: AssistantResponseEnvelope;
+};
+
+/** Lifecycle phases for the chat request indicator (E2). */
+type ChatPhase = "idle" | "thinking" | "searching" | "responding";
+
+const PHASE_LABELS: Record<ChatPhase, string> = {
+  idle: "",
+  thinking: "Thinking…",
+  searching: "Searching knowledge base…",
+  responding: "Generating response…",
 };
 
 const asPositiveInt = (value: string) => {
@@ -93,10 +104,16 @@ export default function TutorPage() {
 
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatPhase, setChatPhase] = useState<ChatPhase>("idle");
   const [chatError, setChatError] = useState<string | null>(null);
+
+  // E1: track in-flight request so navigation cancels stale callbacks
+  const chatAbortRef = useRef<AbortController | null>(null);
+  const activeRequestIdRef = useRef<number>(0);
 
   const [showGraph, setShowGraph] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
+  const [closingDrawer, setClosingDrawer] = useState<"graph" | "quiz" | null>(null);
   const [concepts, setConcepts] = useState<GraphConceptSummary[]>([]);
   const [conceptsLoading, setConceptsLoading] = useState(false);
   const [conceptsError, setConceptsError] = useState<string | null>(null);
@@ -107,12 +124,14 @@ export default function TutorPage() {
   const [switchSuggestion, setSwitchSuggestion] = useState<ConceptSwitchSuggestion | null>(null);
   const [switchDecision, setSwitchDecision] = useState<"accept" | "reject" | null>(null);
 
+  const [onboarding, setOnboarding] = useState<OnboardingStatusResponse | null>(null);
+
   const [levelUpState, dispatchLevelUp] = useReducer(levelUpReducer, initialLevelUpState);
 
-  // Restore existing session data for levelup
+  // Restore existing session data for levelup — keyed to concept, not session
   useEffect(() => {
-    if (!wsId || !activeSessionId) return;
-    const key = `colearni_levelup_${wsId}_${activeSessionId}`;
+    if (!wsId || !currentConcept) return;
+    const key = `colearni_levelup_${wsId}_concept_${currentConcept.concept_id}`;
     try {
       const saved = localStorage.getItem(key);
       if (saved) {
@@ -123,17 +142,17 @@ export default function TutorPage() {
     } catch {
       dispatchLevelUp({ type: "reset" });
     }
-  }, [wsId, activeSessionId]);
+  }, [wsId, currentConcept?.concept_id]);
 
   useEffect(() => {
-    if (!wsId || !activeSessionId) return;
-    const key = `colearni_levelup_${wsId}_${activeSessionId}`;
+    if (!wsId || !currentConcept) return;
+    const key = `colearni_levelup_${wsId}_concept_${currentConcept.concept_id}`;
     if (levelUpState.phase === "idle") {
       localStorage.removeItem(key);
     } else {
       localStorage.setItem(key, JSON.stringify(levelUpState));
     }
-  }, [wsId, activeSessionId, levelUpState]);
+  }, [wsId, currentConcept?.concept_id, levelUpState]);
 
   async function ensureSession(): Promise<string | null> {
     if (!wsId) return null;
@@ -141,7 +160,7 @@ export default function TutorPage() {
     return await startNewSession();
   }
 
-  async function loadMessages(sessionId: string) {
+  const loadMessages = useCallback(async (sessionId: string) => {
     if (!wsId) return;
     setChatLoading(true);
     setChatError(null);
@@ -175,7 +194,8 @@ export default function TutorPage() {
     } finally {
       setChatLoading(false);
     }
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsId]);
 
   async function loadConcepts() {
     if (!wsId) return;
@@ -236,6 +256,12 @@ export default function TutorPage() {
     const sessionId = await ensureSession();
     if (!sessionId) return;
 
+    // E1: Cancel any previous in-flight request
+    chatAbortRef.current?.abort();
+    const abortController = new AbortController();
+    chatAbortRef.current = abortController;
+    const requestId = ++activeRequestIdRef.current;
+
     const optimisticUser: TimelineMessage = {
       id: `tmp-user-${Date.now()}`,
       role: "user",
@@ -244,7 +270,20 @@ export default function TutorPage() {
     setMessages((prev) => [...prev, optimisticUser]);
     setQuery("");
     setChatLoading(true);
+    setChatPhase("thinking");
     setChatError(null);
+
+    // E2: Simulate phase progression for UX feedback
+    const phaseTimer = setTimeout(() => {
+      if (requestId === activeRequestIdRef.current) {
+        setChatPhase("searching");
+      }
+    }, 1500);
+    const phaseTimer2 = setTimeout(() => {
+      if (requestId === activeRequestIdRef.current) {
+        setChatPhase("responding");
+      }
+    }, 4000);
 
     try {
       const response = await apiClient.respondChat(wsId, {
@@ -256,15 +295,12 @@ export default function TutorPage() {
         grounding_mode,
       });
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `tmp-assistant-${Date.now()}`,
-          role: "assistant",
-          text: response.text,
-          response,
-        },
-      ]);
+      // E1: Guard against stale request — if session changed while in-flight, skip
+      if (requestId !== activeRequestIdRef.current) return;
+
+      // E1: Reload messages from backend to ensure persistence, instead of
+      // optimistically appending. This ensures navigation + return shows all messages.
+      await loadMessages(sessionId);
 
       const resolvedConceptId = response.conversation_meta?.resolved_concept_id;
       if (resolvedConceptId) {
@@ -284,15 +320,33 @@ export default function TutorPage() {
       setSwitchDecision(null);
       await refreshSessions(); // update session titles if it changed
     } catch (error: unknown) {
+      if (requestId !== activeRequestIdRef.current) return;
+      if (abortController.signal.aborted) return;
       setChatError(errorText(error, "Tutor request failed"));
     } finally {
-      setChatLoading(false);
+      clearTimeout(phaseTimer);
+      clearTimeout(phaseTimer2);
+      if (requestId === activeRequestIdRef.current) {
+        setChatLoading(false);
+        setChatPhase("idle");
+      }
     }
   }
 
   async function startLevelUp() {
     if (!wsId || !currentConcept) {
       dispatchLevelUp({ type: "create_error", error: "Pick a concept from the graph first." });
+      return;
+    }
+    // Skip if already mastered (≥ 90%)
+    if (
+      currentConcept.mastery_score != null &&
+      currentConcept.mastery_score >= 0.9
+    ) {
+      dispatchLevelUp({
+        type: "create_error",
+        error: `You've already mastered "${currentConcept.canonical_name}" (${Math.round(currentConcept.mastery_score * 100)}%). Try a different concept!`,
+      });
       return;
     }
     const sessionId = await ensureSession();
@@ -335,6 +389,16 @@ export default function TutorPage() {
   }, [wsId]);
 
   useEffect(() => {
+    if (!wsId) return;
+    apiClient.getOnboardingStatus(wsId).then(setOnboarding).catch(() => setOnboarding(null));
+  }, [wsId]);
+
+  useEffect(() => {
+    // E1: Abort in-flight chat request when session changes
+    chatAbortRef.current?.abort();
+    activeRequestIdRef.current++;
+    setChatPhase("idle");
+
     if (activeSessionId) {
       void loadMessages(activeSessionId);
     } else {
@@ -359,9 +423,18 @@ export default function TutorPage() {
     );
   }
 
+  function closeDrawer(which: "graph" | "quiz") {
+    setClosingDrawer(which);
+    setTimeout(() => {
+      if (which === "graph") setShowGraph(false);
+      else setShowQuiz(false);
+      setClosingDrawer(null);
+    }, 240);
+  }
+
   return (
     <section className={`tutor-shell${(showGraph || showQuiz) ? " with-drawer" : ""}`}>
-      <section className="chat-main" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)' }}>
+      <section className="chat-main">
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <span style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text)' }}>Tutor Chat</span>
@@ -390,11 +463,11 @@ export default function TutorPage() {
               className={`header-action-btn${showQuiz ? ' active' : ''}`}
               onClick={() => {
                 if (!showQuiz) {
-                  setShowGraph(false);
+                  if (showGraph) closeDrawer("graph");
                   setShowQuiz(true);
                   if (levelUpState.phase === "idle") void startLevelUp();
                 } else {
-                  setShowQuiz(false);
+                  closeDrawer("quiz");
                 }
               }}
             >
@@ -405,10 +478,10 @@ export default function TutorPage() {
               className={`header-action-btn${showGraph ? ' active' : ''}`}
               onClick={() => {
                 if (!showGraph) {
-                  setShowQuiz(false);
+                  if (showQuiz) closeDrawer("quiz");
                   setShowGraph(true);
                 } else {
-                  setShowGraph(false);
+                  closeDrawer("graph");
                 }
               }}
             >
@@ -418,7 +491,30 @@ export default function TutorPage() {
         </header>
 
         <div className="chat-timeline" aria-live="polite">
-          {timeline.length === 0 ? <p className="status empty">Start chatting to build context.</p> : null}
+          {timeline.length === 0 && onboarding && onboarding.has_documents && onboarding.suggested_topics.length > 0 ? (
+            <div className="onboarding-card">
+              <h3>Welcome! Pick a topic to start learning</h3>
+              <p className="onboarding-subtitle">These concepts were extracted from your documents.</p>
+              <div className="onboarding-chips">
+                {onboarding.suggested_topics.map((topic) => (
+                  <button
+                    key={topic.concept_id}
+                    type="button"
+                    className="onboarding-chip"
+                    onClick={() => {
+                      const matched = concepts.find((c) => c.concept_id === topic.concept_id);
+                      if (matched) setCurrentConcept(matched);
+                      setSuggestedConceptId(topic.concept_id);
+                      setQuery(`Teach me about ${topic.canonical_name}`);
+                    }}
+                  >
+                    <span className="chip-name">{topic.canonical_name}</span>
+                    {topic.description ? <span className="chip-desc">{topic.description.length > 80 ? topic.description.slice(0, 80) + '…' : topic.description}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : timeline.length === 0 ? <p className="status empty">Start chatting to build context.</p> : null}
           {timeline.map((message) => (
             <article key={message.id} className={`chat-message ${message.role === "assistant" ? "assistant" : message.role === "user" ? "user" : "system"}`}>
               <div className="chat-avatar">{message.role === "assistant" ? "🤖" : message.role === "user" ? "👤" : "⚙️"}</div>
@@ -435,11 +531,25 @@ export default function TutorPage() {
             </article>
           ))}
 
-          {chatLoading ? <div style={{ display: 'flex', gap: '1rem', padding: '0.5rem 1rem', maxWidth: '48rem', margin: '0 auto', width: '100%' }}><div className="chat-avatar" style={{ background: 'var(--accent)', color: '#fff' }}>🤖</div><div style={{ color: 'var(--muted)', alignSelf: 'center', fontSize: '0.9rem' }}>Thinking...</div></div> : null}
+          {chatLoading && chatPhase !== "idle" ? (
+            <div className="chat-status-indicator">
+              <div className="chat-avatar" style={{ background: 'var(--accent)', color: '#fff' }}>🤖</div>
+              <div className="chat-status-content">
+                <span className="chat-typing-dots" aria-hidden="true">
+                  <span className="dot" />
+                  <span className="dot" />
+                  <span className="dot" />
+                </span>
+                <span className="chat-status-label">
+                  {PHASE_LABELS[chatPhase]}
+                </span>
+              </div>
+            </div>
+          ) : null}
           {chatError ? <p className="status error" style={{ maxWidth: '48rem', margin: '0 auto' }}>{chatError}</p> : null}
         </div>
 
-        <div style={{ padding: '0.5rem 1rem 1rem 1rem', borderTop: 'none' }}>
+        <div className="chat-composer-dock">
           <form className="chat-composer" onSubmit={(event) => void onSubmitChat(event)}>
             <textarea
               rows={1}
@@ -467,7 +577,7 @@ export default function TutorPage() {
       </section>
 
       {showGraph ? (
-        <aside className="panel graph-drawer">
+        <aside className={`panel graph-drawer${closingDrawer === 'graph' ? ' closing' : ''}`}>
           <h2>Concept graph</h2>
           {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
           {conceptsError ? <p className="status error">{conceptsError}</p> : null}
@@ -477,11 +587,8 @@ export default function TutorPage() {
               edges={subgraph.edges}
               selectedId={currentConcept?.concept_id}
               onSelect={(id) => {
-                setSuggestedConceptId(id);
-                const matched = concepts.find((item) => item.concept_id === id);
-                if (matched) {
-                  setCurrentConcept(matched);
-                }
+                // Navigate the graph without changing the active tutor concept
+                void loadSubgraph(id);
               }}
               width={320}
               height={350}
@@ -506,7 +613,7 @@ export default function TutorPage() {
       ) : null}
 
       {showQuiz ? (
-        <aside className="panel quiz-drawer">
+        <aside className={`panel quiz-drawer${closingDrawer === 'quiz' ? ' closing' : ''}`}>
           <LevelUpCard
             state={levelUpState}
             onStartQuiz={() => void startLevelUp()}
