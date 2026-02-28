@@ -320,6 +320,24 @@ def content_preview(text: str | None) -> str | None:
     return f"{text[:_PREVIEW_CHARS]}... (len={length})"
 
 
+def set_prompt_metadata(span: Any, meta: Any, *, rendered_length: int | None = None) -> None:
+    """Set prompt identity attributes on a span from a ``PromptMeta`` dataclass.
+
+    Expected fields on *meta*: ``prompt_id``, ``version``, ``task_type``.
+    """
+    if span is None or meta is None:
+        return
+    if hasattr(meta, "prompt_id"):
+        span.set_attribute("prompt.id", str(meta.prompt_id))
+    if hasattr(meta, "version"):
+        span.set_attribute("prompt.version", int(meta.version))
+    if hasattr(meta, "task_type"):
+        task_type = meta.task_type
+        span.set_attribute("prompt.task_type", task_type.value if hasattr(task_type, "value") else str(task_type))
+    if rendered_length is not None:
+        span.set_attribute("prompt.rendered_length", rendered_length)
+
+
 def emit_event(event_name: str, *, status: str, **fields: Any) -> dict[str, Any] | None:
     """Emit a structured observability event with null-safe common fields.
 
@@ -505,6 +523,7 @@ __all__ = [
     "set_event_sink",
     "set_input_output",
     "set_llm_span_attributes",
+    "set_prompt_metadata",
     "set_span_kind",
     "set_tracer_provider_for_testing",
     "set_usage_source",

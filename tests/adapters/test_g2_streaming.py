@@ -265,8 +265,15 @@ class TestReasoningCapabilityGating:
 
 
 class TestStreamingLLMSpan:
+    def _llm_spans(self, exporter):
+        """Return spans with LLM kind attribute."""
+        return [
+            s for s in exporter.get_finished_spans()
+            if s.attributes.get("openinference.span.kind") == "LLM"
+        ]
+
     def test_streaming_produces_llm_span(self, otel_exporter) -> None:
-        """Streaming generates an llm.call span with LLM kind and token counts."""
+        """Streaming generates an LLM span with token counts."""
         chunks = [
             {"choices": [{"delta": {"content": "Hello"}}]},
             {"choices": [{"delta": {"content": " world"}}]},
@@ -276,11 +283,9 @@ class TestStreamingLLMSpan:
         stream = client.generate_tutor_text_stream(prompt="test")
         list(stream)
 
-        spans = otel_exporter.get_finished_spans()
-        llm_spans = [s for s in spans if s.name == "llm.call"]
+        llm_spans = self._llm_spans(otel_exporter)
         assert len(llm_spans) >= 1
         span = llm_spans[0]
-        assert span.attributes.get("openinference.span.kind") == "LLM"
         assert span.attributes.get("llm.token_count.prompt") == 5
         assert span.attributes.get("llm.token_count.completion") == 10
         assert span.attributes.get("llm.token_count.total") == 15
@@ -294,8 +299,7 @@ class TestStreamingLLMSpan:
         client = MockStreamingClient(chunks=chunks)
         list(client.generate_tutor_text_stream(prompt="test"))
 
-        spans = otel_exporter.get_finished_spans()
-        llm_spans = [s for s in spans if s.name == "llm.call"]
+        llm_spans = self._llm_spans(otel_exporter)
         assert llm_spans[0].attributes.get("llm.usage_source") == "provider_reported"
 
     def test_streaming_span_missing_usage_source(self, otel_exporter) -> None:
@@ -307,8 +311,7 @@ class TestStreamingLLMSpan:
         client = MockStreamingClient(chunks=chunks)
         list(client.generate_tutor_text_stream(prompt="test"))
 
-        spans = otel_exporter.get_finished_spans()
-        llm_spans = [s for s in spans if s.name == "llm.call"]
+        llm_spans = self._llm_spans(otel_exporter)
         assert llm_spans[0].attributes.get("llm.usage_source") == "missing"
 
     def test_streaming_emits_event(self, otel_exporter) -> None:
@@ -339,6 +342,15 @@ class TestStreamingLLMSpan:
         client = MockStreamingClient(chunks=chunks)
         list(client.generate_tutor_text_stream(prompt="test"))
 
-        spans = otel_exporter.get_finished_spans()
-        llm_spans = [s for s in spans if s.name == "llm.call"]
+        llm_spans = self._llm_spans(otel_exporter)
         assert llm_spans[0].attributes.get("llm.output_messages.preview") == "Hello there"
+
+    def test_streaming_span_uses_operation_name(self, otel_exporter) -> None:
+        """Streaming span name reflects the operation context."""
+        chunks = [{"choices": [{"delta": {"content": "x"}}]}, {"choices": [{"delta": {}}]}]
+        client = MockStreamingClient(chunks=chunks)
+        with observation_context(operation="chat.respond"):
+            list(client.generate_tutor_text_stream(prompt="test"))
+
+        llm_spans = self._llm_spans(otel_exporter)
+        assert llm_spans[0].name == "llm.chat.respond"

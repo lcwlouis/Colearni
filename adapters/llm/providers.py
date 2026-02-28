@@ -15,6 +15,7 @@ from core.observability import (
     extract_token_usage,
     get_observation_context,
     set_llm_span_attributes,
+    set_prompt_metadata,
     set_usage_source,
     start_span,
 )
@@ -113,8 +114,9 @@ class _BaseGraphLLMClient(ABC):
         self._reasoning_enabled = reasoning_enabled
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
+        prompt_meta = None
         try:
-            prompt = _registry.render(
+            prompt, prompt_meta = _registry.render_with_meta(
                 "graph_extract_chunk_v1", {"chunk_text": chunk_text}
             )
         except Exception:
@@ -123,6 +125,7 @@ class _BaseGraphLLMClient(ABC):
             schema_name="graph_raw_extraction",
             schema=_RAW_GRAPH_SCHEMA,
             prompt=prompt,
+            prompt_meta=prompt_meta,
         )
 
     def disambiguate(
@@ -133,8 +136,9 @@ class _BaseGraphLLMClient(ABC):
         candidates: Sequence[Mapping[str, object]],
     ) -> Mapping[str, Any]:
         candidates_json = json.dumps(list(candidates), ensure_ascii=True)
+        prompt_meta = None
         try:
-            prompt = _registry.render("graph_disambiguate_v1", {
+            prompt, prompt_meta = _registry.render_with_meta("graph_disambiguate_v1", {
                 "raw_name": raw_name,
                 "context_snippet": context_snippet or "",
                 "candidates_json": candidates_json,
@@ -150,6 +154,7 @@ class _BaseGraphLLMClient(ABC):
             schema_name="graph_disambiguation",
             schema=_DISAMBIGUATION_SCHEMA,
             prompt=prompt,
+            prompt_meta=prompt_meta,
         )
 
     def generate_tutor_text(self, *, prompt: str) -> str:
@@ -222,10 +227,11 @@ class _BaseGraphLLMClient(ABC):
         """Stream text deltas inside an LLM span and capture final usage."""
         context = get_observation_context()
         operation = str(context.get("operation") or "llm.stream")
+        span_name = f"llm.{operation}" if not operation.startswith("llm.") else operation
         collected_text: list[str] = []
 
         with start_span(
-            "llm.call",
+            span_name,
             component="llm",
             operation=operation,
             provider=self._provider,
@@ -314,6 +320,7 @@ class _BaseGraphLLMClient(ABC):
         schema_name: str,
         schema: dict[str, object],
         prompt: str,
+        prompt_meta: Any | None = None,
     ) -> dict[str, Any]:
         messages = [
             {"role": "system", "content": "Return only JSON that satisfies the provided schema."},
@@ -327,6 +334,8 @@ class _BaseGraphLLMClient(ABC):
             messages=messages,
             temperature=self._json_temperature,
             response_format=response_format,
+            prompt_meta=prompt_meta,
+            rendered_length=len(prompt) if prompt_meta else None,
         )
         content = self._extract_content(result)
         response_payload = json.loads(content)
@@ -382,13 +391,16 @@ class _BaseGraphLLMClient(ABC):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        prompt_meta: Any | None = None,
+        rendered_length: int | None = None,
     ) -> Mapping[str, Any]:
         """Wrap the SDK call with observability spans and events."""
         context = get_observation_context()
         operation = str(context.get("operation") or "llm.call")
+        span_name = f"llm.{operation}" if not operation.startswith("llm.") else operation
 
         with start_span(
-            "llm.call",
+            span_name,
             component="llm",
             operation=operation,
             provider=self._provider,
@@ -404,6 +416,7 @@ class _BaseGraphLLMClient(ABC):
                 },
                 messages=messages,
             )
+            set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
 
             try:
                 result = self._sdk_call(

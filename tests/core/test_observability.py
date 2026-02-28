@@ -260,3 +260,54 @@ def test_emit_event_works_without_active_span(otel_exporter) -> None:
     assert result["event_name"] == "standalone.event"
     assert len(events) == 1
     set_event_sink(None)
+
+
+# ---- OBS-3: Prompt identity and content policy tests ----
+
+
+def test_set_prompt_metadata_on_span(otel_exporter) -> None:
+    """set_prompt_metadata attaches prompt.id, prompt.version, prompt.task_type."""
+    from dataclasses import dataclass
+
+    from core.observability import set_prompt_metadata
+
+    @dataclass
+    class FakeMeta:
+        prompt_id: str = "tutor_socratic_v1"
+        version: int = 2
+        task_type: str = "tutor"
+
+    with start_span("test.prompt") as span:
+        set_prompt_metadata(span, FakeMeta(), rendered_length=500)
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].attributes.get("prompt.id") == "tutor_socratic_v1"
+    assert spans[0].attributes.get("prompt.version") == 2
+    assert spans[0].attributes.get("prompt.task_type") == "tutor"
+    assert spans[0].attributes.get("prompt.rendered_length") == 500
+
+
+def test_content_preview_truncates_long_text() -> None:
+    """content_preview returns a truncated string with length for long text."""
+    from core.observability import content_preview
+
+    short = "hello"
+    assert content_preview(short) == "hello"
+
+    long_text = "x" * 1000
+    preview = content_preview(long_text)
+    assert preview is not None
+    assert len(preview) < 1000
+    assert "len=1000" in preview
+
+    assert content_preview(None) is None
+
+
+def test_classify_usage_source() -> None:
+    """classify_usage_source returns correct labels."""
+    from core.observability import classify_usage_source
+
+    assert classify_usage_source({"token_prompt": 10, "token_completion": 5, "token_total": 15}) == "provider_reported"
+    assert classify_usage_source({"token_prompt": None, "token_completion": None, "token_total": None}) == "missing"
+    assert classify_usage_source({"token_prompt": None, "token_completion": None, "token_total": 5}) == "provider_reported"
