@@ -1,19 +1,44 @@
 # Prompt Inventory — Colearni
 
 > Source-of-truth catalog of all LLM prompts used across the codebase.
-> Proposed versioned prompt templates for future file-based prompt management live in `docs/prompt_templates/`.
-> Last updated: Session 11
+> **Runtime prompt assets** live in `core/prompting/assets/` as versioned Markdown files.
+> Design templates and rationale live in `docs/prompt_templates/`.
+> Last updated: Prompt Refactor P9
 
 ## Overview
 
-Colearni uses 14 distinct LLM prompt templates across 7 source files. Prompts fall into four categories:
+Colearni uses a **file-based prompt asset system** (`core/prompting/`) for all LLM prompts.
+Prompts are stored as Markdown files with front-matter metadata and `{placeholder}` template slots.
+Each migrated call site uses the asset-backed path with an inline fallback for resilience.
+
+### Runtime Asset Catalog
+
+| Prompt ID | Task Type | Output | Asset File |
+|-----------|-----------|--------|------------|
+| `tutor_socratic_v1` | tutor | markdown | `assets/tutor/socratic_v1.md` |
+| `tutor_direct_v1` | tutor | markdown | `assets/tutor/direct_v1.md` |
+| `routing_query_analyzer_v1` | routing | json | `assets/routing/query_analyzer_v1.md` |
+| `graph_extract_chunk_v1` | graph | json | `assets/graph/extract_chunk_v1.md` |
+| `graph_disambiguate_v1` | graph | json | `assets/graph/disambiguate_v1.md` |
+| `graph_merge_summary_v1` | graph | json | `assets/graph/merge_summary_v1.md` |
+| `graph_repair_json_v1` | graph | json | `assets/graph/repair_json_v1.md` |
+| `assessment_levelup_generate_v1` | assessment | json | `assets/assessment/levelup_generate_v1.md` |
+| `assessment_levelup_grade_v1` | assessment | json | `assets/assessment/levelup_grade_v1.md` |
+| `practice_practice_quiz_generate_v1` | practice | json | `assets/practice/practice_quiz_generate_v1.md` |
+| `practice_practice_flashcards_generate_v1` | practice | json | `assets/practice/practice_flashcards_generate_v1.md` |
+| `suggestion_suggestion_hook_v1` | suggestion | json | `assets/suggestion/suggestion_hook_v1.md` |
+| `document_document_summary_v1` | document | text | `assets/document/document_summary_v1.md` |
+
+### Summary by Category
 
 | Category | Count | Output Format |
 |----------|-------|---------------|
 | Tutor / Chat | 5 | Free text |
-| Knowledge Graph | 3 | Structured JSON |
+| Knowledge Graph | 4 | Structured JSON |
 | Quiz & Practice | 4 | Structured JSON |
-| Document Processing | 2 | Mixed |
+| Document Processing | 1 | Plain text |
+| Routing | 1 | Structured JSON |
+| Suggestion | 1 | Structured JSON |
 
 ---
 
@@ -236,7 +261,18 @@ Auto quiz generation (S34)
 ## Maintenance Rules
 
 - Update this file whenever a new prompt template/instruction is added, deleted, or materially changed.
+- **New prompts should be added as Markdown assets** in `core/prompting/assets/<task_type>/` rather than inline strings.
+- Use `PromptRegistry.render()` for all new prompt call sites with inline fallback for resilience.
 - If prompt behavior changes API contracts or major tutor behavior, also update:
   - `docs/ARCHITECTURE.md`
   - `docs/PRODUCT_SPEC.md`
   - `docs/PROGRESS.md`
+
+## Migration Status
+
+All inline prompt strings have been migrated to file-based assets (P1–P8).
+Each migrated call site retains an inline fallback for resilience.
+Regression tests in `tests/domain/test_prompt_regression.py` guard against:
+- Missing prompt IDs
+- Missing required sections in critical prompts
+- Prompt template length drift

@@ -666,3 +666,20 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Files: `docs/REFACTOR.md` (new)
 - Commands: `npx next build` (passes), `npx vitest run` (41/41), `python -m pytest tests/` (100%)
 - No functional changes — documentation only.
+
+#### P1–P9 — Prompt Refactor (Completed)
+- Root cause: All LLM prompts were hardcoded as inline Python strings, making them difficult to version, audit, test, and maintain independently.
+- Fix: Created `core/prompting/` file-based prompt asset system. Migrated all 13+ inline prompt strings to versioned Markdown assets in `core/prompting/assets/`. Each migrated call site uses the asset-backed path with inline fallback for resilience.
+- Slices landed:
+  - P1: Prompt asset infrastructure (models, loader, renderer, registry)
+  - P2: Tutor prompt migration (socratic_v1, direct_v1)
+  - P3: Query analysis prompt (query_analyzer_v1)
+  - P4: Graph prompt migration (extract_chunk_v1, disambiguate_v1, merge_summary_v1)
+  - P5: Assessment prompt migration (levelup_generate_v1, levelup_grade_v1)
+  - P6: Practice prompt migration (practice_quiz_generate_v1, practice_flashcards_generate_v1)
+  - P7: Suggestion and document prompt migration (suggestion_hook_v1, document_summary_v1)
+  - P8: Repair, observability, and regression hardening (repair_json_v1, render_with_meta, 31 regression tests)
+  - P9: Docs and closeout
+- Files: `core/prompting/` (new module), `domain/chat/prompt_kit.py`, `domain/chat/tutor_agent.py`, `adapters/llm/providers.py`, `domain/learning/quiz_flow.py`, `domain/learning/quiz_grading.py`, `domain/learning/practice.py`, `domain/ingestion/post_ingest.py`, `docs/PROMPTS.md`, `docs/ARCHITECTURE.md`
+- Tests: 100+ new tests across 8 test files covering assets, rendering, regression, and integration
+- All existing tests pass; no behavioral regressions.

@@ -142,6 +142,12 @@ core/
   schemas.py            # Evidence, Citation, Card payload schemas
   contracts.py          # Tool/LLM interfaces
   loop.py               # Conductor orchestration (thin)
+  prompting/            # File-based prompt asset system
+    assets/             # Versioned Markdown prompt files by task family
+    registry.py         # PromptRegistry – load/cache/render prompt assets
+    loader.py           # Asset loading with front-matter parsing
+    renderer.py         # Strict placeholder rendering
+    models.py           # PromptMeta, PromptAsset, TaskType types
 domain/
   agents/               # TutorAgent, QuizAgent, PracticeAgent, SuggestionAgent
   learning/             # mastery rules, state machine
