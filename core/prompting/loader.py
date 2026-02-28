@@ -96,7 +96,7 @@ def load_asset(prompt_id: str, *, assets_dir: Path | None = None) -> PromptAsset
 
     version = int(front.get("version", _infer_version(prompt_id)))
     fmt = front.get("output_format", "markdown")
-    output_format: OutputFormat = "json" if fmt == "json" else "markdown"
+    output_format: OutputFormat = fmt if fmt in ("json", "text") else "markdown"
     description = front.get("description", "")
 
     meta = PromptMeta(

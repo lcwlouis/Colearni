@@ -11,9 +11,11 @@ from domain.embeddings.pipeline import NewChunkInput, populate_new_chunk_embeddi
 from domain.graph.pipeline import build_graph_for_chunks
 
 from core.contracts import EmbeddingProvider, GraphLLMClient
+from core.prompting import PromptRegistry
 from core.settings import Settings, get_settings
 
 _log = logging.getLogger(__name__)
+_registry = PromptRegistry()
 
 
 def generate_document_summary(
@@ -36,12 +38,7 @@ def generate_document_summary(
         sample_text += chunk + "\n\n"
     if not sample_text.strip():
         return None
-    prompt = (
-        "Summarize the following document excerpt in 2-3 concise sentences. "
-        "Focus on the main topics and key concepts covered.\n\n"
-        f"DOCUMENT EXCERPT:\n{sample_text.strip()}\n\n"
-        "SUMMARY:"
-    )
+    prompt = _build_document_summary_prompt(sample_text.strip())
     try:
         summary = llm_client.generate_tutor_text(prompt=prompt).strip()
         if summary and len(summary) > 10:
@@ -175,3 +172,19 @@ def run_post_ingest_tasks(
             _log.exception("Failed to record error status doc=%s", document_id)
     finally:
         db.close()
+
+
+def _build_document_summary_prompt(sample_text: str) -> str:
+    """Build the document summary prompt from asset or inline fallback."""
+    try:
+        return _registry.render("document_document_summary_v1", {
+            "chunks": sample_text,
+        })
+    except Exception:
+        _log.debug("asset render failed for document_summary_v1, using inline fallback")
+        return (
+            "Summarize the following document excerpt in 2-3 concise sentences. "
+            "Focus on the main topics and key concepts covered.\n\n"
+            f"DOCUMENT EXCERPT:\n{sample_text}\n\n"
+            "SUMMARY:"
+        )

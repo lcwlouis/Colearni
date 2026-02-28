@@ -19,7 +19,7 @@ class TaskType(str, Enum):
     DOCUMENT = "document"
 
 
-OutputFormat = Literal["markdown", "json"]
+OutputFormat = Literal["markdown", "json", "text"]
 
 
 @dataclass(frozen=True)
