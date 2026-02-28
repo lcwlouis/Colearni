@@ -73,34 +73,52 @@ def apply_concept_bias(
     chunks: list[RankedChunk],
 ) -> list[RankedChunk]:
     """Boost scores for chunks linked to the given concept via provenance."""
-    linked_chunk_ids = _linked_chunks_for_concept(
-        session,
+    with start_span(
+        "retrieval.graph.bias",
         workspace_id=workspace_id,
         concept_id=concept_id,
-    )
-    if not linked_chunk_ids:
-        return chunks
-    boosted = [
-        (
-            chunk.score + (0.15 if chunk.chunk_id in linked_chunk_ids else 0.0),
-            index,
-            chunk,
+        **{"retrieval.input_count": len(chunks)},
+    ) as span:
+        set_span_kind(span, SPAN_KIND_RETRIEVER)
+        linked_chunk_ids = _linked_chunks_for_concept(
+            session,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
         )
-        for index, chunk in enumerate(chunks)
-    ]
-    boosted.sort(key=lambda item: (-item[0], item[1], item[2].chunk_id))
-    return [
-        RankedChunk(
-            workspace_id=item[2].workspace_id,
-            document_id=item[2].document_id,
-            chunk_id=item[2].chunk_id,
-            chunk_index=item[2].chunk_index,
-            text=item[2].text,
-            score=item[0],
-            retrieval_method=item[2].retrieval_method,
-        )
-        for item in boosted
-    ]
+        if not linked_chunk_ids:
+            if span is not None:
+                span.set_attribute("retrieval.graph.linked_count", 0)
+                span.set_attribute("retrieval.graph.boosted_count", 0)
+            return chunks
+        boosted = [
+            (
+                chunk.score + (0.15 if chunk.chunk_id in linked_chunk_ids else 0.0),
+                index,
+                chunk,
+            )
+            for index, chunk in enumerate(chunks)
+        ]
+        boosted.sort(key=lambda item: (-item[0], item[1], item[2].chunk_id))
+        boosted_count = sum(1 for item in boosted if item[2].chunk_id in linked_chunk_ids)
+        if span is not None:
+            span.set_attribute("retrieval.graph.linked_count", len(linked_chunk_ids))
+            span.set_attribute("retrieval.graph.boosted_count", boosted_count)
+            span.set_attribute(
+                "retrieval.graph.linked_chunk_ids",
+                json.dumps(sorted(linked_chunk_ids)[:20]),
+            )
+        return [
+            RankedChunk(
+                workspace_id=item[2].workspace_id,
+                document_id=item[2].document_id,
+                chunk_id=item[2].chunk_id,
+                chunk_index=item[2].chunk_index,
+                text=item[2].text,
+                score=item[0],
+                retrieval_method=item[2].retrieval_method,
+            )
+            for item in boosted
+        ]
 
 
 def _linked_chunks_for_concept(

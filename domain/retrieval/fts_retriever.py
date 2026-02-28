@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 from adapters.db import chunks_repository
 from core.contracts import ChunkRetriever
+from core.observability import (
+    SPAN_KIND_RETRIEVER,
+    set_span_kind,
+    start_span,
+)
 from sqlalchemy.orm import Session
 
 from domain.retrieval.types import RankedChunk
@@ -18,16 +25,33 @@ class PgFtsRetriever(ChunkRetriever):
 
     def retrieve(self, query: str, workspace_id: int, top_k: int) -> list[RankedChunk]:
         bounded_top_k = max(1, min(top_k, self._retrieval_max_top_k))
-        rows = chunks_repository.full_text_top_k(self._session, query, workspace_id, bounded_top_k)
-        return [
-            RankedChunk(
-                workspace_id=workspace_id,
-                document_id=row.document_id,
-                chunk_id=row.chunk_id,
-                chunk_index=row.chunk_index,
-                text=row.text,
-                score=row.fts_rank,
-                retrieval_method="fts",
-            )
-            for row in rows
-        ]
+        with start_span(
+            "retrieval.fts.search",
+            workspace_id=workspace_id,
+            **{"retrieval.top_k": bounded_top_k},
+        ) as span:
+            set_span_kind(span, SPAN_KIND_RETRIEVER)
+            rows = chunks_repository.full_text_top_k(self._session, query, workspace_id, bounded_top_k)
+            results = [
+                RankedChunk(
+                    workspace_id=workspace_id,
+                    document_id=row.document_id,
+                    chunk_id=row.chunk_id,
+                    chunk_index=row.chunk_index,
+                    text=row.text,
+                    score=row.fts_rank,
+                    retrieval_method="fts",
+                )
+                for row in rows
+            ]
+            if span is not None:
+                span.set_attribute("retrieval.results_count", len(results))
+                if results:
+                    span.set_attribute(
+                        "retrieval.documents",
+                        json.dumps(
+                            [{"chunk_id": r.chunk_id, "score": round(r.score, 3)} for r in results[:5]],
+                            default=str,
+                        )[:1024],
+                    )
+            return results

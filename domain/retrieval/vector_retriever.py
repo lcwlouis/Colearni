@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 from adapters.db import chunks_repository
 from core.contracts import ChunkRetriever, EmbeddingProvider
+from core.observability import (
+    SPAN_KIND_RETRIEVER,
+    set_span_kind,
+    start_span,
+)
 from sqlalchemy.orm import Session
 
 from domain.retrieval.types import RankedChunk
@@ -28,33 +35,50 @@ class PgVectorRetriever(ChunkRetriever):
     def retrieve(self, query: str, workspace_id: int, top_k: int) -> list[RankedChunk]:
         """Return top-k chunk matches for one workspace."""
         bounded_top_k = max(1, min(top_k, self._retrieval_max_top_k))
-        query_embeddings = self._embedding_provider.embed_texts([query])
-        if len(query_embeddings) != 1:
-            raise ValueError(
-                "Embedding provider must return exactly one query embedding, "
-                f"got {len(query_embeddings)}"
-            )
-
-        rows = chunks_repository.vector_top_k(
-            session=self._session,
-            query_embedding=query_embeddings[0],
+        with start_span(
+            "retrieval.vector.search",
             workspace_id=workspace_id,
-            top_k=bounded_top_k,
-        )
-        ranked_rows = sorted(
-            rows,
-            key=lambda row: (row.cosine_distance, row.chunk_id),
-        )[:bounded_top_k]
+            **{"retrieval.top_k": bounded_top_k},
+        ) as span:
+            set_span_kind(span, SPAN_KIND_RETRIEVER)
+            query_embeddings = self._embedding_provider.embed_texts([query])
+            if len(query_embeddings) != 1:
+                raise ValueError(
+                    "Embedding provider must return exactly one query embedding, "
+                    f"got {len(query_embeddings)}"
+                )
 
-        return [
-            RankedChunk(
+            rows = chunks_repository.vector_top_k(
+                session=self._session,
+                query_embedding=query_embeddings[0],
                 workspace_id=workspace_id,
-                chunk_id=row.chunk_id,
-                document_id=row.document_id,
-                chunk_index=row.chunk_index,
-                text=row.text,
-                score=1.0 - row.cosine_distance,
-                retrieval_method="vector",
+                top_k=bounded_top_k,
             )
-            for row in ranked_rows
-        ]
+            ranked_rows = sorted(
+                rows,
+                key=lambda row: (row.cosine_distance, row.chunk_id),
+            )[:bounded_top_k]
+
+            results = [
+                RankedChunk(
+                    workspace_id=workspace_id,
+                    chunk_id=row.chunk_id,
+                    document_id=row.document_id,
+                    chunk_index=row.chunk_index,
+                    text=row.text,
+                    score=1.0 - row.cosine_distance,
+                    retrieval_method="vector",
+                )
+                for row in ranked_rows
+            ]
+            if span is not None:
+                span.set_attribute("retrieval.results_count", len(results))
+                if results:
+                    span.set_attribute(
+                        "retrieval.documents",
+                        json.dumps(
+                            [{"chunk_id": r.chunk_id, "score": round(r.score, 3)} for r in results[:5]],
+                            default=str,
+                        )[:1024],
+                    )
+            return results
