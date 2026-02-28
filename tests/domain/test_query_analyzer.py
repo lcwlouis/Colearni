@@ -14,19 +14,19 @@ class TestBuildPrompt:
     """Test prompt rendering from the query_analyzer_v1 asset."""
 
     def test_renders_with_query(self) -> None:
-        prompt = build_query_analysis_prompt(query="Explain DNA replication")
+        prompt, meta = build_query_analysis_prompt(query="Explain DNA replication")
         assert "Explain DNA replication" in prompt
         assert "query analysis" in prompt.lower()
 
     def test_renders_with_history(self) -> None:
-        prompt = build_query_analysis_prompt(
+        prompt, meta = build_query_analysis_prompt(
             query="Continue", history_summary="User asked about mitosis."
         )
         assert "User asked about mitosis." in prompt
         assert "Continue" in prompt
 
     def test_renders_without_history(self) -> None:
-        prompt = build_query_analysis_prompt(query="What is a cell?")
+        prompt, meta = build_query_analysis_prompt(query="What is a cell?")
         assert "(none)" in prompt
 
 

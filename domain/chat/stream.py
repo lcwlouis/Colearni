@@ -29,10 +29,12 @@ from core.schemas import (
 from core.schemas.assistant import GenerationTrace
 from core.schemas.chat import (
     ChatPhase,
+    ChatStreamAnswerPartEvent,
     ChatStreamDeltaEvent,
     ChatStreamErrorEvent,
     ChatStreamEvent,
     ChatStreamFinalEvent,
+    ChatStreamReasoningSummaryEvent,
     ChatStreamStatusEvent,
     ChatStreamTraceEvent,
 )
@@ -64,8 +66,9 @@ from domain.chat.session_memory import (
     persist_turn,
 )
 from domain.chat.social_turns import try_social_response
-from domain.chat.prompt_kit import build_full_tutor_prompt, get_persona
+from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, get_persona
 from domain.chat.tutor_agent import resolve_tutor_style
+from domain.chat.answer_parts import split_answer_parts
 from domain.readiness.analyzer import build_readiness_actions
 
 log = logging.getLogger("domain.chat.stream")
@@ -276,7 +279,7 @@ def _stream_inner(
                 if assessment_context
                 else quiz_context_text
             )
-        prompt = build_full_tutor_prompt(
+        prompt, prompt_meta = build_full_tutor_prompt_with_meta(
             query=request.query,
             evidence=evidence,
             persona=persona,
@@ -290,7 +293,9 @@ def _stream_inner(
             ),
             flashcard_progress=flashcard_progress,
         )
-        text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(prompt=prompt)
+        text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
+            prompt=prompt, prompt_meta=prompt_meta,
+        )
         text_parts: list[str] = []
         for delta in text_stream:
             if not responded and delta:
@@ -302,6 +307,18 @@ def _stream_inner(
         generation_trace = text_stream.trace
         if generation_trace is not None:
             yield ChatStreamTraceEvent(trace=generation_trace)
+            # U5: emit ephemeral reasoning summary when enabled and reasoning was used
+            if (
+                active_settings.reasoning_summary_enabled
+                and generation_trace.reasoning_used
+                and generation_trace.reasoning_tokens
+                and generation_trace.reasoning_tokens > 0
+            ):
+                summary = (
+                    f"Reasoned for {generation_trace.reasoning_tokens} tokens "
+                    f"at {generation_trace.reasoning_effort or 'default'} effort"
+                )
+                yield ChatStreamReasoningSummaryEvent(summary=summary)
     else:
         # Fallback to blocking generation (no streaming support)
         from domain.chat.response_service import generate_tutor_text
@@ -340,6 +357,10 @@ def _stream_inner(
 
     if not assistant_text:
         assistant_text = "(no response generated)"
+
+    # ── Structured answer parts (U6) ─────────────────────────────────
+    answer_parts = split_answer_parts(assistant_text)
+    yield ChatStreamAnswerPartEvent(parts=answer_parts)
 
     # ── Verify + finalize ─────────────────────────────────────────────
     draft = AssistantDraft(text=assistant_text, evidence=evidence, citations=citations)
@@ -388,6 +409,7 @@ def _stream_inner(
             "actions": actions,
             "response_mode": "grounded",
             "generation_trace": generation_trace,
+            "answer_parts": answer_parts,
         }
     )
 

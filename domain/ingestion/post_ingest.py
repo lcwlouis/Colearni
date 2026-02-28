@@ -44,9 +44,9 @@ def generate_document_summary(
         sample_text += chunk + "\n\n"
     if not sample_text.strip():
         return None
-    prompt = _build_document_summary_prompt(sample_text.strip())
+    prompt, prompt_meta = _build_document_summary_prompt(sample_text.strip())
     try:
-        summary = llm_client.generate_tutor_text(prompt=prompt).strip()
+        summary = llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta).strip()
         if summary and len(summary) > 10:
             return summary[:500]
     except (RuntimeError, ValueError):
@@ -193,10 +193,10 @@ def run_post_ingest_tasks(
         db.close()
 
 
-def _build_document_summary_prompt(sample_text: str) -> str:
+def _build_document_summary_prompt(sample_text: str) -> tuple[str, Any]:
     """Build the document summary prompt from asset or inline fallback."""
     try:
-        return _registry.render("document_document_summary_v1", {
+        return _registry.render_with_meta("document_document_summary_v1", {
             "chunks": sample_text,
         })
     except Exception:
@@ -206,4 +206,4 @@ def _build_document_summary_prompt(sample_text: str) -> str:
             "Focus on the main topics and key concepts covered.\n\n"
             f"DOCUMENT EXCERPT:\n{sample_text}\n\n"
             "SUMMARY:"
-        )
+        ), None

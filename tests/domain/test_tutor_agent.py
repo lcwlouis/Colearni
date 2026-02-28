@@ -12,7 +12,7 @@ from domain.chat.tutor_agent import (
 
 
 class FailingTutorClient:
-    def generate_tutor_text(self, *, prompt: str) -> str:  # noqa: ARG002
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:  # noqa: ARG002
         raise RuntimeError("llm unavailable")
 
 

@@ -114,7 +114,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
         monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt", lambda **kw: "fake prompt")
+        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: ("fake prompt", None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         # Create a fake streaming LLM client
@@ -126,7 +126,7 @@ class TestRespondingPhaseSemantics:
                 return iter(self._deltas)
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt: str) -> FakeStream:
+            def generate_tutor_text_stream(self, prompt: str, prompt_meta=None) -> FakeStream:
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -185,7 +185,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
         monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt", lambda **kw: "fake prompt")
+        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: ("fake prompt", None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         class EmptyStream:
@@ -194,7 +194,7 @@ class TestRespondingPhaseSemantics:
                 return iter(["", "", ""])
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt: str) -> EmptyStream:
+            def generate_tutor_text_stream(self, prompt: str, prompt_meta=None) -> EmptyStream:
                 return EmptyStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())

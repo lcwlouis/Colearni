@@ -10,7 +10,7 @@ from core.contracts import GraphLLMClient
 from core.schemas import ChatRespondRequest, EvidenceItem
 from core.schemas.assistant import GenerationTrace
 from core.settings import Settings
-from domain.chat.prompt_kit import build_full_tutor_prompt, get_persona
+from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, get_persona
 from domain.chat.tutor_agent import build_tutor_response_text, resolve_tutor_style
 from domain.learning.quiz_persistence import get_latest_quiz_summary_for_concept
 from sqlalchemy.orm import Session
@@ -39,7 +39,7 @@ def generate_tutor_text(
     combined_assessment = assessment_context
     if quiz_context:
         combined_assessment = f"{assessment_context}\n\n{quiz_context}" if assessment_context else quiz_context
-    prompt = build_full_tutor_prompt(
+    prompt, prompt_meta = build_full_tutor_prompt_with_meta(
         query=query,
         evidence=evidence,
         persona=persona,
@@ -62,7 +62,7 @@ def generate_tutor_text(
         traced_fn = getattr(llm_client, "generate_tutor_text_traced", None)
         if callable(traced_fn):
             try:
-                text, trace = traced_fn(prompt=prompt)
+                text, trace = traced_fn(prompt=prompt, prompt_meta=prompt_meta)
                 text = text.strip()
             except (RuntimeError, ValueError):
                 text, trace = "", None
@@ -70,7 +70,9 @@ def generate_tutor_text(
                 return text, trace
         else:
             try:
-                text = llm_client.generate_tutor_text(prompt=prompt).strip()
+                text = llm_client.generate_tutor_text(
+                    prompt=prompt, prompt_meta=prompt_meta,
+                ).strip()
             except (RuntimeError, ValueError):
                 text = ""
             if text:

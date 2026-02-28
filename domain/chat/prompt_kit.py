@@ -245,10 +245,57 @@ def build_full_tutor_prompt(
         return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}"
 
 
+def build_full_tutor_prompt_with_meta(
+    *,
+    query: str,
+    evidence: Sequence[EvidenceItem],
+    persona: dict[str, str],
+    style: Literal["socratic", "direct"],
+    assessment_context: str = "",
+    history_summary: str = "",
+    document_summaries: str = "",
+    flashcard_progress: str = "",
+) -> tuple[str, object]:
+    """Build the complete prompt and return (text, PromptMeta | None).
+
+    Like :func:`build_full_tutor_prompt` but also returns prompt metadata
+    for observability propagation.
+    """
+    from typing import Any  # noqa: PLC0415
+
+    evidence_block = build_evidence_block(evidence)
+    asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+
+    try:
+        text, meta = _registry.render_with_meta(asset_id, {
+            "strict_grounded_mode": "true",
+            "mastery_status": "learned" if style == "direct" else "locked",
+            "document_summaries": document_summaries or "(none)",
+            "assessment_context": assessment_context or "(none)",
+            "flashcard_progress": flashcard_progress or "(none)",
+            "history_summary": history_summary or "(none)",
+            "evidence_block": evidence_block,
+            "query": query,
+        })
+        return text, meta
+    except Exception:
+        log.debug("asset render_with_meta failed for %s, using inline fallback", asset_id)
+        system = _build_system_prompt_inline(
+            persona=persona,
+            style=style,
+            assessment_context=assessment_context,
+            history_summary=history_summary,
+            document_summaries=document_summaries,
+            flashcard_progress=flashcard_progress,
+        )
+        return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}", None
+
+
 __all__ = [
     "PROMPT_VERSION",
     "build_evidence_block",
     "build_full_tutor_prompt",
+    "build_full_tutor_prompt_with_meta",
     "build_social_response",
     "build_system_prompt",
     "classify_social_intent",

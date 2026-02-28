@@ -159,11 +159,11 @@ class _BaseGraphLLMClient(ABC):
             prompt_meta=prompt_meta,
         )
 
-    def generate_tutor_text(self, *, prompt: str) -> str:
-        text, _ = self.generate_tutor_text_traced(prompt=prompt)
+    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None) -> str:
+        text, _ = self.generate_tutor_text_traced(prompt=prompt, prompt_meta=prompt_meta)
         return text
 
-    def generate_tutor_text_traced(self, *, prompt: str) -> tuple[str, "GenerationTrace"]:
+    def generate_tutor_text_traced(self, *, prompt: str, prompt_meta: Any | None = None) -> tuple[str, "GenerationTrace"]:
         """Generate tutor text and return (text, trace) tuple."""
         from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
 
@@ -172,19 +172,35 @@ class _BaseGraphLLMClient(ABC):
             system_instruction=(
                 "You are a grounded tutor. Follow style instructions exactly and stay concise."
             ),
+            prompt_meta=prompt_meta,
         )
         return text, trace
 
-    def generate_tutor_text_stream(self, *, prompt: str) -> TutorTextStream:
-        """Stream tutor text, yielding deltas. Trace available after iteration."""
+    def generate_tutor_text_stream(
+        self,
+        *,
+        prompt: str,
+        prompt_meta: Any | None = None,
+        reasoning_effort_override: str | None = None,
+    ) -> TutorTextStream:
+        """Stream tutor text, yielding deltas. Trace available after iteration.
+
+        ``reasoning_effort_override`` is a reserved seam for future first-layer
+        per-call effort selection.  When set, it overrides the settings-level
+        effort and the trace records ``reasoning_effort_source="override"``.
+        """
         messages = [
             {"role": "system", "content": "You are a grounded tutor. Follow style instructions exactly and stay concise."},
             {"role": "user", "content": prompt},
         ]
         supported = self._model_supports_reasoning()
         used = self._reasoning_enabled and supported
-        effort = self._reasoning_effort if used else None
-        effort_source = "settings" if effort is not None else None
+        if reasoning_effort_override is not None and used:
+            effort = reasoning_effort_override
+            effort_source = "override"
+        else:
+            effort = self._reasoning_effort if used else None
+            effort_source = "settings" if effort is not None else None
         stream_obj = TutorTextStream(
             self._iter_nothing(),  # placeholder, replaced below
             provider=self._provider,
@@ -199,6 +215,9 @@ class _BaseGraphLLMClient(ABC):
             messages=messages,
             temperature=self._tutor_temperature,
             stream_obj=stream_obj,
+            prompt_meta=prompt_meta,
+            rendered_length=len(prompt) if prompt_meta else None,
+            effort_override=reasoning_effort_override if used else None,
         )
         return stream_obj
 
@@ -211,8 +230,12 @@ class _BaseGraphLLMClient(ABC):
         model_lower = self._model.lower()
         return any(model_lower.startswith(p) for p in self._REASONING_CAPABLE_PREFIXES)
 
-    def _build_reasoning_kwargs(self) -> dict[str, Any]:
-        """Build capability-gated reasoning params with configurable effort."""
+    def _build_reasoning_kwargs(self, *, effort_override: str | None = None) -> dict[str, Any]:
+        """Build capability-gated reasoning params with configurable effort.
+
+        ``effort_override`` overrides the instance-level ``_reasoning_effort``
+        when set.  Reserved for the future per-call override seam.
+        """
         if not self._reasoning_enabled:
             return {}
         if not self._model_supports_reasoning():
@@ -221,7 +244,7 @@ class _BaseGraphLLMClient(ABC):
                 self._provider, self._model,
             )
             return {}
-        effort = self._reasoning_effort or "medium"
+        effort = effort_override or self._reasoning_effort or "medium"
         return {"reasoning_effort": effort}
 
     def _stream_with_usage(
@@ -232,6 +255,7 @@ class _BaseGraphLLMClient(ABC):
         stream_obj: TutorTextStream,
         prompt_meta: Any | None = None,
         rendered_length: int | None = None,
+        effort_override: str | None = None,
     ) -> Iterator[str]:
         """Stream text deltas inside an LLM span and capture final usage."""
         context = get_observation_context()
@@ -264,6 +288,7 @@ class _BaseGraphLLMClient(ABC):
                 for chunk in self._sdk_stream_call(
                     messages=messages,
                     temperature=temperature,
+                    effort_override=effort_override,
                 ):
                     last_chunk = chunk
                     delta_content = self._extract_stream_delta(chunk)
@@ -358,9 +383,18 @@ class _BaseGraphLLMClient(ABC):
         return text
 
     def _chat_text_traced(
-        self, *, prompt: str, system_instruction: str
+        self,
+        *,
+        prompt: str,
+        system_instruction: str,
+        prompt_meta: Any | None = None,
+        reasoning_effort_override: str | None = None,
     ) -> tuple[str, "GenerationTrace"]:
-        """Return (text, trace) from a non-streaming LLM call."""
+        """Return (text, trace) from a non-streaming LLM call.
+
+        ``reasoning_effort_override`` is a reserved seam for future first-layer
+        per-call effort selection.
+        """
         import time as _time  # noqa: PLC0415
 
         from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
@@ -374,6 +408,8 @@ class _BaseGraphLLMClient(ABC):
             messages=messages,
             temperature=self._tutor_temperature,
             response_format=None,
+            prompt_meta=prompt_meta,
+            rendered_length=len(prompt) if prompt_meta else None,
         )
         elapsed_ms = round((_time.monotonic_ns() - t0) / 1_000_000, 2)
         text = self._extract_content(result).strip()
@@ -381,8 +417,12 @@ class _BaseGraphLLMClient(ABC):
         reasoning = self._extract_reasoning_tokens(result)
         supported = self._model_supports_reasoning()
         used = self._reasoning_enabled and supported
-        effort = self._reasoning_effort if used else None
-        effort_source = "settings" if effort is not None else None
+        if reasoning_effort_override is not None and used:
+            effort = reasoning_effort_override
+            effort_source = "override"
+        else:
+            effort = self._reasoning_effort if used else None
+            effort_source = "settings" if effort is not None else None
         trace = GenerationTrace(
             provider=self._provider,
             model=self._model,
@@ -490,6 +530,7 @@ class _BaseGraphLLMClient(ABC):
         *,
         messages: list[dict[str, str]],
         temperature: float,
+        effort_override: str | None = None,
     ) -> Iterator[Mapping[str, Any]]:
         """Execute a provider-specific streaming SDK call and yield raw chunk dicts."""
 
@@ -594,6 +635,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         *,
         messages: list[dict[str, str]],
         temperature: float,
+        effort_override: str | None = None,
     ) -> Iterator[Mapping[str, Any]]:
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -602,7 +644,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        kwargs.update(self._build_reasoning_kwargs())
+        kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
         response = self._client.chat.completions.create(**kwargs)
         for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
@@ -665,6 +707,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         *,
         messages: list[dict[str, str]],
         temperature: float,
+        effort_override: str | None = None,
     ) -> Iterator[Mapping[str, Any]]:
         import litellm  # noqa: PLC0415
 
@@ -679,7 +722,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         }
         if self._api_key is not None:
             kwargs["api_key"] = self._api_key
-        kwargs.update(self._build_reasoning_kwargs())
+        kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
         response = litellm.completion(**kwargs)
         for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)

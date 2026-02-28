@@ -41,12 +41,22 @@ class QueryAnalysis:
 _FALLBACK = QueryAnalysis(intent="clarify", needs_retrieval=False)
 
 
-def build_query_analysis_prompt(*, query: str, history_summary: str = "") -> str:
-    """Render the query analysis prompt from the file-based asset."""
-    return _registry.render(_PROMPT_ID, {
-        "query": query,
-        "history_summary": history_summary or "(none)",
-    })
+def build_query_analysis_prompt(*, query: str, history_summary: str = "") -> tuple[str, object]:
+    """Render the query analysis prompt from the file-based asset.
+
+    Returns (rendered_text, PromptMeta | None).
+    """
+    try:
+        return _registry.render_with_meta(_PROMPT_ID, {
+            "query": query,
+            "history_summary": history_summary or "(none)",
+        })
+    except Exception:
+        log.debug("asset render_with_meta failed for %s, using inline fallback", _PROMPT_ID)
+        return _registry.render(_PROMPT_ID, {
+            "query": query,
+            "history_summary": history_summary or "(none)",
+        }), None
 
 
 def parse_query_analysis(raw_json: str) -> QueryAnalysis:

@@ -76,7 +76,7 @@ class _StubGraphLLM(GraphLLMClient):
     ) -> dict[str, object]:
         return {"decision": "CREATE_NEW", "confidence": 1.0}
 
-    def generate_tutor_text(self, *, prompt: str) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
         return "Stub summary for testing."
 
 

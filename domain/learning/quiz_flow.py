@@ -594,7 +594,7 @@ def _generate_items_with_retries(
             "struggled with, or showed curiosity about):\n"
             f"{chat_history}\n"
         )
-    prompt = _build_quiz_generation_prompt(
+    prompt, prompt_meta = _build_quiz_generation_prompt(
         concept_name=concept_name,
         concept_desc=concept_desc,
         adjacent_str=adjacent_str,
@@ -605,7 +605,9 @@ def _generate_items_with_retries(
     retry_prompt = prompt
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         try:
-            llm_response = llm_client.generate_tutor_text(prompt=retry_prompt)
+            llm_response = llm_client.generate_tutor_text(
+                prompt=retry_prompt, prompt_meta=prompt_meta,
+            )
         except Exception:
             return None
         try:
@@ -643,10 +645,10 @@ def _build_quiz_generation_prompt(
     chunks_block: str,
     chat_block: str,
     target_count: int,
-) -> str:
+) -> tuple[str, Any]:
     """Build the quiz generation prompt from the asset or inline fallback."""
     try:
-        return _registry.render("assessment_levelup_generate_v1", {
+        return _registry.render_with_meta("assessment_levelup_generate_v1", {
             "target_count": str(target_count),
             "concept_name": concept_name,
             "concept_description": concept_desc,
@@ -669,4 +671,4 @@ def _build_quiz_generation_prompt(
             f"- Produce exactly {target_count} items with a mix of short_answer and mcq.\n"
             "- Each question must be SPECIFIC to the concept.\n"
             "- Make questions progressively harder.\n"
-        )
+        ), None

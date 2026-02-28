@@ -25,7 +25,7 @@ class PracticeLLM:
             )
         )
 
-    def generate_tutor_text(self, *, prompt: str) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
         if "CARD_COUNT:" in prompt:
             count = self._count(prompt, "CARD_COUNT:")
             cards = [{"front": "f", "back": "b", "hint": str(i)} for i in range(count)]
@@ -51,7 +51,7 @@ class FlakyPracticeLLM(PracticeLLM):
     def __init__(self) -> None:
         self.quiz_calls = 0
 
-    def generate_tutor_text(self, *, prompt: str) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
         if "QUESTION_COUNT:" in prompt:
             self.quiz_calls += 1
             if self.quiz_calls == 1:
@@ -65,7 +65,7 @@ class FlakyPracticeLLM(PracticeLLM):
                         ]
                     }
                 )
-        return super().generate_tutor_text(prompt=prompt)
+        return super().generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta)
 
 
 def _short_item() -> dict[str, Any]:

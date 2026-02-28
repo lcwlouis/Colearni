@@ -41,7 +41,7 @@ class GraphLLMClient(Protocol):
     ) -> Mapping[str, Any]:
         """Choose merge target vs create-new from bounded candidate set."""
 
-    def generate_tutor_text(self, *, prompt: str) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None) -> str:
         """Generate tutor-facing response text from an instruction prompt."""
 
 
@@ -61,6 +61,8 @@ class TutorTextStream:
         reasoning_requested: bool = False,
         reasoning_supported: bool = False,
         reasoning_used: bool = False,
+        reasoning_effort: str | None = None,
+        reasoning_effort_source: str | None = None,
     ) -> None:
         self._delta_iter = delta_iter
         self._provider = provider
@@ -72,6 +74,8 @@ class TutorTextStream:
             reasoning_requested=reasoning_requested,
             reasoning_supported=reasoning_supported,
             reasoning_used=reasoning_used,
+            reasoning_effort=reasoning_effort,
+            reasoning_effort_source=reasoning_effort_source,
         )
 
     def __iter__(self) -> Iterator[str]:
@@ -104,5 +108,11 @@ class TutorTextStream:
 class StreamingLLMClient(Protocol):
     """Protocol for LLM clients that support streaming tutor text generation."""
 
-    def generate_tutor_text_stream(self, *, prompt: str) -> TutorTextStream:
+    def generate_tutor_text_stream(
+        self,
+        *,
+        prompt: str,
+        prompt_meta: Any | None = None,
+        reasoning_effort_override: str | None = None,
+    ) -> TutorTextStream:
         """Stream tutor-facing response text, yielding text deltas."""

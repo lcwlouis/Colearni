@@ -33,7 +33,7 @@ class StubGardenerLLM(GraphLLMClient):
         self.calls += 1
         return self._payload
 
-    def generate_tutor_text(self, *, prompt: str) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
         return prompt
 
 
