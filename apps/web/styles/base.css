@@ -227,6 +227,7 @@ pre {
   overflow-x: auto;
   overflow-y: auto;
   max-height: 36rem;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   font-size: 0.85rem;
@@ -245,6 +246,7 @@ pre {
   background: none;
   padding: 0;
   font-size: inherit;
+  display: block;
   white-space: pre;
   word-wrap: normal;
   overflow-wrap: normal;
