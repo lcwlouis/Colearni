@@ -1766,6 +1766,15 @@ pre {
   height: 100%;
 }
 
+.graph-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 65fr) minmax(0, 35fr);
+  gap: 1rem;
+  flex: 1;
+  overflow: hidden;
+  padding: 0 0.5rem 0.5rem;
+}
+
 .graph-explorer > div {
   gap: 1.5rem;
 }
@@ -1788,15 +1797,15 @@ pre {
   gap: 0.85rem;
   overflow-y: auto;
   min-height: 0;
-  margin: 0.5rem;
-  padding: 1.5rem;
-  width: clamp(20rem, 30%, 28rem);
-  flex-shrink: 0;
+  padding: 1rem 1.25rem;
+  min-width: 0;
 }
 
 .graph-detail-panel h1 {
   margin: 0;
   font-size: 1.3rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .graph-detail-panel p {
@@ -1808,9 +1817,8 @@ pre {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  margin: 0.5rem;
-  padding: 1.5rem;
-  flex: 1.5;
+  padding: 1rem 1.25rem;
+  min-width: 0;
 }
 
 .graph-viz-panel .concept-graph-container {
@@ -2080,6 +2088,10 @@ pre {
   }
 
   .graph-explorer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .graph-panels {
     grid-template-columns: minmax(0, 1fr);
   }
 

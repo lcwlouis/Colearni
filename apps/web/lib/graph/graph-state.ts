@@ -55,7 +55,8 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
     return { ...state, phase: "error", error: action.error };
   }
   if (action.type === "detail_start") {
-    return { ...state, phase: "loading_detail", selectedDetail: null, subgraph: null, luckyPick: null, error: null };
+    // Keep previous subgraph to avoid unmounting + re-mounting the graph
+    return { ...state, phase: "loading_detail", selectedDetail: null, luckyPick: null, error: null };
   }
   if (action.type === "detail_success") {
     return { ...state, phase: "detail_ready", selectedDetail: action.detail, subgraph: action.subgraph, error: null };

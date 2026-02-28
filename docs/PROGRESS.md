@@ -562,3 +562,23 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Fix: Added `ChatPhase` state machine (`idle → thinking → searching → responding`) with timed transitions (1.5s → searching, 4s → responding). Replaced static text with animated CSS typing dots (`.chat-typing-dots` with `typingBounce` keyframe) and descriptive phase labels. All styling extracted to CSS classes (`.chat-status-indicator`, `.chat-status-content`, `.chat-status-label`).
 - Files: `apps/web/app/tutor/page.tsx`, `apps/web/app/globals.css`
 
+#### A3 — Graph 422 Highlight Fix (Completed)
+- Root cause: Frontend dropdown options for Nodes (1000), Edges (2000), and Depth (4 hops) exceeded backend FastAPI `Query(le=...)` validation limits (`le=500`, `le=1000`, `le=3` respectively). FastAPI returned 422 Unprocessable Entity.
+- Fix: Removed out-of-range dropdown options — Nodes max now 500, Edges max now 1000, Depth max now 3 hops. Added 4 regression tests to `TestGraphParamValidation` verifying 422 on out-of-range and acceptance of max valid values.
+- Files: `apps/web/app/graph/page.tsx`, `tests/api/test_response_contracts.py`
+
+#### A2 — Graph Re-mount on Click (Completed)
+- Root cause: Inline `onSelect`/`onBackgroundClick` arrow functions recreated every render → `draw` useCallback dependency changed → full SVG teardown + rebuild on every click. Also `detail_start` reducer action nulled `subgraph`, causing ConceptGraph to unmount and remount.
+- Fix: (1) Stored `onSelect`/`onBackgroundClick` in refs (`onSelectRef`, `onBackgroundClickRef`) so `draw` no longer depends on them. (2) Memoized handler callbacks in page.tsx with `useCallback`. (3) Changed `detail_start` reducer to preserve previous `subgraph` during loading. Updated graph-state test accordingly.
+- Files: `apps/web/components/concept-graph.tsx`, `apps/web/app/graph/page.tsx`, `apps/web/lib/graph/graph-state.ts`, `apps/web/lib/graph/graph-state.test.ts`
+
+#### A1/A5 — Graph Panel Layout (Completed)
+- Root cause: Both panels used `margin: 0.5rem` + flex layout with `clamp(20rem, 30%, 28rem)` for detail panel width, causing uneven spacing and responsive width changes.
+- Fix: Replaced flex layout with CSS grid (`.graph-panels`) using `grid-template-columns: minmax(0, 65fr) minmax(0, 35fr)` for stable 65/35 split. Removed margin from both panels, standardized padding to `1rem 1.25rem`, added `overflow-wrap: break-word` to panel headings. Added responsive stacking rule for small screens.
+- Files: `apps/web/app/globals.css`, `apps/web/app/graph/page.tsx`
+
+#### A4 — Reset View Button (Completed)
+- Root cause: No "Reset view" button existed. Zoom/pan resets happened only during full graph rebuilds. `zoomRef` was stored but never exposed.
+- Fix: Added `onResetViewReady` callback prop to `ConceptGraph` that passes a `resetView` function to the parent. The function calls `zoomRef.current.transform` with `zoomIdentity` via a 300ms transition. Added "Reset view" button to graph controls. "Clear focus" button now also resets zoom.
+- Files: `apps/web/components/concept-graph.tsx`, `apps/web/app/graph/page.tsx`
+

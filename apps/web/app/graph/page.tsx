@@ -30,7 +30,19 @@ export default function GraphPage() {
   const [ratingInFlight, setRatingInFlight] = useState(false);
 
   // Full graph state
-  const [fullGraph, setFullGraph] = useState<{ nodes: GraphSubgraphNode[], edges: GraphSubgraphEdge[] } | null>(null);
+  const [fullGraph, setFullGraph] = useState<{ nodes: GraphSubgraphNode[], edges: GraphSubgraphEdge[], is_truncated?: boolean, total_concept_count?: number } | null>(null);
+
+  // Graph controls
+  const [maxNodes, setMaxNodes] = useState(100);
+  const [maxEdges, setMaxEdges] = useState(300);
+  const [maxHops, setMaxHops] = useState(2);
+  const [graphSearch, setGraphSearch] = useState("");
+  const [focusNodeId, setFocusNodeId] = useState<number | null>(null);
+  const [resetView, setResetView] = useState<(() => void) | null>(null);
+
+  const handleResetViewReady = useCallback((fn: () => void) => {
+    setResetView(() => fn);
+  }, []);
 
   useEffect(() => {
     if (!wsId) return;
@@ -42,10 +54,10 @@ export default function GraphPage() {
 
   useEffect(() => {
     if (!wsId || query.trim().length > 0 || state.selectedDetail) return;
-    apiClient.getFullGraph(wsId, { max_nodes: 100, max_edges: 300 })
+    apiClient.getFullGraph(wsId, { max_nodes: maxNodes, max_edges: maxEdges })
       .then((res) => setFullGraph(res))
       .catch((e) => console.error("Failed to load full graph overview", e));
-  }, [wsId, query, state.selectedDetail]);
+  }, [wsId, query, state.selectedDetail, maxNodes, maxEdges]);
 
   const selectConcept = useCallback((conceptId: number) => {
     dispatch({ type: "detail_start" });
@@ -56,11 +68,11 @@ export default function GraphPage() {
     setStatefulError(null);
     Promise.all([
       apiClient.getConceptDetail(wsId, conceptId),
-      apiClient.getConceptSubgraph(wsId, conceptId, { max_hops: 2, max_nodes: 40, max_edges: 80 }),
+      apiClient.getConceptSubgraph(wsId, conceptId, { max_hops: maxHops, max_nodes: 40, max_edges: 80 }),
     ])
       .then(([detail, subgraph]) => dispatch({ type: "detail_success", detail, subgraph }))
       .catch((e) => dispatch({ type: "detail_error", error: e instanceof ApiError ? e.message : "Failed to load detail" }));
-  }, [wsId]);
+  }, [wsId, maxHops]);
 
   const lucky = useCallback((mode: LuckyMode) => {
     const conceptId = state.selectedDetail?.concept.concept_id;
@@ -124,6 +136,16 @@ export default function GraphPage() {
       .catch((e) => dispatchPractice({ type: "submit_error", error: e instanceof ApiError ? e.message : "Failed to submit practice quiz" }));
   }, [practiceState.quiz, practiceState.answers]);
 
+  const handleGraphSelect = useCallback((id: number) => {
+    selectConcept(id);
+    setFocusNodeId(id);
+  }, [selectConcept]);
+
+  const handleGraphBgClick = useCallback(() => {
+    dispatch({ type: "clear_detail" });
+    setFocusNodeId(null);
+  }, []);
+
   if (auth.isLoading) return <p>Loading…</p>;
 
   const { phase, concepts, selectedDetail, subgraph, luckyPick, error } = state;
@@ -146,12 +168,68 @@ export default function GraphPage() {
         />
       </header>
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      <div className="graph-panels">
       {/* Graph visualization — left */}
       <section className="panel graph-viz-panel">
         <div className="graph-viz-header">
+          <div className="graph-controls">
+            <label className="graph-control-label">
+              Nodes
+              <select value={maxNodes} onChange={(e) => setMaxNodes(Number(e.target.value))}>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+                <option value={200}>200</option>
+                <option value={500}>500</option>
+              </select>
+            </label>
+            <label className="graph-control-label">
+              Edges
+              <select value={maxEdges} onChange={(e) => setMaxEdges(Number(e.target.value))}>
+                <option value={100}>100</option>
+                <option value={300}>300</option>
+                <option value={600}>600</option>
+                <option value={1000}>1000</option>
+              </select>
+            </label>
+            <label className="graph-control-label">
+              Depth
+              <select value={maxHops} onChange={(e) => setMaxHops(Number(e.target.value))}>
+                <option value={1}>1 hop</option>
+                <option value={2}>2 hops</option>
+                <option value={3}>3 hops</option>
+              </select>
+            </label>
+          </div>
+          {fullGraph?.is_truncated && (
+            <p className="graph-truncation-banner">
+              Showing {fullGraph.nodes.length} of {fullGraph.total_concept_count ?? "?"} concepts (graph truncated)
+            </p>
+          )}
+          <div className="graph-search-inline">
+            <input
+              type="search"
+              placeholder="Highlight node..."
+              value={graphSearch}
+              onChange={(e) => setGraphSearch(e.target.value)}
+              style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem', borderRadius: '0.4rem', border: '1px solid var(--line)', background: 'var(--surface)', width: '10rem' }}
+            />
+            {focusNodeId != null && (
+              <button type="button" className="secondary" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => { setFocusNodeId(null); dispatch({ type: "clear_detail" }); resetView?.(); }}>Clear focus</button>
+            )}
+            {resetView && (
+              <button type="button" className="secondary" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }} onClick={() => resetView()}>Reset view</button>
+            )}
+          </div>
         </div>
         <AsyncState loading={phase === "loading_list" || phase === "loading_detail"} error={phase === "error" && !selectedDetail ? error : null} empty={phase === "list_ready" && concepts.length === 0} emptyLabel="No concepts found." />
+
+        {/* Mastery legend */}
+        <div className="graph-legend-bar">
+          <span className="graph-legend-dot" style={{ background: "#2ecc71" }} /> Learned
+          <span className="graph-legend-dot" style={{ background: "#f39c12" }} /> Learning
+          <span className="graph-legend-dot" style={{ background: "#95a5a6" }} /> Locked
+          <span className="graph-legend-dot" style={{ background: "#0f5f9c" }} /> Unseen
+        </div>
         {concepts.length > 0 && query.trim().length > 0 && !selectedDetail ? (
           <div className="concept-list">
             {concepts.map((c) => (
@@ -174,19 +252,21 @@ export default function GraphPage() {
             nodes={subgraph.nodes}
             edges={subgraph.edges}
             selectedId={selectedDetail?.concept.concept_id}
-            onSelect={selectConcept}
-            onBackgroundClick={() => dispatch({ type: "clear_detail" })}
-            width={700}
-            height={500}
+            onSelect={handleGraphSelect}
+            onBackgroundClick={handleGraphBgClick}
+            focusNodeId={focusNodeId}
+            searchHighlight={graphSearch}
+            onResetViewReady={handleResetViewReady}
           />
         ) : fullGraph && fullGraph.nodes.length > 0 ? (
           <ConceptGraph
             nodes={fullGraph.nodes}
             edges={fullGraph.edges}
-            onSelect={selectConcept}
-            onBackgroundClick={() => dispatch({ type: "clear_detail" })}
-            width={700}
-            height={500}
+            onSelect={handleGraphSelect}
+            onBackgroundClick={handleGraphBgClick}
+            focusNodeId={focusNodeId}
+            searchHighlight={graphSearch}
+            onResetViewReady={handleResetViewReady}
           />
         ) : null}
       </section>

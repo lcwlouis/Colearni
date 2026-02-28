@@ -31,12 +31,12 @@ describe("graphReducer", () => {
         expect(s.error).toBe("fail");
     });
 
-    it("detail_start clears previous detail", () => {
+    it("detail_start clears previous detail but preserves subgraph", () => {
         const prev = { ...initialGraphState, selectedDetail: detail, subgraph };
         const s = graphReducer(prev, { type: "detail_start" });
         expect(s.phase).toBe("loading_detail");
         expect(s.selectedDetail).toBeNull();
-        expect(s.subgraph).toBeNull();
+        expect(s.subgraph).not.toBeNull();
         expect(s.luckyPick).toBeNull();
     });
 

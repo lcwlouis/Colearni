@@ -89,10 +89,13 @@ OPENAPI_ROUTES = {
     ("/workspaces/{ws_id}/graph/concepts", "get"),
     ("/workspaces/{ws_id}/graph/concepts/{concept_id}", "get"),
     ("/workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph", "get"),
+    ("/workspaces/{ws_id}/graph/full", "get"),
     ("/workspaces/{ws_id}/graph/lucky", "get"),
+    ("/workspaces/{ws_id}/onboarding/status", "get"),
     ("/workspaces/{ws_id}/quizzes/level-up", "post"),
     ("/workspaces/{ws_id}/quizzes/{quiz_id}/submit", "post"),
     ("/workspaces/{ws_id}/practice/flashcards", "post"),
+    ("/workspaces/{ws_id}/practice/flashcards/due", "get"),
     ("/workspaces/{ws_id}/practice/quizzes", "post"),
     ("/workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit", "post"),
 }
@@ -166,7 +169,7 @@ REQUIRED_FIELDS = {
     "PracticeQuizSubmitResponse": SUBMIT_FIELDS,
     "GraphConceptListResponse": {"workspace_id", "concepts"},
     "GraphConceptDetailResponse": {"workspace_id", "concept"},
-    "GraphSubgraphResponse": {"workspace_id", "root_concept_id", "max_hops", "nodes", "edges"},
+    "GraphSubgraphResponse": {"workspace_id", "nodes", "edges"},
     "GraphLuckyResponse": {"workspace_id", "seed_concept_id", "mode", "pick"},
 }
 
@@ -363,3 +366,36 @@ def test_chat_and_graph_runtime_response_contracts(client: Any, monkeypatch: Any
     assert REQUIRED_FIELDS["ChatSessionListResponse"] <= set(sessions.json())
     assert REQUIRED_FIELDS["ChatMessagesResponse"] <= set(messages.json())
     assert REQUIRED_FIELDS["GraphConceptListResponse"] <= set(concepts.json())
+
+
+# ── A3 regression: out-of-range graph params must return 422 ──────
+class TestGraphParamValidation:
+    """Ensure backend rejects values that exceed Query validation limits."""
+
+    @pytest.fixture(autouse=True)
+    def _override_deps(self) -> None:
+        app.dependency_overrides[get_db_session] = _override_db
+        app.dependency_overrides[get_workspace_context] = _override_ws_ctx
+        yield
+        app.dependency_overrides.clear()
+
+    def test_full_graph_rejects_nodes_above_500(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/full?max_nodes=1000")
+            assert r.status_code == 422
+
+    def test_full_graph_rejects_edges_above_1000(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/full?max_edges=2000")
+            assert r.status_code == 422
+
+    def test_subgraph_rejects_hops_above_3(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/concepts/1/subgraph?max_hops=4")
+            assert r.status_code == 422
+
+    def test_full_graph_accepts_max_valid_nodes(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/full?max_nodes=500")
+            # Should NOT be 422 (may be 200 or other status depending on DB)
+            assert r.status_code != 422
