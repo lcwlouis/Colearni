@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from core.contracts import GraphLLMClient
+from core.observability import observation_context
+from core.prompting.models import PromptMeta, TaskType
 from core.schemas import (
     AssistantResponseEnvelope,
     AssistantResponseKind,
@@ -14,6 +16,13 @@ from domain.chat.prompt_kit import (
     get_persona,
 )
 from core.settings import Settings
+
+_SOCIAL_PROMPT_META = PromptMeta(
+    prompt_id="chat_social_v1",
+    task_type=TaskType.TUTOR,
+    version=1,
+    description="Inline social-intent fast-path prompt",
+)
 
 
 def try_social_response(
@@ -37,7 +46,11 @@ def try_social_response(
             f"USER: {query}"
         )
         try:
-            social_text = social_llm.generate_tutor_text(prompt=social_prompt).strip()
+            with observation_context(component="chat", operation="chat.social"):
+                social_text = social_llm.generate_tutor_text(
+                    prompt=social_prompt,
+                    prompt_meta=_SOCIAL_PROMPT_META,
+                ).strip()
         except (RuntimeError, ValueError):
             social_text = ""
         if not social_text:

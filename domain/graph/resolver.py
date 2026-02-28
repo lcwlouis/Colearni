@@ -8,7 +8,7 @@ from typing import Literal
 
 from adapters.db import graph_repository
 from core.contracts import EmbeddingProvider, GraphLLMClient
-from core.observability import emit_event
+from core.observability import emit_event, observation_context
 from core.settings import Settings
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
@@ -320,21 +320,22 @@ class OnlineResolver:
                 chunk_id=chunk_id,
                 budgets=budgets,
             )
-            payload = _DisambiguationPayload.model_validate(
-                self._llm_client.disambiguate(
-                    raw_name=raw_concept.name,
-                    context_snippet=raw_concept.context_snippet,
-                    candidates=[
-                        {
-                            "id": candidate.concept_id,
-                            "canonical_name": candidate.canonical_name,
-                            "description": candidate.description,
-                            "aliases": list(candidate.aliases),
-                        }
-                        for candidate in candidates
-                    ],
+            with observation_context(operation="graph.disambiguate"):
+                payload = _DisambiguationPayload.model_validate(
+                    self._llm_client.disambiguate(
+                        raw_name=raw_concept.name,
+                        context_snippet=raw_concept.context_snippet,
+                        candidates=[
+                            {
+                                "id": candidate.concept_id,
+                                "canonical_name": candidate.canonical_name,
+                                "description": candidate.description,
+                                "aliases": list(candidate.aliases),
+                            }
+                            for candidate in candidates
+                        ],
+                    )
                 )
-            )
         except (RuntimeError, ValidationError, ValueError):
             return ResolverDecision(
                 decision="CREATE_NEW",

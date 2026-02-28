@@ -483,19 +483,20 @@ def _cluster_llm_decision(
     ordered_ids = sorted(cluster)
     reference = concepts[ordered_ids[0]]
     try:
-        payload = llm_client.disambiguate(
-            raw_name=reference.canonical_name,
-            context_snippet=reference.description,
-            candidates=[
-                {
-                    "id": concept_id,
-                    "canonical_name": concepts[concept_id].canonical_name,
-                    "description": concepts[concept_id].description,
-                    "aliases": list(concepts[concept_id].aliases),
-                }
-                for concept_id in ordered_ids
-            ],
-        )
+        with observation_context(operation="graph.disambiguate"):
+            payload = llm_client.disambiguate(
+                raw_name=reference.canonical_name,
+                context_snippet=reference.description,
+                candidates=[
+                    {
+                        "id": concept_id,
+                        "canonical_name": concepts[concept_id].canonical_name,
+                        "description": concepts[concept_id].description,
+                        "aliases": list(concepts[concept_id].aliases),
+                    }
+                    for concept_id in ordered_ids
+                ],
+            )
         return _GardenerDecisionPayload.model_validate(payload)
     except (ValidationError, RuntimeError, ValueError):
         return None
