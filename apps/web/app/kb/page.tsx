@@ -163,13 +163,17 @@ export default function KBPage() {
     setError(errors.join(" | ") || "Failed to upload documents.");
   }, [selectedFiles, wsId, fetchDocuments, startPolling]);
 
+  /** Whether any document is in a non-terminal processing state that needs polling. */
+  const anyDocProcessing = useCallback((docs: KBDocumentSummary[]) => {
+    return docs.some((d) => d.graph_status === "extracting");
+  }, []);
+
   // ── B2: Auto-clear queue when background processing completes ──────
   useEffect(() => {
     const processingItems = uploadQueue.filter((q) => q.phase === "processing");
     if (processingItems.length === 0) {
-      // No items processing — stop polling only if no docs are still extracting
-      const anyExtracting = documents.some((d) => d.graph_status === "extracting" || d.graph_status === "pending");
-      if (!anyExtracting) {
+      // No items processing — stop polling if no docs are actively extracting
+      if (!anyDocProcessing(documents)) {
         stopPolling();
       }
       return;
@@ -187,9 +191,8 @@ export default function KBPage() {
       }
     }
     if (allDone) {
-      // Keep polling if any documents are still extracting graph
-      const anyExtracting = documents.some((d) => d.graph_status === "extracting" || d.graph_status === "pending");
-      if (!anyExtracting) {
+      // Keep polling only if any documents are still actively extracting
+      if (!anyDocProcessing(documents)) {
         stopPolling();
       }
       // Schedule auto-dismiss of completed items
@@ -199,15 +202,14 @@ export default function KBPage() {
         autoClearTimerRef.current = null;
       }, AUTO_CLEAR_DELAY_MS);
     }
-  }, [uploadQueue, documents, stopPolling]);
+  }, [uploadQueue, documents, stopPolling, anyDocProcessing]);
 
-  // B4: Auto-poll when documents are in extracting state
+  // B4: Auto-poll when documents are actively extracting (not failed/pending)
   useEffect(() => {
-    const anyExtracting = documents.some((d) => d.graph_status === "extracting" || (d.graph_status === "pending" && d.ingestion_status === "ingested"));
-    if (anyExtracting && !pollTimerRef.current) {
+    if (anyDocProcessing(documents) && !pollTimerRef.current) {
       startPolling();
     }
-  }, [documents, startPolling]);
+  }, [documents, startPolling, anyDocProcessing]);
 
   const handleConfirmAction = useCallback(async () => {
     if (!pendingAction || !wsId) return;

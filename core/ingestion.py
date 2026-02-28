@@ -404,6 +404,8 @@ def run_post_ingest_tasks(
                     log.info("post_ingest embedding DONE doc=%s", document_id)
                 except Exception:
                     log.exception("Background embedding population failed doc=%s", document_id)
+                    # Rollback to keep the session usable for subsequent operations
+                    db.rollback()
 
         # 2) Summary + graph
         if active_settings.ingest_build_graph and graph_llm_client is not None:

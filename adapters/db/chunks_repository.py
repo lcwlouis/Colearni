@@ -67,7 +67,10 @@ def _vector_literal(values: Sequence[float]) -> str:
 
 
 def insert_chunks_with_embeddings(session: Session, rows: Sequence[ChunkInsertRow]) -> list[int]:
-    """Insert new chunks with embeddings and return inserted chunk ids."""
+    """Insert or upsert chunks with embeddings and return chunk ids.
+
+    Uses ON CONFLICT to handle reprocessing where chunks already exist.
+    """
     if not rows:
         return []
 
@@ -75,10 +78,13 @@ def insert_chunks_with_embeddings(session: Session, rows: Sequence[ChunkInsertRo
         "INSERT INTO chunks (workspace_id, document_id, chunk_index, text, tsv, embedding) "
         "VALUES (:workspace_id, :document_id, :chunk_index, :text, "
         "to_tsvector('english', :text), CAST(:embedding AS vector)) "
+        "ON CONFLICT (document_id, chunk_index) DO UPDATE "
+        "SET embedding = EXCLUDED.embedding, text = EXCLUDED.text, "
+        "tsv = EXCLUDED.tsv "
         "RETURNING id"
     )
 
-    inserted_ids: list[int] = []
+    chunk_ids: list[int] = []
     for row in rows:
         result = session.execute(
             statement,
@@ -90,9 +96,9 @@ def insert_chunks_with_embeddings(session: Session, rows: Sequence[ChunkInsertRo
                 "embedding": _vector_literal(row.embedding),
             },
         )
-        inserted_ids.append(int(result.scalar_one()))
+        chunk_ids.append(int(result.scalar_one()))
 
-    return inserted_ids
+    return chunk_ids
 
 
 def list_chunks_missing_embeddings(

@@ -170,6 +170,7 @@ def test_ingest_text_document_populates_chunk_embeddings_when_enabled() -> None:
         settings = get_settings().model_copy(
             update={
                 "ingest_populate_embeddings": True,
+                "ingest_build_graph": False,
                 "embedding_provider": "mock",
             }
         )
