@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { GlobalSidebar } from "@/components/global-sidebar";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
@@ -9,12 +8,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <Providers>
-          <div className="shell">
-            <GlobalSidebar />
-            <main className="content">{children}</main>
-          </div>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
