@@ -5,22 +5,20 @@ from __future__ import annotations
 import logging
 
 from adapters.db.dependencies import get_db_session
-from adapters.llm.factory import build_graph_llm_client
-from adapters.embeddings.factory import build_embedding_provider
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
-from core.ingestion import (
-    IngestionRequest,
-    IngestionValidationError,
-    ingest_text_document_fast,
-    run_post_ingest_tasks,
-)
+from core.ingestion import IngestionRequest, IngestionValidationError
 from core.schemas import KBDocumentListResponse
-from core.settings import Settings
 from domain.knowledge_base.service import (
     DocumentNotFoundError,
     delete_document,
     list_documents,
     reset_document_for_reprocess,
+)
+from domain.knowledge_base.upload_flow import (
+    execute_upload,
+    resolve_post_ingest_context,
+    resolve_settings,
+    schedule_post_ingest,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
@@ -37,7 +35,7 @@ def list_kb_documents(
     db: Session = Depends(get_db_session),
 ) -> KBDocumentListResponse:
     """List documents in the workspace knowledge base with chunk counts."""
-    app_settings: Settings | None = getattr(request.app.state, "settings", None)
+    app_settings = resolve_settings(request.app.state)
     graph_enabled = bool(app_settings.ingest_build_graph) if app_settings else False
     return list_documents(db, workspace_id=ws.workspace_id, graph_enabled=graph_enabled)
 
@@ -90,36 +88,14 @@ def reprocess_kb_document(
         )
 
     # Schedule background re-processing
-    app_state = getattr(request.app, "state", None)
-    settings: Settings | None = getattr(app_state, "settings", None) if app_state else None
-    graph_llm = getattr(app_state, "graph_llm_client", None) if app_state else None
-    if graph_llm is None:
-        try:
-            graph_llm = build_graph_llm_client(settings=settings)
-        except (ValueError, RuntimeError):
-            graph_llm = None
-    graph_embed = getattr(app_state, "graph_embedding_provider", None) if app_state else None
-    if graph_embed is None:
-        try:
-            graph_embed = build_embedding_provider(settings=settings)
-        except (ValueError, RuntimeError):
-            graph_embed = None
-    chunk_embed = getattr(app_state, "chunk_embedding_provider", None) if app_state else None
-    if chunk_embed is None:
-        try:
-            chunk_embed = build_embedding_provider(settings=settings)
-        except (ValueError, RuntimeError):
-            chunk_embed = None
-
-    background_tasks.add_task(
-        run_post_ingest_tasks,
+    settings = resolve_settings(request.app.state)
+    context = resolve_post_ingest_context(
+        request.app.state,
         workspace_id=ws.workspace_id,
         document_id=document_id,
-        graph_llm_client=graph_llm,
-        graph_embedding_provider=graph_embed,
-        chunk_embedding_provider=chunk_embed,
         settings=settings,
     )
+    schedule_post_ingest(background_tasks, context)
 
     return {
         "document_id": document_id,
@@ -150,12 +126,10 @@ async def upload_kb_document(
     if len(raw_bytes) > 20 * 1024 * 1024:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 20 MB limit.")
 
-    app_state = getattr(request.app, "state", None)
-    settings: Settings | None = getattr(app_state, "settings", None) if app_state else None
-
     try:
-        result = ingest_text_document_fast(
+        result = execute_upload(
             db,
+            background_tasks,
             request=IngestionRequest(
                 workspace_id=ws.workspace_id,
                 uploaded_by_user_id=ws.user.id,
@@ -165,42 +139,10 @@ async def upload_kb_document(
                 title=title,
                 source_uri=None,
             ),
-            settings=settings,
+            app_state=request.app.state,
         )
     except IngestionValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-
-    # Schedule heavy processing (embeddings, summary, graph) in background
-    if result.created:
-        _log.info("upload fast-ingest done doc=%s chunks=%d, scheduling background tasks", result.document_id, result.chunk_count)
-        graph_llm = getattr(app_state, "graph_llm_client", None) if app_state else None
-        if graph_llm is None:
-            try:
-                graph_llm = build_graph_llm_client(settings=settings)
-            except (ValueError, RuntimeError):
-                graph_llm = None
-        graph_embed = getattr(app_state, "graph_embedding_provider", None) if app_state else None
-        if graph_embed is None:
-            try:
-                graph_embed = build_embedding_provider(settings=settings)
-            except (ValueError, RuntimeError):
-                graph_embed = None
-        chunk_embed = getattr(app_state, "chunk_embedding_provider", None) if app_state else None
-        if chunk_embed is None:
-            try:
-                chunk_embed = build_embedding_provider(settings=settings)
-            except (ValueError, RuntimeError):
-                chunk_embed = None
-
-        background_tasks.add_task(
-            run_post_ingest_tasks,
-            workspace_id=ws.workspace_id,
-            document_id=result.document_id,
-            graph_llm_client=graph_llm,
-            graph_embedding_provider=graph_embed,
-            chunk_embedding_provider=chunk_embed,
-            settings=settings,
-        )
 
     return {
         "document_id": result.document_id,

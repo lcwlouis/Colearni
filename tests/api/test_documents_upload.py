@@ -69,7 +69,7 @@ def test_upload_raw_text_returns_201_and_passes_payload(monkeypatch: Any) -> Non
             },
         )()
 
-    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document_fast", fake_ingest)
+    monkeypatch.setattr("domain.knowledge_base.upload_flow.ingest_text_document_fast", fake_ingest)
     settings = get_settings().model_copy(update={"ingest_build_graph": False})
     monkeypatch.setattr(app.state, "settings", settings, raising=False)
 
@@ -119,7 +119,7 @@ def test_upload_duplicate_returns_200(monkeypatch: Any) -> None:
             },
         )()
 
-    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document_fast", fake_ingest)
+    monkeypatch.setattr("domain.knowledge_base.upload_flow.ingest_text_document_fast", fake_ingest)
 
     def override_db() -> Any:
         yield object()
@@ -150,7 +150,7 @@ def test_upload_returns_422_for_non_extractable_pdf(monkeypatch: Any) -> None:
             "PDF has no extractable text layer. Only text-extractable PDFs are supported."
         )
 
-    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document_fast", fake_ingest)
+    monkeypatch.setattr("domain.knowledge_base.upload_flow.ingest_text_document_fast", fake_ingest)
 
     def override_db() -> Any:
         yield object()
@@ -190,9 +190,9 @@ def test_create_app_graph_enabled_builds_client_and_upload_passes_it(monkeypatch
     ) -> Any:
         return _created_result(request=request)
 
-    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document_fast", fake_ingest)
+    monkeypatch.setattr("domain.knowledge_base.upload_flow.ingest_text_document_fast", fake_ingest)
     # Also stub out the background task so it doesn't run
-    monkeypatch.setattr("apps.api.routes.documents.run_post_ingest_tasks", lambda **kw: None)
+    monkeypatch.setattr("domain.knowledge_base.upload_flow.run_post_ingest_tasks", lambda **kw: None)
     response = _upload_once(app_instance)
 
     assert response.status_code == 201
@@ -217,7 +217,7 @@ def test_create_app_graph_disabled_skips_client_build(monkeypatch: Any) -> None:
     ) -> Any:
         return _created_result(request=request)
 
-    monkeypatch.setattr("apps.api.routes.documents.ingest_text_document_fast", fake_ingest)
+    monkeypatch.setattr("domain.knowledge_base.upload_flow.ingest_text_document_fast", fake_ingest)
     response = _upload_once(app_instance)
 
     assert response.status_code == 201

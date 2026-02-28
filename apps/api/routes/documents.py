@@ -12,18 +12,9 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 from adapters.db.dependencies import get_db_session
-from core.ingestion import (
-    IngestionEmbeddingUnavailableError,
-    IngestionGraphProviderError,
-    IngestionGraphUnavailableError,
-    IngestionRequest,
-    IngestionValidationError,
-    UnsupportedTextDocumentError,
-    ingest_text_document,
-    ingest_text_document_fast,
-    run_post_ingest_tasks,
-)
-from core.settings import Settings
+from adapters.parsers.text import UnsupportedTextDocumentError
+from core.ingestion import IngestionRequest, IngestionValidationError
+from domain.knowledge_base.upload_flow import execute_upload
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -74,7 +65,7 @@ async def upload_document(
     .. deprecated:: Use ``POST /api/workspaces/{ws_id}/kb/documents/upload`` instead.
     """
     payload = await _read_upload_payload(request)
-    request_payload = IngestionRequest(
+    ingestion_request = IngestionRequest(
         workspace_id=workspace_id,
         uploaded_by_user_id=uploaded_by_user_id,
         raw_bytes=payload.raw_bytes,
@@ -83,16 +74,10 @@ async def upload_document(
         title=title or payload.title,
         source_uri=source_uri or payload.source_uri,
     )
-    settings_state = getattr(request.app.state, "settings", None)
-    settings = settings_state if isinstance(settings_state, Settings) else None
-    graph_llm_client = getattr(request.app.state, "graph_llm_client", None)
-    graph_embedding_provider = getattr(request.app.state, "graph_embedding_provider", None)
 
     try:
-        result = ingest_text_document_fast(
-            db,
-            request=request_payload,
-            settings=settings,
+        result = execute_upload(
+            db, background_tasks, request=ingestion_request, app_state=request.app.state,
         )
     except UnsupportedTextDocumentError as exc:
         raise HTTPException(
@@ -104,17 +89,6 @@ async def upload_document(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-
-    # Schedule heavy processing (embeddings, summary, graph) in background
-    if result.created:
-        background_tasks.add_task(
-            run_post_ingest_tasks,
-            workspace_id=workspace_id,
-            document_id=result.document_id,
-            graph_llm_client=graph_llm_client,
-            graph_embedding_provider=graph_embedding_provider,
-            settings=settings,
-        )
 
     response = DocumentUploadResponse(
         document_id=result.document_id,
