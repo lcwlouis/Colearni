@@ -9,6 +9,7 @@ import { ApiError, apiClient } from "@/lib/api/client";
 import { graphReducer, initialGraphState } from "@/lib/graph/graph-state";
 import { practiceReducer, initialPracticeState, toPracticeAnswers } from "@/lib/practice/practice-state";
 import { useRequireAuth } from "@/lib/auth";
+import { useDebounce } from "@/lib/hooks/use-debounce";
 import type { LuckyMode, JsonObject, StatefulFlashcard, FlashcardSelfRating, GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 
 export default function GraphPage() {
@@ -16,6 +17,7 @@ export default function GraphPage() {
   const wsId = auth.activeWorkspaceId ?? "";
   const [state, dispatch] = useReducer(graphReducer, initialGraphState);
   const [query, setQuery] = useState("");
+  const debouncedQuery = useDebounce(query, 300);
   const [luckyLoading, setLuckyLoading] = useState(false);
 
   // Practice state (inline)
@@ -37,6 +39,7 @@ export default function GraphPage() {
   const [maxEdges, setMaxEdges] = useState(300);
   const [maxHops, setMaxHops] = useState(2);
   const [graphSearch, setGraphSearch] = useState("");
+  const debouncedGraphSearch = useDebounce(graphSearch, 200);
   const [focusNodeId, setFocusNodeId] = useState<number | null>(null);
   const [resetView, setResetView] = useState<(() => void) | null>(null);
 
@@ -47,17 +50,17 @@ export default function GraphPage() {
   useEffect(() => {
     if (!wsId) return;
     dispatch({ type: "list_start" });
-    apiClient.listConcepts(wsId, { q: query || undefined, limit: 50 })
+    apiClient.listConcepts(wsId, { q: debouncedQuery || undefined, limit: 50 })
       .then((r) => dispatch({ type: "list_success", concepts: r.concepts }))
       .catch((e) => dispatch({ type: "list_error", error: e instanceof ApiError ? e.message : "Failed to load concepts" }));
-  }, [query, wsId]);
+  }, [debouncedQuery, wsId]);
 
   useEffect(() => {
-    if (!wsId || query.trim().length > 0 || state.selectedDetail) return;
+    if (!wsId || debouncedQuery.trim().length > 0 || state.selectedDetail) return;
     apiClient.getFullGraph(wsId, { max_nodes: maxNodes, max_edges: maxEdges })
       .then((res) => setFullGraph(res))
       .catch((e) => console.error("Failed to load full graph overview", e));
-  }, [wsId, query, state.selectedDetail, maxNodes, maxEdges]);
+  }, [wsId, debouncedQuery, state.selectedDetail, maxNodes, maxEdges]);
 
   const selectConcept = useCallback((conceptId: number) => {
     dispatch({ type: "detail_start" });
@@ -230,7 +233,7 @@ export default function GraphPage() {
           <span className="graph-legend-dot" style={{ background: "#95a5a6" }} /> Locked
           <span className="graph-legend-dot" style={{ background: "#0f5f9c" }} /> Unseen
         </div>
-        {concepts.length > 0 && query.trim().length > 0 && !selectedDetail ? (
+        {concepts.length > 0 && debouncedQuery.trim().length > 0 && !selectedDetail ? (
           <div className="concept-list">
             {concepts.map((c) => (
               <button
@@ -255,7 +258,7 @@ export default function GraphPage() {
             onSelect={handleGraphSelect}
             onBackgroundClick={handleGraphBgClick}
             focusNodeId={focusNodeId}
-            searchHighlight={graphSearch}
+            searchHighlight={debouncedGraphSearch}
             onResetViewReady={handleResetViewReady}
           />
         ) : fullGraph && fullGraph.nodes.length > 0 ? (
@@ -265,7 +268,7 @@ export default function GraphPage() {
             onSelect={handleGraphSelect}
             onBackgroundClick={handleGraphBgClick}
             focusNodeId={focusNodeId}
-            searchHighlight={graphSearch}
+            searchHighlight={debouncedGraphSearch}
             onResetViewReady={handleResetViewReady}
           />
         ) : null}

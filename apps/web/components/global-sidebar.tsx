@@ -2,21 +2,15 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
-import { LogOut, Sun, Moon, Check, Search, Clock, GraduationCap, Network, BookOpen, Target } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { LogOut, Check, GraduationCap, Network, BookOpen } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { HealthDot } from "@/components/health-dot";
 import { useRequireAuth } from "@/lib/auth";
 import { useChatSession } from "@/lib/tutor/chat-session-context";
 import { apiClient } from "@/lib/api/client";
+import { getSidebarFooterMode } from "@/lib/sidebar/footer-state";
 import { useState, useEffect } from "react";
-
-const navLinks = [
-    ["/tutor", "Tutor", "🎓"],
-    ["/graph", "Graph", "🕸️"],
-    ["/practice", "Practice", "🎯"],
-    ["/kb", "Sources", "📚"],
-] as const;
 
 function toTitleCase(str: string): string {
     return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
@@ -80,6 +74,11 @@ export function GlobalSidebar() {
 
     const activeWs = workspaces.find(w => w.public_id === activeWorkspaceId);
     const wsInitial = activeWs?.name?.charAt(0)?.toUpperCase() || 'W';
+    const footerMode = getSidebarFooterMode({
+        collapsed,
+        isCreatingWorkspace,
+        renamingWorkspaceId,
+    });
 
     return (
         <aside className={`global-sidebar${collapsed ? ' collapsed' : ''}`}>
@@ -282,7 +281,7 @@ export function GlobalSidebar() {
             </div>
 
             <div className="sidebar-footer" style={{ borderTop: "none", paddingTop: 0 }}>
-                {isCreatingWorkspace ? (
+                {footerMode === "create-workspace" ? (
                     <form onSubmit={async (e) => {
                         e.preventDefault();
                         if (newWorkspaceName.trim()) {
@@ -303,12 +302,13 @@ export function GlobalSidebar() {
                             <button type="button" className="secondary" onClick={() => setIsCreatingWorkspace(false)} style={{ flex: 1, padding: "0.25rem", fontSize: "0.8rem", height: "auto" }}>Cancel</button>
                         </div>
                     </form>
-                ) : renamingWorkspaceId ? (
+                ) : footerMode === "rename-workspace" ? (
                     <form onSubmit={async (e) => {
                         e.preventDefault();
-                        if (renameWorkspaceName.trim()) {
+                        const workspaceId = renamingWorkspaceId;
+                        if (workspaceId && renameWorkspaceName.trim()) {
                             try {
-                                await apiClient.updateWorkspace(renamingWorkspaceId, { name: renameWorkspaceName.trim() });
+                                await apiClient.updateWorkspace(workspaceId, { name: renameWorkspaceName.trim() });
                                 await refreshWorkspaces();
                             } catch (err) {
                                 console.error(err);
@@ -322,79 +322,83 @@ export function GlobalSidebar() {
                             <button type="button" className="secondary" onClick={() => setRenamingWorkspaceId(null)} style={{ flex: 1, padding: "0.25rem", fontSize: "0.8rem", height: "auto" }}>Cancel</button>
                         </div>
                     </form>
-                ) : (
-                    <div className="sidebar-workspace-block" style={{ padding: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem", position: "relative" }}>
-                        <select
-                            value={activeWorkspaceId ?? ""}
-                            onChange={(event) => {
-                                setActiveWorkspaceId(event.target.value);
-                            }}
-                            aria-label="Select workspace"
-                            style={{ flex: 1, fontSize: "0.85rem" }}
-                        >
-                            {workspaces.map((workspace) => (
-                                <option key={workspace.public_id} value={workspace.public_id}>
-                                    {workspace.name}
-                                </option>
-                            ))}
-                        </select>
-                        <button
-                            type="button"
-                            className="icon-btn secondary"
-                            title="Workspace options"
-                            style={{ padding: "0.4rem" }}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setWsMenuOpen((prev) => !prev);
-                            }}
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="1.5"></circle>
-                                <circle cx="19" cy="12" r="1.5"></circle>
-                                <circle cx="5" cy="12" r="1.5"></circle>
-                            </svg>
-                        </button>
-                        {wsMenuOpen && (
-                            <div className="session-context-menu" style={{ position: "absolute", right: 0, bottom: "100%", marginBottom: "4px", zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
-                                <button type="button" onClick={() => {
-                                    setWsMenuOpen(false);
-                                    setNewWorkspaceName("");
-                                    setIsCreatingWorkspace(true);
-                                }}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                                    New workspace
-                                </button>
-                                <button type="button" onClick={() => {
-                                    setWsMenuOpen(false);
-                                    if (activeWorkspaceId) {
-                                        const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
-                                        if (ws) {
-                                            setRenameWorkspaceName(ws.name);
-                                            setRenamingWorkspaceId(ws.public_id);
+                ) : null}
+
+                {footerMode === "expanded" ? (
+                    <>
+                        <div className="sidebar-workspace-block" style={{ padding: "0.5rem", alignItems: "center", gap: "0.25rem", position: "relative" }}>
+                            <select
+                                value={activeWorkspaceId ?? ""}
+                                onChange={(event) => {
+                                    setActiveWorkspaceId(event.target.value);
+                                }}
+                                aria-label="Select workspace"
+                                style={{ flex: 1, fontSize: "0.85rem" }}
+                            >
+                                {workspaces.map((workspace) => (
+                                    <option key={workspace.public_id} value={workspace.public_id}>
+                                        {workspace.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                className="icon-btn secondary"
+                                title="Workspace options"
+                                style={{ padding: "0.4rem" }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setWsMenuOpen((prev) => !prev);
+                                }}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <circle cx="12" cy="12" r="1.5"></circle>
+                                    <circle cx="19" cy="12" r="1.5"></circle>
+                                    <circle cx="5" cy="12" r="1.5"></circle>
+                                </svg>
+                            </button>
+                            {wsMenuOpen && (
+                                <div className="session-context-menu" style={{ position: "absolute", right: 0, bottom: "100%", marginBottom: "4px", zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
+                                    <button type="button" onClick={() => {
+                                        setWsMenuOpen(false);
+                                        setNewWorkspaceName("");
+                                        setIsCreatingWorkspace(true);
+                                    }}>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                        New workspace
+                                    </button>
+                                    <button type="button" onClick={() => {
+                                        setWsMenuOpen(false);
+                                        if (activeWorkspaceId) {
+                                            const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
+                                            if (ws) {
+                                                setRenameWorkspaceName(ws.name);
+                                                setRenamingWorkspaceId(ws.public_id);
+                                            }
                                         }
-                                    }
-                                }}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                                    Rename
+                                    }}>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                        Rename
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        <div className="sidebar-profile-block" style={{ flexDirection: "row", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.6rem" }}>
+                            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                                <p className="sidebar-user-name" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "0.82rem" }}>{user.display_name || user.email}</p>
+                            </div>
+                            <div className="sidebar-profile-actions">
+                                <ThemeToggle />
+                                <button type="button" className="secondary icon-btn" onClick={logout} title="Logout">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
                                 </button>
                             </div>
-                        )}
-                    </div>
-                )}
-                <div className="sidebar-profile-block" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.6rem" }}>
-                    <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-                        <p className="sidebar-user-name" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "0.82rem" }}>{user.display_name || user.email}</p>
-                    </div>
-                    <div className="sidebar-profile-actions">
-                        <ThemeToggle />
-                        <button type="button" className="secondary icon-btn" onClick={logout} title="Logout">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                        </button>
-                    </div>
-                </div>
+                        </div>
+                    </>
+                ) : null}
 
                 {/* D4: Collapsed compact bottom controls */}
-                {collapsed && !isCreatingWorkspace && !renamingWorkspaceId && (
+                {footerMode === "collapsed" && (
                     <div className="collapsed-bottom-controls">
                         <div style={{ position: 'relative' }}>
                             <button

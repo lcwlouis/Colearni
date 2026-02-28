@@ -63,6 +63,7 @@ export function ConceptGraph({
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const onSelectRef = useRef(onSelect);
   const onBackgroundClickRef = useRef(onBackgroundClick);
+  const nodeGroupsRef = useRef<{ node: GNode; g: SVGGElement; circle: SVGCircleElement }[]>([]);
   const [size, setSize] = useState({ w: propWidth ?? 600, h: propHeight ?? 380 });
 
   // Auto-size from container using ResizeObserver
@@ -208,7 +209,6 @@ export function ConceptGraph({
       }
     }
     const hasFocus = focusedSet.size > 0;
-    const searchLower = searchHighlight?.toLowerCase() ?? "";
 
     const nodeGroups = gNodes.map((n) => {
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -223,20 +223,10 @@ export function ConceptGraph({
       circle.setAttribute("stroke", n.id === selectedId ? "#0f5f9c" : bgColor);
       circle.setAttribute("stroke-width", n.id === selectedId ? "3" : "2");
 
-      // Dim non-focused or non-matching nodes
-      const isSearchMatch = searchLower && n.label.toLowerCase().includes(searchLower);
+      // Dim non-focused nodes
       const isFocused = !hasFocus || focusedSet.has(n.id);
-      if ((hasFocus && !isFocused) || (searchLower && !isSearchMatch)) {
+      if (hasFocus && !isFocused) {
         g.setAttribute("opacity", "0.2");
-      }
-      // Highlight search matches with ring
-      if (isSearchMatch) {
-        const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        ring.setAttribute("r", String(nodeRadius + 4));
-        ring.setAttribute("fill", "none");
-        ring.setAttribute("stroke", "#eab308");
-        ring.setAttribute("stroke-width", "2.5");
-        g.appendChild(ring);
       }
 
       // Hide node labels for huge graphs
@@ -258,7 +248,6 @@ export function ConceptGraph({
 
       g.appendChild(circle);
       rootG.appendChild(g);
-      const ringEl = g.querySelector("circle[stroke='#eab308']") as SVGCircleElement | null;
 
       // ── Drag behavior per node ──
       let dragStarted = false;
@@ -318,18 +307,17 @@ export function ConceptGraph({
       g.addEventListener("pointerup", endDrag);
       g.addEventListener("pointercancel", endDrag);
 
-      return { node: n, g, circle, text, ring: ringEl };
+      return { node: n, g, circle, text };
     });
 
+    // Store node group refs for in-place search highlight updates
+    nodeGroupsRef.current = nodeGroups.map(({ node, g, circle }) => ({ node, g, circle }));
+
     sim.on("tick", () => {
-      for (const { node, circle, text, ring } of nodeGroups) {
+      for (const { node, circle, text } of nodeGroups) {
         // No hard clamping — zoom/pan handles viewport
         circle.setAttribute("cx", String(node.x ?? 0));
         circle.setAttribute("cy", String(node.y ?? 0));
-        if (ring) {
-          ring.setAttribute("cx", String(node.x ?? 0));
-          ring.setAttribute("cy", String(node.y ?? 0));
-        }
         if (text) {
           text.setAttribute("x", String(node.x ?? 0));
           text.setAttribute("y", String((node.y ?? 0) + nodeRadius + 14));
@@ -387,7 +375,7 @@ export function ConceptGraph({
     const simTimeout = isHugeGraph ? 1500 : isLargeGraph ? 2000 : 3000;
     sim.alpha(1).restart();
     setTimeout(() => sim.stop(), simTimeout);
-  }, [nodes, edges, selectedId, width, height, focusNodeId, searchHighlight]);
+  }, [nodes, edges, selectedId, width, height, focusNodeId]);
 
   useEffect(() => {
     draw();
@@ -399,6 +387,41 @@ export function ConceptGraph({
       }
     };
   }, [draw]);
+
+  // ── In-place search highlight (no simulation rebuild) ──
+  useEffect(() => {
+    const groups = nodeGroupsRef.current;
+    if (groups.length === 0) return;
+    const searchLower = (searchHighlight ?? "").toLowerCase();
+
+    for (const { node, g, circle } of groups) {
+      // Remove any existing search ring
+      const oldRing = g.querySelector("circle[data-search-ring]");
+      if (oldRing) oldRing.remove();
+
+      const isMatch = searchLower && node.label.toLowerCase().includes(searchLower);
+
+      // Dim non-matching nodes when search is active
+      if (searchLower && !isMatch) {
+        g.setAttribute("opacity", "0.2");
+      } else {
+        g.removeAttribute("opacity");
+      }
+
+      // Add highlight ring to matching nodes
+      if (isMatch) {
+        const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        ring.setAttribute("data-search-ring", "1");
+        ring.setAttribute("cx", circle.getAttribute("cx") ?? "0");
+        ring.setAttribute("cy", circle.getAttribute("cy") ?? "0");
+        ring.setAttribute("r", String(parseFloat(circle.getAttribute("r") ?? "14") + 4));
+        ring.setAttribute("fill", "none");
+        ring.setAttribute("stroke", "#eab308");
+        ring.setAttribute("stroke-width", "2.5");
+        g.insertBefore(ring, g.firstChild);
+      }
+    }
+  }, [searchHighlight]);
 
   if (nodes.length === 0) {
     return <p className="status empty">No graph data yet.</p>;

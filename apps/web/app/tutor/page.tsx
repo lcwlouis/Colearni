@@ -119,6 +119,8 @@ export default function TutorPage() {
   const [conceptsError, setConceptsError] = useState<string | null>(null);
   const [currentConcept, setCurrentConcept] = useState<GraphConceptSummary | null>(null);
   const [subgraph, setSubgraph] = useState<GraphSubgraphResponse | null>(null);
+  const [graphViewConceptId, setGraphViewConceptId] = useState<number | null>(null);
+  const tutorResetViewRef = useRef<(() => void) | null>(null);
 
   const [suggestedConceptId, setSuggestedConceptId] = useState<number | null>(null);
   const [switchSuggestion, setSwitchSuggestion] = useState<ConceptSwitchSuggestion | null>(null);
@@ -415,6 +417,7 @@ export default function TutorPage() {
   useEffect(() => {
     if (showGraph && currentConcept) {
       void loadSubgraph(currentConcept.concept_id);
+      setGraphViewConceptId(currentConcept.concept_id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showGraph, currentConcept?.concept_id, wsId]);
@@ -582,7 +585,23 @@ export default function TutorPage() {
 
       {showGraph ? (
         <aside className={`panel graph-drawer${closingDrawer === 'graph' ? ' closing' : ''}`}>
-          <h2>Concept graph</h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+            <h2 style={{ margin: 0 }}>Concept graph</h2>
+            {currentConcept && graphViewConceptId != null && graphViewConceptId !== currentConcept.concept_id ? (
+              <button
+                type="button"
+                className="secondary"
+                style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', whiteSpace: 'nowrap' }}
+                onClick={() => {
+                  void loadSubgraph(currentConcept.concept_id);
+                  setGraphViewConceptId(currentConcept.concept_id);
+                  tutorResetViewRef.current?.();
+                }}
+              >
+                ← Back to topic
+              </button>
+            ) : null}
+          </div>
           {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
           {conceptsError ? <p className="status error">{conceptsError}</p> : null}
           {subgraph ? (
@@ -592,8 +611,10 @@ export default function TutorPage() {
               selectedId={currentConcept?.concept_id}
               onSelect={(id) => {
                 // Navigate the graph without changing the active tutor concept
+                setGraphViewConceptId(id);
                 void loadSubgraph(id);
               }}
+              onResetViewReady={(fn) => { tutorResetViewRef.current = fn; }}
               width={320}
               height={350}
             />
