@@ -21,7 +21,7 @@ export default function TutorPage() {
   }
 
   return (
-    <section className={`tutor-shell${(t.showGraph || t.showQuiz) ? " with-drawer" : ""}`}>
+    <section className={`tutor-shell${t.drawerOpen ? " with-drawer" : ""}`}>
       <section className="chat-main">
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.75rem 1rem", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -51,9 +51,12 @@ export default function TutorPage() {
               className={`header-action-btn${t.showQuiz ? " active" : ""}`}
               onClick={() => {
                 if (!t.showQuiz) {
-                  if (t.showGraph) t.closeDrawer("graph");
-                  t.setShowQuiz(true);
-                  if (t.levelUpState.phase === "idle") void t.startLevelUp();
+                  const doOpen = () => {
+                    t.openDrawer("quiz");
+                    if (t.levelUpState.phase === "idle") void t.startLevelUp();
+                  };
+                  if (t.showGraph) t.closeDrawer("graph", doOpen);
+                  else doOpen();
                 } else {
                   t.closeDrawer("quiz");
                 }
@@ -66,8 +69,8 @@ export default function TutorPage() {
               className={`header-action-btn${t.showGraph ? " active" : ""}`}
               onClick={() => {
                 if (!t.showGraph) {
-                  if (t.showQuiz) t.closeDrawer("quiz");
-                  t.setShowGraph(true);
+                  if (t.showQuiz) t.closeDrawer("quiz", () => t.openDrawer("graph"));
+                  else t.openDrawer("graph");
                 } else {
                   t.closeDrawer("graph");
                 }

@@ -38,6 +38,7 @@ export function useTutorPage() {
   const [showGraph, setShowGraph] = useState(false);
   const [showQuiz, setShowQuiz] = useState(false);
   const [closingDrawer, setClosingDrawer] = useState<"graph" | "quiz" | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const tutorResetViewRef = useRef<(() => void) | null>(null);
 
   // Onboarding
@@ -133,13 +134,21 @@ export function useTutorPage() {
     }
   }
 
-  function closeDrawer(which: "graph" | "quiz") {
+  function closeDrawer(which: "graph" | "quiz", onDone?: () => void) {
     setClosingDrawer(which);
+    if (!onDone) setDrawerOpen(false);
     setTimeout(() => {
       if (which === "graph") setShowGraph(false);
       else setShowQuiz(false);
       setClosingDrawer(null);
-    }, 240);
+      onDone?.();
+    }, 320);
+  }
+
+  function openDrawer(which: "graph" | "quiz") {
+    if (which === "graph") setShowGraph(true);
+    else setShowQuiz(true);
+    setDrawerOpen(true);
   }
 
   // Effects
@@ -210,10 +219,10 @@ export function useTutorPage() {
     switchDecisionRef,
     // Drawers
     showGraph,
-    setShowGraph,
     showQuiz,
-    setShowQuiz,
+    drawerOpen,
     closingDrawer,
+    openDrawer,
     closeDrawer,
     // Onboarding
     onboarding,
