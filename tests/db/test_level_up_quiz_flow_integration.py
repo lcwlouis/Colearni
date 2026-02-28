@@ -143,7 +143,10 @@ def _client(session: Session, grader: DeterministicQuizGrader, *, user: UserRow 
 
 
 def _client_without_llm(session: Session, *, user: UserRow | None = None) -> tuple[Any, TestClient]:
-    app = create_app(settings=get_settings().model_copy(update={"ingest_build_graph": False}))
+    app = create_app(settings=get_settings().model_copy(update={
+        "ingest_build_graph": False,
+        "graph_llm_provider": "mock",
+    }))
 
     def override_db() -> Any:
         yield session

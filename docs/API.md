@@ -28,6 +28,7 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 - `POST /workspaces/{ws_id}/chat/sessions`
 - `GET /workspaces/{ws_id}/chat/sessions`
 - `DELETE /workspaces/{ws_id}/chat/sessions/{session_id}`
+- `PATCH /workspaces/{ws_id}/chat/sessions/{session_id}`
 - `GET /workspaces/{ws_id}/chat/sessions/{session_id}/messages`
 - `GET /workspaces/{ws_id}/graph/concepts`
 - `GET /workspaces/{ws_id}/graph/concepts/{concept_id}`
@@ -295,6 +296,30 @@ Error responses:
 - `403 Forbidden` when not a workspace member
 - `404 Not Found` when workspace does not exist
 
+### PATCH /workspaces/{ws_id}
+
+Tag/group: `workspaces`
+
+Purpose: update workspace name and description.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | string | yes | workspace public ID |
+| `name` | body | string | yes | new workspace name |
+| `description` | body | string/null | no | optional description |
+
+Success responses:
+
+- `200 OK` with `WorkspaceDetail`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when workspace does not exist
+
 ### PATCH /workspaces/{ws_id}/settings
 
 Tag/group: `workspaces`
@@ -461,6 +486,28 @@ Request contract:
 Success responses:
 
 - `200 OK` with `ChatMessagesResponse`
+
+Error responses:
+
+- `404 Not Found` when the session is not scoped to workspace/user
+- `422 Unprocessable Entity` for validation failures
+
+### PATCH /workspaces/{ws_id}/chat/sessions/{session_id}
+
+Tag/group: `chat`
+
+Purpose: rename (update the title of) a chat session.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `session_id` | path | string | yes | UUID public_id |
+| `title` | body | string | yes | 1-120 chars |
+
+Success responses:
+
+- `200 OK` with `ChatSessionSummary`
 
 Error responses:
 
@@ -687,6 +734,29 @@ curl -sS \
   "edges": []
 }
 ```
+
+### GET /workspaces/{ws_id}/graph/full
+
+Tag/group: `graph`
+
+Purpose: retrieve the full knowledge graph for a workspace (capped to prevent overload).
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | string | yes | workspace public ID |
+| `max_nodes` | query | integer | no | default 100, range 1–500 |
+| `max_edges` | query | integer | no | default 300, range 1–1000 |
+
+Success responses:
+
+- `200 OK` with `GraphSubgraphResponse`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
 
 ### GET /workspaces/{ws_id}/graph/lucky
 
@@ -1031,6 +1101,41 @@ Error responses:
 - `404 Not Found` when flashcard not found
 - `422 Unprocessable Entity` for validation failures
 
+### GET /workspaces/{ws_id}/practice/flashcards/due
+
+Tag/group: `practice`
+
+Purpose: retrieve flashcards due for spaced-repetition review.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | string | yes | workspace public ID |
+| `limit` | query | integer | no | default 10, max 50 |
+
+Success responses:
+
+- `200 OK` with `{ workspace_id, due_flashcards: [...] }`
+
+Each flashcard in `due_flashcards`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `flashcard_id` | integer | bank row ID |
+| `front` | string | question side |
+| `back` | string | answer side |
+| `hint` | string/null | optional hint |
+| `concept_name` | string | canonical concept name |
+| `due_at` | string | ISO-8601 timestamp |
+| `interval_days` | float | current interval |
+| `last_rating` | string/null | most recent self-rating |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
 ### POST /workspaces/{ws_id}/practice/quizzes
 
 Tag/group: `practice`
@@ -1212,7 +1317,7 @@ Error responses:
 
 Tag/group: `knowledge-base`
 
-Purpose: delete a document and its chunks from the knowledge base (cascading delete).
+Purpose: delete a document and its chunks from the knowledge base (cascading delete). Optionally prune orphaned canonical graph nodes.
 
 Request contract:
 
@@ -1220,6 +1325,7 @@ Request contract:
 |---|---|---|---|---|
 | `document_id` | path | integer | yes | document ID |
 | `workspace_id` | query | integer | yes | `> 0` |
+| `prune_orphan_graph` | query | boolean | no | default `false`; when `true`, removes canonical concepts/edges with no remaining provenance after deletion |
 
 Success responses:
 
@@ -1504,3 +1610,37 @@ Error responses:
 - `401 Unauthorized` when not authenticated
 - `403 Forbidden` when not a workspace member
 - `404 Not Found` when candidate not found
+
+---
+
+## Onboarding
+
+### GET /workspaces/{ws_id}/onboarding/status
+
+Tag/group: `onboarding`
+
+Purpose: check workspace readiness and get suggested starting topics.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | string | yes | workspace public ID |
+| `topic_limit` | query | integer | no | default 5, range 1–20 |
+
+Success responses:
+
+- `200 OK` with `OnboardingStatusResponse`
+
+`OnboardingStatusResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `has_documents` | boolean | true if workspace has uploaded docs |
+| `has_active_concepts` | boolean | true if workspace has active graph concepts |
+| `suggested_topics` | array | top-N concepts by degree |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member

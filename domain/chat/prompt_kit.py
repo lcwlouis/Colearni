@@ -1,7 +1,7 @@
 """Prompt kit – versioned prompt templates, persona, and social-intent classifier.
 
 Slice 13: This module provides:
-  1. Persona definitions (OpenClaw default + pluggable).
+  1. Persona definitions (CoLearni default + pluggable).
   2. A lightweight social-intent classifier that detects greetings / chitchat
      and routes them to a "social" response path (no retrieval needed).
   3. Versioned prompt builder that composes the final tutor system prompt
@@ -18,25 +18,25 @@ from core.schemas import EvidenceItem
 
 # ── Persona Definitions ──────────────────────────────────────────────
 
-PERSONA_OPENCLAW = {
-    "name": "OpenClaw",
+PERSONA_COLEARNI = {
+    "name": "CoLearni",
     "tone": "warm, curious, and encouraging",
-    "greeting": "Hey there! I'm OpenClaw, your study buddy. What shall we explore today?",
+    "greeting": "Hey there! I'm CoLearni, your study buddy. What shall we explore today?",
     "system_prefix": (
-        "You are OpenClaw, an encouraging and curious AI tutor. "
+        "You are CoLearni, an encouraging and curious AI tutor. "
         "You love asking guiding questions and celebrating progress. "
         "Keep responses concise, warm, and grounded in the user's study material."
     ),
 }
 
 PERSONA_REGISTRY: dict[str, dict[str, str]] = {
-    "openclaw": PERSONA_OPENCLAW,
+    "colearni": PERSONA_COLEARNI,
 }
 
 
 def get_persona(name: str) -> dict[str, str]:
-    """Resolve a persona by name, defaulting to OpenClaw."""
-    return PERSONA_REGISTRY.get(name.lower(), PERSONA_OPENCLAW)
+    """Resolve a persona by name, defaulting to CoLearni."""
+    return PERSONA_REGISTRY.get(name.lower(), PERSONA_COLEARNI)
 
 
 # ── Social-Intent Classifier ─────────────────────────────────────────
@@ -71,7 +71,7 @@ def build_social_response(query: str, *, persona: dict[str, str]) -> str:
     if "how are you" in lower:
         return "I'm doing great, thanks for asking! Ready to help you learn. 📚"
     if "your name" in lower:
-        name = persona.get("name", "OpenClaw")
+        name = persona.get("name", "CoLearni")
         return f"I'm {name}, your AI study tutor! What shall we work on?"
     return "😊 Let me know when you're ready to study!"
 
@@ -88,6 +88,7 @@ def build_system_prompt(
     assessment_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
+    flashcard_progress: str = "",
 ) -> str:
     """Compose the full system prompt for the tutor LLM call.
 
@@ -95,11 +96,12 @@ def build_system_prompt(
       1. Persona system prefix
       2. Teaching style rules
       3. Document summaries (if available)
-      4. Assessment history summary (if available)
-      5. Conversation history summary (if available)
+      4. Topic assessment history (if available)
+      5. Flashcard progress snapshot (if available)
+      6. Conversation history (if available)
     """
     lines: list[str] = [
-        persona.get("system_prefix", PERSONA_OPENCLAW["system_prefix"]),
+        persona.get("system_prefix", PERSONA_COLEARNI["system_prefix"]),
         "",
     ]
 
@@ -129,14 +131,19 @@ def build_system_prompt(
 
     if assessment_context:
         lines.extend([
-            "RECENT ASSESSMENT CONTEXT:",
+            "TOPIC ASSESSMENT HISTORY:",
             assessment_context,
+            "",
+        ])
+
+    if flashcard_progress:
+        lines.extend([
+            flashcard_progress,
             "",
         ])
 
     if history_summary:
         lines.extend([
-            "CONVERSATION HISTORY:",
             history_summary,
             "",
         ])
@@ -165,6 +172,7 @@ def build_full_tutor_prompt(
     assessment_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
+    flashcard_progress: str = "",
 ) -> str:
     """Build the complete prompt: system + evidence + user question."""
     system = build_system_prompt(
@@ -173,6 +181,7 @@ def build_full_tutor_prompt(
         assessment_context=assessment_context,
         history_summary=history_summary,
         document_summaries=document_summaries,
+        flashcard_progress=flashcard_progress,
     )
     evidence_block = build_evidence_block(evidence)
     return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}"

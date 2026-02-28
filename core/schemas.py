@@ -365,6 +365,8 @@ class GraphSubgraphResponse(BaseModel):
     max_hops: int | None = Field(default=None, ge=1)
     nodes: list[GraphSubgraphNode]
     edges: list[GraphSubgraphEdge]
+    is_truncated: bool = Field(default=False, description="True when results were capped by max_nodes/max_edges")
+    total_concept_count: int | None = Field(default=None, ge=0, description="Total concepts in scope before truncation")
 
 
 class GraphLuckyAdjacentScoreComponents(BaseModel):
@@ -549,6 +551,22 @@ class ResearchCandidateReviewRequest(BaseModel):
     status: Literal["approved", "rejected"]
 
 
+# ── Onboarding ──────────────────────────────────
+
+
+class OnboardingSuggestedTopic(BaseModel):
+    concept_id: int = Field(gt=0)
+    canonical_name: str
+    description: str | None = None
+    degree: int = Field(ge=0)
+
+
+class OnboardingStatusResponse(BaseModel):
+    has_documents: bool
+    has_active_concepts: bool
+    suggested_topics: list[OnboardingSuggestedTopic] = Field(default_factory=list)
+
+
 __all__ = [
     "ActionCTA",
     "AssessmentCard",
@@ -591,6 +609,8 @@ __all__ = [
     "LevelUpQuizSubmitResponse",
     "LuckyMode",
     "MasteryStatus",
+    "OnboardingStatusResponse",
+    "OnboardingSuggestedTopic",
     "PracticeFlashcard",
     "PracticeFlashcardsResponse",
     "PracticeQuizSubmitResponse",

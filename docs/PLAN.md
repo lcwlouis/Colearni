@@ -282,6 +282,215 @@
 - Create and maintain `docs/PROMPTS.md` as source-of-truth inventory of prompts by agent/domain with direct code paths.
 - Before closing any future PLAN slice, ensure implementation details are reflected in `docs/PROGRESS.md` (and API/architecture docs when contract/design changes).
 
+---
+
+## Session 12: Reasoning/Context Integrity + Test Debt + Onboarding + Spaced Repetition
+
+### S45 (Urgent) Reasoning Controls + Full Context Envelope Integrity
+- **Problem statement (observed in Phoenix)**:
+  - LLM API calls are effectively showing only system + latest message, with missing explicit chat-history sections and missing topic-linked assessment/flashcard context in outbound prompts.
+- **Reasoning policy by task (toggleable)**:
+  - Default `reasoning=off` for high-volume structured generation paths:
+    - graph extraction/disambiguation (`extract_raw_graph`, `disambiguate`)
+    - quiz generation (`level_up` + practice generation)
+  - Default `reasoning=on` for deliberative text tasks:
+    - tutor chat response generation
+    - quiz grading/feedback synthesis
+    - agents requiring deeper planning/synthesis
+  - Add per-surface overrides via settings/env + request-level override for controlled experimentation.
+- **Configuration surface**:
+  - Add explicit settings keys (example naming):
+    - `APP_LLM_REASONING_CHAT`
+    - `APP_LLM_REASONING_QUIZ_GRADING`
+    - `APP_LLM_REASONING_GRAPH_GENERATION`
+    - `APP_LLM_REASONING_QUIZ_GENERATION`
+  - Implement normalized reasoning config object in provider adapters so OpenAI/LiteLLM/no-reasoning models degrade gracefully.
+- **Provider/model compatibility contract**:
+  - Reasoning toggles must be capability-aware per provider/model:
+    - If a model/provider supports reasoning controls, apply requested mode.
+    - If unsupported, silently fallback to standard generation while emitting an observability event (`reasoning_mode_unsupported_fallback`).
+  - Keep behavior stable when switching providers/models; no hard failures from unsupported reasoning knobs.
+- **Full context envelope integrity (chat + assessments + flashcards)**:
+  - Update `domain/chat/respond.py` + `domain/chat/session_memory.py` to construct explicit prompt sections:
+    - `RECENT CHAT HISTORY`
+    - `COMPACTED PRIOR CONTEXT`
+    - `TOPIC ASSESSMENT HISTORY` (quiz/practice outcomes)
+    - `FLASHCARD PROGRESS SNAPSHOT`
+  - Ensure these sections are always included when data exists, concept-scoped where applicable, and budgeted by token policy.
+  - Extend quiz generation context (`domain/learning/level_up.py`) with chat-history-derived misconceptions and relevant assessment traces.
+- **Observability + Phoenix verification**:
+  - Add structured span attributes/events for outbound prompt sections present/missing and token-budget allocation.
+  - Add regression tests asserting that outbound prompt text includes history + assessment + flashcard sections for seeded sessions.
+  - Add explicit acceptance check in Phoenix traces: outbound user payload must include more than latest-turn text for non-empty sessions.
+- **Model/provider switching impact (explicit)**:
+  - Yes, this affects switching behavior only insofar as capability differences are normalized by adapter fallback.
+  - With the capability-aware contract above, changing providers/models should not break flows; only effective reasoning mode may differ and will be observable.
+- **Execution order**:
+  - Run S45 before S37–S40 so Session 12 is built on correct prompt-context + reasoning semantics.
+
+### S37 Test Debt & Mock Infrastructure Cleanup
+- **Fix `_FakeSession`**: Add `.execute()`, `.get_bind()` stubs to the unit-test `_FakeSession` in `tests/core/test_ingestion_embeddings.py`, or replace with `MagicMock(spec=Session)`.
+- **Explicit settings in unit tests**: Every `test_ingest_*` test must pin `ingest_build_graph=False` (or `True` with a matching stub client) via `settings.model_copy(update={...})` so tests don't depend on env file state.
+- **Fix `IntegrationGraphLLM`**: Add `generate_tutor_text(self, *, prompt: str) -> str` returning a deterministic stub summary so the document summary path doesn't NPE.
+- **Fix integration ingestion tests**: In `tests/db/test_document_ingestion_integration.py`, pass `graph_llm_client=IntegrationGraphLLM()` and appropriate settings for non-graph tests.
+- **Sync API docs + contracts**: Update `docs/API.md` headings for route additions since Session 9. Update `REQUIRED_FIELDS` in `tests/api/test_response_contracts.py` for new schema fields (`is_truncated`, `total_concept_count`).
+- **Fix settings test**: Update `tests/core/test_settings.py` observability alias expectation or pin via monkeypatch.
+- **Exit criteria**: 0 failing tests in full `pytest tests/` run.
+- **Implementation notes**:
+  - Primary files: `tests/core/test_ingestion_embeddings.py`, `tests/db/test_document_ingestion_integration.py`, `tests/api/test_api_docs_sync.py`, `tests/api/test_response_contracts.py`, `tests/core/test_settings.py`.
+  - Keep < 200 LOC net.
+
+### S38 Onboarding Flow
+- **Backend: onboarding status endpoint**: Add `GET /workspaces/{ws_id}/onboarding/status` returning `{ has_documents, has_active_concepts, suggested_topics }`.
+- **Domain: topic suggestion logic**: Add `suggest_starting_topics(db, workspace_id, limit=5)` returning top-N concepts by degree (most connected = most central).
+- **Tutor onboarding prompt path**: In `domain/chat/respond.py`, detect when workspace has documents but user has no mastery records. Inject onboarding system prompt listing suggested topics.
+- **Frontend: onboarding card**: In tutor page, when user has documents but no active concepts, render an onboarding card with clickable topic chips.
+- **Tests**: Unit test for `suggest_starting_topics`. API test for onboarding endpoint. Integration test for onboarding prompt injection.
+- **Implementation notes**:
+  - New files: `domain/onboarding/` or extend `domain/graph/explore.py`.
+  - Route: `apps/api/routes/onboarding.py` or extend graph routes.
+  - Frontend: `apps/web/app/tutor/page.tsx` (onboarding state check + card).
+  - Keep < 300 LOC net.
+
+### S39 Spaced Repetition Foundation
+- **Schema + migration**: Add `next_review_at TIMESTAMPTZ` and `interval_days FLOAT DEFAULT 1.0` to `practice_flashcard_progress`.
+- **Domain: SR scheduler**: New `domain/learning/spaced_repetition.py` implementing SM-2 variant. Map `Again/Hard/Good/Easy` → interval multipliers (0.5×/1.0×/2.5×/4.0×). Compute `next_review_at = now + interval_days`.
+- **Wire into flashcard progress**: After recording flashcard rating, call `compute_next_review()` and persist `interval_days` + `next_review_at`.
+- **Due flashcards query**: Add `get_due_flashcards(db, workspace_id, user_id, limit)` selecting cards where `next_review_at <= now()` ordered by most overdue.
+- **API endpoint**: `GET /workspaces/{ws_id}/practice/flashcards/due?limit=10` returning due flashcards.
+- **Tests**: Unit tests for `compute_next_review` with all 4 ratings. Unit test for due-cards query ordering. API test for `/due` endpoint.
+- **Implementation notes**:
+  - New file: `domain/learning/spaced_repetition.py`.
+  - Migration: `adapters/db/migrations/versions/`.
+  - Wire: `domain/learning/practice.py` (rating handler), `apps/api/routes/practice.py` (due endpoint).
+  - Keep < 300 LOC net.
+
+### S40 Quiz Gardener Operability & Testing
+- **Unit tests for quiz_gardener**: Add tests with mocked DB verifying candidate query logic and `create_level_up_quiz` delegation.
+- **Makefile target**: Add `make quiz-gardener` entry to run the job (same pattern as `readiness_analyzer`).
+- **Docs**: Document quiz_gardener invocation in `docs/ARCHITECTURE.md` alongside existing job documentation.
+- **Implementation notes**:
+  - Test file: `tests/domain/test_quiz_gardener.py` (or `tests/jobs/`).
+  - Keep < 100 LOC net.
+
+---
+
+## Session 13: Session-11 Misses Remediation + UX Parity
+
+### S41 Tutor Continuity, Context Memory, and Naming Reliability
+- **Composer bottom anchoring (hard fix)**:
+  - Replace ad-hoc inline style composition in `apps/web/app/tutor/page.tsx` with a stable shell contract: header fixed-height row, timeline scroll container (`flex: 1; min-height: 0; overflow-y: auto`), composer dock row (`flex-shrink: 0`) that is always at viewport bottom.
+  - Remove competing layout definitions (`.chat-main` grid in CSS vs inline `display:flex` in JSX) and keep a single source-of-truth style in `apps/web/app/globals.css`.
+  - Add a viewport-height assertion for the tutor shell to avoid composer drifting to “bottom of last message”.
+- **Conversation memory (full-history aware, bounded)**:
+  - Current system exists but is shallow: `domain/chat/session_memory.py` only includes latest system summary + recent 10 messages and uses lexical truncation.
+  - Upgrade to tiered memory: `recent_window` + `rolling_structured_summary` + `assessment_cards` + `topic_trace`.
+  - Introduce token budgeting + deterministic compaction policy (budget by section, then summarize oldest unsummarized range) instead of char-based slicing.
+  - Add compaction metadata (`source_start_id`, `source_end_id`, `token_estimate`, `version`) to system-summary payload for auditability.
+  - Include explicit retrieval tests proving older turns survive via summary, not only recent-window replay.
+- **Chat-history-informed quiz generation**:
+  - Extend level-up generation context in `domain/learning/level_up.py` to include compacted session slices (user misconceptions, unresolved asks, repeated corrections) from `session_memory`.
+  - Pass this as a dedicated `CHAT_HISTORY_CONTEXT` block in the quiz prompt and guard against leakage of irrelevant chat by concept-scoping and recency weighting.
+  - Add tests asserting quiz items react to known conversation misunderstandings.
+- **Auto session title generation (<=5 words)**:
+  - Current behavior is first-user-message fallback (`set_chat_session_title_if_missing(...)`); replace with topic-aware summarization title generator.
+  - New title policy: 2–5 words, title-case, no punctuation suffix noise, include dominant concept/topic if available.
+  - Trigger naming after first assistant response (when concept inference + context are available), with idempotent update and manual rename override preservation.
+- **Sidebar delete confirmation regression**:
+  - Reintroduce explicit in-app confirmation step in sidebar context menu delete path (`apps/web/components/global-sidebar.tsx` + `apps/web/lib/tutor/chat-session-context.tsx`).
+  - Use inline confirmation popover/modal (not `window.confirm`) consistent with prior UX direction.
+- **Session handoff automation point (requested)**:
+  - Add a completion hook for S41: once all accepted S11/S12 fixes are marked done and validated, trigger an LLM-driven maintenance task to update `docs/PLAN.md` and `docs/PROGRESS.md`, then automatically draft and start the next session checklist.
+
+### S42 Markdown Rendering, Sidebar Footer Fit, and Collapsed Sidebar Quality
+- **Code block rendering hardening**:
+  - Investigate clipping path across `.chat-content { overflow: hidden; }`, markdown wrappers, and nested `pre/code` styles.
+  - Ensure block code uses frame tokens without clipping while preserving in-block horizontal scroll only.
+  - Verify KaTeX + fenced code coexistence and no double-background artifacts in assistant responses.
+- **Sidebar footer should fit (no internal scroll for workspace/profile cards)**:
+  - Remove forced footer scroll (`.sidebar-footer max-height: 40vh; overflow-y: auto`) and rebalance layout with session list as sole scrolling region.
+  - Keep workspace selector + profile/logout visible without nested scroller in normal viewport sizes.
+- **Collapsed sidebar UX rework (image-3 remediation track)**:
+  - Add explicit collapsed rail design (icon-only nav with centered hit targets, tooltips, active indicator, clear expand affordance).
+  - Preserve quick access actions (new chat, workspace switch entry point) in collapsed mode rather than hiding all controls.
+  - Improve visual rhythm: spacing, icon alignment, and state transitions.
+- **Acceptance criteria**:
+  - No footer scrollbar at common desktop heights.
+  - Collapsed sidebar remains fully usable and discoverable.
+  - Code blocks render with full frame and no clipping in long-line and multiline cases.
+
+### S43 Graph UX Density + LightRAG-Informed Adaptation (Native)
+- **Wasted-space reduction on Graph page (image-1)**:
+  - Remove fixed SVG dimensions in `apps/web/app/graph/page.tsx` (`width={700}`, `height={500}`) and adopt responsive fill with available panel height.
+  - Convert panel split to ratio-driven layout with resizable or adaptive columns so graph canvas claims primary space.
+  - Tighten outer padding/margins and reduce dead zones in right panel empty state.
+- **LightRAG adaptation plan (without coupling)**:
+  - Research HKUDS/LightRAG runtime patterns (graph search index, focus/neighbor expansion, hide-unselected edges, multi-layout iterations).
+  - Implement Colearni-native equivalents in `apps/web/components/concept-graph.tsx` and graph page controls:
+    - search-and-focus on graph nodes,
+    - focus mode (selected node + N-hop neighborhood),
+    - progressive expansion,
+    - optional worker-driven layout iterations for large graphs.
+  - Keep existing Colearni API contracts/tenancy unchanged.
+- **Performance target**:
+  - Maintain interactive graph operations at >=1k nodes with no visible UI lockups (selection, pan/zoom, focus filter, search highlight).
+
+### S44 Document Deletion vs Graph Retention Policy + Implementation
+- **Current behavior audit**:
+  - Deleting a document removes `chunks`, `provenance`, `concepts_raw`, `edges_raw` for those chunks, but canonical graph entities may persist.
+- **Policy decision slice (explicit user-facing choice)**:
+  - Add workspace setting or per-delete option:
+    - `retain_learned_graph=true` (keep canonical concepts/edges not currently backed by docs), or
+    - `prune_orphan_graph=true` (remove canonical nodes/edges with no remaining provenance/chunk support).
+- **Implementation plan**:
+  - Add orphan-pruning service in domain layer, run synchronously (small docs) or enqueue background prune job (large workspaces).
+  - Add KB delete UI affordance clarifying graph impact before confirmation.
+  - Add regression tests for both policies.
+- **Default recommendation**:
+  - Default to retain graph for continuity; provide explicit “prune orphaned graph nodes from this document” advanced option to prevent clutter when desired.
+---
+
+## Session 14: Learning Intelligence & Graph Curation
+
+### S46 Learning Path Generator (S4 foundation)
+- **Domain logic**: `domain/learning/learning_path.py` — `generate_learning_path(session, workspace_id, user_id, limit=10)` ordering next concepts by topological dependency (edges from already-mastered nodes), readiness decay, and degree centrality tiebreaker.
+- **Prerequisites**: `get_prerequisites(session, workspace_id, concept_id)` returning incoming edge source concepts with their mastery status — enables "learn X before Y" signals.
+- **API endpoint**: `GET /workspaces/{ws_id}/learning/path?limit=10` returning ordered path with concept name, description, readiness score, prerequisite status.
+- **Route file**: New `apps/api/routes/learning.py`; register in `main.py`.
+- **Schemas**: `LearningPathResponse`, `LearningPathEntry` in `core/schemas.py`.
+- **Tests**: Unit tests for path ordering with various mastery/edge configurations.
+- **Est. ~300 LOC net.**
+
+### S47 Concept Strength Analytics & Weakness Detection (S2 foundation)
+- **Domain logic**: `domain/learning/strength.py` — `compute_concept_strengths(session, workspace_id, user_id)` aggregating quiz pass rate, flashcard average interval + fail rate, readiness score, and time since last engagement into a normalized 0–1 `strength_score` per concept.
+- **Weakness ranking**: `get_weakest_concepts(session, workspace_id, user_id, limit=5)` for targeted review recommendations.
+- **API endpoint**: `GET /workspaces/{ws_id}/learning/strengths` returning per-concept strength breakdown.
+- **Tutor context**: Inject weakest-concept signals into `respond.py` prompt context so the tutor can proactively mention areas for review.
+- **Tests**: Unit tests for strength aggregation, weakness ranking, and tutor context injection.
+- **Est. ~280 LOC net.**
+
+### S48 Graph Curation: Duplicate Detection & Merge (S1 foundation)
+- **Duplicate detection**: `domain/graph/curation.py` — `find_probable_duplicates(session, workspace_id, limit=20)` using alias overlap, normalized name similarity, and shared neighbor ratio to score candidate merge pairs.
+- **Merge operation**: `merge_concepts(session, workspace_id, keep_id, merge_id)` retargets edges, transfers aliases, merges provenance, deactivates merged node — reusing gardener patterns.
+- **API endpoints**: `GET /workspaces/{ws_id}/graph/curation/duplicates` and `POST /workspaces/{ws_id}/graph/curation/merge`.
+- **Schemas**: `DuplicateCandidateResponse` in `core/schemas.py`.
+- **Tests**: Unit tests for duplicate scoring and merge correctness.
+- **Est. ~350 LOC net.**
+
+### S49 Spaced Repetition Review Session Orchestrator
+- **Review session lifecycle**: `domain/learning/review_session.py` — `start_review_session(session, workspace_id, user_id, limit=20)` batches due flashcards into a tracked session, `complete_review_session(session, review_id)` computes stats (cards reviewed, avg rating, retention rate, concepts covered).
+- **Migration**: New `review_sessions` table (id, workspace_id, user_id, started_at, completed_at, card_count, cards_reviewed, avg_rating, retention_rate).
+- **API endpoints**: `GET /workspaces/{ws_id}/practice/review/start?limit=20` and `POST /workspaces/{ws_id}/practice/review/{review_id}/complete`.
+- **Tests**: Unit tests for session lifecycle and stats computation.
+- **Est. ~350 LOC net.**
+
+### S50 Mastery Decay Alerts & Tutor Proactive Nudges
+- **Nudge generation**: `domain/readiness/nudge.py` — `generate_decay_nudges(session, workspace_id, user_id, threshold=0.3, limit=3)` finds concepts below readiness threshold, ranked by decay velocity.
+- **Tutor integration**: `format_nudge_for_tutor(nudges)` produces a `PROACTIVE REVIEW NUDGES` prompt section. On first message of a session, inject decay nudges so the tutor weaves in "Your understanding of X might be getting rusty" naturally.
+- **Wire into**: `respond.py` (first-message detection), `prompt_kit.py` (nudge section template).
+- **API endpoint**: `GET /workspaces/{ws_id}/readiness/nudges` for frontend nudge banner.
+- **Tests**: Unit tests for nudge selection, threshold filtering, and prompt formatting.
+- **Est. ~250 LOC net.**
 ### Incorporated from SUGGESTIONS.md
 - **Spaced Repetition Optimization Engine** (S2): ML-driven spaced repetition to dynamically identify weakest graph links and push micro-assessments. (Future)
 - **Markdown-Based Skills Architecture** (S9): Migrate away from hardcoded prompts toward file-system-based "skills" directory with discoverable Markdown prompt files. (Future — aligns with S25 Agentic RAG)
@@ -367,6 +576,20 @@
 27. S34 Quiz Lifecycle Automation & Concept Grounding
 28. S35 Scalable Graph Experience (LightRAG-Informed)
 29. S36 Documentation Integrity
+30. S45 (Urgent) Reasoning Controls + Full Context Envelope Integrity
+31. S37 Test Debt & Mock Infrastructure Cleanup
+32. S38 Onboarding Flow
+33. S39 Spaced Repetition Foundation
+34. S40 Quiz Gardener Operability & Testing
+35. S41 Tutor Continuity, Context Memory, and Naming Reliability
+36. S42 Markdown Rendering, Sidebar Footer Fit, and Collapsed Sidebar Quality
+37. S43 Graph UX Density + LightRAG-Informed Adaptation (Native)
+38. S44 Document Deletion vs Graph Retention Policy + Implementation
+39. S46 Learning Path Generator
+40. S47 Concept Strength Analytics & Weakness Detection
+41. S48 Graph Curation: Duplicate Detection & Merge
+42. S49 Spaced Repetition Review Session Orchestrator
+43. S50 Mastery Decay Alerts & Tutor Proactive Nudges
 
 ## Assumptions and Defaults
 - OpenClaw exact style snippet is not yet available; placeholder persona ships first.

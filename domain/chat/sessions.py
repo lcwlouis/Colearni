@@ -8,6 +8,7 @@ from adapters.db.chat import (
     delete_chat_session,
     list_chat_messages,
     list_chat_sessions,
+    update_session_title,
 )
 from sqlalchemy.orm import Session
 
@@ -94,10 +95,31 @@ def delete_session(
         raise ChatSessionNotFoundError(str(exc)) from exc
 
 
+def rename_session(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    session_id: int,
+    title: str,
+) -> dict[str, object]:
+    try:
+        return update_session_title(
+            session,
+            session_id=session_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            title=title,
+        )
+    except ChatNotFoundError as exc:
+        raise ChatSessionNotFoundError(str(exc)) from exc
+
+
 __all__ = [
     "ChatSessionNotFoundError",
     "create_session",
     "delete_session",
     "get_messages",
     "list_sessions",
+    "rename_session",
 ]

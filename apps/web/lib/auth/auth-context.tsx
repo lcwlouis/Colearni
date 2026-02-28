@@ -12,6 +12,7 @@ import type { UserPublic, WorkspaceSummary } from "@/lib/api/types";
 import { apiClient } from "@/lib/api/client";
 
 const SESSION_TOKEN_KEY = "colearni_session_token";
+const WORKSPACE_KEY = "colearni_active_workspace";
 
 interface AuthContextValue {
   user: UserPublic | null;
@@ -45,8 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserPublic | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceIdRaw] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const setActiveWorkspaceId = useCallback((id: string) => {
+    setActiveWorkspaceIdRaw(id);
+    try { localStorage.setItem(WORKSPACE_KEY, id); } catch { /* quota */ }
+  }, []);
 
   const refreshWorkspaces = useCallback(async () => {
     try {
@@ -59,12 +65,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setWorkspaces(list);
       if (list.length > 0 && activeWorkspaceId === null) {
-        setActiveWorkspaceId(list[0].public_id);
+        const stored = localStorage.getItem(WORKSPACE_KEY);
+        const match = stored && list.find((w) => w.public_id === stored);
+        setActiveWorkspaceId(match ? stored : list[0].public_id);
       }
     } catch {
       setWorkspaces([]);
     }
-  }, [activeWorkspaceId]);
+  }, [activeWorkspaceId, setActiveWorkspaceId]);
 
   // Restore session on mount
   useEffect(() => {
@@ -85,7 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           setWorkspaces(list);
           if (list.length > 0) {
-            setActiveWorkspaceId(list[0].public_id);
+            const storedWs = localStorage.getItem(WORKSPACE_KEY);
+            const match = storedWs && list.find((w) => w.public_id === storedWs);
+            setActiveWorkspaceId(match ? storedWs : list[0].public_id);
           }
         })
         .catch(() => {
@@ -111,10 +121,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     localStorage.removeItem(SESSION_TOKEN_KEY);
+    localStorage.removeItem(WORKSPACE_KEY);
     setSessionToken(null);
     setUser(null);
     setWorkspaces([]);
-    setActiveWorkspaceId(null);
+    setActiveWorkspaceIdRaw(null);
     apiClient.logout().catch(() => {});
     // Redirect to login page
     if (typeof window !== "undefined") {

@@ -228,6 +228,8 @@ export interface GraphSubgraphResponse {
   max_hops: number;
   nodes: GraphSubgraphNode[];
   edges: GraphSubgraphEdge[];
+  is_truncated?: boolean;
+  total_concept_count?: number;
 }
 
 export interface GraphLuckyResponse {
@@ -423,4 +425,19 @@ export interface ResearchCandidateSummary {
   title: string | null;
   snippet: string | null;
   status: "pending" | "approved" | "rejected" | "ingested";
+}
+
+// ── Onboarding ──────────────────────────────────────────────────────
+
+export interface OnboardingSuggestedTopic {
+  concept_id: number;
+  canonical_name: string;
+  description: string | null;
+  degree: number;
+}
+
+export interface OnboardingStatusResponse {
+  has_documents: boolean;
+  has_active_concepts: boolean;
+  suggested_topics: OnboardingSuggestedTopic[];
 }

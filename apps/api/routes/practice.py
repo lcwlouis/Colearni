@@ -29,6 +29,7 @@ from domain.learning.practice import (
     rate_flashcard,
     submit_practice_quiz,
 )
+from domain.learning.spaced_repetition import get_due_flashcards
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -229,3 +230,19 @@ def rate_flashcard_route(
         PracticeValidationError,
     ) as exc:
         _raise_http(exc)
+
+
+@router.get("/flashcards/due")
+def due_flashcards_route(
+    limit: int = 10,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> dict:
+    """Return flashcards due for spaced-repetition review."""
+    cards = get_due_flashcards(
+        db,
+        workspace_id=ws.workspace_id,
+        user_id=ws.user.id,
+        limit=min(limit, 50),
+    )
+    return {"workspace_id": ws.workspace_id, "due_flashcards": cards}

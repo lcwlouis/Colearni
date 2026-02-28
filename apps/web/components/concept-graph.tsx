@@ -12,6 +12,7 @@ import {
 } from "d3-force";
 import { zoom as d3Zoom, zoomIdentity, type ZoomBehavior } from "d3-zoom";
 import { select } from "d3-selection";
+import "d3-transition";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 
 type Props = {

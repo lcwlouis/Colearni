@@ -391,6 +391,48 @@ def set_chat_session_title_if_missing(
     )
 
 
+def update_session_title(
+    session: Session,
+    *,
+    session_id: int,
+    workspace_id: int,
+    user_id: int,
+    title: str,
+) -> dict[str, Any]:
+    """Unconditionally update session title (user rename)."""
+    assert_chat_session(
+        session,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+    normalized = (title or "").strip()[:120] or None
+    row = (
+        session.execute(
+            text(
+                """
+                UPDATE chat_sessions
+                SET title = :title, updated_at = now()
+                WHERE id = :session_id
+                RETURNING id, public_id, workspace_id, user_id, title, updated_at
+                """
+            ),
+            {"session_id": session_id, "title": normalized},
+        )
+        .mappings()
+        .one()
+    )
+    session.commit()
+    return {
+        "session_id": int(row["id"]),
+        "public_id": str(row["public_id"]),
+        "workspace_id": int(row["workspace_id"]),
+        "user_id": int(row["user_id"]),
+        "title": str(row["title"] or "").strip() or None,
+        "last_activity_at": row["updated_at"],
+    }
+
+
 def _as_json(payload: dict[str, Any]) -> str:
     import json
 
@@ -410,4 +452,5 @@ __all__ = [
     "list_recent_chat_messages",
     "resolve_session_by_public_id",
     "set_chat_session_title_if_missing",
+    "update_session_title",
 ]

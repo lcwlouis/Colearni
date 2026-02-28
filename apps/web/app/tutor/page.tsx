@@ -249,9 +249,11 @@ export default function TutorPage() {
     }
   }
 
-  async function onSubmitChat(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const text = query.trim();
+  async function onSubmitChat(eventOrText: FormEvent<HTMLFormElement> | string) {
+    if (typeof eventOrText !== 'string') {
+      eventOrText.preventDefault();
+    }
+    const text = typeof eventOrText === 'string' ? eventOrText.trim() : query.trim();
     if (!text || !wsId) return;
 
     const sessionId = await ensureSession();

@@ -16,6 +16,8 @@ adapters/db/migrations/versions/20260224_0001_initial_schema.py
 adapters/db/migrations/versions/20260224_0002_chunks_embedding_vector_index.py
 adapters/db/migrations/versions/20260224_0003_concepts_canon_embedding_vector_index.py
 adapters/db/migrations/versions/20260227_0004_wow_release.py
+adapters/db/migrations/versions/20260227_0005_document_summary.py
+adapters/db/migrations/versions/20260228_0006_spaced_repetition.py
 adapters/embeddings/__init__.py
 adapters/embeddings/factory.py
 adapters/embeddings/litellm_provider.py
@@ -39,6 +41,7 @@ apps/api/routes/documents.py
 apps/api/routes/graph.py
 apps/api/routes/healthz.py
 apps/api/routes/knowledge_base.py
+apps/api/routes/onboarding.py
 apps/api/routes/practice.py
 apps/api/routes/quizzes.py
 apps/api/routes/readiness.py
@@ -47,6 +50,7 @@ apps/api/routes/workspaces.py
 apps/jobs/__init__.py
 apps/jobs/backfill_chunk_embeddings.py
 apps/jobs/graph_gardener.py
+apps/jobs/quiz_gardener.py
 apps/jobs/readiness_analyzer.py
 apps/jobs/research_runner.py
 apps/web/node_modules/flatted/python/flatted.py
@@ -75,6 +79,7 @@ domain/chat/prompt_kit.py
 domain/chat/respond.py
 domain/chat/session_memory.py
 domain/chat/sessions.py
+domain/chat/title_gen.py
 domain/chat/tutor_agent.py
 domain/embeddings/__init__.py
 domain/embeddings/pipeline.py
@@ -82,12 +87,16 @@ domain/graph/__init__.py
 domain/graph/explore.py
 domain/graph/extraction.py
 domain/graph/gardener.py
+domain/graph/orphan_pruner.py
 domain/graph/pipeline.py
 domain/graph/resolver.py
 domain/graph/types.py
 domain/learning/__init__.py
 domain/learning/level_up.py
 domain/learning/practice.py
+domain/learning/spaced_repetition.py
+domain/onboarding/__init__.py
+domain/onboarding/status.py
 domain/readiness/__init__.py
 domain/readiness/analyzer.py
 domain/research/__init__.py

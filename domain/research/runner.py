@@ -76,23 +76,22 @@ def run_research(
         .all()
     )
 
-    # Load existing content fingerprints to avoid duplicates
-    existing_fps = set()
+    # Load existing source URLs to avoid duplicate candidates
+    existing_urls: set[str] = set()
     rows = session.execute(
         text(
-            "SELECT content_hash FROM workspace_research_candidates "
+            "SELECT source_url FROM workspace_research_candidates "
             "WHERE workspace_id = :workspace_id"
         ),
         {"workspace_id": workspace_id},
     ).all()
-    existing_fps = {str(r[0]) for r in rows if r[0]}
+    existing_urls = {str(r[0]) for r in rows if r[0]}
 
     total_candidates = 0
     client = httpx.Client(timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True)
     try:
         for source in sources:
             url = str(source["url"])
-            source_id = int(source["id"])
             try:
                 resp = client.get(url)
                 resp.raise_for_status()
@@ -116,12 +115,11 @@ def run_research(
                 logger.info("research_runner: skipping %s (too short after extraction)", url)
                 continue
 
-            # Fingerprint + dedup
-            fp = fingerprint_text(raw_text)
-            if fp in existing_fps:
-                logger.info("research_runner: skipping %s (duplicate content)", url)
+            # Dedup by source URL
+            if url in existing_urls:
+                logger.info("research_runner: skipping %s (duplicate source URL)", url)
                 continue
-            existing_fps.add(fp)
+            existing_urls.add(url)
 
             # Break into candidate snippets (take first MAX_CONTENT_LENGTH chars)
             snippet = raw_text[:2000]
@@ -130,20 +128,19 @@ def run_research(
                 text(
                     """
                     INSERT INTO workspace_research_candidates
-                        (workspace_id, source_id, source_url, title, snippet,
-                         content_hash, status, created_at)
+                        (workspace_id, run_id, source_url, title, snippet,
+                         status, created_at)
                     VALUES
-                        (:workspace_id, :source_id, :source_url, :title, :snippet,
-                         :content_hash, 'pending', now())
+                        (:workspace_id, :run_id, :source_url, :title, :snippet,
+                         'pending', now())
                     """
                 ),
                 {
                     "workspace_id": workspace_id,
-                    "source_id": source_id,
+                    "run_id": run_id,
                     "source_url": url,
                     "title": title[:500],
                     "snippet": snippet,
-                    "content_hash": fp,
                 },
             )
             total_candidates += 1
@@ -224,13 +221,16 @@ def ingest_approved_candidates(
             )
         except Exception as exc:
             logger.warning("research_runner: failed to ingest candidate %s: %s", candidate_id, exc)
+            if callable(getattr(session, "rollback", None)):
+                session.rollback()
             session.execute(
                 text(
                     "UPDATE workspace_research_candidates "
-                    "SET status = 'failed' WHERE id = :id"
+                    "SET status = 'rejected' WHERE id = :id"
                 ),
                 {"id": candidate_id},
             )
+            session.commit()
             continue
 
         session.execute(

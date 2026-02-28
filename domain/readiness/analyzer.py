@@ -66,7 +66,7 @@ def analyze_workspace_readiness(
                 """
                 SELECT
                     m.concept_id,
-                    m.mastery_score,
+                    m.score AS mastery_score,
                     m.updated_at AS last_activity
                 FROM mastery m
                 WHERE m.workspace_id = :workspace_id

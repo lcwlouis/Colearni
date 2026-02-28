@@ -80,6 +80,9 @@ def test_ingest_text_document_writes_documents_chunks_and_tsv() -> None:
                 title="LA Notes",
                 source_uri=None,
             ),
+            settings=get_settings().model_copy(
+                update={"ingest_build_graph": False, "ingest_populate_embeddings": False}
+            ),
         )
 
         assert result.created is True

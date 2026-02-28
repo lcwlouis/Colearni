@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from adapters.db.engine import build_engine
+from adapters.db.engine import create_db_engine
 from core.settings import get_settings
 from domain.readiness.analyzer import analyze_workspace_readiness
 from sqlalchemy import text
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def run_readiness_analysis() -> None:
     """Run readiness analysis for all active users across workspaces."""
     settings = get_settings()
-    engine = build_engine(settings.database_url)
+    engine = create_db_engine(settings)
 
     with Session(engine) as session:
         # Find all (workspace, user) pairs that have mastery records
@@ -64,6 +64,8 @@ def run_readiness_analysis() -> None:
                     workspace_id,
                     user_id,
                 )
+                if callable(getattr(session, "rollback", None)):
+                    session.rollback()
 
         # Snapshot
         session.execute(

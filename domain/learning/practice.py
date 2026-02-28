@@ -232,7 +232,8 @@ def create_practice_quiz(
             fingerprints=new_fps,
         )
     except Exception:
-        pass  # Non-critical: don't fail quiz creation if fingerprint recording fails
+        if callable(getattr(session, "rollback", None)):
+            session.rollback()  # Reset failed transaction state
 
     return level_up.create_level_up_quiz(
         session,
@@ -697,10 +698,27 @@ def rate_flashcard(
             "passed": passed,
         },
     )
+
+    # Update spaced repetition schedule
+    from domain.learning.spaced_repetition import update_flashcard_schedule
+
+    try:
+        schedule = update_flashcard_schedule(
+            session,
+            flashcard_id=int(bank_row["id"]),
+            user_id=user_id,
+            self_rating=self_rating,
+        )
+    except Exception:
+        if callable(getattr(session, "rollback", None)):
+            session.rollback()
+        schedule = {"interval_days": 1.0, "due_at": None}
     session.commit()
 
     return {
         "flashcard_id": flashcard_id,
         "self_rating": self_rating,
         "passed": passed,
+        "interval_days": schedule.get("interval_days", 1.0),
+        "due_at": schedule.get("due_at"),
     }

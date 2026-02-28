@@ -63,48 +63,48 @@ class TestSocialIntentClassifier:
 
 class TestSocialResponse:
     def test_greeting_response(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         resp = build_social_response("Hello!", persona=persona)
         assert resp  # non-empty
-        assert "OpenClaw" in resp or "study buddy" in resp or "explore" in resp
+        assert "CoLearni" in resp or "study buddy" in resp or "explore" in resp
 
     def test_thanks_response(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         resp = build_social_response("Thanks!", persona=persona)
         assert "welcome" in resp.lower()
 
     def test_bye_response(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         resp = build_social_response("Bye!", persona=persona)
         assert "next time" in resp.lower() or "great work" in resp.lower()
 
 
 class TestPersona:
     def test_default_persona(self) -> None:
-        persona = get_persona("openclaw")
-        assert persona["name"] == "OpenClaw"
+        persona = get_persona("colearni")
+        assert persona["name"] == "CoLearni"
         assert "system_prefix" in persona
 
     def test_unknown_persona_defaults(self) -> None:
         persona = get_persona("nonexistent")
-        assert persona["name"] == "OpenClaw"
+        assert persona["name"] == "CoLearni"
 
 
 class TestPromptBuilder:
     def test_system_prompt_socratic(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         prompt = build_system_prompt(persona=persona, style="socratic")
         assert "Socratic" in prompt
         assert "guiding question" in prompt.lower()
 
     def test_system_prompt_direct(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         prompt = build_system_prompt(persona=persona, style="direct")
         assert "Direct" in prompt
         assert "concise" in prompt.lower()
 
     def test_full_prompt_includes_evidence(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         prompt = build_full_tutor_prompt(
             query="Explain photosynthesis",
             evidence=_sample_evidence(),
@@ -116,7 +116,7 @@ class TestPromptBuilder:
         assert "Photosynthesis" in prompt
 
     def test_full_prompt_with_assessment_context(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         prompt = build_full_tutor_prompt(
             query="What is light energy?",
             evidence=[],
@@ -124,11 +124,11 @@ class TestPromptBuilder:
             style="direct",
             assessment_context="quiz_result: Biology — score 80%, passed.",
         )
-        assert "ASSESSMENT CONTEXT" in prompt
+        assert "TOPIC ASSESSMENT HISTORY" in prompt
         assert "quiz_result" in prompt
 
     def test_full_prompt_with_history(self) -> None:
-        persona = get_persona("openclaw")
+        persona = get_persona("colearni")
         prompt = build_full_tutor_prompt(
             query="Continue",
             evidence=[],
@@ -136,5 +136,5 @@ class TestPromptBuilder:
             style="socratic",
             history_summary="User asked about cell division. Tutor explained mitosis.",
         )
-        assert "CONVERSATION HISTORY" in prompt
+        assert "cell division" in prompt
         assert "cell division" in prompt

@@ -20,6 +20,7 @@ from domain.chat.sessions import (
     delete_session,
     get_messages,
     list_sessions,
+    rename_session,
 )
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
@@ -30,6 +31,10 @@ router = APIRouter(prefix="/workspaces/{ws_id}/chat", tags=["chat"])
 
 class ChatSessionCreateRequest(BaseModel):
     title: str | None = None
+
+
+class ChatSessionRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
 
 
 class ChatRespondAPIRequest(BaseModel):
@@ -119,6 +124,30 @@ def delete_chat_session_route(
     except (ChatSessionNotFoundError, ChatNotFoundError) as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/sessions/{session_id}", response_model=ChatSessionSummary)
+def rename_chat_session_route(
+    session_id: str,
+    payload: ChatSessionRenameRequest,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> ChatSessionSummary:
+    try:
+        internal_id = resolve_session_by_public_id(
+            db, public_id=session_id, workspace_id=ws.workspace_id, user_id=ws.user.id,
+        )
+        return ChatSessionSummary.model_validate(
+            rename_session(
+                db,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+                session_id=internal_id,
+                title=payload.title,
+            )
+        )
+    except (ChatSessionNotFoundError, ChatNotFoundError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.post("/respond", response_model=AssistantResponseEnvelope)

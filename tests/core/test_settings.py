@@ -86,6 +86,13 @@ def test_settings_observability_defaults(monkeypatch) -> None:
 
 
 def test_settings_reads_observability_aliases(monkeypatch) -> None:
+    # Clear all competing aliases before setting test values
+    for key in (
+        "APP_OBSERVABILITY_ENABLED",
+        "APP_OBSERVABILITY_OTLP_ENDPOINT",
+        "APP_OBSERVABILITY_SERVICE_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("OBSERVABILITY_ENABLED", "true")
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318/v1/traces")
     monkeypatch.setenv("OTEL_SERVICE_NAME", "colearni-test")

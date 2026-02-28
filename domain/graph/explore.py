@@ -297,6 +297,24 @@ def get_full_subgraph(
     max_edges: int,
     user_id: int | None = None,
 ) -> dict[str, Any]:
+    # Count total concepts for truncation detection
+    total_row = (
+        session.execute(
+            text(
+                """
+                SELECT count(*) AS cnt
+                FROM concepts_canon c
+                WHERE c.workspace_id = :workspace_id
+                  AND c.is_active = TRUE
+                """
+            ),
+            {"workspace_id": workspace_id},
+        )
+        .mappings()
+        .first()
+    )
+    total_concept_count = int(total_row["cnt"]) if total_row else 0
+
     node_rows = (
         session.execute(
             text(
@@ -339,6 +357,8 @@ def get_full_subgraph(
             "max_hops": None,
             "nodes": [],
             "edges": [],
+            "is_truncated": False,
+            "total_concept_count": total_concept_count,
         }
 
     edge_rows = (
@@ -372,10 +392,13 @@ def get_full_subgraph(
         .mappings()
         .all()
     )
+    is_truncated = len(node_rows) >= max_nodes or total_concept_count > max_nodes
     return {
         "workspace_id": workspace_id,
         "root_concept_id": None,
         "max_hops": None,
+        "is_truncated": is_truncated,
+        "total_concept_count": total_concept_count,
         "nodes": [
             {
                 "concept_id": int(r["concept_id"]),

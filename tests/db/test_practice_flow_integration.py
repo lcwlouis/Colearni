@@ -112,7 +112,12 @@ def _close(session: Any, app: Any, client: Any) -> None:
 
 def _answers(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        {"item_id": item["item_id"], "answer": "a" if item["item_type"] == "mcq" else "explain"}
+        {
+            "item_id": item["item_id"],
+            "answer": item["choices"][0]["id"]
+            if item["item_type"] == "mcq" and item.get("choices")
+            else ("a" if item["item_type"] == "mcq" else "explain"),
+        }
         for item in items
     ]
 

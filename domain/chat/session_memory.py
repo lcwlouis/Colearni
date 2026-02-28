@@ -12,12 +12,15 @@ from adapters.db.chat import (
     list_recent_chat_messages,
     set_chat_session_title_if_missing,
 )
+from domain.chat.title_gen import generate_session_title
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 COMPACTION_THRESHOLD = 40
 COMPACTION_KEEP_RECENT = 16
 SUMMARY_SOURCE_LIMIT = 24
 ASSESSMENT_CARD_LIMIT = 5
+FLASHCARD_PROGRESS_LIMIT = 10
 
 
 def load_history_text(
@@ -25,22 +28,40 @@ def load_history_text(
     *,
     session_id: int | None,
 ) -> str:
+    """Load chat history as labeled sections for the tutor prompt.
+
+    Returns a structured string with COMPACTED PRIOR CONTEXT and
+    RECENT CHAT HISTORY sections when data exists.
+    """
     if session_id is None:
         return ""
 
     summary = latest_system_summary(session, session_id=session_id) or ""
     recent = list_recent_chat_messages(session, session_id=session_id, limit=10)
-    snippets: list[str] = []
+
+    sections: list[str] = []
+
     if summary:
-        snippets.append(summary)
+        sections.append(f"COMPACTED PRIOR CONTEXT:\n{summary}")
+
+    recent_lines: list[str] = []
     for message in recent:
         payload = message.get("payload") if isinstance(message, dict) else {}
         if not isinstance(payload, dict):
             continue
         text_value = str(payload.get("text", "")).strip()
-        if text_value:
-            snippets.append(text_value)
-    return "\n".join(snippets)
+        if not text_value:
+            continue
+        role = str(message.get("type", ""))
+        if role == "user":
+            recent_lines.append(f"User: {text_value}")
+        elif role == "assistant":
+            recent_lines.append(f"Tutor: {text_value}")
+
+    if recent_lines:
+        sections.append("RECENT CHAT HISTORY:\n" + "\n".join(recent_lines))
+
+    return "\n\n".join(sections)
 
 
 def persist_turn(
@@ -51,6 +72,7 @@ def persist_turn(
     user_id: int | None,
     user_text: str,
     assistant_payload: dict[str, Any],
+    concept_name: str | None = None,
 ) -> None:
     if session_id is None:
         return
@@ -82,7 +104,10 @@ def persist_turn(
     set_chat_session_title_if_missing(
         session,
         session_id=session_id,
-        title=user_text,
+        title=generate_session_title(
+            user_query=user_text,
+            concept_name=concept_name,
+        ),
     )
     maybe_compact_session_context(
         session,
@@ -150,8 +175,50 @@ def maybe_compact_session_context(
     )
 
 
+def load_chat_context_for_quiz(
+    session: Session,
+    *,
+    session_id: int | None,
+    max_turns: int = 8,
+) -> str:
+    """Load condensed chat history for inclusion in quiz generation prompts.
+
+    Extracts recent user/tutor exchanges so the quiz generator can target
+    areas the learner discussed, struggled with, or showed curiosity about.
+    Returns a compact string; empty if no usable history.
+    """
+    if session_id is None:
+        return ""
+
+    recent = list_recent_chat_messages(session, session_id=session_id, limit=max_turns * 2)
+    lines: list[str] = []
+    for message in recent:
+        if not isinstance(message, dict):
+            continue
+        payload = message.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        text_value = str(payload.get("text", "")).strip()
+        if not text_value:
+            continue
+        role = str(message.get("type", ""))
+        if role == "user":
+            lines.append(f"Learner: {text_value[:200]}")
+        elif role == "assistant":
+            lines.append(f"Tutor: {text_value[:200]}")
+        if len(lines) >= max_turns:
+            break
+
+    if not lines:
+        return ""
+
+    return "\n".join(lines)
+
+
 __all__ = [
     "load_assessment_context",
+    "load_chat_context_for_quiz",
+    "load_flashcard_progress",
     "load_history_text",
     "maybe_compact_session_context",
     "persist_assessment_card",
@@ -234,4 +301,76 @@ def load_assessment_context(
             f"- {card.get('card_type', 'result')}: {concept} "
             f"— score {score:.0%}, {passed}. {summary}"
         )
+    return "\n".join(lines)
+
+
+# ── S45: Flashcard progress snapshot for tutor context ────────────────
+
+
+def load_flashcard_progress(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int | None,
+    concept_id: int | None = None,
+) -> str:
+    """Load recent flashcard progress for inclusion in tutor prompt context.
+
+    Returns a formatted FLASHCARD PROGRESS SNAPSHOT section.
+    Scoped to concept if provided, otherwise workspace-wide.
+    """
+    if user_id is None:
+        return ""
+
+    try:
+        params: dict[str, object] = {
+            "workspace_id": workspace_id,
+            "user_id": user_id,
+            "limit": FLASHCARD_PROGRESS_LIMIT,
+        }
+        concept_filter = ""
+        if concept_id is not None:
+            concept_filter = "AND fb.concept_id = :concept_id"
+            params["concept_id"] = concept_id
+
+        rows = (
+            session.execute(
+                text(f"""
+                    SELECT
+                        fb.concept_id,
+                        cc.canonical_name,
+                        fp.self_rating,
+                        fp.passed,
+                        fp.updated_at
+                    FROM practice_flashcard_progress fp
+                    JOIN practice_flashcard_bank fb
+                        ON fb.id = fp.flashcard_id
+                        AND fb.workspace_id = :workspace_id
+                    LEFT JOIN concepts_canon cc
+                        ON cc.id = fb.concept_id
+                        AND cc.workspace_id = :workspace_id
+                    WHERE fp.user_id = :user_id
+                      {concept_filter}
+                    ORDER BY fp.updated_at DESC
+                    LIMIT :limit
+                """),
+                params,
+            )
+            .mappings()
+            .all()
+        )
+    except Exception:
+        if callable(getattr(session, "rollback", None)):
+            session.rollback()
+        return ""
+
+    if not rows:
+        return ""
+
+    lines: list[str] = ["FLASHCARD PROGRESS SNAPSHOT:"]
+    for row in rows:
+        concept_name = str(row.get("canonical_name") or "unknown")
+        rating = str(row.get("self_rating") or "unrated")
+        passed = "passed" if row.get("passed") else "in progress"
+        lines.append(f"- {concept_name}: {rating} ({passed})")
     return "\n".join(lines)

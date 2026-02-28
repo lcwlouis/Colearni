@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from core.contracts import GraphLLMClient
+from domain.chat.session_memory import load_chat_context_for_quiz
 from core.observability import (
     SPAN_KIND_CHAIN,
     emit_event,
@@ -95,6 +96,7 @@ def create_level_up_quiz(
         llm_client=llm_client,
         min_items=min_items,
         max_items=max_items,
+        session_id=session_id,
     )
     normalized_items = _attach_generation_context(
         normalized_items,
@@ -562,6 +564,7 @@ def _choose_items(
     llm_client: GraphLLMClient | None,
     min_items: int,
     max_items: int,
+    session_id: int | None = None,
 ) -> list[dict[str, Any]]:
     if items:
         return _normalize_items(items, min_items=min_items, max_items=max_items)
@@ -580,6 +583,7 @@ def _choose_items(
             target_count=target,
             min_items=min_items,
             max_items=max_items,
+            session_id=session_id,
         )
         if generated:
             return generated
@@ -623,17 +627,36 @@ def _generate_level_up_items_with_retries(
     target_count: int,
     min_items: int,
     max_items: int,
+    session_id: int | None = None,
 ) -> list[dict[str, Any]] | None:
     context = _generation_context(session, workspace_id=workspace_id, concept_id=concept_id)
     concept_name = context["concept_name"]
     concept_desc = context.get("concept_description", "")
     adjacent = context.get("adjacent_concepts", [])
     adjacent_str = ", ".join(adjacent[:6]) if adjacent else "none"
+    chunk_excerpts = context.get("chunk_excerpts", [])
+    chunks_block = ""
+    if chunk_excerpts:
+        chunks_block = "\nSOURCE MATERIAL EXCERPTS:\n" + "\n".join(
+            f"- {excerpt}" for excerpt in chunk_excerpts
+        ) + "\n"
+    chat_history = load_chat_context_for_quiz(
+        session, session_id=session_id, max_turns=8
+    )
+    chat_block = ""
+    if chat_history:
+        chat_block = (
+            "\nCHAT HISTORY CONTEXT (use to target areas the learner discussed, "
+            "struggled with, or showed curiosity about):\n"
+            f"{chat_history}\n"
+        )
     prompt = (
         "You are creating a quiz to assess understanding of a concept.\n"
         f"CONCEPT: {concept_name}\n"
         f"DESCRIPTION: {concept_desc}\n"
-        f"RELATED CONCEPTS: {adjacent_str}\n\n"
+        f"RELATED CONCEPTS: {adjacent_str}\n"
+        f"{chunks_block}"
+        f"{chat_block}\n"
         "Return ONLY valid JSON with this schema:\n"
         '{"items":[{"item_type":"short_answer"|"mcq","prompt":"...","payload":{...}}]}\n\n'
         "Rules:\n"
@@ -732,10 +755,32 @@ def _generation_context(
         str(row["tgt_name"]) if str(row["src_name"]) == concept_name else str(row["src_name"])
         for row in rows
     ]
+    # Fetch document chunks linked to the concept for richer quiz context
+    chunk_rows = (
+        session.execute(
+            text(
+                """
+                SELECT ch.text
+                FROM provenance p
+                JOIN chunks ch ON ch.id = p.chunk_id AND ch.workspace_id = p.workspace_id
+                WHERE p.workspace_id = :workspace_id
+                  AND p.target_type = 'concept'
+                  AND p.target_id = :concept_id
+                ORDER BY p.chunk_id ASC
+                LIMIT 3
+                """
+            ),
+            {"workspace_id": workspace_id, "concept_id": concept_id},
+        )
+        .mappings()
+        .all()
+    )
+    chunk_excerpts = [str(r["text"])[:300] for r in chunk_rows]
     return {
         "concept_name": concept_name,
         "concept_description": str(concept["description"] or ""),
         "adjacent_concepts": adjacent,
+        "chunk_excerpts": chunk_excerpts,
     }
 
 
@@ -1446,11 +1491,122 @@ def _validate_session_scope(
         raise LevelUpQuizValidationError("session_id is not valid for workspace/user scope.")
 
 
+def get_latest_quiz_summary_for_concept(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int,
+) -> dict[str, Any] | None:
+    """Return a summary of the latest quiz attempt for a given concept.
+
+    Used by the tutor prompt to include recent quiz context in conversation.
+    Returns None if no quiz has been attempted for this concept.
+    """
+    row = (
+        session.execute(
+            text(
+                """
+                SELECT q.id AS quiz_id,
+                       q.status AS quiz_status,
+                       qa.score,
+                       qa.passed,
+                       qa.graded_at,
+                       qa.grading
+                FROM quizzes q
+                LEFT JOIN quiz_attempts qa
+                  ON qa.quiz_id = q.id
+                 AND qa.user_id = :user_id
+                 AND qa.graded_at IS NOT NULL
+                WHERE q.workspace_id = :workspace_id
+                  AND q.user_id = :user_id
+                  AND q.concept_id = :concept_id
+                ORDER BY q.id DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+            },
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+
+    grading = row["grading"] if isinstance(row["grading"], dict) else {}
+    return {
+        "quiz_id": int(row["quiz_id"]),
+        "quiz_status": str(row["quiz_status"]),
+        "score": float(row["score"]) if row["score"] is not None else None,
+        "passed": bool(row["passed"]) if row["passed"] is not None else None,
+        "overall_feedback": str(grading.get("overall_feedback", "")).strip()[:200],
+        "attempted": row["graded_at"] is not None,
+    }
+
+
+def get_mastered_neighbor_context(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int,
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
+    """Return top-K mastered neighboring concepts by edge weight.
+
+    Used to enrich quiz generation context with surrounding mastered knowledge.
+    """
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT c.canonical_name, c.description, m.score AS mastery_score, e.weight
+                FROM edges_canon e
+                JOIN concepts_canon c
+                  ON c.workspace_id = e.workspace_id
+                 AND c.is_active = TRUE
+                 AND c.id = CASE WHEN e.src_id = :concept_id THEN e.tgt_id ELSE e.src_id END
+                JOIN mastery m
+                  ON m.workspace_id = e.workspace_id
+                 AND m.user_id = :user_id
+                 AND m.concept_id = c.id
+                 AND m.status = 'learned'
+                WHERE e.workspace_id = :workspace_id
+                  AND (e.src_id = :concept_id OR e.tgt_id = :concept_id)
+                ORDER BY e.weight DESC, c.canonical_name ASC
+                LIMIT :top_k
+                """
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+                "top_k": top_k,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        {
+            "name": str(r["canonical_name"]),
+            "description": str(r["description"] or "")[:150],
+            "mastery_score": float(r["mastery_score"]) if r["mastery_score"] is not None else None,
+        }
+        for r in rows
+    ]
+
+
 __all__ = [
     "LevelUpQuizGradingError",
     "LevelUpQuizNotFoundError",
     "LevelUpQuizUnavailableError",
     "LevelUpQuizValidationError",
     "create_level_up_quiz",
+    "get_latest_quiz_summary_for_concept",
     "submit_level_up_quiz",
 ]

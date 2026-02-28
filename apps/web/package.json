@@ -11,7 +11,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@types/d3-selection": "^3.0.11",
+    "@types/d3-transition": "^3.0.9",
+    "@types/d3-zoom": "^3.0.8",
     "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
+    "d3-zoom": "^3.0.0",
     "katex": "^0.16.33",
     "lucide-react": "^0.575.0",
     "next": "14.2.5",

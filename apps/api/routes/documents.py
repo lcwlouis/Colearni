@@ -14,9 +14,11 @@ from core.ingestion import (
     IngestionValidationError,
     UnsupportedTextDocumentError,
     ingest_text_document,
+    ingest_text_document_fast,
+    run_post_ingest_tasks,
 )
 from core.settings import Settings
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -54,6 +56,7 @@ class UploadPayload:
 )
 async def upload_document(
     request: Request,
+    background_tasks: BackgroundTasks,
     workspace_id: Annotated[int, Query(gt=0)],
     uploaded_by_user_id: Annotated[int, Query(gt=0)],
     title: Annotated[str | None, Query()] = None,
@@ -77,11 +80,9 @@ async def upload_document(
     graph_embedding_provider = getattr(request.app.state, "graph_embedding_provider", None)
 
     try:
-        result = ingest_text_document(
+        result = ingest_text_document_fast(
             db,
             request=request_payload,
-            graph_llm_client=graph_llm_client,
-            graph_embedding_provider=graph_embedding_provider,
             settings=settings,
         )
     except UnsupportedTextDocumentError as exc:
@@ -94,21 +95,17 @@ async def upload_document(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
-    except IngestionEmbeddingUnavailableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except IngestionGraphUnavailableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-    except IngestionGraphProviderError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=str(exc),
-        ) from exc
+
+    # Schedule heavy processing (embeddings, summary, graph) in background
+    if result.created:
+        background_tasks.add_task(
+            run_post_ingest_tasks,
+            workspace_id=workspace_id,
+            document_id=result.document_id,
+            graph_llm_client=graph_llm_client,
+            graph_embedding_provider=graph_embedding_provider,
+            settings=settings,
+        )
 
     response = DocumentUploadResponse(
         document_id=result.document_id,

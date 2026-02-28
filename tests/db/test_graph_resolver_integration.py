@@ -55,6 +55,9 @@ class IntegrationGraphLLM(GraphLLMClient):
     ) -> Mapping[str, Any]:
         return {"decision": "CREATE_NEW", "confidence": 1.0}
 
+    def generate_tutor_text(self, *, prompt: str) -> str:
+        return "Integration test summary."
+
 
 def _connect_or_skip() -> tuple[Any, Any]:
     settings = get_settings()

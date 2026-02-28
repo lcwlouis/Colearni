@@ -23,6 +23,7 @@ import type {
   PracticeQuizSubmitResponse,
   QuizCreateResponse,
   ReadinessSnapshotResponse,
+  OnboardingStatusResponse,
   ResearchCandidateSummary,
   ResearchRunSummary,
   ResearchSourceSummary,
@@ -119,6 +120,7 @@ export class ApiClient {
   listChatSessions(wsId: string, p?: { limit?: number }) { return this.request<ChatSessionListResponse>(`/workspaces/${wsId}/chat/sessions`, { method: "GET" }, { limit: p?.limit }); }
   getChatMessages(wsId: string, sessionId: string, p?: { limit?: number }) { return this.request<ChatMessagesResponse>(`/workspaces/${wsId}/chat/sessions/${sessionId}/messages`, { method: "GET" }, { limit: p?.limit }); }
   deleteChatSession(wsId: string, sessionId: string) { return this.request<null>(`/workspaces/${wsId}/chat/sessions/${sessionId}`, { method: "DELETE" }); }
+  renameChatSession(wsId: string, sessionId: string, title: string) { return this.request<ChatSessionSummary>(`/workspaces/${wsId}/chat/sessions/${sessionId}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
   respondChat(wsId: string, p: ChatRespondRequest) { return this.request<AssistantResponseEnvelope>(`/workspaces/${wsId}/chat/respond`, { method: "POST", body: JSON.stringify(p) }); }
 
   // ── Graph (workspace-scoped) ────────────────────────────────────
@@ -172,6 +174,9 @@ export class ApiClient {
   triggerResearchRun(wsId: string) { return this.request<ResearchRunSummary>(`/workspaces/${wsId}/research/runs`, { method: "POST" }); }
   listResearchCandidates(wsId: string, p?: { run_id?: number; status?: string }) { return this.request<ResearchCandidateSummary[]>(`/workspaces/${wsId}/research/candidates`, { method: "GET" }, { run_id: p?.run_id, status: p?.status }); }
   reviewResearchCandidate(wsId: string, candidateId: number, p: { status: "approved" | "rejected" }) { return this.request<ResearchCandidateSummary>(`/workspaces/${wsId}/research/candidates/${candidateId}`, { method: "PATCH", body: JSON.stringify({ status: p.status }) }); }
+
+  // ── Onboarding (workspace-scoped) ───────────────────────────────
+  getOnboardingStatus(wsId: string) { return this.request<OnboardingStatusResponse>(`/workspaces/${wsId}/onboarding/status`, { method: "GET" }); }
 }
 
 export const apiClient = new ApiClient();

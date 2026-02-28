@@ -81,6 +81,17 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
 
     const startNewSession = async (): Promise<string | null> => {
         if (!wsId) return null;
+        // Guard: if the active session looks empty (no title), just re-select it
+        if (activeSessionId) {
+            const active = sessions.find((s) => s.public_id === activeSessionId);
+            if (active && !active.title) {
+                // Already on an empty chat — just navigate there
+                if (pathname !== "/tutor") {
+                    router.push(`/tutor?chat=${activeSessionId}`);
+                }
+                return activeSessionId;
+            }
+        }
         setSessionsError(null);
         try {
             const created = await apiClient.createChatSession(wsId, {});
@@ -103,7 +114,6 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         setSessionsError(null);
         try {
             await apiClient.deleteChatSession(wsId, sessionId);
-            localStorage.removeItem(`colearni_levelup_${wsId}_${sessionId}`);
             await refreshSessions();
         } catch (error: unknown) {
             setSessionsError(errorText(error, "Could not delete chat session"));
@@ -111,9 +121,17 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
     };
 
     const renameSession = (sessionId: string, title: string) => {
+        // Optimistic update
         setSessions((prev) =>
             prev.map((s) => (s.public_id === sessionId ? { ...s, title } : s))
         );
+        // Persist to backend
+        if (wsId) {
+            apiClient.renameChatSession(wsId, sessionId, title).catch(() => {
+                // Revert on failure by re-fetching
+                void refreshSessions();
+            });
+        }
     };
 
     useEffect(() => {

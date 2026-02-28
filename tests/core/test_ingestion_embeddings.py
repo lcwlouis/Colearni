@@ -19,6 +19,25 @@ from core.settings import get_settings
 from domain.graph.types import GraphBuildResult
 
 
+class _FakeResult:
+    """Stub query result for _FakeSession.execute()."""
+
+    def scalar_one(self) -> int:
+        return 0
+
+    def mappings(self) -> "_FakeResult":
+        return self
+
+    def all(self) -> list:
+        return []
+
+    def first(self) -> None:
+        return None
+
+    def __iter__(self):
+        return iter([])
+
+
 class _FakeSession:
     """Simple session test double that tracks commit calls."""
 
@@ -27,6 +46,12 @@ class _FakeSession:
 
     def commit(self) -> None:
         self.commit_calls += 1
+
+    def execute(self, *args: object, **kwargs: object) -> _FakeResult:  # noqa: ARG002
+        return _FakeResult()
+
+    def get_bind(self) -> None:
+        return None
 
 
 class _DummyProvider(EmbeddingProvider):
@@ -50,6 +75,9 @@ class _StubGraphLLM(GraphLLMClient):
         candidates: Sequence[dict[str, object]],
     ) -> dict[str, object]:
         return {"decision": "CREATE_NEW", "confidence": 1.0}
+
+    def generate_tutor_text(self, *, prompt: str) -> str:
+        return "Stub summary for testing."
 
 
 def _request() -> IngestionRequest:
@@ -104,6 +132,7 @@ def test_ingest_populates_chunk_embeddings_when_enabled(monkeypatch: Any) -> Non
     settings = get_settings().model_copy(
         update={
             "ingest_populate_embeddings": True,
+            "ingest_build_graph": False,
             "embedding_provider": "mock",
             "embedding_batch_size": 3,
         }
@@ -166,7 +195,7 @@ def test_ingest_uses_legacy_chunk_bulk_insert_when_embeddings_disabled(
     """Disabled embedding mode should preserve existing bulk chunk insert path."""
     _patch_new_document_flow(monkeypatch, chunks=["first", "second"])
     session = _FakeSession()
-    settings = get_settings().model_copy(update={"ingest_populate_embeddings": False})
+    settings = get_settings().model_copy(update={"ingest_populate_embeddings": False, "ingest_build_graph": False})
     captured: dict[str, object] = {}
 
     def _fake_insert_chunks_bulk(
@@ -216,6 +245,7 @@ def test_ingest_raises_when_embeddings_enabled_and_provider_is_unavailable(
     settings = get_settings().model_copy(
         update={
             "ingest_populate_embeddings": True,
+            "ingest_build_graph": False,
             "embedding_provider": "openai",
             "openai_api_key": None,
         }
@@ -315,7 +345,7 @@ def test_ingest_graph_disabled_skips_builder_even_when_client_is_present(
     """Graph-disabled ingestion should preserve current behavior and skip graph pipeline."""
     _patch_new_document_flow(monkeypatch, chunks=["chunk"])
     session = _FakeSession()
-    settings = get_settings().model_copy(update={"ingest_build_graph": False})
+    settings = get_settings().model_copy(update={"ingest_build_graph": False, "ingest_populate_embeddings": False})
     monkeypatch.setattr(
         "core.ingestion.build_graph_for_chunks",
         lambda *args, **kwargs: (_ for _ in ()).throw(  # noqa: ARG005

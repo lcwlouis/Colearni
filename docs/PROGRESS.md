@@ -641,3 +641,18 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Fix: Added `APP_LOG_LEVEL` setting (default INFO). Configured `logging.basicConfig()` in `create_app()` with structured format. Added request/response logging in `CorrelationIdMiddleware` (method, path, status, elapsed ms, request ID). Added module-level loggers in respond.py and knowledge_base.py.
 - Files: `core/settings.py`, `apps/api/main.py`, `apps/api/middleware.py`, `domain/chat/respond.py`, `apps/api/routes/knowledge_base.py`
 
+#### D4 — Collapsed Bottom Controls Polish (Completed)
+- Root cause: In collapsed mode, the existing profile block (ThemeToggle + logout button) and workspace block were rendered with large pill-shaped containers, inconsistent sizing, and misaligned spacing — visually detached from the compact nav icon rail above.
+- Fix: 
+  1. Hid both `.sidebar-workspace-block` (already D2) and `.sidebar-profile-block` entirely in collapsed mode.
+  2. Added a new `collapsed-bottom-controls` section visible only in collapsed mode: a compact vertically-stacked icon cluster with consistent 2.5rem × 2.5rem buttons aligned to the same centerline as nav icons.
+  3. Workspace selector: a circular initial-badge icon button that opens a popover listing all workspaces (with switch, New, Rename actions). Creating/renaming expands the sidebar automatically.
+  4. Theme toggle: reused existing `<ThemeToggle />` component, overrode sizing in collapsed context to match 2.5rem square with rounded corners.
+  5. Logout: a compact icon button with `<LogOut>` lucide icon.
+  6. All buttons have hover backgrounds, focus-visible outlines, and tooltips via `::after` pseudo-elements, consistent with collapsed nav links.
+  7. Added subtle `border-top` divider above the bottom cluster.
+  8. Fixed pre-existing type error in `onSubmitChat` (E3 string argument) and pre-existing `d3-transition` missing import in concept-graph.
+- Files: `apps/web/components/global-sidebar.tsx`, `apps/web/app/globals.css`, `apps/web/components/theme-toggle.tsx`, `apps/web/app/tutor/page.tsx`, `apps/web/components/concept-graph.tsx`, `apps/web/package.json`
+- Commands: `npx next build` (passes), `npx vitest run` (41/41), `python -m pytest tests/` (100%)
+- Verification: Toggle sidebar collapsed/expanded — collapsed shows compact icon stack; expanded retains rich UI. Workspace popover opens on click, lists workspaces, supports switch/new/rename. Tooltips appear on hover. Theme toggle and logout match nav icon sizing. Page refresh preserves collapsed state (D3).
+

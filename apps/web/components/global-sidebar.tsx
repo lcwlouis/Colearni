@@ -54,6 +54,7 @@ export function GlobalSidebar() {
         return false;
     });
     const [wsMenuOpen, setWsMenuOpen] = useState(false);
+    const [collapsedWsOpen, setCollapsedWsOpen] = useState(false);
 
     // D3: Persist collapsed state
     useEffect(() => {
@@ -67,14 +68,18 @@ export function GlobalSidebar() {
                 setContextMenuPos(null);
             }
             if (wsMenuOpen) setWsMenuOpen(false);
+            if (collapsedWsOpen) setCollapsedWsOpen(false);
         };
         document.addEventListener("click", handleGlobalClick);
         return () => document.removeEventListener("click", handleGlobalClick);
-    }, [contextMenuId]);
+    }, [contextMenuId, wsMenuOpen, collapsedWsOpen]);
 
     if (!user) {
         return null; // Don't render sidebar on login page
     }
+
+    const activeWs = workspaces.find(w => w.public_id === activeWorkspaceId);
+    const wsInitial = activeWs?.name?.charAt(0)?.toUpperCase() || 'W';
 
     return (
         <aside className={`global-sidebar${collapsed ? ' collapsed' : ''}`}>
@@ -387,6 +392,86 @@ export function GlobalSidebar() {
                         </button>
                     </div>
                 </div>
+
+                {/* D4: Collapsed compact bottom controls */}
+                {collapsed && !isCreatingWorkspace && !renamingWorkspaceId && (
+                    <div className="collapsed-bottom-controls">
+                        <div style={{ position: 'relative' }}>
+                            <button
+                                type="button"
+                                className="collapsed-icon-btn"
+                                title={activeWs?.name || "Workspace"}
+                                aria-label="Switch workspace"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCollapsedWsOpen(prev => !prev);
+                                }}
+                            >
+                                <span className="collapsed-ws-initial">{wsInitial}</span>
+                            </button>
+                            {collapsedWsOpen && (
+                                <div className="collapsed-ws-popover" onClick={(e) => e.stopPropagation()}>
+                                    <div className="collapsed-ws-popover-header">Workspaces</div>
+                                    {workspaces.map(ws => (
+                                        <button
+                                            key={ws.public_id}
+                                            type="button"
+                                            className={`collapsed-ws-item${ws.public_id === activeWorkspaceId ? ' active' : ''}`}
+                                            onClick={() => {
+                                                setActiveWorkspaceId(ws.public_id);
+                                                setCollapsedWsOpen(false);
+                                            }}
+                                        >
+                                            <span className="collapsed-ws-initial-small">{ws.name.charAt(0).toUpperCase()}</span>
+                                            <span>{ws.name}</span>
+                                            {ws.public_id === activeWorkspaceId && <Check size={14} />}
+                                        </button>
+                                    ))}
+                                    <div className="collapsed-ws-divider" />
+                                    <button
+                                        type="button"
+                                        className="collapsed-ws-action"
+                                        onClick={() => {
+                                            setCollapsedWsOpen(false);
+                                            setCollapsed(false);
+                                            setNewWorkspaceName("");
+                                            setIsCreatingWorkspace(true);
+                                        }}
+                                    >
+                                        New workspace
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="collapsed-ws-action"
+                                        onClick={() => {
+                                            setCollapsedWsOpen(false);
+                                            setCollapsed(false);
+                                            if (activeWorkspaceId) {
+                                                const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
+                                                if (ws) {
+                                                    setRenameWorkspaceName(ws.name);
+                                                    setRenamingWorkspaceId(ws.public_id);
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        Rename
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        <ThemeToggle />
+                        <button
+                            type="button"
+                            className="collapsed-icon-btn"
+                            onClick={logout}
+                            title="Logout"
+                            aria-label="Logout"
+                        >
+                            <LogOut size={18} />
+                        </button>
+                    </div>
+                )}
             </div>
         </aside>
     );
