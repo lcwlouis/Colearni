@@ -8,7 +8,6 @@ from adapters.db import chunks_repository
 from core.contracts import ChunkRetriever, EmbeddingProvider
 from core.observability import (
     SPAN_KIND_RETRIEVER,
-    set_span_kind,
     start_span,
 )
 from sqlalchemy.orm import Session
@@ -37,10 +36,10 @@ class PgVectorRetriever(ChunkRetriever):
         bounded_top_k = max(1, min(top_k, self._retrieval_max_top_k))
         with start_span(
             "retrieval.vector.search",
+            kind=SPAN_KIND_RETRIEVER,
             workspace_id=workspace_id,
             **{"retrieval.top_k": bounded_top_k},
         ) as span:
-            set_span_kind(span, SPAN_KIND_RETRIEVER)
             query_embeddings = self._embedding_provider.embed_texts([query])
             if len(query_embeddings) != 1:
                 raise ValueError(

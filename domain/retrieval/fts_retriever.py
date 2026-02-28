@@ -8,7 +8,6 @@ from adapters.db import chunks_repository
 from core.contracts import ChunkRetriever
 from core.observability import (
     SPAN_KIND_RETRIEVER,
-    set_span_kind,
     start_span,
 )
 from sqlalchemy.orm import Session
@@ -27,10 +26,10 @@ class PgFtsRetriever(ChunkRetriever):
         bounded_top_k = max(1, min(top_k, self._retrieval_max_top_k))
         with start_span(
             "retrieval.fts.search",
+            kind=SPAN_KIND_RETRIEVER,
             workspace_id=workspace_id,
             **{"retrieval.top_k": bounded_top_k},
         ) as span:
-            set_span_kind(span, SPAN_KIND_RETRIEVER)
             rows = chunks_repository.full_text_top_k(self._session, query, workspace_id, bounded_top_k)
             results = [
                 RankedChunk(

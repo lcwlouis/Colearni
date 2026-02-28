@@ -21,7 +21,6 @@ from core.observability import (
     emit_event,
     observation_context,
     set_input_output,
-    set_span_kind,
     start_span,
 )
 from core.prompting import PromptRegistry
@@ -264,13 +263,13 @@ def submit_quiz(
         run_id=resolved_run_id,
     ), start_span(
         event_prefix,
+        kind=SPAN_KIND_CHAIN,
         component="grading",
         operation=operation,
         workspace_id=workspace_id,
         quiz_id=quiz_id,
         run_id=resolved_run_id,
     ) as span:
-        set_span_kind(span, SPAN_KIND_CHAIN)
         try:
             quiz = _load_quiz_for_grading(
                 session,

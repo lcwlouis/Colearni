@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from core.contracts import GraphLLMClient
-from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_kind, start_span
+from core.observability import SPAN_KIND_CHAIN, observation_context, start_span
 from core.prompting import PromptRegistry
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -100,11 +100,11 @@ def generate_practice_flashcards(
         workspace_id=workspace_id,
     ), start_span(
         "practice.flashcards.generate",
+        kind=SPAN_KIND_CHAIN,
         component="practice",
         operation="practice.flashcards.generate",
         workspace_id=workspace_id,
     ) as span:
-        set_span_kind(span, SPAN_KIND_CHAIN)
         if span is not None:
             span.set_attribute("concept.id", concept_id)
         payload = _parse_json(
@@ -170,11 +170,11 @@ def create_practice_quiz(
             workspace_id=workspace_id,
         ), start_span(
             "practice.quiz.generate",
+            kind=SPAN_KIND_CHAIN,
             component="practice",
             operation="practice.quiz.generate",
             workspace_id=workspace_id,
         ) as span:
-            set_span_kind(span, SPAN_KIND_CHAIN)
             if span is not None and concept_id is not None:
                 span.set_attribute("concept.id", concept_id)
             items = _generate_practice_items_with_retries(
@@ -488,11 +488,11 @@ def generate_stateful_flashcards(
         workspace_id=workspace_id,
     ), start_span(
         "practice.flashcards.generate_stateful",
+        kind=SPAN_KIND_CHAIN,
         component="practice",
         operation="practice.flashcards.generate_stateful",
         workspace_id=workspace_id,
     ) as span:
-        set_span_kind(span, SPAN_KIND_CHAIN)
         if span is not None and concept_id is not None:
             span.set_attribute("concept.id", concept_id)
         payload = _parse_json(

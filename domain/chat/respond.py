@@ -9,7 +9,6 @@ from core.observability import (
     observation_context,
     record_content_enabled,
     set_input_output,
-    set_span_kind,
     start_span,
 )
 from core.schemas import (
@@ -69,11 +68,11 @@ def generate_chat_response(
         workspace_id=request.workspace_id,
     ), start_span(
         "chat.respond",
+        kind=SPAN_KIND_CHAIN,
         component="chat",
         operation="chat.respond",
         workspace_id=request.workspace_id,
     ) as span:
-        set_span_kind(span, SPAN_KIND_CHAIN)
         set_input_output(span, input_value=request.query)
         # Correlation fields for Phoenix filtering
         if span is not None:

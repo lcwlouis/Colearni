@@ -158,6 +158,7 @@ Use these stable IDs in commits, reports, and verification blocks:
 - `OBS-4` RAG retrieval transparency: vector, FTS, hybrid, and graph-derived context
 - `OBS-5` Domain and graph maintenance span normalization
 - `OBS-6` Docs, regression coverage, and Phoenix operator guidance
+- `OBS-7` Completion audit and verification ledger
 
 ## Decision Log For Remaining Work
 
@@ -225,9 +226,11 @@ Verification
 Current repo verification status:
 
 - `pytest -q`: fails during collection from repo root because package imports are unresolved without `PYTHONPATH=.`
+- `PYTHONPATH=. pytest -q`: passing (`524 passed, 23 skipped`) as of 2026-03-01 audit rerun
 - `PYTHONPATH=. pytest -q tests/core/test_observability.py tests/adapters/test_graph_llm_observability.py`: passing
 - `PYTHONPATH=. pytest -q tests/domain/test_graph_gardener.py tests/domain/test_graph_resolver.py`: passing
 - `PYTHONPATH=. pytest -q tests/api/test_middleware.py tests/api/test_g3_stream.py tests/api/test_chat_respond.py`: passing
+- `PYTHONPATH=. pytest -q tests/core/test_observability.py tests/adapters/test_graph_llm_observability.py tests/adapters/test_g2_streaming.py tests/domain/test_g5_trace.py tests/domain/test_practice_prompts.py tests/domain/test_graph_resolver.py tests/domain/test_graph_gardener.py tests/api/test_middleware.py tests/api/test_g3_stream.py tests/api/test_chat_respond.py`: passing (`103 passed`) as of 2026-03-01 audit rerun
 - `npm --prefix apps/web test`: not run during this investigation
 - `npm --prefix apps/web run typecheck`: not run during this investigation
 
@@ -251,6 +254,56 @@ Current remaining hotspots:
 | `domain/ingestion/post_ingest.py` | 190 | Background summary generation is not yet grouped and summarized at the right level. |
 | `docs/OBSERVABILITY.md` | 248 | Documentation overstates current behavior and must be reconciled with the actual code. |
 
+## Plan Audit Findings
+
+This plan is close to technically complete, but it is still incomplete as a final execution record.
+
+Audit findings:
+
+1. The plan scope is now mostly correct.
+   - Phoenix is correctly treated as an AI-debugging surface, not a generic HTTP tracing surface.
+   - Retrieval visibility now explicitly covers vector, FTS, hybrid fusion, and graph-derived context/bias.
+2. The completion ledger is incomplete.
+   - `OBS-1` through `OBS-6` are marked complete later in this file, but this document does not yet contain the slice-level verification blocks required by the run rules above.
+   - Until those verification blocks are backfilled or linked, completion claims remain provisional.
+3. The verification snapshot is stale relative to the completion claims.
+   - The "Current Verification Status" section still reads like an in-flight baseline rather than a post-rollout verification record.
+   - Some hotspot notes are already stale against the codebase. For example, middleware no longer creates generic HTTP spans, and retrieval stage spans now exist in the retriever layer.
+   - This must be refreshed before the plan can serve as the final source of truth for completed work.
+4. Phoenix scope enforcement must be centralized.
+   - Removing `http.request` spans from middleware is necessary, but not sufficient by itself.
+   - The exporter/helper layer should also enforce an AI-span allowlist so future infrastructure spans cannot quietly re-enter Phoenix.
+5. "Graph retrieval" needs precise wording.
+   - In the current codebase, Phoenix visibility should cover graph-derived retrieval inputs such as provenance-linked chunks, concept biasing, adjacency/context injection, and selection reasons.
+   - If a dedicated graph retriever is introduced later, it should become its own traced retrieval stage rather than overloading the current terminology.
+
+## Completion Audit Results (2026-03-01)
+
+Slice verdicts after code inspection plus test reruns:
+
+1. `OBS-1` Partial
+   - Generic HTTP spans are removed from Phoenix, and the current targeted tests do not show `unknown` kinds on the exercised AI paths.
+   - The planned centralized AI-span export allowlist is still missing, so Phoenix scope enforcement is not hardened at the helper/exporter layer.
+2. `OBS-2` Incomplete
+   - Streaming LLM spans and provider-reported token capture work.
+   - The `estimated` usage-source path is still unimplemented, and long prompt/response capture still hard-truncates at 4096 chars without chunked events or linked storage fallback.
+   - The streaming chat path does not establish an observation context before calling the provider, so real request traces can fall back to `llm.stream` instead of the intended operation-specific name.
+3. `OBS-3` Incomplete
+   - Prompt metadata exists for several prompt-asset-backed calls.
+   - The social path still uses an inline prompt with no prompt metadata, and the promised stable span names such as `llm.chat.social`, `llm.graph.extract`, and `llm.graph.disambiguate` are not consistently produced by the current call sites.
+4. `OBS-4` Partial
+   - Retrieval is now split into vector, FTS, hybrid-fusion, and graph-bias stages.
+   - Fusion is still exported as `CHAIN` rather than `RETRIEVER`, and retrieval payloads remain too sparse to satisfy the plan's richer explainability goals (`document_id`, rank, previews, and selection reasons are still missing or inconsistent).
+5. `OBS-5` Incomplete
+   - Gardener budget events and some graph summaries are present.
+   - Many domain spans still lack list-view-friendly input/output summaries.
+   - `ingestion.post_ingest` does not actually wrap the background work because the span block ends before the task body.
+   - The streaming root span is not made current, so downstream retrieval/LLM spans are not guaranteed to nest under `chat.stream`.
+6. `OBS-6` Incomplete
+   - The docs are improved, but they still overstate the actual implementation.
+   - `docs/OBSERVABILITY.md` currently documents span names and hierarchies that the code does not reliably emit.
+   - The regression suite is useful but does not currently catch the real streaming-route hierarchy/naming issue or the post-ingest span scoping bug.
+
 ## Remaining Work Overview
 
 ### 1. Phoenix scope is polluted
@@ -268,6 +321,10 @@ The current retrieval span can show a merged result list, but it cannot explain 
 ### 4. Token and prompt visibility are still partial
 
 Provider usage is better than before, but full content is still truncated, metadata is not fully propagated, and there is still no explicit story for estimated token counts.
+
+### 5. Completion evidence is not yet recorded in this file
+
+The plan now claims the observability rollout is complete, but it does not yet carry the verification ledger required by its own run rules. That makes the document unreliable as the final execution record until the evidence is backfilled.
 
 ## Implementation Sequencing
 
@@ -599,16 +656,63 @@ Exit criteria:
 - Docs match the implemented behavior.
 - Regressions in trace scope, kind coverage, retrieval transparency, and token accounting are covered by tests.
 
+### OBS-7. Slice 7: Completion audit and verification ledger
+
+Purpose:
+
+- Make this plan trustworthy as the final execution document by reconciling completion claims with actual verification evidence.
+
+Root problem:
+
+- `OBS-1` through `OBS-6` are marked complete, but this file does not yet contain the slice-level verification blocks required by its own run rules.
+- The current verification snapshot does not read like a post-implementation verification record.
+- Without an audit slice, the plan can overclaim completion even if the code changes themselves are sound.
+
+Files involved:
+
+- `docs/OBSERVABILITY_REFACTOR_PLAN.md`
+- `docs/OBSERVABILITY.md`
+- any test files touched while re-running or repairing the observability verification matrix
+
+Implementation steps:
+
+1. Backfill a verification block for every completed slice, or link to the exact artifact that contains it if the repo intentionally stores those records elsewhere.
+2. Refresh the "Current Verification Status" section so it reflects the actual post-rollout state instead of the original in-flight baseline.
+3. Re-run the targeted observability verification matrix and record exact outcomes, including any pre-existing unrelated failures.
+4. Re-open any slice that lacks evidence, still has residual behavior gaps, or no longer matches the code.
+5. Confirm the final Phoenix contract in one place:
+   - AI-only span scope
+   - no exported AI spans with `unknown` kind
+   - retrieval stage visibility includes vector, FTS, hybrid, and graph-derived context/bias
+   - prompt/token capture policy is accurately documented
+
+What stays the same:
+
+- This slice is an audit/documentation hardening step; it does not widen product scope.
+- If all prior slices are genuinely complete, `OBS-7` should mostly add evidence and reconcile docs rather than introduce new behavior.
+
+Verification:
+
+- Re-run the targeted observability matrix recorded in this file
+- Manually inspect this document to confirm every completed slice has traceable evidence
+
+Exit criteria:
+
+- Every completed slice in this file has traceable verification evidence.
+- The current verification snapshot is accurate as of the latest run.
+- No mismatch remains between completion claims and the evidence recorded in this plan.
+
 ## Execution Order (Update After Each Run)
 
 Start with the highest-priority remaining slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
 
-1. `OBS-1` Phoenix scope and span taxonomy foundation ✅
-2. `OBS-2` LLM tracing parity ✅
-3. `OBS-3` Prompt identity and call separation ✅
-4. `OBS-4` RAG retrieval transparency ✅
-5. `OBS-5` Domain and graph maintenance span normalization ✅
-6. `OBS-6` Docs and regression hardening ✅
+1. `OBS-1` Partial; reopen to add centralized AI-span export allowlist and close kind-scope hardening
+2. `OBS-2` Incomplete; reopen to finish estimated/missing usage policy and long-content capture policy
+3. `OBS-3` Incomplete; reopen to make span naming and prompt identity consistent across social, graph, and streaming paths
+4. `OBS-4` Partial; reopen to finish retriever-kind taxonomy and richer retrieval payload visibility
+5. `OBS-5` Incomplete; reopen to fix root-span scoping/summary gaps, especially streaming and post-ingest
+6. `OBS-6` Incomplete; reopen after code fixes so docs and regression coverage match reality
+7. `OBS-7` Completion audit and verification ledger after the reopened slices are actually closed
 
 Re-read this file after every 2 completed slices and restate which slices remain.
 
@@ -672,6 +776,9 @@ Slice-specific emphasis:
   - `PYTHONPATH=. pytest -q tests/domain/test_graph_resolver.py tests/domain/test_graph_gardener.py`
 - `OBS-6`
   - rerun the targeted observability matrix plus docs review
+- `OBS-7`
+  - every completed slice has a verification block or an explicit pointer to the verification artifact
+  - the "Current Verification Status" section reflects the latest rerun, not the original baseline
 
 Manual smoke checklist:
 
@@ -681,6 +788,7 @@ Manual smoke checklist:
 4. Open a gardener trace and confirm the Events tab explains budget usage and any hard-stop reason.
 5. Open a streaming tutor trace and confirm tokens, prompt metadata, and non-unknown kinds appear in Phoenix.
 6. Confirm safe mode still omits full content when the full-content env gate is off.
+7. Confirm this plan file contains traceable verification evidence for every slice marked complete.
 
 ## What Not To Do
 

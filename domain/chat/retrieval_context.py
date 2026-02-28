@@ -7,7 +7,6 @@ import json
 from adapters.embeddings.factory import build_embedding_provider
 from core.observability import (
     SPAN_KIND_RETRIEVER,
-    set_span_kind,
     start_span,
 )
 from core.settings import Settings
@@ -30,10 +29,10 @@ def retrieve_ranked_chunks(
     """Build a hybrid retriever and return ranked chunks."""
     with start_span(
         "retrieval.hybrid",
+        kind=SPAN_KIND_RETRIEVER,
         workspace_id=workspace_id,
         **{"retrieval.query": query[:256], "retrieval.top_k": top_k},
     ) as span:
-        set_span_kind(span, SPAN_KIND_RETRIEVER)
         provider = build_embedding_provider(settings=settings)
         vector_retriever = PgVectorRetriever(
             session=session,
@@ -75,11 +74,11 @@ def apply_concept_bias(
     """Boost scores for chunks linked to the given concept via provenance."""
     with start_span(
         "retrieval.graph.bias",
+        kind=SPAN_KIND_RETRIEVER,
         workspace_id=workspace_id,
         concept_id=concept_id,
         **{"retrieval.input_count": len(chunks)},
     ) as span:
-        set_span_kind(span, SPAN_KIND_RETRIEVER)
         linked_chunk_ids = _linked_chunks_for_concept(
             session,
             workspace_id=workspace_id,

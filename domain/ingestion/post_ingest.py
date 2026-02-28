@@ -14,7 +14,6 @@ from core.contracts import EmbeddingProvider, GraphLLMClient
 from core.observability import (
     SPAN_KIND_CHAIN,
     observation_context,
-    set_span_kind,
     start_span,
 )
 from core.prompting import PromptRegistry
@@ -79,102 +78,101 @@ def run_post_ingest_tasks(
             workspace_id=workspace_id,
         ), start_span(
             "ingestion.post_ingest",
+            kind=SPAN_KIND_CHAIN,
             component="ingestion",
             operation="post_ingest",
             workspace_id=workspace_id,
             document_id=document_id,
         ) as span:
-            set_span_kind(span, SPAN_KIND_CHAIN)
-
             # Mark graph as extracting
-        if active_settings.ingest_build_graph and graph_llm_client is not None:
-            update_document_status(
-                db, workspace_id=workspace_id, document_id=document_id,
-                graph_status="extracting",
-            )
-            db.commit()
-
-        chunks_rows = list_chunks_for_document(
-            db,
-            workspace_id=workspace_id,
-            document_id=document_id,
-        )
-        chunk_texts = [c.text for c in chunks_rows]
-        _log.info("post_ingest loaded %d chunks for doc=%s", len(chunk_texts), document_id)
-
-        # 1) Populate embeddings
-        if active_settings.ingest_populate_embeddings:
-            provider = chunk_embedding_provider
-            if provider is None:
-                try:
-                    provider = build_embedding_provider(settings=active_settings)
-                except ValueError:
-                    _log.warning("Chunk embedding provider unavailable for background task")
-                    provider = None
-            if provider is not None:
-                _log.info("post_ingest embedding START doc=%s chunks=%d", document_id, len(chunk_texts))
-                try:
-                    populate_new_chunk_embeddings(
-                        session=db,
-                        provider=provider,
-                        chunks=[
-                            NewChunkInput(
-                                workspace_id=workspace_id,
-                                document_id=document_id,
-                                chunk_index=i,
-                                text=chunk_texts[i],
-                            )
-                            for i in range(len(chunk_texts))
-                        ],
-                        batch_size=active_settings.embedding_batch_size,
-                    )
-                    _log.info("post_ingest embedding DONE doc=%s", document_id)
-                except Exception:
-                    _log.exception("Background embedding population failed doc=%s", document_id)
-                    db.rollback()
-
-        # 2) Summary + graph
-        if active_settings.ingest_build_graph and graph_llm_client is not None:
-            _log.info("post_ingest summary+graph START doc=%s", document_id)
-            summary = generate_document_summary(
-                chunks=chunk_texts,
-                llm_client=graph_llm_client,
-            )
-            if summary:
-                _log.info("post_ingest summary generated doc=%s len=%d", document_id, len(summary))
-                update_document_summary(
-                    db,
-                    workspace_id=workspace_id,
-                    document_id=document_id,
-                    summary=summary,
+            if active_settings.ingest_build_graph and graph_llm_client is not None:
+                update_document_status(
+                    db, workspace_id=workspace_id, document_id=document_id,
+                    graph_status="extracting",
                 )
-            effective_graph_embedding_provider = (
-                graph_embedding_provider or chunk_embedding_provider
+                db.commit()
+
+            chunks_rows = list_chunks_for_document(
+                db,
+                workspace_id=workspace_id,
+                document_id=document_id,
             )
-            try:
-                build_graph_for_chunks(
-                    db,
-                    workspace_id=workspace_id,
-                    chunks=chunks_rows,
+            chunk_texts = [c.text for c in chunks_rows]
+            _log.info("post_ingest loaded %d chunks for doc=%s", len(chunk_texts), document_id)
+
+            # 1) Populate embeddings
+            if active_settings.ingest_populate_embeddings:
+                provider = chunk_embedding_provider
+                if provider is None:
+                    try:
+                        provider = build_embedding_provider(settings=active_settings)
+                    except ValueError:
+                        _log.warning("Chunk embedding provider unavailable for background task")
+                        provider = None
+                if provider is not None:
+                    _log.info("post_ingest embedding START doc=%s chunks=%d", document_id, len(chunk_texts))
+                    try:
+                        populate_new_chunk_embeddings(
+                            session=db,
+                            provider=provider,
+                            chunks=[
+                                NewChunkInput(
+                                    workspace_id=workspace_id,
+                                    document_id=document_id,
+                                    chunk_index=i,
+                                    text=chunk_texts[i],
+                                )
+                                for i in range(len(chunk_texts))
+                            ],
+                            batch_size=active_settings.embedding_batch_size,
+                        )
+                        _log.info("post_ingest embedding DONE doc=%s", document_id)
+                    except Exception:
+                        _log.exception("Background embedding population failed doc=%s", document_id)
+                        db.rollback()
+
+            # 2) Summary + graph
+            if active_settings.ingest_build_graph and graph_llm_client is not None:
+                _log.info("post_ingest summary+graph START doc=%s", document_id)
+                summary = generate_document_summary(
+                    chunks=chunk_texts,
                     llm_client=graph_llm_client,
-                    settings=active_settings,
-                    embedding_provider=effective_graph_embedding_provider,
                 )
-                update_document_status(
-                    db, workspace_id=workspace_id, document_id=document_id,
-                    graph_status="extracted",
+                if summary:
+                    _log.info("post_ingest summary generated doc=%s len=%d", document_id, len(summary))
+                    update_document_summary(
+                        db,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        summary=summary,
+                    )
+                effective_graph_embedding_provider = (
+                    graph_embedding_provider or chunk_embedding_provider
                 )
-                _log.info("post_ingest graph DONE doc=%s", document_id)
-            except Exception as exc:
-                _log.exception("Background graph extraction failed doc=%s", document_id)
-                update_document_status(
-                    db, workspace_id=workspace_id, document_id=document_id,
-                    graph_status="failed",
-                    error_message=f"Graph extraction failed: {exc}",
-                )
+                try:
+                    build_graph_for_chunks(
+                        db,
+                        workspace_id=workspace_id,
+                        chunks=chunks_rows,
+                        llm_client=graph_llm_client,
+                        settings=active_settings,
+                        embedding_provider=effective_graph_embedding_provider,
+                    )
+                    update_document_status(
+                        db, workspace_id=workspace_id, document_id=document_id,
+                        graph_status="extracted",
+                    )
+                    _log.info("post_ingest graph DONE doc=%s", document_id)
+                except Exception as exc:
+                    _log.exception("Background graph extraction failed doc=%s", document_id)
+                    update_document_status(
+                        db, workspace_id=workspace_id, document_id=document_id,
+                        graph_status="failed",
+                        error_message=f"Graph extraction failed: {exc}",
+                    )
 
-        db.commit()
-        _log.info("post_ingest_tasks DONE ws=%s doc=%s", workspace_id, document_id)
+            db.commit()
+            _log.info("post_ingest_tasks DONE ws=%s doc=%s", workspace_id, document_id)
     except Exception as exc:
         _log.exception("Post-ingest background task failed ws=%s doc=%s", workspace_id, document_id)
         db.rollback()

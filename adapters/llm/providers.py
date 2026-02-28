@@ -10,6 +10,7 @@ from typing import Any
 
 from core.contracts import TutorTextStream
 from core.observability import (
+    SPAN_KIND_LLM,
     classify_usage_source,
     create_span,
     emit_event,
@@ -280,6 +281,7 @@ class _BaseGraphLLMClient(ABC):
 
         span = create_span(
             span_name,
+            kind=SPAN_KIND_LLM,
             component="llm",
             operation=operation,
             provider=self._provider,
@@ -484,6 +486,7 @@ class _BaseGraphLLMClient(ABC):
 
         with start_span(
             span_name,
+            kind=SPAN_KIND_LLM,
             component="llm",
             operation=operation,
             provider=self._provider,

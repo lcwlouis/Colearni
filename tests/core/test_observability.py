@@ -399,3 +399,88 @@ def test_budget_hard_stop_event_visible(otel_exporter) -> None:
     stop_events = [e for e in spans[0].events if e.name == "graph.resolver.budget.hard_stop"]
     assert stop_events[0].attributes["status"] == "warning"
     assert stop_events[0].attributes["reason"] == "llm_budget_exhausted"
+
+
+# ---------------------------------------------------------------------------
+# _AIOnlySpanExporter tests
+# ---------------------------------------------------------------------------
+
+
+def test_ai_only_exporter_forwards_ai_spans() -> None:
+    """_AIOnlySpanExporter forwards spans that have AI OpenInference kinds."""
+    from core.observability import (
+        SPAN_KIND_CHAIN,
+        SPAN_KIND_LLM,
+        SPAN_KIND_RETRIEVER,
+        _AIOnlySpanExporter,
+    )
+
+    forwarded: list = []
+
+    class _Capture(SpanExporter):
+        def export(self, spans):
+            forwarded.extend(spans)
+            return SpanExportResult.SUCCESS
+        def shutdown(self): pass
+
+    exporter = _AIOnlySpanExporter(_Capture())
+
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    set_tracer_provider_for_testing(provider)
+    settings = get_settings().model_copy(
+        update={
+            "observability_enabled": True,
+            "observability_otlp_endpoint": None,
+            "observability_service_name": "colearni-test",
+        }
+    )
+    configure_observability(settings)
+    try:
+        with start_span("llm.call", kind=SPAN_KIND_LLM):
+            pass
+        with start_span("chat.respond", kind=SPAN_KIND_CHAIN):
+            pass
+        with start_span("retrieval.vector", kind=SPAN_KIND_RETRIEVER):
+            pass
+        assert len(forwarded) == 3
+    finally:
+        set_tracer_provider_for_testing(None)
+
+
+def test_ai_only_exporter_blocks_non_ai_spans() -> None:
+    """_AIOnlySpanExporter does NOT forward spans without an AI kind attribute."""
+    from core.observability import (
+        SPAN_KIND_CHAIN,
+        _AIOnlySpanExporter,
+    )
+
+    forwarded: list = []
+
+    class _Capture(SpanExporter):
+        def export(self, spans):
+            forwarded.extend(spans)
+            return SpanExportResult.SUCCESS
+        def shutdown(self): pass
+
+    exporter = _AIOnlySpanExporter(_Capture())
+
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    set_tracer_provider_for_testing(provider)
+    settings = get_settings().model_copy(
+        update={
+            "observability_enabled": True,
+            "observability_otlp_endpoint": None,
+            "observability_service_name": "colearni-test",
+        }
+    )
+    configure_observability(settings)
+    try:
+        # start_span without kind= → no openinference.span.kind attribute
+        with start_span("http.request"):
+            pass
+        # No spans should reach the inner exporter
+        assert len(forwarded) == 0, f"Expected 0 forwarded spans, got {len(forwarded)}"
+    finally:
+        set_tracer_provider_for_testing(None)

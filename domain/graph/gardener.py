@@ -13,7 +13,6 @@ from core.observability import (
     SPAN_KIND_CHAIN,
     emit_event,
     observation_context,
-    set_span_kind,
     start_span,
 )
 from core.settings import Settings
@@ -138,12 +137,12 @@ def run_graph_gardener(
         run_id=resolved_run_id,
     ), start_span(
         "graph.gardener.run",
+        kind=SPAN_KIND_CHAIN,
         component="graph",
         operation="graph.gardener.run",
         workspace_id=workspace_id,
         run_id=resolved_run_id,
     ) as span:
-        set_span_kind(span, SPAN_KIND_CHAIN)
         config = GardenerConfig.from_settings(settings)
         effective_max_dirty_nodes = config.max_dirty_nodes_per_run
         if max_dirty_nodes is not None:

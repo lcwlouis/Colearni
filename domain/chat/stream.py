@@ -15,7 +15,6 @@ from core.observability import (
     SPAN_KIND_CHAIN,
     create_span,
     set_input_output,
-    set_span_kind,
 )
 from core.schemas import (
     AssistantDraft,
@@ -88,12 +87,12 @@ def generate_chat_response_stream(
     # cross async boundaries (Starlette runs sync generators in threadpool).
     span = create_span(
         "chat.stream",
+        kind=SPAN_KIND_CHAIN,
         component="chat",
         operation="chat.stream",
         workspace_id=request.workspace_id,
     )
     if span is not None:
-        set_span_kind(span, SPAN_KIND_CHAIN)
         set_input_output(span, input_value=request.query)
         if request.session_id is not None:
             span.set_attribute("session.id", request.session_id)

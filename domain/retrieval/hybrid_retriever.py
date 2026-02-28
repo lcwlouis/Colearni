@@ -7,8 +7,7 @@ from typing import Literal
 
 from core.contracts import ChunkRetriever
 from core.observability import (
-    SPAN_KIND_CHAIN,
-    set_span_kind,
+    SPAN_KIND_RETRIEVER,
     start_span,
 )
 
@@ -52,6 +51,7 @@ class HybridRetriever(ChunkRetriever):
 
         with start_span(
             "retrieval.hybrid.fuse",
+            kind=SPAN_KIND_RETRIEVER,
             **{
                 "retrieval.vector_count": len(vector_rows),
                 "retrieval.fts_count": len(fts_rows),
@@ -60,7 +60,6 @@ class HybridRetriever(ChunkRetriever):
                 "retrieval.fts_weight": self._fts_weight,
             },
         ) as span:
-            set_span_kind(span, SPAN_KIND_CHAIN)
             vector_ranks = {row.chunk_id: rank for rank, row in enumerate(vector_rows, start=1)}
             fts_ranks = {row.chunk_id: rank for rank, row in enumerate(fts_rows, start=1)}
             by_chunk_id = {row.chunk_id: row for row in vector_rows}

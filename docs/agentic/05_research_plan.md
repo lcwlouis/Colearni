@@ -1,0 +1,359 @@
+# Research Plan (AR5) (READ THIS OFTEN)
+
+Last updated: 2026-03-01
+
+Archive snapshots:
+- `none` (new child plan)
+
+Template usage:
+- This is a task-specific child plan for topic finding, research planning, and approval-gated candidate flow expansion.
+- It does not replace `docs/REFACTOR_PLAN.md`.
+- `docs/AGENTIC_MASTER_PLAN.md` remains the parent source of truth for cross-track constraints and status.
+
+## Plan Completeness Checklist
+
+This child plan should be treated as incomplete unless it includes:
+
+1. archive snapshot path(s)
+2. current verification status
+3. ordered slice list with stable IDs
+4. verification block template
+5. removal entry template
+6. final section named `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)`
+
+## Non-Negotiable Run Rules
+
+1. You MUST re-open and re-read this file:
+   - at the start of the run
+   - after every 2 AR5 sub-slices
+   - after any context compaction / summarization event
+   - before claiming any AR5 slice complete
+2. Do not overclaim. A slice is ONLY complete if:
+   - code or docs for that slice are changed
+   - behavior is verified
+   - the slice-specific verification gates in this file are met
+3. Keep external research approval-gated.
+4. Do not auto-ingest raw external material in the first pass.
+5. This file is INCOMPLETE unless it ends with `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)` followed by exactly one fenced code block.
+
+## Purpose
+
+This plan restores the original topic-finder and knowledge-finder direction without dropping CoLearni's current guardrails.
+
+Earlier work already landed:
+
+- `apps/api/routes/research.py` exposes research source and candidate workflows
+- `domain/research/service.py` manages research state
+- `domain/research/runner.py` fetches from approved/registered sources and creates pending candidates
+- `apps/jobs/research_runner.py` runs the background job
+
+This plan exists because the current subsystem is still much closer to "manual source registry plus candidate fetcher" than to the original topic-planned learning copilot vision.
+
+## Inputs Used
+
+- `docs/prompt_templates/refactor_plan.md`
+- `docs/AGENTIC_MASTER_PLAN.md`
+- `docs/DRIFT_REPORT.md`
+- `docs/PRODUCT_SPEC.md`
+- `apps/api/routes/research.py`
+- `domain/research/service.py`
+- `domain/research/runner.py`
+- `apps/jobs/research_runner.py`
+- `domain/ingestion/post_ingest.py`
+- quiz/practice flow files for learning-gated promotion
+
+## Executive Summary
+
+What is already in good shape:
+
+- approval-gated candidate flow already exists
+- research state already has routes, services, and a background runner
+
+What is still materially missing:
+
+1. topic discovery is mostly missing
+2. query planning is mostly missing
+3. research and learning are still too loosely coupled
+4. bounded online query execution is not yet clearly planned into the current runner flow
+
+The remaining work should stay narrow: add typed planning on top of the existing subsystem, route planned results into the current candidate queue, and only then connect promotion into the learning loop.
+
+## Non-Negotiable Constraints
+
+1. Keep external research approval-gated.
+2. Do not auto-ingest raw external material in the first pass; every externally discovered result must remain pending until explicit user approval before ingestion.
+3. Keep search planning bounded and inspectable.
+4. Separate source discovery from learner-visible trust/promotion.
+5. Preserve the existing research tables and flows where possible during migration.
+
+## Completed Work (Do Not Reopen Unless Blocked)
+
+- `BASE-R1` Research source and candidate routes already exist.
+- `BASE-R2` Research runner already creates pending candidates.
+- `BASE-R3` Approved candidates can already be ingested through the current pipeline.
+
+## Remaining Slice IDs
+
+- `AR5.1` Define research planning types
+- `AR5.2` Add topic/subtopic planner
+- `AR5.3` Add external query planning and candidate queue integration
+- `AR5.4` Add learning-gated candidate promotion
+
+## Decision Log For Remaining Work
+
+1. Build on the existing research subsystem rather than replacing it wholesale.
+2. Research planning should propose topics, queries, and source classes; runtime code should decide how to execute them.
+3. Promotion into the learner's trusted working set should remain deliberate and may involve quiz/review gates.
+4. Initial AR5 execution may use bounded online search/fetch providers in addition to registered-source fetchers.
+5. Every discovered result must enter the pending candidate queue before any ingest decision.
+6. User approval is required before the trusted ingest pipeline can run on externally discovered material.
+
+## Removal Safety Rules
+
+1. Do not remove existing manual source registration until topic-planned research reaches parity.
+2. Keep approval states explicit through every migration step.
+3. If research schema fields grow, record backward compatibility expectations.
+4. Maintain a removal ledger here if any old research compatibility path is retired.
+
+## Removal Entry Template
+
+```text
+Removal Entry - AR5.x
+
+Removed artifact
+- <file / function / route / schema / selector>
+
+Reason for removal
+- <why it was dead, duplicated, or replaced>
+
+Replacement
+- <new file/module/path or "none" if true deletion>
+
+Reverse path
+- <exact steps to restore or revert>
+
+Compatibility impact
+- <public/internal, none/minor/major>
+
+Verification
+- <tests or manual checks proving the replacement works>
+```
+
+## Current Verification Status
+
+- approval-gated research candidate flow exists
+- automated topic planning and external query planning are not confirmed in current runtime
+- `pytest -q`: not re-run during this planning pass
+
+Current hotspots:
+
+| File | Why it still matters |
+|---|---|
+| `apps/api/routes/research.py` | Current research UX/API seam. |
+| `domain/research/service.py` | Current state-management seam for research. |
+| `domain/research/runner.py` | Current fetch/discovery engine that will need planned inputs. |
+| `apps/jobs/research_runner.py` | Current background execution seam. |
+| `domain/ingestion/post_ingest.py` | Current ingest pipeline that candidate promotion must respect. |
+
+## Remaining Work Overview
+
+### 1. Topic discovery is mostly missing
+
+The current product does not yet support the original "topic finder" flow from a plain-language research goal.
+
+### 2. Research and learning are still too loosely coupled
+
+Candidates exist, but they are not yet naturally turned into guided learning opportunities.
+
+## Implementation Sequencing
+
+Each slice should end with green targeted tests before the next slice starts.
+
+### AR5.1. Slice 1: Define research planning types
+
+Purpose:
+
+- create typed planner outputs for research
+
+Root problem:
+
+- there is no canonical planning surface for topic, query, and promotion decisions
+
+Files involved:
+
+- `domain/research/planner.py` (new)
+- research schema modules as needed
+
+Implementation steps:
+
+1. Define `TopicProposal`, `ResearchQueryPlan`, and `CandidatePromotionDecision`.
+2. Keep planner outputs typed and bounded.
+3. Add prompt assets only where needed for structured planning.
+
+What stays the same:
+
+- current research tables and approval states
+- current candidate flow remains the canonical queue
+
+Verification:
+
+- unit tests for schema validation
+
+Exit criteria:
+
+- research planning outputs have canonical shapes
+
+### AR5.2. Slice 2: Add topic/subtopic planner
+
+Purpose:
+
+- generate reviewable points of interest from a user goal
+
+Root problem:
+
+- research cannot currently start from a plain-language topic request
+
+Files involved:
+
+- `domain/research/planner.py`
+- `apps/api/routes/research.py`
+
+Implementation steps:
+
+1. Accept a high-level topic request.
+2. Produce subtopics, related study directions, and source-class suggestions such as papers, expert posts, docs, or updates.
+3. Keep the user in the loop for approval or narrowing.
+
+What stays the same:
+
+- no silent candidate ingestion
+- research remains approval-gated
+
+Verification:
+
+- API tests
+- manual planner flows
+
+Exit criteria:
+
+- research can start from a topic prompt rather than only pre-registered URLs
+
+### AR5.3. Slice 3: Add external query planning and candidate queue integration
+
+Purpose:
+
+- generate search plans and route results into the current candidate system
+
+Root problem:
+
+- even if topics are found, there is not yet a planner-owned route into the candidate queue
+
+Files involved:
+
+- `domain/research/planner.py`
+- `domain/research/service.py`
+- `domain/research/runner.py`
+- `apps/jobs/research_runner.py`
+
+Implementation steps:
+
+1. Generate query sets based on topic and learner state.
+2. Execute query plans through bounded online providers or registered-source fetchers.
+3. Route fetched results into the existing candidate queue.
+4. Track query provenance and candidate origin.
+
+What stays the same:
+
+- candidate approval remains mandatory
+- current queue semantics remain intact
+
+Verification:
+
+- targeted research job tests
+- manual queue inspection
+
+Exit criteria:
+
+- research planning feeds the candidate review flow safely
+
+### AR5.4. Slice 4: Add learning-gated candidate promotion
+
+Purpose:
+
+- tie research ingestion back to the learning loop
+
+Root problem:
+
+- research candidates do not yet naturally become guided learning opportunities
+
+Files involved:
+
+- research files above
+- quiz/practice flow files
+- `domain/ingestion/post_ingest.py`
+
+Implementation steps:
+
+1. Convert approved candidates into learning candidates with summaries and extracted POIs.
+2. Add optional review or quiz gates after approval but before promotion into trusted material.
+3. Record user feedback signals for future planning relevance.
+
+What stays the same:
+
+- no automatic promotion of unapproved content
+- ingest pipeline remains the trusted final path
+
+Verification:
+
+- end-to-end manual research-to-learning flow
+- targeted tests for status transitions
+
+Exit criteria:
+
+- external research becomes a guided learning pipeline, not just fetched text
+
+## Verification Block Template
+
+```text
+Verification Block - AR5.x
+
+Root cause
+- <why research was too manual or too loosely connected to learning>
+
+Files changed
+- <path>
+- <path>
+
+What changed
+- <summary>
+
+Commands run
+- <command>
+
+Manual verification
+- <research and review flow checked>
+
+Observed outcome
+- <result>
+```
+
+## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
+
+```text
+Read docs/AGENTIC_MASTER_PLAN.md, then read docs/agentic/05_research_plan.md.
+Begin with the next incomplete AR5 slice exactly as described.
+
+Execution loop for this child plan:
+
+1. Work on one AR5 slice at a time.
+2. Preserve approval-gated research, keep planning bounded and typed, and do not auto-ingest raw external content.
+3. Run the listed verification steps before claiming a slice complete.
+4. When a slice is complete, add:
+   - the normal Verification Block for that slice
+   - a summary of all Removal Entries added during that slice
+5. After every 2 completed AR5 slices OR if context is compacted/summarized, re-open docs/AGENTIC_MASTER_PLAN.md and docs/agentic/05_research_plan.md and restate which AR5 slices remain.
+6. Continue to the next incomplete AR5 slice once the previous slice is verified.
+7. When all AR5 slices are complete, return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
+
+Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+```

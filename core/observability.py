@@ -59,6 +59,17 @@ SPAN_KIND_EMBEDDING = "EMBEDDING"
 SPAN_KIND_TOOL = "TOOL"
 SPAN_KIND_AGENT = "AGENT"
 
+# Allowed OpenInference kinds for Phoenix export.
+# Only spans with these kinds are forwarded to the OTLP exporter.
+_AI_SPAN_KINDS: frozenset[str] = frozenset([
+    SPAN_KIND_LLM,
+    SPAN_KIND_CHAIN,
+    SPAN_KIND_RETRIEVER,
+    SPAN_KIND_EMBEDDING,
+    SPAN_KIND_TOOL,
+    SPAN_KIND_AGENT,
+])
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -144,7 +155,7 @@ def configure_observability(settings: Any) -> None:
         tracer_provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
         exporter = _build_otlp_http_exporter(endpoint)
         if exporter is not None:
-            tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
+            tracer_provider.add_span_processor(BatchSpanProcessor(_AIOnlySpanExporter(exporter)))
         _TRACER_PROVIDER = tracer_provider
         try:
             trace.set_tracer_provider(tracer_provider)
@@ -171,8 +182,12 @@ def observation_context(**fields: Any):
 
 
 @contextlib.contextmanager
-def start_span(name: str, **attributes: Any):
+def start_span(name: str, *, kind: str | None = None, **attributes: Any):
     """Start a trace span when observability is enabled.
+
+    ``kind`` sets the OpenInference span kind (e.g. SPAN_KIND_CHAIN) at
+    creation time — prefer this over a follow-up ``set_span_kind()`` call so
+    the kind is always present before the span is exported.
 
     Sets span status to OK on normal exit, or ERROR with a recorded
     exception on failure.
@@ -185,6 +200,8 @@ def start_span(name: str, **attributes: Any):
     combined = dict(get_observation_context())
     combined.update(attributes)
     with tracer.start_as_current_span(name) as span:
+        if kind is not None:
+            span.set_attribute(OPENINFERENCE_SPAN_KIND, kind)
         _set_span_attributes(span, combined)
         try:
             yield span
@@ -196,8 +213,10 @@ def start_span(name: str, **attributes: Any):
             span.set_status(trace.StatusCode.OK)
 
 
-def create_span(name: str, **attributes: Any):
+def create_span(name: str, *, kind: str | None = None, **attributes: Any):
     """Create a span without context management (safe for generators/streams).
+
+    ``kind`` sets the OpenInference span kind at creation time.
 
     Unlike ``start_span``, this does **not** use a context manager and will
     not attach/detach OTel context.  The caller is responsible for calling
@@ -212,6 +231,8 @@ def create_span(name: str, **attributes: Any):
     combined = dict(get_observation_context())
     combined.update(attributes)
     span = tracer.start_span(name)
+    if kind is not None:
+        span.set_attribute(OPENINFERENCE_SPAN_KIND, kind)
     _set_span_attributes(span, combined)
     return span
 
@@ -442,6 +463,39 @@ def _build_otlp_http_exporter(endpoint: str | None):
         )
         return None
     return OTLPSpanExporter(endpoint=endpoint)
+
+
+class _AIOnlySpanExporter:
+    """Wrap a SpanExporter and only forward spans that carry an AI OpenInference kind.
+
+    This enforces the Phoenix export allowlist at the exporter layer so that
+    generic infrastructure spans (added by third-party libraries or future
+    code) can never quietly pollute the Phoenix trace view.
+    """
+
+    def __init__(self, delegate: Any) -> None:
+        self._delegate = delegate
+
+    def export(self, spans: Any) -> Any:
+        ai_spans = [
+            s for s in spans
+            if s.attributes.get(OPENINFERENCE_SPAN_KIND) in _AI_SPAN_KINDS
+        ]
+        if not ai_spans:
+            try:
+                from opentelemetry.sdk.trace.export import SpanExportResult
+                return SpanExportResult.SUCCESS
+            except ImportError:
+                return None
+        return self._delegate.export(ai_spans)
+
+    def shutdown(self) -> None:
+        self._delegate.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        if hasattr(self._delegate, "force_flush"):
+            return self._delegate.force_flush(timeout_millis)
+        return True
 
 
 def _set_span_attributes(span: Any, attributes: Mapping[str, Any]) -> None:
