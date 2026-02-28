@@ -1,9 +1,10 @@
-# CoLearni Tutor Phase UX Fix Plan (READ THIS OFTEN)
+# CoLearni Tutor Streaming UX Fix Plan (READ THIS OFTEN)
 
 Last updated: 2026-03-01
 
 Archive snapshots:
 - `docs/archive/GENERATION_STATUS_PLAN_2026-03-01_pre-ux-phase-fix-rewrite.md`
+- `docs/archive/GENERATION_STATUS_PLAN_2026-03-01_pre-ephemeral-trace-and-structured-stream-update.md`
 
 Template source:
 - `docs/prompt_templates/refactor_plan.md`
@@ -33,31 +34,45 @@ This active plan should be treated as invalid if any of the following are missin
 3. Browser-visible behavior is the source of truth:
    - tests are necessary
    - they are not sufficient
-   - the phase UX is not done until the tutor UI shows `Thinking…` before first output, switches to `Generating response…` only when visible text starts, and does not show `Finalizing…`
+   - the feature is not done until the tutor UI shows the right visible phase labels, streams the answer into the right surfaces, and avoids the current end-of-stream layout jump
 4. Keep FastAPI routes thin and keep `/chat/respond` stable.
 5. Do not expose raw chain-of-thought, hidden reasoning text, prompt internals, or retrieved chunk bodies in logs, API responses, or UI.
-6. Do not reopen completed backend streaming transport work unless the current slice is blocked by it.
-7. This plan is specifically for tutor phase UX correctness. Do not widen it into a general chat rewrite.
-8. This document is incomplete unless it ends with a section titled:
+6. Any human-readable reasoning summary must be optional, bounded, and ephemeral. It must not be persisted in chat history or the assistant response envelope.
+7. Do not reopen completed backend streaming transport work unless the current slice is blocked by it.
+8. This plan is specifically for tutor streaming UX, explicit reasoning-control semantics, ephemeral reasoning summaries, and structured hint/citation rendering. Do not widen it into a general chat rewrite.
+9. This document is incomplete unless it ends with a section titled:
    - `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)`
    - followed by a fenced code block containing the execution prompt
 
 ## Purpose
 
-This document replaces the earlier thinking/streaming status plan.
+This document replaces the earlier phase-only status plan.
 
-The stream transport and delta plumbing are already in place. The remaining gap is narrower and user-visible:
+The stream transport and phase semantics are mostly in place. The remaining gap is now a broader streaming UX problem:
 
-- the frontend does not reliably show `Thinking…` before pre-output work
-- the frontend exposes `Searching knowledge base…` as the first visible state
-- the frontend still exposes `Finalizing…`, which is not necessary user-facing copy
+- visible phase labels are mostly fixed, but still need real-browser confirmation
+- reasoning traces are only available today as persisted operational metadata in the final envelope
+- explicit reasoning-effort control is not yet configurable for newer reasoning-capable model families
+- hints are extracted with a brittle frontend regex after completion instead of being structured
+- citations and evidence only arrive as a final payload, so the UI jumps from raw streaming text to fully processed answer chrome at the end
 
-The current goal is:
+The current goals are:
 
-1. show `Thinking…` from request start until the first visible answer text
-2. switch to `Generating response…` only when the first visible delta arrives
-3. keep `searching` and `finalizing` available for backend/internal semantics if useful, but do not require them as user-facing labels
-4. keep raw reasoning private and continue using metadata-only reasoning signals
+1. preserve the landed visible phase policy:
+   - pre-output work shows `Thinking…`
+   - visible text shows `Generating response…`
+   - `Finalizing…` is not exposed as separate user-facing copy
+2. add an optional, env-gated reasoning summary surface that:
+   - is high-level and bounded
+   - never exposes raw reasoning
+   - is never persisted in chat history
+3. add explicit `reasoning_effort` settings and trace semantics that distinguish:
+   - explicit reasoning params requested by the app
+   - provider-reported internal reasoning metadata
+4. reserve an internal per-call override seam so a future first-layer model can choose reasoning effort dynamically
+   - do not implement automatic model-driven selection in this plan
+5. replace the current regex-only hint split with a structured answer model that can support streaming main content and hint content separately
+6. improve citation/evidence rendering so the answer does not visually "snap" from raw streamed text into a different final layout after completion
 
 ## Inputs Used
 
@@ -68,76 +83,107 @@ This plan is based on:
 - `docs/PRODUCT_SPEC.md`
 - `docs/GRAPH.md`
 - `docs/REFACTOR_PLAN.md`
-- `docs/archive/GENERATION_STATUS_PLAN_2026-03-01_pre-ux-phase-fix-rewrite.md`
+- `docs/archive/GENERATION_STATUS_PLAN_2026-03-01_pre-ephemeral-trace-and-structured-stream-update.md`
+- `core/settings.py`
+- `core/schemas/assistant.py`
+- `core/schemas/chat.py`
+- `adapters/llm/factory.py`
+- `adapters/llm/providers.py`
 - `domain/chat/stream.py`
+- `domain/chat/respond.py`
+- `domain/chat/response_service.py`
+- `domain/chat/evidence_builder.py`
+- `core/prompting/assets/tutor/socratic_v1.md`
 - `apps/api/routes/chat.py`
+- `apps/web/components/chat-response.tsx`
 - `apps/web/features/tutor/hooks/use-tutor-messages.ts`
-- `apps/web/features/tutor/types.ts`
+- `apps/web/features/tutor/stream-messages.ts`
 - `apps/web/features/tutor/components/tutor-timeline.tsx`
+- `apps/web/features/tutor/types.ts`
+- `apps/web/features/tutor/visible-phase.test.ts`
 - `apps/web/lib/api/client.ts`
 - `apps/web/lib/api/types.ts`
-- `tests/domain/test_s1_phase_semantics.py`
-- `tests/api/test_g3_stream.py`
-- `apps/web/lib/api/client.test.ts`
-- `apps/web/features/tutor/stream-messages.test.ts`
-- current user report from 2026-03-01:
-  - frontend goes from `searching` to streamed response to `finalising`
-  - `thinking` is not visibly shown
-  - `finalising` is probably unnecessary to show
+- `apps/web/.env.example`
+- `.env.example`
+- current user requests from 2026-03-01:
+  - optional summarized reasoning traces on frontend
+  - no persistence of those summaries in chat history
+  - env toggle for the reasoning summary surface
+  - explicit env-configured `reasoning_effort` for newer reasoning-capable models
+  - trace semantics that separate explicit reasoning control from provider-reported reasoning tokens
+  - reserve a future first-layer override seam for reasoning effort without implementing automatic selection yet
+  - better hint/citation rendering during streaming
+  - stream hints into the hidden hint area instead of restructuring only at completion
 
 ## Executive Summary
 
-The earlier plan is no longer accurate.
+Current state in the repo:
 
-What is already true in the repo:
+- stream transport exists and incremental text deltas render
+- visible phase policy is landed in code:
+  - `searching` and `finalizing` collapse to visible `Thinking…`
+  - `responding` maps to `Generating response…`
+- backend `responding` timing is already correct: it starts on first non-empty visible delta
+- safe operational trace metadata exists as `generation_trace`
+- frontend tests exist for visible phase mapping and stream parsing
 
-- the backend stream route exists
-- text deltas render incrementally in the tutor UI
-- the backend emits `responding` on the first non-empty visible delta, not at stream start
-- safe reasoning metadata exists without exposing raw reasoning text
-- blocking fallback no longer uses fake timer phases
+Current product gaps:
 
-What is still failing at the product level:
+- real browser verification for the visible phase UX is still not closed out
+- the only reasoning-related UI is a dev-only raw JSON trace panel based on `response.generation_trace`
+- that trace lives in the final `AssistantResponseEnvelope`, so any future human-readable summary added there would be persisted unless the contract is changed
+- explicit reasoning control is still boolean-only in practice; there is no setting for `reasoning_effort`
+- current trace semantics can look contradictory because provider-reported `reasoning_tokens` may appear even when explicit reasoning was not requested
+- hints are currently derived by a frontend regex looking for `Hint:` markers, but the tutor prompt explicitly tells the model not to use rigid `Hint:` headers
+- streaming assistant messages are plain text only; they do not carry structured `main` / `hint` / `citations` state while the stream is live
+- citations/evidence are filtered and attached only after full text generation completes, so the UI switches from a plain streamed message to a processed answer card at the end
 
-- `setChatPhase("thinking")` is immediately overwritten by incoming `searching` status events
-- `searching` is still mapped to visible copy instead of being treated as part of the pre-output thinking period
-- `finalizing` is still mapped to visible copy even though the user does not want it shown
-- there is no targeted frontend test proving the visible phase sequence
+The next work is not transport. It is contract and UI shaping:
 
-The next work is mainly frontend semantics and acceptance verification, not backend streaming implementation.
+1. explicit reasoning-effort settings plus clearer trace semantics
+2. optional ephemeral reasoning summaries
+3. structured streaming answer parts
+4. smoother hint/citation rendering
 
 ## Browser-Visible Acceptance Target
 
 The feature is only complete when a real browser run behaves like this:
 
-1. Request starts:
-   - visible label is `Thinking…`
-2. Retrieval / prompt assembly / model internal work:
-   - visible label remains `Thinking…`
-   - `Searching knowledge base…` is not shown as the primary user-facing label
-3. First visible streamed text delta arrives:
-   - visible label switches to `Generating response…`
-4. Stream completes / persist / verification:
-   - `Finalizing…` is not shown to the user
-   - the response simply settles into its final rendered state
-5. Blocking or degraded fallback:
-   - visible label stays `Thinking…` until final content is available
-   - no fake intermediate generation label unless there is truly visible incremental output
+1. Phase UX:
+   - request starts with visible `Thinking…`
+   - no visible `Searching knowledge base…`
+   - `Generating response…` appears only when visible text starts arriving
+   - no visible `Finalizing…`
+2. Answer streaming UX:
+   - main answer text streams into the same surface that will remain after completion
+   - if a hint exists, it progressively appears in the hidden hint area rather than first appearing inline and then moving later
+   - the final response does not dramatically re-layout from "raw markdown blob" to "structured answer card"
+3. Citation UX:
+   - citation/evidence UI appears in a stable way
+   - if provisional citations are shown before finalization, they are clearly provisional and reconcile cleanly to the final verified set
+4. Optional reasoning summary UX:
+   - when the feature is disabled, nothing reasoning-summary-like is shown
+   - when enabled and available, a small high-level summary can appear while the model is working
+   - that summary never contains the final answer, detailed derivation, or raw chain-of-thought
+   - that summary disappears with the live turn state and is not stored as a past assistant message
 
 ## Current Verification Status
 
 Current repo verification status:
 
-- `.venv/bin/pytest -q tests/domain/test_s1_phase_semantics.py tests/api/test_g3_stream.py`: passing (`9 passed`)
-- `npm --prefix apps/web test -- lib/api/client.test.ts features/tutor/stream-messages.test.ts`: passing (`15 passed`)
-- no automated frontend test currently proves the visible `thinking -> generating` UX
+- `npm --prefix apps/web test -- features/tutor/visible-phase.test.ts features/tutor/stream-messages.test.ts lib/api/client.test.ts`: passing (`23 passed`)
+- `.venv/bin/pytest -q tests/domain/test_s1_phase_semantics.py tests/api/test_g3_stream.py tests/domain/test_s2_reasoning_metadata.py`: passing (`17 passed`)
+- the pytest run emits OTLP exporter connection noise to `localhost:6006` after completion in this sandbox; tests still pass
+- no automated test currently covers ephemeral reasoning-summary UI
+- no automated test currently covers streamed hint/citation restructuring
 - no browser automation was run in this check
 
 Observed implementation state:
 
-- backend semantic fix is landed
-- frontend streaming parser and delta rendering are landed
-- browser-visible phase UX is still incomplete based on the current code and user report
+- visible phase label work is landed and covered by unit tests
+- stream parser and delta assembly are landed
+- optional reasoning summaries are not implemented
+- structured hint/citation streaming is not implemented
 
 ## Completed Work (Do Not Reopen Unless Blocked)
 
@@ -149,73 +195,143 @@ These areas are considered landed for this phase:
 - `L4` Safe reasoning metadata contract
 - `L5` Blocking fallback without fake timer phases
 - `L6` Stream log spam reduction
+- `L7` Visible phase label policy (`thinking/searching/finalizing` collapse to visible `Thinking…`)
+- `L8` Visible phase frontend regression tests
 
 Do not reopen these slices unless the current fix is blocked by them or the code no longer matches this plan.
 
 ## Current Findings
 
-### 1. Backend timing is no longer the main bug
+### 1. Visible phase policy is implemented, but only code/test verified
 
-`domain/chat/stream.py` now emits `responding` only when the first non-empty delta is observed.
+`apps/web/features/tutor/types.ts` now collapses:
 
-That earlier backend mismatch should be treated as fixed, not as remaining scope.
+- `thinking -> Thinking…`
+- `searching -> Thinking…`
+- `finalizing -> Thinking…`
+- `responding -> Generating response…`
 
-### 2. The visible `thinking` state is being replaced too early
+That work should be treated as landed. What remains is real browser verification, not a reimplementation of visible labels.
 
-`apps/web/features/tutor/hooks/use-tutor-messages.ts` sets `thinking` before starting the request, but then any `status` event directly replaces it.
+### 2. Human-readable reasoning summaries do not exist yet
 
-That means a fast `searching` event can become the first label the user ever sees.
+The current frontend only shows a dev-only raw JSON trace panel from `response.generation_trace`.
 
-### 3. `searching` and `finalizing` are still exposed as user-facing labels
+That does not satisfy the requirement for an optional summarized reasoning surface.
 
-`apps/web/features/tutor/types.ts` still maps:
+### 3. The current trace contract would persist any new summary if added naively
 
-- `searching -> Searching knowledge base…`
-- `finalizing -> Finalizing…`
+`generation_trace` lives on `AssistantResponseEnvelope`, and the final envelope is persisted through chat history.
 
-That is now the main UX mismatch with the desired behavior.
+Therefore:
 
-### 4. The frontend lacks a dedicated test for visible phase policy
+- do NOT add a human-readable reasoning summary to `GenerationTrace`
+- do NOT add it to the persisted assistant envelope
+- if a summary is added, it must travel separately as a stream-only ephemeral payload
 
-Current tests cover:
+### 4. There is no env toggle yet for reasoning-summary UI
 
-- SSE parsing
-- delta assembly
-- backend status sequence
+Current env examples only expose streaming toggles:
 
-Current tests do NOT cover:
+- backend: `APP_CHAT_STREAMING_ENABLED`
+- frontend: `NEXT_PUBLIC_CHAT_STREAMING_ENABLED`
 
-- visible phase derivation in the tutor UI
-- hiding `finalizing`
-- collapsing pre-output work under `Thinking…`
+There is no current flag for reasoning-summary collection or display.
 
-### 5. The previous plan had become internally inconsistent
+### 5. Explicit reasoning control is still too coarse
 
-It still described old backend issues as remaining work even though the repo now contains fixes and passing tests for those areas.
+Current reasoning controls are effectively boolean at the settings layer, but newer reasoning-capable models may also accept `reasoning_effort`.
 
-This rewrite resets the plan to the actual remaining scope.
+At the same time, provider metadata may report `reasoning_tokens` even when the app did not send explicit reasoning params.
+
+Therefore the current trace fields are not wrong, but they are semantically incomplete:
+
+- `reasoning_requested` and `reasoning_used` only describe explicit app-side reasoning control
+- `reasoning_tokens` may still reflect provider-reported internal reasoning
+
+The plan should make this distinction explicit and add env-configured effort controls for supported models.
+
+### 6. Hint extraction is structurally brittle today
+
+`apps/web/components/chat-response.tsx` extracts hints by regex searching for `Hint:` markers.
+
+But `core/prompting/assets/tutor/socratic_v1.md` explicitly tells the tutor output contract not to use rigid section headers like `Hint:`.
+
+Therefore the current hint UI is not just non-streaming. It is also based on a contract mismatch.
+
+### 7. There is no future-proof seam for dynamic first-layer reasoning control
+
+The user wants the option for a future first-layer model to choose reasoning effort dynamically.
+
+That should not be implemented now, but this plan should preserve a seam for:
+
+- settings/default reasoning config
+- optional per-call override reasoning config
+- provider capability gating
+
+without exposing a user-facing or model-driven auto-selection policy yet.
+
+### 8. The live streaming message has no structured answer state
+
+`apps/web/features/tutor/stream-messages.ts` stores the in-flight assistant message as plain text only.
+
+That means the frontend cannot incrementally render:
+
+- main answer body
+- hidden hint area
+- citations/evidence chrome
+- ephemeral reasoning summary
+
+without additional transient message structure.
+
+### 9. Citations are only finalized after full text generation
+
+`domain/chat/stream.py` streams raw text deltas first, then verifies the full draft, filters used citations, emits `finalizing`, persists, and only then sends the final envelope.
+
+That means the citation panel can only become accurate at the end of the stream unless the stream contract is expanded with provisional or structured source events.
 
 ## Current Hotspots
 
 | File | Why it matters now |
 |---|---|
-| `apps/web/features/tutor/hooks/use-tutor-messages.ts` | Current source of truth for how incoming status events become visible tutor phases. |
-| `apps/web/features/tutor/types.ts` | Current mapping from internal phase names to user-facing copy. |
-| `apps/web/features/tutor/components/tutor-timeline.tsx` | Current rendering surface for the status badge shown during chat loading. |
-| `apps/web/lib/api/types.ts` | Stream status union should stay backward-compatible even if UI hides some phases. |
-| `domain/chat/stream.py` | Backend contract is already mostly correct and should only be touched if the frontend fix proves impossible without small contract cleanup. |
+| `apps/web/components/chat-response.tsx` | Current final-response rendering path; hint split and dev-only trace panel both live here. |
+| `apps/web/features/tutor/hooks/use-tutor-messages.ts` | Current source of truth for stream event handling and transient assistant message state. |
+| `apps/web/features/tutor/stream-messages.ts` | Currently only supports plain text streaming; likely needs structured transient state. |
+| `apps/web/features/tutor/types.ts` | Visible phase policy is here; may also need new transient UI types. |
+| `apps/web/lib/api/types.ts` | Stream event unions and assistant envelope types will need extension for any new stream-only payloads. |
+| `domain/chat/stream.py` | Current backend stream contract and final-envelope assembly point. |
+| `core/schemas/chat.py` | Best place for new stream-only event schemas. |
+| `core/schemas/assistant.py` | Must remain free of persisted human-readable reasoning summaries unless that is explicitly rejected and documented. |
+| `core/settings.py` | Backend feature gates for any optional reasoning-summary behavior belong here. |
+| `adapters/llm/factory.py` | Current reasoning toggle wiring enters the provider adapters here. |
+| `adapters/llm/providers.py` | Reasoning-effort param wiring and trace semantics live here. |
+| `apps/web/.env.example` | Frontend toggle documentation belongs here. |
+| `.env.example` | Backend toggle documentation belongs here. |
+| `core/prompting/assets/tutor/socratic_v1.md` | Existing output contract conflicts with regex-based hint extraction; this must be reconciled. |
 
 ## Decision Log
 
 These decisions are already made for this fix plan:
 
-1. `Thinking…` is the only required pre-output user-facing status.
-2. `Generating response…` starts only after the first visible text delta.
-3. `searching` may remain part of the internal/backend stream contract, but it does not need to remain a distinct user-facing label.
-4. `finalizing` may remain part of the internal/backend contract, but it should not be shown to users unless a new explicit product need appears.
-5. Raw reasoning text remains out of scope.
-6. Safe reasoning metadata remains allowed.
-7. This is a frontend semantics fix first; backend changes are optional and should be minimal.
+1. Visible phase policy remains as landed:
+   - pre-output phases collapse to visible `Thinking…`
+   - visible text maps to `Generating response…`
+2. Raw reasoning text remains out of scope.
+3. Any reasoning summary shown to users must be:
+   - optional
+   - env-gated
+   - bounded and high-level
+   - ephemeral only
+   - excluded from persisted chat history and assistant envelopes
+4. The repo should not rely on provider-specific raw reasoning payloads as the baseline UX contract.
+5. Hint extraction should no longer depend on the frontend guessing `Hint:` headers in a natural-language answer.
+6. If streamed citations are shown before final verification, they must be clearly identified as provisional and reconciled cleanly to the final verified set.
+7. Prefer contract-level structured streaming over more regex parsing in the browser.
+8. Explicit reasoning control has two separate dimensions:
+   - whether the app requests explicit reasoning params
+   - what `reasoning_effort` level is requested when supported
+9. Provider-reported `reasoning_tokens` must not be treated as proof that the app explicitly requested reasoning.
+10. Reserve a per-call override seam for future first-layer reasoning-effort selection, but do not implement automatic selection in this plan.
 
 ## Remaining Slice IDs
 
@@ -224,111 +340,204 @@ Use these stable IDs in commits, reports, and verification blocks:
 - `U0` Plan Reset and Acceptance Lock
 - `U1` Visible Phase Policy
 - `U2` Frontend Phase Derivation
-- `U3` Frontend Test Coverage
-- `U4` Manual Browser Verification
-- `U5` Docs Closeout
+- `U3` Visible Phase Test Coverage
+- `U4` Reasoning Control Policy, Effort Settings, and Summary Flags
+- `U5` Ephemeral Reasoning Summary Transport and UI
+- `U6` Structured Answer Parts Contract
+- `U7` Streamed Hint and Citation Rendering
+- `U8` Test Coverage for Ephemeral Summary and Structured Stream
+- `U9` Manual Browser Verification
+- `U10` Docs Closeout
 
 ### Completion Status
 
 | Slice | Status | Summary |
 |---|---|---|
-| U0 | ✅ Done | Plan rewritten to match current repo state and real remaining UX gaps. |
-| U1 | ✅ Done | PHASE_LABELS updated: searching/finalizing → "Thinking…". Added `visiblePhaseLabel()` helper. |
-| U2 | ✅ Done | Hook no longer regresses from responding to pre-output phases on finalizing event. Delta safety net simplified. |
-| U3 | ✅ Done | 8 frontend tests in `visible-phase.test.ts` covering all phase labels, no Searching/Finalizing visible. |
-| U4 | ⏳ Manual | Requires real browser verification — see manual steps below. |
-| U5 | ✅ Done | Plan updated, docs consistent. |
+| U0 | ✅ Done | Plan reset to current repo state. |
+| U1 | ✅ Done | Visible phase labels collapse pre-output work to `Thinking…`. |
+| U2 | ✅ Done | Hook/state logic supports the visible phase policy during streaming. |
+| U3 | ✅ Done | Frontend tests cover visible phase policy and current stream parsing. |
+| U4 | Pending | Define explicit reasoning-effort settings, trace semantics, and env-gated reasoning-summary policy/flags. |
+| U5 | Pending | Add stream-only reasoning-summary event/state and frontend surface. |
+| U6 | Pending | Replace regex-only hint extraction with a structured answer-parts contract. |
+| U7 | Pending | Render streamed hints/citations without end-of-stream layout snap. |
+| U8 | Pending | Add regression coverage for new flags, events, and streaming UI behavior. |
+| U9 | Pending | Verify browser behavior with streaming and optional summary toggles. |
+| U10 | Pending | Sync docs and close out after acceptance passes. |
 
 ## Slice Plan
 
-### U1. Visible Phase Policy
+### U4. Reasoning Control Policy, Effort Settings, and Summary Flags
 
 Purpose:
-- define the user-facing meaning of each phase before changing code
+- define explicit reasoning-control semantics, effort settings, and a safe feature surface for optional reasoning summaries
 
 Changes:
-- lock the visible status policy to:
-  - pre-output work: `Thinking…`
-  - visible streamed text: `Generating response…`
-  - post-stream cleanup: no user-facing label change
-- decide whether `searching` and `finalizing` remain internal-only or are collapsed at the UI boundary
+- add explicit backend settings for reasoning effort on supported models.
+  - minimum required surface:
+    - `APP_LLM_REASONING_EFFORT_CHAT`
+  - preferred forward-compatible surface:
+    - `APP_LLM_REASONING_EFFORT_CHAT`
+    - `APP_LLM_REASONING_EFFORT_QUIZ_GRADING`
+    - `APP_LLM_REASONING_EFFORT_GRAPH_GENERATION`
+    - `APP_LLM_REASONING_EFFORT_QUIZ_GENERATION`
+- introduce a normalized internal reasoning config object passed through the provider layer, for example:
+  - `enabled: bool`
+  - `effort: str | None`
+  - `source: settings | override`
+- keep initial implementation settings-driven only.
+  - reserve an internal per-call override seam for future first-layer control
+  - do NOT implement automatic first-layer effort selection in this slice
+- clarify trace semantics:
+  - `reasoning_requested` means the app requested explicit reasoning params
+  - `reasoning_used` means explicit reasoning params were actually sent
+  - provider-reported `reasoning_tokens` may still appear even when explicit reasoning was not requested
+  - update schema/docs naming or field descriptions if needed so this is unambiguous
+- add explicit policy for a human-readable reasoning summary:
+  - optional
+  - off by default
+  - high-level only
+  - never sufficient to reveal the final answer or derivation
+  - never persisted in chat history
+- add backend and frontend feature gates, likely:
+  - backend env to allow emitting summary events
+  - frontend env to allow rendering them
+- document fallback semantics when the provider does not support any reasoning-summary source
 
 Verification:
-- the implementation plan, tests, and UI copy all use the same visible phase policy
+- settings/env tests and examples are updated
+- adapter tests cover effort value propagation and capability gating
+- trace/contract tests prove explicit reasoning control is distinguished from provider-reported reasoning metadata
+- the policy is explicit in this plan
 
 Exit criteria:
-- there is no remaining ambiguity about what the user should see
+- there is no ambiguity about:
+  - what explicit reasoning control the app requested
+  - what provider-reported reasoning metadata may still appear
+  - what is allowed to be shown or stored
 
-### U2. Frontend Phase Derivation
+### U5. Ephemeral Reasoning Summary Transport and UI
 
 Purpose:
-- make the tutor UI reflect the visible policy instead of the raw stream contract
+- surface optional reasoning summaries without polluting persisted chat history
 
 Changes:
-- update `apps/web/features/tutor/hooks/use-tutor-messages.ts` so pre-output work stays visibly in `Thinking…`
-- do not let early `searching` events become the first visible user label
-- stop surfacing `finalizing` in the loading indicator
-- keep the first-delta safety net for `responding`
-- keep blocking fallback semantics aligned with the same visible policy
+- add a stream-only event or payload for ephemeral reasoning summaries
+- do NOT store it on `AssistantResponseEnvelope`
+- do NOT persist it through `persist_turn`
+- add frontend transient state for rendering a small reasoning-summary panel while the turn is live
+- hide the panel entirely when the feature flag is off or no summary is available
 
 Verification:
-- frontend unit coverage or focused logic tests for:
-  - initial request shows `Thinking…`
-  - `searching` does not replace visible `Thinking…`
-  - first delta transitions to `Generating response…`
-  - `finalizing` is not shown
+- tests confirm:
+  - summaries do not appear in persisted message payloads
+  - summaries can be shown during a live turn when enabled
+  - summaries are hidden when disabled
 
 Exit criteria:
-- the UI no longer shows `Searching knowledge base…` as the primary initial status
-- the UI no longer shows `Finalizing…`
+- the frontend can show optional summary text without storing it as part of the historical assistant message
 
-### U3. Frontend Test Coverage
+### U6. Structured Answer Parts Contract
 
 Purpose:
-- add regression coverage for the actual UX contract
+- stop relying on regex parsing of natural-language answer text for hint extraction
 
 Changes:
-- add tests for visible phase derivation and/or tutor timeline rendering
-- prefer a small pure helper if it makes the phase policy easier to test directly
+- define a structured answer model for streaming/final rendering such as:
+  - main body content
+  - optional hint content
+  - citations/evidence data
+  - optional provisional source set
+- choose where this structure is derived:
+  - backend-generated stream events, preferred
+  - or a deterministic post-processor that yields stable parts before final persistence
+- reconcile the contract with the tutor prompt so hint rendering does not depend on forbidden `Hint:` headers
 
 Verification:
-- `npm --prefix apps/web test -- <targeted files>` passes
+- schema tests and/or targeted stream contract tests
+- the final answer can still round-trip through the existing chat history model
 
 Exit criteria:
-- the visible phase sequence is protected by frontend tests
+- hint handling is based on an explicit contract, not regex guesses
 
-### U4. Manual Browser Verification
+### U7. Streamed Hint and Citation Rendering
 
 Purpose:
-- prove the actual browser behavior matches the plan
+- make the streamed answer and final answer use the same UI structure
+
+Changes:
+- extend the transient assistant message model so live turns can hold structured answer state
+- stream main body text into the stable answer surface
+- stream hint text into the hidden hint area when present
+- decide citation rendering policy:
+  - either show provisional citations during the stream
+  - or stabilize the final citation panel so it appears without reformatting the answer body
+- minimize the visual jump between live stream state and final persisted message state
+
+Verification:
+- frontend tests confirm:
+  - hint content can update during the live stream
+  - final response does not re-layout dramatically
+  - citations reconcile cleanly at completion
+
+Exit criteria:
+- the browser no longer jumps from raw streamed markdown to a separate processed answer layout after completion
+
+### U8. Test Coverage for Ephemeral Summary and Structured Stream
+
+Purpose:
+- protect the new UX contract from regressions
+
+Changes:
+- add tests for:
+  - reasoning-effort settings and capability gating
+  - reasoning-summary flags
+  - stream-only summary events
+  - no persistence of summaries in final envelopes
+  - structured hint streaming
+  - citation reconciliation
+- keep tests small and focused; add pure helpers when they improve testability
+
+Verification:
+- targeted `pytest` and `npm --prefix apps/web test -- <targeted files>` pass
+
+Exit criteria:
+- the new behavior is covered by stable automated tests
+
+### U9. Manual Browser Verification
+
+Purpose:
+- prove the full browser-visible behavior matches this plan
 
 Changes:
 - run the tutor flow with streaming enabled
-- confirm the visible indicator sequence during a normal grounded answer
-- confirm fallback behavior if streaming is disabled or unavailable
+- verify live phase labels
+- verify trace semantics for explicit reasoning control on a supported model:
+  - effort unset / disabled
+  - effort enabled at a configured level
+- verify streamed answer-body + hint behavior
+- verify citation behavior before and after finalization
+- verify reasoning-summary toggle off and on
 
 Verification:
-- manual browser run confirms:
-  - request starts with `Thinking…`
-  - no visible `Searching knowledge base…`
-  - text begins streaming before or as `Generating response…` appears
-  - no visible `Finalizing…`
+- manual browser run confirms the acceptance target in this file
 
 Exit criteria:
-- browser-visible behavior matches the acceptance target
+- the user-visible behavior matches the intended UX, not just the tests
 
-### U5. Docs Closeout
+### U10. Docs Closeout
 
 Purpose:
 - leave the plan and related docs internally consistent
 
 Changes:
 - update this file with final completion status
-- update any related docs only if the public API contract or observability story changed
+- update related API/observability/docs only if the public stream contract or feature flags changed
+- keep the env examples accurate
 
 Verification:
 - plan state matches repo state
-- no stale claims remain about backend timing being the active bug
+- no stale claims remain about what is landed versus pending
 
 Exit criteria:
 - docs and implementation agree on what is done and what remains
@@ -363,46 +572,59 @@ Observed outcome
 
 | Area | Must pass |
 |---|---|
-| Backend targeted tests | `.venv/bin/pytest -q tests/domain/test_s1_phase_semantics.py tests/api/test_g3_stream.py` |
+| Backend targeted tests | `.venv/bin/pytest -q <targeted files>` |
 | Frontend targeted tests | `npm --prefix apps/web test -- <targeted files>` |
 | Frontend typecheck | `npm --prefix apps/web run typecheck` |
-| Browser UX | visible `Thinking…` before first delta; no visible `Searching knowledge base…`; no visible `Finalizing…` |
-| Safety | no raw reasoning text in logs, API payloads, or UI |
+| Browser UX | correct visible phases, stable streamed answer layout, optional ephemeral reasoning summary only when enabled |
+| Safety | no raw reasoning text; no persisted human-readable reasoning summary |
 | Plan consistency | this file reflects the actual current repo state |
 
 ## Risks and Controls
 
-### Risk 1: Fixing the UI by changing the backend contract unnecessarily
+### Risk 1: A reasoning summary leaks answer content or chain-of-thought
 
-- Control: prefer UI-layer derivation first; keep API/status enums backward-compatible unless a small cleanup is clearly needed
+- Control: keep the feature off by default, env-gated, bounded, sanitized, and ephemeral only
 
-### Risk 2: Hiding `searching` removes useful diagnostics
+### Risk 2: The easiest implementation stores the summary in the final envelope
 
-- Control: keep `searching` in the stream contract if it is useful internally; only collapse it at the user-facing label layer
+- Control: require a stream-only transient event/state path and explicitly forbid persistence in this plan
 
-### Risk 3: `finalizing` is still needed for some edge cases
+### Risk 3: Explicit reasoning control and provider-reported reasoning metadata get conflated again
 
-- Control: keep it internal until a concrete UX case proves it should be shown again
+- Control: keep explicit reasoning request fields separate from provider-reported token metadata and document the distinction in schema/docs/tests
 
-### Risk 4: Browser behavior still diverges from tests
+### Risk 4: Regex-based hint parsing remains in place and keeps breaking
 
-- Control: require a real browser verification slice before closing the plan
+- Control: move hint handling to an explicit structured contract instead of adding more regex rules
+
+### Risk 5: Streaming citations before verification causes confusing UI churn
+
+- Control: treat pre-final citations as provisional or delay them until a stable point; document whichever policy is chosen
+
+### Risk 6: The stream UI and final UI diverge again
+
+- Control: use the same structured rendering model for in-flight and final assistant messages wherever possible
 
 ## What Not To Do
 
 - Do not rebuild the SSE transport.
-- Do not reopen provider reasoning-summary work.
-- Do not log or display raw chain-of-thought.
-- Do not show `Searching knowledge base…` as the first visible status if the acceptance target is `Thinking…`.
-- Do not show `Finalizing…` unless a new explicit product requirement justifies it.
+- Do not expose raw chain-of-thought.
+- Do not treat provider-reported `reasoning_tokens` as proof that explicit reasoning params were sent.
+- Do not add human-readable reasoning summaries to `GenerationTrace` or `AssistantResponseEnvelope`.
+- Do not persist reasoning-summary text through `persist_turn`.
+- Do not let the first-layer model auto-set reasoning effort in this plan; only reserve the override seam.
+- Do not keep relying on `Hint:` header regexes as the primary hint contract.
+- Do not make the final response snap into a structurally different layout if the same state could have been rendered progressively.
 
 ## Deliverables
 
-1. A tutor UI that visibly starts with `Thinking…`
-2. A tutor UI that switches to `Generating response…` only when text starts arriving
-3. No visible `Finalizing…` in the normal streamed flow
-4. Frontend regression tests for the visible phase policy
-5. A plan that matches the actual repo state
+1. Landed visible phase policy, kept intact
+2. Explicit env-configured `reasoning_effort` support for supported models, with clearer trace semantics
+3. Optional env-gated ephemeral reasoning-summary surface
+4. Structured answer-parts contract for main content, hint content, and citations
+5. Streamed hint/citation rendering with reduced end-of-stream layout jump
+6. Regression tests for the new stream UX and reasoning-control semantics
+7. A plan and docs set that match the actual repo state
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
@@ -412,17 +634,19 @@ You are working in the CoLearni repo.
 STRICT INSTRUCTIONS:
 
 Open docs/GENERATION_STATUS_PLAN.md now. This file is the source of truth.
-Treat backend streaming transport and first-delta responding semantics as already landed.
-The current bug is browser-visible phase UX:
-- the user should see Thinking… before output
-- Searching knowledge base… should not be the primary visible status
-- Generating response… should begin only when visible text starts
-- Finalizing… should not be shown to the user
+Treat transport, delta rendering, and visible phase labels as already landed.
+The remaining work is:
+- explicit env-configured `reasoning_effort` settings plus clear explicit-vs-provider reasoning trace semantics
+- optional env-gated ephemeral reasoning summaries
+- structured streaming for answer body, hints, and citations
+- smoother transition from live stream state to final answer state
 
 Do not rebuild streaming from scratch.
-Do not widen this into a general chat rewrite.
 Do not expose raw reasoning text.
-Prefer a frontend-layer fix unless a very small backend cleanup is clearly required.
+Do not store human-readable reasoning summaries in persisted chat history.
+Do not implement automatic first-layer reasoning-effort selection yet.
+Do not rely on regex parsing of `Hint:` headers as the long-term contract.
+Prefer stream-only transient state for new live-turn UI.
 
 For each completed slice, report:
 - Root cause
@@ -434,6 +658,6 @@ For each completed slice, report:
 
 START:
 - Read docs/GENERATION_STATUS_PLAN.md.
-- Begin with U1 and U2.
+- Begin with U4 and U6.
 - Stop after each slice for verification before continuing.
 ```

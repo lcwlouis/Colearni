@@ -6,9 +6,11 @@ Archive snapshots:
 - `<archive snapshot path>`
 
 Template usage:
-- Copy this file to `docs/REFACTOR_PLAN.md` when starting or resetting a refactor plan.
+- Default to a task-specific plan filename such as `docs/LANDING_AUTH_PLAN.md` or `docs/GRAPH_CLEANUP_PLAN.md`.
+- Use `docs/REFACTOR_PLAN.md` only when you are intentionally starting or resetting the repo's canonical active refactor plan.
+- If the work is narrow or feature-specific, do not replace `docs/REFACTOR_PLAN.md`; create a new plan file with a descriptive name instead.
 - Replace placeholders before execution begins.
-- Archive the previous active plan before rewriting it.
+- Archive the previous active plan before rewriting it, but only if you are truly replacing that active plan.
 - Do not delete or rename the final `REQUIRED KICKOFF PROMPT (DO NOT OMIT)` section.
 - If you derive a new plan from this template, preserving that final section is mandatory.
 
