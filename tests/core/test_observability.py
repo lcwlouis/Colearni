@@ -311,3 +311,91 @@ def test_classify_usage_source() -> None:
     assert classify_usage_source({"token_prompt": 10, "token_completion": 5, "token_total": 15}) == "provider_reported"
     assert classify_usage_source({"token_prompt": None, "token_completion": None, "token_total": None}) == "missing"
     assert classify_usage_source({"token_prompt": None, "token_completion": None, "token_total": 5}) == "provider_reported"
+
+
+# ---- OBS-6: Regression hardening tests ----
+
+_VALID_SPAN_KINDS = {"LLM", "CHAIN", "RETRIEVER", "EMBEDDING", "TOOL", "AGENT"}
+
+
+def test_span_kind_constants_are_valid_openinference_values() -> None:
+    """All SPAN_KIND_* constants must be valid OpenInference span kinds."""
+    from core.observability import (
+        SPAN_KIND_AGENT,
+        SPAN_KIND_CHAIN,
+        SPAN_KIND_EMBEDDING,
+        SPAN_KIND_LLM,
+        SPAN_KIND_RETRIEVER,
+        SPAN_KIND_TOOL,
+    )
+
+    for kind in (SPAN_KIND_LLM, SPAN_KIND_CHAIN, SPAN_KIND_RETRIEVER,
+                 SPAN_KIND_EMBEDDING, SPAN_KIND_TOOL, SPAN_KIND_AGENT):
+        assert kind in _VALID_SPAN_KINDS, f"Unknown span kind: {kind}"
+
+
+def test_start_span_with_chain_kind_sets_attribute(otel_exporter) -> None:
+    """set_span_kind(CHAIN) sets openinference.span.kind=CHAIN, never unknown."""
+    from core.observability import SPAN_KIND_CHAIN, set_span_kind
+
+    with start_span("test.chain") as span:
+        set_span_kind(span, SPAN_KIND_CHAIN)
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    kind = spans[0].attributes.get("openinference.span.kind")
+    assert kind == "CHAIN"
+    assert kind != "unknown"
+
+
+def test_start_span_with_retriever_kind_sets_attribute(otel_exporter) -> None:
+    """set_span_kind(RETRIEVER) sets correct OpenInference kind."""
+    from core.observability import SPAN_KIND_RETRIEVER, set_span_kind
+
+    with start_span("test.retriever") as span:
+        set_span_kind(span, SPAN_KIND_RETRIEVER)
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].attributes.get("openinference.span.kind") == "RETRIEVER"
+
+
+def test_retrieval_span_attributes_schema(otel_exporter) -> None:
+    """Retrieval spans must carry results_count and documents summary."""
+    import json
+
+    from core.observability import SPAN_KIND_RETRIEVER
+
+    with start_span("retrieval.vector.search", kind=SPAN_KIND_RETRIEVER) as span:
+        span.set_attribute("retrieval.results_count", 3)
+        span.set_attribute("retrieval.documents", json.dumps([
+            {"chunk_id": "c1", "score": 0.95},
+            {"chunk_id": "c2", "score": 0.88},
+        ]))
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].attributes.get("retrieval.results_count") == 3
+    docs = json.loads(spans[0].attributes.get("retrieval.documents"))
+    assert len(docs) == 2
+    assert docs[0]["chunk_id"] == "c1"
+
+
+def test_budget_hard_stop_event_visible(otel_exporter) -> None:
+    """Budget hard-stop events are visible as OTel span events."""
+    with start_span("graph.resolver.run") as span:
+        emit_event(
+            "graph.resolver.budget.hard_stop",
+            status="warning",
+            reason="llm_budget_exhausted",
+            calls_used=10,
+            calls_max=10,
+        )
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    event_names = [e.name for e in spans[0].events]
+    assert "graph.resolver.budget.hard_stop" in event_names
+    stop_events = [e for e in spans[0].events if e.name == "graph.resolver.budget.hard_stop"]
+    assert stop_events[0].attributes["status"] == "warning"
+    assert stop_events[0].attributes["reason"] == "llm_budget_exhausted"

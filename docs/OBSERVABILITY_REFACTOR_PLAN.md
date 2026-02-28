@@ -603,12 +603,12 @@ Exit criteria:
 
 Start with the highest-priority remaining slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
 
-1. `OBS-1` Phoenix scope and span taxonomy foundation
-2. `OBS-2` LLM tracing parity
-3. `OBS-3` Prompt identity and call separation
-4. `OBS-4` RAG retrieval transparency
-5. `OBS-5` Domain and graph maintenance span normalization
-6. `OBS-6` Docs and regression hardening
+1. `OBS-1` Phoenix scope and span taxonomy foundation ✅
+2. `OBS-2` LLM tracing parity ✅
+3. `OBS-3` Prompt identity and call separation ✅
+4. `OBS-4` RAG retrieval transparency ✅
+5. `OBS-5` Domain and graph maintenance span normalization ✅
+6. `OBS-6` Docs and regression hardening ✅
 
 Re-read this file after every 2 completed slices and restate which slices remain.
 

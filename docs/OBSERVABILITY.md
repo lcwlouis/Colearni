@@ -53,16 +53,26 @@ docker compose --profile observability down
 
 ### Span Hierarchy
 
-Traces form a tree rooted at the HTTP middleware span.
+AI-relevant traces are exported to Phoenix. Generic HTTP/CRUD endpoints
+(healthz, session listing, etc.) do **not** create Phoenix spans — request
+correlation stays in structured logs via `observation_context`.
 
 ```
-http.request (CHAIN)                    ← middleware root span
-  └─ chat.respond (CHAIN)              ← blocking chat orchestrator
-  │    ├─ retrieval.hybrid (RETRIEVER)  ← hybrid retrieval
-  │    └─ llm.chat.respond (LLM)       ← LLM adapter call
-  └─ chat.stream (CHAIN)               ← streaming chat orchestrator
-       ├─ retrieval.hybrid (RETRIEVER)
-       └─ llm.chat.respond (LLM)
+chat.respond (CHAIN)                            ← blocking chat orchestrator
+  ├─ retrieval.hybrid (RETRIEVER)               ← hybrid retrieval root
+  │    ├─ retrieval.vector.search (RETRIEVER)   ← pgvector cosine search
+  │    ├─ retrieval.fts.search (RETRIEVER)      ← Postgres FTS search
+  │    └─ retrieval.hybrid.fuse (CHAIN)         ← RRF weighted fusion
+  ├─ retrieval.graph.bias (RETRIEVER)           ← concept-based reranking
+  └─ llm.chat.respond (LLM)                    ← LLM adapter call
+
+chat.stream (CHAIN)                             ← streaming chat orchestrator
+  ├─ retrieval.hybrid (RETRIEVER)
+  │    ├─ retrieval.vector.search (RETRIEVER)
+  │    ├─ retrieval.fts.search (RETRIEVER)
+  │    └─ retrieval.hybrid.fuse (CHAIN)
+  ├─ retrieval.graph.bias (RETRIEVER)
+  └─ llm.chat.respond (LLM)
 ```
 
 Background tasks create their own root spans:
@@ -71,7 +81,7 @@ Background tasks create their own root spans:
 ingestion.post_ingest (CHAIN)           ← post-ingest background task
   ├─ llm.graph.extract (LLM)
   └─ graph.resolver.run (CHAIN)
-       └─ graph.resolver.chunk (child)
+       └─ graph.resolver.chunk (CHAIN)
 
 graph.gardener.run (CHAIN)              ← offline graph consolidation
   └─ llm.graph.disambiguate (LLM)
@@ -81,15 +91,19 @@ graph.gardener.run (CHAIN)              ← offline graph consolidation
 
 | Span Name | Kind | Source |
 |---|---|---|
-| `http.request` | CHAIN | `apps/api/middleware.py` |
 | `chat.respond` | CHAIN | `domain/chat/respond.py` |
 | `chat.stream` | CHAIN | `domain/chat/stream.py` |
 | `retrieval.hybrid` | RETRIEVER | `domain/chat/retrieval_context.py` |
+| `retrieval.vector.search` | RETRIEVER | `domain/retrieval/vector_retriever.py` |
+| `retrieval.fts.search` | RETRIEVER | `domain/retrieval/fts_retriever.py` |
+| `retrieval.hybrid.fuse` | CHAIN | `domain/retrieval/hybrid_retriever.py` |
+| `retrieval.graph.bias` | RETRIEVER | `domain/chat/retrieval_context.py` |
 | `ingestion.post_ingest` | CHAIN | `domain/ingestion/post_ingest.py` |
 | `practice.flashcards.generate` | CHAIN | `domain/learning/practice.py` |
+| `practice.flashcards.generate_stateful` | CHAIN | `domain/learning/practice.py` |
 | `practice.quiz.generate` | CHAIN | `domain/learning/practice.py` |
 | `graph.resolver.run` | CHAIN | `domain/graph/pipeline.py` |
-| `graph.resolver.chunk` | (child) | `domain/graph/pipeline.py` |
+| `graph.resolver.chunk` | CHAIN | `domain/graph/pipeline.py` |
 | `graph.gardener.run` | CHAIN | `domain/graph/gardener.py` |
 | `grading.level_up` | CHAIN | `domain/learning/level_up.py` |
 | `grading.practice` | CHAIN | `domain/learning/level_up.py` |
@@ -142,7 +156,7 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 |---|---|
 | `session.id` | `chat.respond`, `chat.stream` |
 | `user.id` | `chat.respond`, `chat.stream` |
-| `concept.id` | `chat.respond` |
+| `concept.id` | `chat.respond`, `chat.stream`, practice spans |
 | `workspace_id` | All domain spans |
 | `document_id` | `ingestion.post_ingest` |
 
@@ -156,12 +170,52 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 
 ### Retrieval Span Attributes
 
+**Parent span (`retrieval.hybrid`)**:
+
 | Attribute | Description |
 |---|---|
 | `retrieval.query` | Query text (first 256 chars) |
 | `retrieval.top_k` | Requested result count |
 | `retrieval.results_count` | Actual results returned |
 | `retrieval.documents` | JSON summary of top 5 results (chunk_id, score) |
+
+**Vector stage (`retrieval.vector.search`)**:
+
+| Attribute | Description |
+|---|---|
+| `retrieval.top_k` | Bounded top-k for vector search |
+| `retrieval.results_count` | Vector hits returned |
+| `retrieval.documents` | JSON summary of top 5 vector results |
+
+**FTS stage (`retrieval.fts.search`)**:
+
+| Attribute | Description |
+|---|---|
+| `retrieval.top_k` | Bounded top-k for FTS search |
+| `retrieval.results_count` | FTS hits returned |
+| `retrieval.documents` | JSON summary of top 5 FTS results |
+
+**Fusion stage (`retrieval.hybrid.fuse`)**:
+
+| Attribute | Description |
+|---|---|
+| `retrieval.vector_count` | Number of vector candidates |
+| `retrieval.fts_count` | Number of FTS candidates |
+| `retrieval.rrf_k` | RRF parameter used |
+| `retrieval.vector_weight` | Weight applied to vector scores |
+| `retrieval.fts_weight` | Weight applied to FTS scores |
+| `retrieval.results_count` | Final fused result count |
+| `retrieval.method_distribution` | JSON count of vector/fts/hybrid methods |
+| `retrieval.documents` | JSON summary of top 5 fused results (chunk_id, score, method) |
+
+**Graph bias stage (`retrieval.graph.bias`)**:
+
+| Attribute | Description |
+|---|---|
+| `retrieval.input_count` | Chunks before bias |
+| `retrieval.graph.linked_count` | Number of provenance-linked chunks found |
+| `retrieval.graph.boosted_count` | Number of chunks boosted by graph bias |
+| `retrieval.graph.linked_chunk_ids` | JSON array of linked chunk IDs (up to 20) |
 
 ### Graph Span Output Summaries
 
@@ -214,6 +268,17 @@ active span (visible in the Phoenix Events tab).
 
 ## Phoenix Operator Guide
 
+### Routes That Should Never Appear
+
+Only AI-significant operations produce Phoenix spans. You should **never**
+see spans for:
+
+- `/api/healthz`, `/api/openapi.json`, or any static/docs endpoints
+- CRUD-only routes (workspace listing, session CRUD, document listing)
+- Middleware-level HTTP requests — these are tracked via structured logs only
+
+If any of the above appear in Phoenix, it indicates a tracing scope bug.
+
 ### Suggested Filters
 
 | What to find | Phoenix filter |
@@ -225,9 +290,27 @@ active span (visible in the Phoenix Events tab).
 | Budget stops | Event name contains `hard_stop` |
 | Graph extraction | Span name = `graph.resolver.run` |
 | Gardener runs | Span name = `graph.gardener.run` |
-| Retrieval | Span kind = `RETRIEVER` |
+| Retrieval pipeline | Span kind = `RETRIEVER` |
+| Vector search only | Span name = `retrieval.vector.search` |
+| FTS search only | Span name = `retrieval.fts.search` |
+| Graph bias effect | Span name = `retrieval.graph.bias` |
+| Specific concept | Attribute `concept.id` = `<value>` |
 | Specific user | Attribute `user.id` = `<value>` |
 | Specific workspace | Attribute `workspace_id` = `<value>` |
+
+### Reading Retrieval Spans
+
+The retrieval pipeline produces four child spans under `chat.respond` / `chat.stream`:
+
+1. **`retrieval.vector.search`** — pgvector cosine similarity search. Check
+   `retrieval.results_count` to see how many chunks the vector index returned.
+2. **`retrieval.fts.search`** — Postgres full-text search. Low `results_count`
+   may indicate the query didn't match well via keywords.
+3. **`retrieval.hybrid.fuse`** — RRF fusion combining vector and FTS results.
+   The `retrieval.method_distribution` attribute shows how many results came
+   from each source and how many appeared in both.
+4. **`retrieval.graph.bias`** — concept-graph reranking. `boosted_count` shows
+   how many chunks were boosted by knowledge-graph provenance links.
 
 ### Understanding Token Usage Sources
 
@@ -304,8 +387,10 @@ lifecycle (OK on final event yield, ERROR on exception).
    make dev
    # trigger chat or practice operations
    # open http://localhost:6006 → filter by service "colearni-backend"
-   # verify: nested spans with http.request root, LLM kind icons,
+   # verify: nested spans with chat.respond/chat.stream as root, LLM kind icons,
    #         input/output messages, token counts, prompt metadata
+   # verify: retrieval sub-spans (vector.search, fts.search, hybrid.fuse, graph.bias)
+   #         are nested under chat root
    ```
 
 4. **Content recording off**
