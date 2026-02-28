@@ -20,9 +20,9 @@
     "d3-zoom": "^3.0.0",
     "katex": "^0.16.33",
     "lucide-react": "^0.575.0",
-    "next": "14.2.35",
-    "react": "18.3.1",
-    "react-dom": "18.3.1",
+    "next": "15.5.12",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0"
@@ -31,10 +31,10 @@
     "@types/d3-force": "^3.0.10",
     "@types/katex": "^0.16.8",
     "@types/node": "20.17.0",
-    "@types/react": "18.3.3",
-    "@types/react-dom": "18.3.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
     "eslint": "8.57.0",
-    "eslint-config-next": "14.2.35",
+    "eslint-config-next": "15.5.12",
     "typescript": "5.6.3",
     "vitest": "2.1.9"
   },
@@ -42,10 +42,5 @@
     "extends": [
       "next/core-web-vitals"
     ]
-  },
-  "overrides": {
-    "@next/eslint-plugin-next": {
-      "glob": "10.5.0"
-    }
   }
 }
