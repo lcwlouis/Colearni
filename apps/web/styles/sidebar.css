@@ -1,0 +1,411 @@
+/* ===== Shell & Sidebar ===== */
+.shell {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.global-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 16rem;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--line);
+  position: relative;
+  z-index: 10;
+  padding: 1rem 0.75rem;
+  flex-shrink: 0;
+  gap: 1rem;
+  transition: width 0.25s ease, padding 0.25s ease;
+  overflow: hidden;
+  max-height: 100vh;
+}
+
+.global-sidebar.collapsed {
+  width: 3.5rem;
+  padding: 1rem 0.5rem;
+  overflow: visible;
+}
+
+.global-sidebar.collapsed .nav-link span,
+.global-sidebar.collapsed .sidebar-header .brand,
+.global-sidebar.collapsed .session-list,
+.global-sidebar.collapsed .sidebar-user-name,
+.global-sidebar.collapsed h2,
+.global-sidebar.collapsed .sidebar-header .health-dot {
+  display: none;
+}
+
+.global-sidebar.collapsed .nav-link {
+  justify-content: center;
+  padding: 0.55rem;
+  position: relative;
+  border-radius: 0.5rem;
+  transition: background-color 0.15s ease;
+}
+
+.global-sidebar.collapsed .nav-link:hover {
+  background: var(--surface);
+}
+
+.global-sidebar.collapsed .nav-link .nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* Tooltip on hover for collapsed nav links */
+.global-sidebar.collapsed .nav-link::after {
+  content: attr(title);
+  position: absolute;
+  left: calc(100% + 0.5rem);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.25rem 0.55rem;
+  border-radius: 0.3rem;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 9999;
+}
+
+.global-sidebar.collapsed .nav-link:hover::after {
+  opacity: 1;
+}
+
+.global-sidebar.collapsed .nav-items-group {
+  align-items: center;
+}
+
+.global-sidebar.collapsed .sidebar-header {
+  justify-content: center;
+}
+
+/* D1: In collapsed mode, show logo by default; swap to expand arrow on hover */
+.global-sidebar.collapsed .sidebar-collapse-btn {
+  display: none;
+}
+
+.global-sidebar.collapsed:hover .sidebar-collapse-btn {
+  display: grid;
+}
+
+.global-sidebar.collapsed:hover .sidebar-logo {
+  display: none;
+}
+
+.global-sidebar.collapsed .sidebar-footer {
+  border-top: none;
+  padding-top: 0;
+}
+
+/* D4: Hide profile block in collapsed mode — replaced by compact icon stack */
+.global-sidebar.collapsed .sidebar-profile-block {
+  display: none;
+}
+
+.global-sidebar.collapsed .sidebar-profile-actions {
+  display: none;
+}
+
+/* D2: Hide workspace block entirely when collapsed */
+.global-sidebar.collapsed .sidebar-workspace-block {
+  display: none;
+}
+
+/* D4: Collapsed compact bottom controls */
+.collapsed-bottom-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.global-sidebar:not(.collapsed) .collapsed-bottom-controls {
+  display: none;
+}
+
+.collapsed-icon-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  padding: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  position: relative;
+}
+
+.collapsed-icon-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.collapsed-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Tooltip for collapsed bottom buttons */
+.collapsed-icon-btn::after {
+  content: attr(title);
+  position: absolute;
+  left: calc(100% + 0.5rem);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.25rem 0.55rem;
+  border-radius: 0.3rem;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 9999;
+}
+
+.collapsed-icon-btn:hover::after {
+  opacity: 1;
+}
+
+/* Workspace initial badge */
+.collapsed-ws-initial {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  background: var(--accent-light);
+  color: var(--accent);
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Collapsed workspace popover */
+.collapsed-ws-popover {
+  position: absolute;
+  left: calc(100% + 0.5rem);
+  bottom: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 12rem;
+  max-width: 16rem;
+  z-index: 200;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.collapsed-ws-popover-header {
+  padding: 0.4rem 0.5rem 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.collapsed-ws-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.82rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.collapsed-ws-item:hover {
+  background: var(--surface);
+}
+
+.collapsed-ws-item.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.collapsed-ws-initial-small {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: grid;
+  place-items: center;
+  background: var(--accent-light);
+  color: var(--accent);
+  border-radius: 50%;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.collapsed-ws-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 0.25rem 0.5rem;
+}
+
+.collapsed-ws-action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.82rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.collapsed-ws-action:hover {
+  background: var(--surface);
+}
+
+/* D4: Match theme-toggle size in collapsed controls */
+.collapsed-bottom-controls .theme-toggle {
+  width: 2.5rem !important;
+  height: 2.5rem !important;
+  border-radius: 0.5rem !important;
+  border-color: transparent !important;
+}
+
+.collapsed-new-chat {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.25rem;
+}
+
+.global-sidebar:not(.collapsed) .collapsed-new-chat {
+  display: none;
+}
+
+.sidebar-collapse-btn {
+  padding: 0.3rem !important;
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  color: var(--muted) !important;
+  width: 1.75rem;
+  height: 1.75rem;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-btn:hover {
+  background: var(--accent-light) !important;
+  color: var(--accent) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.25rem 0.5rem 0.25rem;
+}
+
+.brand-logo {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.sidebar-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.brand {
+  margin: 0;
+  font: 700 1.25rem "Inter", "Segoe UI", sans-serif;
+  letter-spacing: -0.025em;
+  color: var(--text);
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3a6;
+  flex-shrink: 0;
+  transition: background 0.3s ease;
+}
+
+.health-dot.ok {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
+}
+
+.health-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+/* ===== Navigation ===== */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  padding: 0.45rem 0.75rem;
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nav-link:hover {
+  background: var(--surface);
+}
+
+.nav-link[aria-current="page"] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+}
+

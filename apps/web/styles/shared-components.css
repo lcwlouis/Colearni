@@ -1,0 +1,464 @@
+/* ===== Theme Toggle ===== */
+.theme-toggle {
+  padding: 0.35rem !important;
+  background: transparent !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 50% !important;
+  box-shadow: none !important;
+  color: var(--muted) !important;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--accent-light) !important;
+  color: var(--accent) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+
+/* ===== Quiz Items ===== */
+.quiz-items {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.quiz-item {
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--bg);
+  transition: border-color 0.3s ease, background-color 0.3s ease;
+}
+
+.quiz-item.correct {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+[data-theme="dark"] .quiz-item.correct {
+  background: #0a2618;
+  border-color: #166534;
+}
+
+.quiz-item.incorrect {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+[data-theme="dark"] .quiz-item.incorrect {
+  background: #2a1515;
+  border-color: #991b1b;
+}
+
+.quiz-item p {
+  margin: 0.15rem 0;
+}
+
+.quiz-item-feedback {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+  animation: fade 0.3s ease-out;
+}
+
+.quiz-item-feedback p {
+  margin: 0.15rem 0;
+}
+
+.quiz-item-result-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
+
+.quiz-item-result-label.correct {
+  color: #166534;
+  background: #dcfce7;
+}
+
+[data-theme="dark"] .quiz-item-result-label.correct {
+  color: #86efac;
+  background: #0a2618;
+}
+
+.quiz-item-result-label.incorrect {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+[data-theme="dark"] .quiz-item-result-label.incorrect {
+  color: #fca5a5;
+  background: #2a1515;
+}
+
+.quiz-choices {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.quiz-choice-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.65rem 0.85rem;
+  background: var(--bg-secondary);
+  border: 2px solid var(--line);
+  border-radius: 0.75rem;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 400;
+  box-shadow: none;
+  transition: border-color 0.2s, background 0.2s, transform 0.15s;
+}
+
+.quiz-choice-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  transform: none;
+  box-shadow: none;
+}
+
+.quiz-choice-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.quiz-choice-card:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.quiz-choice-card.selected:disabled {
+  opacity: 1;
+}
+
+.quiz-choice-letter {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background: var(--line);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+  transition: background 0.2s, color 0.2s;
+}
+
+.quiz-choice-card.selected .quiz-choice-letter {
+  background: var(--accent);
+  color: #fff;
+}
+
+.quiz-choice-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.quiz-choice-check {
+  font-size: 1rem;
+  color: var(--accent);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.level-up-feedback h3 {
+  margin: 0;
+}
+
+.quiz-feedback-list {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.quiz-feedback-list p {
+  margin: 0.1rem 0;
+}
+
+
+/* ===== Flashcard Stack ===== */
+.flashcard-stack-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1rem 0;
+}
+
+.flashcard-stack-header {
+  text-align: center;
+}
+
+.flashcard-stack-header h3 {
+  margin: 0 0 0.25rem;
+}
+
+.flashcard-counter {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.flashcard-stage {
+  position: relative;
+  width: min(28rem, 100%);
+  min-height: 14rem;
+}
+
+.flashcard {
+  width: 100%;
+  min-height: 14rem;
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: var(--bg);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  animation: cardIn 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.flashcard.revealed {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+.flashcard-toggle {
+  flex: 1;
+  width: 100%;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 1.5rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-shadow: none;
+}
+
+.flashcard-toggle:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.flashcard-front {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
+.flashcard-back {
+  animation: fade 0.25s ease-out;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.flashcard-back p {
+  margin: 0.15rem 0;
+}
+
+.flashcard-hint-area {
+  padding: 0 1.5rem 1.25rem;
+}
+
+.flashcard-hint {
+  font-style: italic;
+  color: var(--muted);
+  margin: 0;
+  font-size: 0.92rem;
+  animation: fade 0.2s ease-out;
+}
+
+.flashcard-hint-btn {
+  font-size: 0.85rem;
+  padding: 0.2rem 0.6rem;
+}
+
+.flashcard-tap-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: auto;
+}
+
+.flashcard-nav {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.flashcard-nav-btn {
+  padding: 0.45rem 1rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* Shadow stack effect behind active card */
+.flashcard-stage::before,
+.flashcard-stage::after {
+  content: '';
+  position: absolute;
+  border-radius: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  z-index: 0;
+}
+
+.flashcard-stage::before {
+  top: 6px;
+  left: 6px;
+  right: -6px;
+  bottom: -6px;
+  opacity: 0.7;
+}
+
+.flashcard-stage::after {
+  top: 12px;
+  left: 12px;
+  right: -12px;
+  bottom: -12px;
+  opacity: 0.4;
+}
+
+
+/* ===== Practice ===== */
+.practice-badge {
+  display: inline-block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-light);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.practice-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.practice-feedback h3 {
+  margin: 0;
+}
+
+/* Minimized practice result card */
+.practice-minimized {
+  padding: 0.75rem 1rem;
+}
+
+.practice-minimized-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.practice-minimized-score {
+  font-weight: 700;
+  font-size: 1.1rem;
+  min-width: 3rem;
+  text-align: center;
+}
+
+.practice-minimized-score.passed {
+  color: var(--green, #22c55e);
+}
+
+.practice-minimized-score.failed {
+  color: var(--red, #ef4444);
+}
+
+.practice-minimized-label {
+  flex: 1;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.lucky-pick {
+  border-color: #e8c547;
+  background: #fffef5;
+}
+
+[data-theme="dark"] .lucky-pick {
+  background: #2a2810;
+  border-color: #a08520;
+}
+
+.concept-search {
+  margin-bottom: 0.25rem;
+}
+
+
+/* ===== Citations ===== */
+.citation-toggle {
+  margin-top: 0.35rem;
+}
+
+.citation-summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0.25rem 0;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.citation-summary::before {
+  content: "▸";
+  font-size: 0.75rem;
+  transition: transform 0.15s;
+}
+
+.citation-toggle[open] .citation-summary::before {
+  transform: rotate(90deg);
+}
+
+.citation-toggle .chat-citations {
+  margin-top: 0.35rem;
+}
+

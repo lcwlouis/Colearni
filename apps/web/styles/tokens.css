@@ -1,0 +1,42 @@
+/* ===== CoLearni Design System ===== */
+/* Green/white palette derived from the CoLearni tree logo */
+
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f8faf8;
+  --text: #1a2e1a;
+  --muted: #6b7f6b;
+  --panel: rgba(255, 255, 255, 0.92);
+  --line: #dce5dc;
+  --accent: #2d8a4e;
+  --accent-hover: #236b3c;
+  --accent-light: #e8f5ec;
+  --danger: #dc2626;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+  --surface: #f0f5f0;
+  --radius: 0.75rem;
+}
+
+[data-theme="dark"] {
+  --bg: #0f1419;
+  --bg-secondary: #1a1f2e;
+  --text: #e8ede8;
+  --muted: #8a9b8a;
+  --panel: rgba(26, 31, 46, 0.92);
+  --line: #2a3540;
+  --accent: #4ade80;
+  --accent-hover: #86efac;
+  --accent-light: #0a2618;
+  --danger: #ef4444;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.2);
+  --shadow-md: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.2);
+  --surface: #1e2a35;
+}
+
+* {
+  box-sizing: border-box;
+}
+

@@ -1,0 +1,41 @@
+/* ===== Content & Panels ===== */
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fade 0.2s ease-out;
+  background: var(--bg);
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  padding: 1.25rem;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+
+.stack {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field-label {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
