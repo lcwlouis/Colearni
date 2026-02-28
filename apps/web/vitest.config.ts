@@ -7,8 +7,11 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./", import.meta.url)),
     },
   },
+  esbuild: {
+    jsx: "automatic",
+  },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "features/**/*.test.ts", "components/**/*.test.ts", "components/**/*.test.tsx"],
   },
 });
