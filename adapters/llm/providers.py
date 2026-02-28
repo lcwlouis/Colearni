@@ -11,6 +11,7 @@ from typing import Any
 from core.contracts import TutorTextStream
 from core.observability import (
     classify_usage_source,
+    create_span,
     emit_event,
     extract_token_usage,
     get_observation_context,
@@ -257,83 +258,99 @@ class _BaseGraphLLMClient(ABC):
         rendered_length: int | None = None,
         effort_override: str | None = None,
     ) -> Iterator[str]:
-        """Stream text deltas inside an LLM span and capture final usage."""
+        """Stream text deltas inside an LLM span and capture final usage.
+
+        Uses create_span (not start_span) because this is a generator that
+        yields across Starlette's thread-pool boundary.  start_span calls
+        tracer.start_as_current_span which attaches a ContextVar token; if the
+        generator resumes in a different thread context the subsequent detach
+        raises ``ValueError: Token was created in a different Context``.
+        """
         context = get_observation_context()
         operation = str(context.get("operation") or "llm.stream")
         span_name = f"llm.{operation}" if not operation.startswith("llm.") else operation
         collected_text: list[str] = []
 
-        with start_span(
+        span = create_span(
             span_name,
             component="llm",
             operation=operation,
             provider=self._provider,
             model=self._model,
-        ) as span:
-            set_llm_span_attributes(
-                span,
-                model=self._model,
-                invocation_params={
-                    "model": self._model,
-                    "temperature": temperature,
-                    "provider": self._provider,
-                    "stream": True,
-                },
+        )
+        set_llm_span_attributes(
+            span,
+            model=self._model,
+            invocation_params={
+                "model": self._model,
+                "temperature": temperature,
+                "provider": self._provider,
+                "stream": True,
+            },
+            messages=messages,
+        )
+        set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
+
+        last_chunk: Mapping[str, Any] = {}
+        try:
+            for chunk in self._sdk_stream_call(
                 messages=messages,
-            )
-            set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
-
-            last_chunk: Mapping[str, Any] = {}
-            try:
-                for chunk in self._sdk_stream_call(
-                    messages=messages,
-                    temperature=temperature,
-                    effort_override=effort_override,
-                ):
-                    last_chunk = chunk
-                    delta_content = self._extract_stream_delta(chunk)
-                    if delta_content:
-                        collected_text.append(delta_content)
-                        yield delta_content
-            except Exception as exc:
-                emit_event(
-                    "llm.call",
-                    status="failure",
-                    component="llm",
-                    operation=operation,
-                    provider=self._provider,
-                    model=self._model,
-                    error_type=type(exc).__name__,
-                )
-                raise
-
-            # Extract usage from the final chunk
-            usage = self.extract_stream_usage(last_chunk)
-            reasoning_tokens = self._extract_reasoning_tokens(last_chunk)
-            stream_obj.set_usage(
-                prompt_tokens=usage.get("token_prompt"),
-                completion_tokens=usage.get("token_completion"),
-                total_tokens=usage.get("token_total"),
-                reasoning_tokens=reasoning_tokens,
-            )
-
-            response_text = "".join(collected_text)
-            set_llm_span_attributes(
-                span,
-                response_message=response_text,
-                token_usage=usage,
-            )
-            # Usage source is set by set_llm_span_attributes via token_usage
-
+                temperature=temperature,
+                effort_override=effort_override,
+            ):
+                last_chunk = chunk
+                delta_content = self._extract_stream_delta(chunk)
+                if delta_content:
+                    collected_text.append(delta_content)
+                    yield delta_content
+        except Exception as exc:
             emit_event(
                 "llm.call",
-                status="success",
+                status="failure",
                 component="llm",
                 operation=operation,
                 provider=self._provider,
                 model=self._model,
-                **usage,
+                error_type=type(exc).__name__,
             )
+            if span is not None:
+                from opentelemetry import trace as _trace
+                span.set_status(_trace.StatusCode.ERROR, str(exc))
+                span.record_exception(exc)
+                span.end()
+            raise
+
+        # Extract usage from the final chunk
+        usage = self.extract_stream_usage(last_chunk)
+        reasoning_tokens = self._extract_reasoning_tokens(last_chunk)
+        stream_obj.set_usage(
+            prompt_tokens=usage.get("token_prompt"),
+            completion_tokens=usage.get("token_completion"),
+            total_tokens=usage.get("token_total"),
+            reasoning_tokens=reasoning_tokens,
+        )
+
+        response_text = "".join(collected_text)
+        set_llm_span_attributes(
+            span,
+            response_message=response_text,
+            token_usage=usage,
+        )
+
+        emit_event(
+            "llm.call",
+            status="success",
+            component="llm",
+            operation=operation,
+            provider=self._provider,
+            model=self._model,
+            **usage,
+        )
+
+        if span is not None:
+            from opentelemetry import trace as _trace
+            span.set_status(_trace.StatusCode.OK)
+            span.end()
 
     @staticmethod
     def _extract_reasoning_tokens(payload: Mapping[str, Any]) -> int | None:
