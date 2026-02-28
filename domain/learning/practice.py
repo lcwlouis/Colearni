@@ -9,7 +9,14 @@ from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_ki
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from domain.learning import level_up
+from domain.learning.quiz_flow import (
+    QuizGradingError as _QuizGradingError,
+    QuizNotFoundError as _QuizNotFoundError,
+    QuizUnavailableError as _QuizUnavailableError,
+    QuizValidationError as _QuizValidationError,
+    create_quiz as _create_quiz,
+    submit_quiz as _submit_quiz,
+)
 from domain.learning.practice_novelty import (
     fingerprint_text,
     load_existing_fingerprints as _load_existing_fingerprints,
@@ -193,7 +200,7 @@ def create_practice_quiz(
             session.rollback()  # Reset failed transaction state
 
     try:
-        return level_up.create_level_up_quiz(
+        return _create_quiz(
             session,
             workspace_id=workspace_id,
             user_id=user_id,
@@ -206,11 +213,11 @@ def create_practice_quiz(
             max_items=MAX_ITEMS,
             context_source="generated",
         )
-    except level_up.LevelUpQuizNotFoundError as exc:
+    except _QuizNotFoundError as exc:
         raise PracticeNotFoundError(str(exc)) from exc
-    except level_up.LevelUpQuizValidationError as exc:
+    except _QuizValidationError as exc:
         raise PracticeValidationError(str(exc)) from exc
-    except level_up.LevelUpQuizUnavailableError as exc:
+    except _QuizUnavailableError as exc:
         raise PracticeUnavailableError(str(exc)) from exc
 
 
@@ -224,7 +231,7 @@ def submit_practice_quiz(
     llm_client: GraphLLMClient | None,
 ) -> dict[str, Any]:
     try:
-        return level_up.submit_level_up_quiz(
+        return _submit_quiz(
             session,
             quiz_id=quiz_id,
             workspace_id=workspace_id,
@@ -235,13 +242,13 @@ def submit_practice_quiz(
             update_mastery=False,
             retry_hint=RETRY_HINT,
         )
-    except level_up.LevelUpQuizNotFoundError as exc:
+    except _QuizNotFoundError as exc:
         raise PracticeNotFoundError(str(exc)) from exc
-    except level_up.LevelUpQuizValidationError as exc:
+    except _QuizValidationError as exc:
         raise PracticeValidationError(str(exc)) from exc
-    except level_up.LevelUpQuizGradingError as exc:
+    except _QuizGradingError as exc:
         raise PracticeGradingError(str(exc)) from exc
-    except level_up.LevelUpQuizUnavailableError as exc:
+    except _QuizUnavailableError as exc:
         raise PracticeUnavailableError(str(exc)) from exc
 
 

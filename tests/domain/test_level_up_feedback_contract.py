@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from domain.learning import level_up
+from domain.learning.quiz_grading import compose_feedback_items as _compose_feedback_items
 
 
 def test_compose_feedback_items_maps_mcq_and_short_answer_results() -> None:
@@ -23,7 +23,7 @@ def test_compose_feedback_items_maps_mcq_and_short_answer_results() -> None:
         },
     ]
 
-    payload = level_up._compose_feedback_items(item_refs=item_refs, graded_items=graded_items)
+    payload = _compose_feedback_items(item_refs=item_refs, graded_items=graded_items)
 
     assert payload == [
         {
@@ -48,7 +48,7 @@ def test_compose_feedback_items_maps_mcq_and_short_answer_results() -> None:
 
 
 def test_compose_feedback_items_marks_short_answer_critical_incorrect() -> None:
-    payload = level_up._compose_feedback_items(
+    payload = _compose_feedback_items(
         item_refs=[{"item_id": 10, "item_type": "short_answer"}],
         graded_items=[
             {
@@ -65,7 +65,7 @@ def test_compose_feedback_items_marks_short_answer_critical_incorrect() -> None:
 
 
 def test_compose_feedback_items_filters_unknown_or_invalid_rows() -> None:
-    payload = level_up._compose_feedback_items(
+    payload = _compose_feedback_items(
         item_refs=[{"item_id": 1, "item_type": "mcq"}],
         graded_items=[
             {

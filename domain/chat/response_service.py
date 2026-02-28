@@ -11,7 +11,7 @@ from core.schemas import ChatRespondRequest, EvidenceItem
 from core.settings import Settings
 from domain.chat.prompt_kit import build_full_tutor_prompt, get_persona
 from domain.chat.tutor_agent import build_tutor_response_text, resolve_tutor_style
-from domain.learning.level_up import get_latest_quiz_summary_for_concept
+from domain.learning.quiz_persistence import get_latest_quiz_summary_for_concept
 from sqlalchemy.orm import Session
 
 log = logging.getLogger("domain.chat.response_service")
