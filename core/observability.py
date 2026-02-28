@@ -45,6 +45,12 @@ USER_ID = "user.id"
 RETRIEVAL_DOCUMENTS = "retrieval.documents"
 METADATA = "metadata"
 
+# Usage-source metadata values
+LLM_USAGE_SOURCE = "llm.usage_source"
+USAGE_SOURCE_PROVIDER = "provider_reported"
+USAGE_SOURCE_ESTIMATED = "estimated"
+USAGE_SOURCE_MISSING = "missing"
+
 # Span kind constants (values recognised by Phoenix)
 SPAN_KIND_LLM = "LLM"
 SPAN_KIND_CHAIN = "CHAIN"
@@ -101,6 +107,7 @@ _SENSITIVE_MARKERS = (
     "secret",
 )
 _MAX_VALUE_CHARS = 4096
+_PREVIEW_CHARS = 256
 
 
 def configure_observability(settings: Any) -> None:
@@ -210,7 +217,9 @@ def set_llm_span_attributes(
 ) -> None:
     """Set OpenInference LLM span attributes on a trace span.
 
-    Respects the ``record_content_enabled()`` toggle for message content.
+    Content policy:
+    - Preview/length are always set when messages are provided.
+    - Full message bodies are only attached when ``record_content_enabled()``.
     """
     if span is None:
         return
@@ -226,13 +235,17 @@ def set_llm_span_attributes(
             json.dumps(dict(invocation_params), default=str)[:_MAX_VALUE_CHARS],
         )
 
-    if record_content_enabled():
-        if messages is not None:
-            span.set_attribute(
-                LLM_INPUT_MESSAGES,
-                json.dumps(list(messages), default=str)[:_MAX_VALUE_CHARS],
-            )
-        if response_message is not None:
+    if messages is not None:
+        full_json = json.dumps(list(messages), default=str)
+        span.set_attribute("llm.input_messages.length", len(full_json))
+        span.set_attribute("llm.input_messages.preview", content_preview(full_json) or "")
+        if record_content_enabled():
+            span.set_attribute(LLM_INPUT_MESSAGES, full_json[:_MAX_VALUE_CHARS])
+
+    if response_message is not None:
+        span.set_attribute("llm.output_messages.length", len(response_message))
+        span.set_attribute("llm.output_messages.preview", content_preview(response_message) or "")
+        if record_content_enabled():
             span.set_attribute(
                 LLM_OUTPUT_MESSAGES,
                 json.dumps(
@@ -247,6 +260,7 @@ def set_llm_span_attributes(
             span.set_attribute(LLM_TOKEN_COUNT_COMPLETION, int(token_usage["token_completion"]))
         if token_usage.get("token_total") is not None:
             span.set_attribute(LLM_TOKEN_COUNT_TOTAL, int(token_usage["token_total"]))
+        set_usage_source(span, classify_usage_source(token_usage))
 
 
 def set_span_kind(span: Any, kind: str) -> None:
@@ -273,6 +287,37 @@ def set_input_output(
         if output_value is not None:
             span.set_attribute(OUTPUT_VALUE, output_value[:_MAX_VALUE_CHARS])
             span.set_attribute(OUTPUT_MIME_TYPE, output_mime_type)
+
+
+def classify_usage_source(
+    token_usage: Mapping[str, int | None],
+) -> str:
+    """Return the usage-source label for a token-usage dict.
+
+    Values: ``provider_reported`` | ``estimated`` | ``missing``.
+    """
+    if token_usage.get("token_prompt") is not None or token_usage.get("token_total") is not None:
+        return USAGE_SOURCE_PROVIDER
+    return USAGE_SOURCE_MISSING
+
+
+def set_usage_source(span: Any, source: str) -> None:
+    """Set the ``llm.usage_source`` attribute on a span."""
+    if span is not None:
+        span.set_attribute(LLM_USAGE_SOURCE, source)
+
+
+def content_preview(text: str | None) -> str | None:
+    """Return a short preview of *text* suitable for span metadata.
+
+    Always includes length; keeps only the first ``_PREVIEW_CHARS`` characters.
+    """
+    if text is None:
+        return None
+    length = len(text)
+    if length <= _PREVIEW_CHARS:
+        return text
+    return f"{text[:_PREVIEW_CHARS]}... (len={length})"
 
 
 def emit_event(event_name: str, *, status: str, **fields: Any) -> dict[str, Any] | None:
@@ -445,7 +490,13 @@ __all__ = [
     "SPAN_KIND_EMBEDDING",
     "SPAN_KIND_TOOL",
     "SPAN_KIND_AGENT",
+    "LLM_USAGE_SOURCE",
+    "USAGE_SOURCE_PROVIDER",
+    "USAGE_SOURCE_ESTIMATED",
+    "USAGE_SOURCE_MISSING",
+    "classify_usage_source",
     "configure_observability",
+    "content_preview",
     "emit_event",
     "extract_token_usage",
     "get_observation_context",
@@ -456,5 +507,6 @@ __all__ = [
     "set_llm_span_attributes",
     "set_span_kind",
     "set_tracer_provider_for_testing",
+    "set_usage_source",
     "start_span",
 ]

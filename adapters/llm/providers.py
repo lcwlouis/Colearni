@@ -10,10 +10,12 @@ from typing import Any
 
 from core.contracts import TutorTextStream
 from core.observability import (
+    classify_usage_source,
     emit_event,
     extract_token_usage,
     get_observation_context,
     set_llm_span_attributes,
+    set_usage_source,
     start_span,
 )
 from core.prompting import PromptRegistry
@@ -217,26 +219,80 @@ class _BaseGraphLLMClient(ABC):
         temperature: float,
         stream_obj: TutorTextStream,
     ) -> Iterator[str]:
-        """Stream text deltas and capture final usage on the TutorTextStream."""
-        last_chunk: Mapping[str, Any] = {}
-        for chunk in self._sdk_stream_call(
-            messages=messages,
-            temperature=temperature,
-        ):
-            last_chunk = chunk
-            delta_content = self._extract_stream_delta(chunk)
-            if delta_content:
-                yield delta_content
-        # Extract usage from the final chunk
-        usage = self.extract_stream_usage(last_chunk)
-        # Also look for reasoning tokens
-        reasoning_tokens = self._extract_reasoning_tokens(last_chunk)
-        stream_obj.set_usage(
-            prompt_tokens=usage.get("token_prompt"),
-            completion_tokens=usage.get("token_completion"),
-            total_tokens=usage.get("token_total"),
-            reasoning_tokens=reasoning_tokens,
-        )
+        """Stream text deltas inside an LLM span and capture final usage."""
+        context = get_observation_context()
+        operation = str(context.get("operation") or "llm.stream")
+        collected_text: list[str] = []
+
+        with start_span(
+            "llm.call",
+            component="llm",
+            operation=operation,
+            provider=self._provider,
+            model=self._model,
+        ) as span:
+            set_llm_span_attributes(
+                span,
+                model=self._model,
+                invocation_params={
+                    "model": self._model,
+                    "temperature": temperature,
+                    "provider": self._provider,
+                    "stream": True,
+                },
+                messages=messages,
+            )
+
+            last_chunk: Mapping[str, Any] = {}
+            try:
+                for chunk in self._sdk_stream_call(
+                    messages=messages,
+                    temperature=temperature,
+                ):
+                    last_chunk = chunk
+                    delta_content = self._extract_stream_delta(chunk)
+                    if delta_content:
+                        collected_text.append(delta_content)
+                        yield delta_content
+            except Exception as exc:
+                emit_event(
+                    "llm.call",
+                    status="failure",
+                    component="llm",
+                    operation=operation,
+                    provider=self._provider,
+                    model=self._model,
+                    error_type=type(exc).__name__,
+                )
+                raise
+
+            # Extract usage from the final chunk
+            usage = self.extract_stream_usage(last_chunk)
+            reasoning_tokens = self._extract_reasoning_tokens(last_chunk)
+            stream_obj.set_usage(
+                prompt_tokens=usage.get("token_prompt"),
+                completion_tokens=usage.get("token_completion"),
+                total_tokens=usage.get("token_total"),
+                reasoning_tokens=reasoning_tokens,
+            )
+
+            response_text = "".join(collected_text)
+            set_llm_span_attributes(
+                span,
+                response_message=response_text,
+                token_usage=usage,
+            )
+            # Usage source is set by set_llm_span_attributes via token_usage
+
+            emit_event(
+                "llm.call",
+                status="success",
+                component="llm",
+                operation=operation,
+                provider=self._provider,
+                model=self._model,
+                **usage,
+            )
 
     @staticmethod
     def _extract_reasoning_tokens(payload: Mapping[str, Any]) -> int | None:

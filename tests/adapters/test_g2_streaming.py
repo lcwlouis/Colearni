@@ -2,13 +2,65 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 import pytest
 
 from core.contracts import TutorTextStream
+from core.observability import (
+    configure_observability,
+    observation_context,
+    set_event_sink,
+    set_tracer_provider_for_testing,
+)
 from core.schemas.assistant import GenerationTrace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+
+
+class _InMemoryExporter(SpanExporter):
+    """Minimal in-memory span exporter for test assertions."""
+
+    def __init__(self):
+        self._spans: list = []
+        self._lock = threading.Lock()
+
+    def export(self, spans):
+        with self._lock:
+            self._spans.extend(spans)
+        return SpanExportResult.SUCCESS
+
+    def get_finished_spans(self):
+        with self._lock:
+            return list(self._spans)
+
+    def shutdown(self):
+        pass
+
+
+@pytest.fixture()
+def otel_exporter():
+    """Provide an in-memory OTel exporter for span assertions."""
+    from core.settings import get_settings
+
+    exporter = _InMemoryExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    set_tracer_provider_for_testing(provider)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+                "observability_record_content": True,
+            }
+        )
+    )
+    yield exporter
+    set_tracer_provider_for_testing(None)
 
 
 # ── TutorTextStream unit tests ───────────────────────────────────────
@@ -207,3 +259,86 @@ class TestReasoningCapabilityGating:
         for model in ("gpt-4.1", "claude-sonnet", "llama-3"):
             client._model = model
             assert not client._model_supports_reasoning()
+
+
+# ── OBS-2: Streaming LLM span tests ─────────────────────────────────
+
+
+class TestStreamingLLMSpan:
+    def test_streaming_produces_llm_span(self, otel_exporter) -> None:
+        """Streaming generates an llm.call span with LLM kind and token counts."""
+        chunks = [
+            {"choices": [{"delta": {"content": "Hello"}}]},
+            {"choices": [{"delta": {"content": " world"}}]},
+            {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}},
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        stream = client.generate_tutor_text_stream(prompt="test")
+        list(stream)
+
+        spans = otel_exporter.get_finished_spans()
+        llm_spans = [s for s in spans if s.name == "llm.call"]
+        assert len(llm_spans) >= 1
+        span = llm_spans[0]
+        assert span.attributes.get("openinference.span.kind") == "LLM"
+        assert span.attributes.get("llm.token_count.prompt") == 5
+        assert span.attributes.get("llm.token_count.completion") == 10
+        assert span.attributes.get("llm.token_count.total") == 15
+
+    def test_streaming_span_has_usage_source(self, otel_exporter) -> None:
+        """Streaming span includes llm.usage_source = provider_reported."""
+        chunks = [
+            {"choices": [{"delta": {"content": "x"}}]},
+            {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}},
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        list(client.generate_tutor_text_stream(prompt="test"))
+
+        spans = otel_exporter.get_finished_spans()
+        llm_spans = [s for s in spans if s.name == "llm.call"]
+        assert llm_spans[0].attributes.get("llm.usage_source") == "provider_reported"
+
+    def test_streaming_span_missing_usage_source(self, otel_exporter) -> None:
+        """Streaming span with no usage reports llm.usage_source = missing."""
+        chunks = [
+            {"choices": [{"delta": {"content": "x"}}]},
+            {"choices": [{"delta": {}}]},
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        list(client.generate_tutor_text_stream(prompt="test"))
+
+        spans = otel_exporter.get_finished_spans()
+        llm_spans = [s for s in spans if s.name == "llm.call"]
+        assert llm_spans[0].attributes.get("llm.usage_source") == "missing"
+
+    def test_streaming_emits_event(self, otel_exporter) -> None:
+        """Streaming completion emits an llm.call event."""
+        events: list[dict] = []
+        set_event_sink(events)
+
+        chunks = [
+            {"choices": [{"delta": {"content": "hi"}}]},
+            {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        with observation_context(operation="chat.stream"):
+            list(client.generate_tutor_text_stream(prompt="test"))
+
+        assert len(events) == 1
+        assert events[0]["event_name"] == "llm.call"
+        assert events[0]["status"] == "success"
+        set_event_sink(None)
+
+    def test_streaming_span_captures_response_text(self, otel_exporter) -> None:
+        """Streaming span includes response message preview."""
+        chunks = [
+            {"choices": [{"delta": {"content": "Hello"}}]},
+            {"choices": [{"delta": {"content": " there"}}]},
+            {"choices": [{"delta": {}}]},
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        list(client.generate_tutor_text_stream(prompt="test"))
+
+        spans = otel_exporter.get_finished_spans()
+        llm_spans = [s for s in spans if s.name == "llm.call"]
+        assert llm_spans[0].attributes.get("llm.output_messages.preview") == "Hello there"
