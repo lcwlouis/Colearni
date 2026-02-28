@@ -1,4 +1,10 @@
-"""Document upload route definitions."""
+"""Document upload route definitions.
+
+.. deprecated::
+    This route (``/api/documents/upload``) is superseded by
+    ``/api/workspaces/{ws_id}/kb/documents/upload`` in ``knowledge_base.py``.
+    It remains for backward compatibility and will be removed in a future release.
+"""
 
 from __future__ import annotations
 
@@ -63,7 +69,10 @@ async def upload_document(
     source_uri: Annotated[str | None, Query()] = None,
     db: Session = Depends(get_db_session),
 ) -> DocumentUploadResponse | JSONResponse:
-    """Upload .md/.txt/.pdf content via multipart or raw body."""
+    """Upload .md/.txt/.pdf content via multipart or raw body.
+
+    .. deprecated:: Use ``POST /api/workspaces/{ws_id}/kb/documents/upload`` instead.
+    """
     payload = await _read_upload_payload(request)
     request_payload = IngestionRequest(
         workspace_id=workspace_id,
