@@ -154,10 +154,15 @@ class _BaseGraphLLMClient(ABC):
             {"role": "system", "content": "You are a grounded tutor. Follow style instructions exactly and stay concise."},
             {"role": "user", "content": prompt},
         ]
+        supported = self._model_supports_reasoning()
+        used = self._reasoning_enabled and supported
         stream_obj = TutorTextStream(
             self._iter_nothing(),  # placeholder, replaced below
             provider=self._provider,
             model=self._model,
+            reasoning_requested=self._reasoning_enabled,
+            reasoning_supported=supported,
+            reasoning_used=used,
         )
         stream_obj._delta_iter = self._stream_with_usage(
             messages=messages,
@@ -281,6 +286,8 @@ class _BaseGraphLLMClient(ABC):
         text = self._extract_content(result).strip()
         usage = extract_token_usage(result)
         reasoning = self._extract_reasoning_tokens(result)
+        supported = self._model_supports_reasoning()
+        used = self._reasoning_enabled and supported
         trace = GenerationTrace(
             provider=self._provider,
             model=self._model,
@@ -289,6 +296,9 @@ class _BaseGraphLLMClient(ABC):
             completion_tokens=usage.get("token_completion"),
             total_tokens=usage.get("token_total"),
             reasoning_tokens=reasoning,
+            reasoning_requested=self._reasoning_enabled,
+            reasoning_supported=supported,
+            reasoning_used=used,
         )
         return text, trace
 

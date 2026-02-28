@@ -88,7 +88,14 @@ class OnboardingStatusResponse(BaseModel):
 
 
 class ChatPhase(str, Enum):
-    """Backend lifecycle phases for chat generation."""
+    """Backend lifecycle phases for chat generation.
+
+    Semantic contract:
+      - THINKING:   request started, no visible output yet (includes LLM internal work)
+      - SEARCHING:  retrieval / context assembly in progress
+      - RESPONDING: first visible text delta has arrived (NOT "LLM call started")
+      - FINALIZING: post-generation verification and persistence
+    """
 
     THINKING = "thinking"
     SEARCHING = "searching"

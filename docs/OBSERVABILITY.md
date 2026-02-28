@@ -176,16 +176,22 @@ chain-of-thought, prompt content, or raw model output is ever included.
 | `completion_tokens` | integer \| null | Output token count |
 | `total_tokens` | integer \| null | Sum of prompt + completion |
 | `reasoning_tokens` | integer \| null | Reasoning tokens (o1/o3/o4 models only) |
+| `reasoning_requested` | boolean \| null | Whether reasoning was requested for this call |
+| `reasoning_supported` | boolean \| null | Whether the model supports reasoning params |
+| `reasoning_used` | boolean \| null | Whether reasoning params were actually sent |
 
 All fields are nullable.  When the LLM provider does not report usage, token fields
 are `null`.  Social and onboarding fast-path responses have `generation_trace: null`.
 
 ### Safety Guarantees
 
-- **No chain-of-thought**: reasoning content is never included; only the token count.
+- **No chain-of-thought**: reasoning content is never included; only the token count and boolean metadata.
 - **No prompt leakage**: the trace carries only provider/model identifiers and numeric metrics.
 - **Capability gating**: `reasoning_tokens` is only populated for models that support the
   reasoning API (prefix `o1`, `o3`, `o4`).  Other models return `null`.
+- **Reasoning metadata**: `reasoning_requested/supported/used` indicate whether reasoning was
+  attempted without exposing any reasoning content.  Raw reasoning summaries are explicitly
+  deferred (see S5 in GENERATION_STATUS_PLAN.md).
 
 ---
 

@@ -200,8 +200,7 @@ def _stream_inner(
         ),
     )
 
-    # ── Phase: responding ─────────────────────────────────────────────
-    yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
+    # ── Phase: responding (deferred until first visible delta — S1) ─────
 
     resolved_concept_id = (
         concept_resolution.resolved_concept.concept_id
@@ -211,8 +210,13 @@ def _stream_inner(
 
     # Build tutor text — attempt streaming if client supports it
     generation_trace: GenerationTrace | None = None
+    responded = False  # S1: track whether we've emitted 'responding'
     if concept_resolution.requires_clarification:
         assistant_text = concept_resolution.clarification_prompt or ""
+        # Clarification is immediate visible content
+        if assistant_text:
+            yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
+            responded = True
     elif tutor_llm_client is not None and hasattr(tutor_llm_client, "generate_tutor_text_stream"):
         quiz_context_text = build_quiz_context(
             session=session,
@@ -252,6 +256,9 @@ def _stream_inner(
         text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(prompt=prompt)
         text_parts: list[str] = []
         for delta in text_stream:
+            if not responded and delta:
+                yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
+                responded = True
             text_parts.append(delta)
             yield ChatStreamDeltaEvent(text=delta)
         assistant_text = "".join(text_parts).strip()
@@ -289,6 +296,10 @@ def _stream_inner(
             quiz_context=quiz_context_text,
             flashcard_progress=flashcard_progress,
         )
+        # S1: emit responding only after blocking generation yields content
+        if assistant_text:
+            yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
+            responded = True
 
     if not assistant_text:
         assistant_text = "(no response generated)"

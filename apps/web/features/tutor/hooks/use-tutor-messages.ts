@@ -146,6 +146,11 @@ export function useTutorMessages({
             console.info("[tutor-stream] phase -> %s", event.phase);
             setChatPhase(event.phase as ChatPhase);
           } else if (event.event === "delta") {
+            // S3: safety net — if backend hasn't emitted 'responding' yet
+            // but we received text, auto-transition to responding
+            setChatPhase((prev) =>
+              prev !== "responding" && prev !== "finalizing" ? "responding" : prev,
+            );
             setMessages((prev) =>
               appendStreamingAssistantDelta(prev, streamAssistantId, event.text),
             );
@@ -207,14 +212,7 @@ export function useTutorMessages({
   ) {
     if (!wsId || !activeSessionId) return;
 
-    // Simulated phase progression for blocking path
-    const phaseTimer = setTimeout(() => {
-      if (requestId === activeRequestIdRef.current) setChatPhase("searching");
-    }, 1500);
-    const phaseTimer2 = setTimeout(() => {
-      if (requestId === activeRequestIdRef.current) setChatPhase("responding");
-    }, 4000);
-
+    // S4: blocking path keeps Thinking… until response arrives — no fake phases
     try {
       const response = await apiClient.respondChat(wsId, {
         session_id: activeSessionId,
@@ -250,8 +248,6 @@ export function useTutorMessages({
       if (abortController.signal.aborted) return;
       setChatError(errorText(error, "Tutor request failed"));
     } finally {
-      clearTimeout(phaseTimer);
-      clearTimeout(phaseTimer2);
       if (requestId === activeRequestIdRef.current) {
         setChatLoading(false);
         setChatPhase("idle");

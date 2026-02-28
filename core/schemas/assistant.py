@@ -222,6 +222,12 @@ class GenerationTrace(BaseModel):
 
     Only operational fields are included — no prompt text, no chain-of-thought,
     no retrieved evidence body copies.
+
+    Reasoning metadata (S2):
+    - ``reasoning_requested``: caller asked for reasoning (e.g. reasoning_effort).
+    - ``reasoning_supported``: the model is known to support reasoning params.
+    - ``reasoning_used``: reasoning params were actually sent to the provider.
+    - ``reasoning_tokens``: token count consumed by internal reasoning (if reported).
     """
 
     provider: str | None = None
@@ -231,6 +237,9 @@ class GenerationTrace(BaseModel):
     completion_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
+    reasoning_requested: bool | None = None
+    reasoning_supported: bool | None = None
+    reasoning_used: bool | None = None
 
 
 class ReadinessTopicState(BaseModel):

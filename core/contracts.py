@@ -58,12 +58,21 @@ class TutorTextStream:
         *,
         provider: str,
         model: str,
+        reasoning_requested: bool = False,
+        reasoning_supported: bool = False,
+        reasoning_used: bool = False,
     ) -> None:
         self._delta_iter = delta_iter
         self._provider = provider
         self._model = model
         self._start_ns = time.monotonic_ns()
-        self.trace: GenerationTrace = GenerationTrace(provider=provider, model=model)
+        self.trace: GenerationTrace = GenerationTrace(
+            provider=provider,
+            model=model,
+            reasoning_requested=reasoning_requested,
+            reasoning_supported=reasoning_supported,
+            reasoning_used=reasoning_used,
+        )
 
     def __iter__(self) -> Iterator[str]:
         for chunk in self._delta_iter:

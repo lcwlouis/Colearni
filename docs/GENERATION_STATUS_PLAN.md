@@ -1,4 +1,4 @@
-# CoLearni Generation Status + Trace Fix Plan (READ THIS OFTEN)
+# CoLearni Thinking + Streaming Status Plan (READ THIS OFTEN)
 
 Last updated: 2026-02-28
 
@@ -6,38 +6,38 @@ Last updated: 2026-02-28
 
 1. You MUST re-open and re-read this file:
    - at the start of the run
-   - after every 2 fix slices
+   - after every 2 implementation slices
    - after any context compaction / summarization / "I may lose context" moment
    - before claiming any slice complete
 2. Do not overclaim. A slice is ONLY complete if:
    - code or docs for that slice are changed
    - behavior is verified
-   - the slice-specific gates in this file are met
-3. Browser-visible streaming is the source of truth for completion:
-   - passing unit tests are necessary
+   - the slice-specific verification gates in this file are met
+3. Browser-visible behavior is the source of truth:
+   - tests are necessary
    - they are not sufficient
-   - the feature is not done until the actual tutor UI shows real phase changes and incremental assistant text in the browser
-4. Never expose raw chain-of-thought, hidden reasoning text, prompt internals, or retrieved chunk bodies in the trace payload or UI.
-5. Keep `/chat/respond` stable while fixing `/chat/respond/stream`.
-6. Do not keep silent fallback behavior:
-   - if the UI falls back from streaming to blocking
-   - that fact must be observable in logs, UI, or both
-7. This is now a remediation plan, not a greenfield rollout plan. Do not widen scope into unrelated chat refactors.
+   - the feature is not done until the tutor UI shows `Thinking…` before output and only shows content-generation status once text actually begins
+4. Never expose raw chain-of-thought, hidden reasoning text, prompt internals, or retrieved chunk bodies in logs, API responses, or UI.
+5. Keep `/chat/respond` stable while updating `/chat/respond/stream`.
+6. If provider support differs, normalize behavior behind shared contracts and clearly document what is inferred vs actually available.
+7. This plan is specifically for thinking/status semantics and safe reasoning metadata. Do not widen it into a general chat rewrite.
 
 ## Purpose
 
-This document replaces the earlier rollout-style generation-status plan.
+This document replaces the earlier generation-status remediation plan.
 
-That earlier version became stale in two ways:
+The streaming transport path is now mostly in place. The next product gap is different:
 
-- it still described several pre-implementation gaps that are no longer true in code
-- later edits overcorrected and started claiming the work was effectively complete
+- the UI currently says `Generating response…` too early
+- the backend emits `responding` before any user-visible text delta arrives
+- the system only has safe reasoning metadata today, not a trustworthy cross-provider stream of reasoning text
 
-Neither state is accurate.
+The new goal is:
 
-The repo now contains a substantial partial implementation of streaming chat status and safe generation trace metadata, but user-visible browser behavior is still not reliable enough to call done.
-
-This active file is the source of truth for fixing that gap.
+1. show `Thinking…` while the model is internally working but has not produced visible content
+2. switch to `Generating response…` only when the first real text delta arrives
+3. keep raw reasoning private
+4. optionally support provider-specific reasoning summaries later, but do not depend on them for core UX
 
 ## Inputs Used
 
@@ -46,463 +46,427 @@ This plan is based on:
 - `docs/CODEX.md`
 - `docs/ARCHITECTURE.md`
 - `docs/PRODUCT_SPEC.md`
-- `docs/GRAPH.md`
 - `docs/REFACTOR_PLAN.md`
 - `apps/api/routes/chat.py`
-- `domain/chat/respond.py`
 - `domain/chat/stream.py`
+- `domain/chat/respond.py`
 - `domain/chat/response_service.py`
-- `domain/chat/session_memory.py`
 - `adapters/llm/providers.py`
 - `core/contracts.py`
 - `core/schemas/assistant.py`
 - `core/schemas/chat.py`
-- `core/settings.py`
-- `apps/web/next.config.mjs`
-- `apps/web/README.md`
-- `apps/web/.env.example`
-- `apps/web/app/tutor/page.tsx`
-- `apps/web/features/tutor/hooks/use-tutor-page.ts`
 - `apps/web/features/tutor/hooks/use-tutor-messages.ts`
-- `apps/web/features/tutor/stream-messages.ts`
+- `apps/web/features/tutor/types.ts`
 - `apps/web/features/tutor/components/tutor-timeline.tsx`
 - `apps/web/components/chat-response.tsx`
 - `apps/web/lib/api/client.ts`
 - `apps/web/lib/api/types.ts`
-- `docs/API.md`
-- `docs/OBSERVABILITY.md`
-- user manual report from 2026-02-28:
-  - backend restarted
-  - frontend restarted
-  - tutor still shows only `Thinking...`
-  - assistant text still does not stream into the chat
+- current repo behavior as of 2026-02-28
+- current user requirement:
+  - show `Thinking…` while the LLM is still thinking
+  - show `Generating response…` only when visible text is actually streaming
+  - if there is no streaming and no reasoning-specific signal, `Generating response…` may still be used as fallback
 
 ## Executive Summary
 
-The current state is:
+Current state:
 
-1. The core implementation is partially landed.
-2. The browser-visible feature is still not done.
+- the backend can stream `status`, `delta`, `trace`, `final`, and `error`
+- the frontend can render text deltas incrementally
+- the system captures safe reasoning metadata like `reasoning_tokens`
+- the system does NOT have a reliable, provider-neutral stream of raw reasoning text
 
-What is already present in code:
+Current product mismatch:
 
-- additive `generation_trace` schemas
-- chat stream event schemas
-- provider-side streaming + token normalization
-- `POST /workspaces/{ws_id}/chat/respond/stream`
-- domain-level streaming orchestration in `domain/chat/stream.py`
-- frontend stream client code
-- frontend stream delta insertion code
-- backend and frontend tests covering many of those pieces
+- `domain/chat/stream.py` emits `responding` before the first text delta
+- the frontend maps `responding` to `Generating response…`
+- this makes the UI claim content generation has started even when the model may still be thinking internally
 
-What is still failing in the real product:
+Correct target behavior:
 
-- the tutor UI still does not reliably show real backend phase progression
-- the assistant text still does not reliably stream into the timeline
-- the current UX can still look fake even when the stream code exists
+1. `Thinking…`
+   - after request start
+   - during retrieval
+   - during model internal work before first visible output token
+2. `Generating response…`
+   - only after the first visible text delta arrives
+3. `Finalizing…`
+   - after text generation is done, during verify/persist/final assembly
 
-The most likely remaining failure cluster is transport/runtime behavior, not missing schemas or missing backend orchestration.
+Reasoning visibility policy:
 
-The strongest current hypothesis is:
-
-- the frontend uses `/api/*` via a Next rewrite proxy
-- that same-origin proxy path may be buffering or coalescing `text/event-stream`
-- the browser therefore stays on the optimistic local `thinking` state until the stream effectively completes
-
-That hypothesis must be verified directly, not assumed away.
+- safe reasoning metadata is allowed
+- raw reasoning text is not
+- optional provider-specific reasoning summaries may be explored later behind explicit gating, but are not required for correct phase UX
 
 ## Non-Negotiable Constraints
 
 These constraints apply to every remaining slice:
 
-1. No raw reasoning text / chain-of-thought in API responses, stored payloads, or UI.
-2. `/chat/respond` must remain backward-compatible throughout the fix pass.
-3. Citation/evidence verification guarantees must remain unchanged.
+1. No raw reasoning text / chain-of-thought in logs, API payloads, or UI.
+2. `/chat/respond` must remain backward-compatible.
+3. Existing evidence/citation verification guarantees must remain unchanged.
 4. Route handlers remain thin: input validation, session/public-id resolution, service call, error mapping, response.
-5. If streaming is unavailable, the fallback path may remain temporarily, but it must no longer be silent.
-6. Fixes must target the browser-visible failure path first, not purely internal cleanliness.
-7. Do not mark the plan complete until a real browser run confirms:
-   - phase changes beyond `thinking`
-   - incremental assistant text before `final`
+5. `responding` must no longer mean "LLM call started"; it must mean "visible response text has started".
+6. Thinking-state UX must not depend on provider-specific reasoning text support.
+7. If no streaming is available, fallback semantics must be explicit and documented.
 
 ## What Has Landed (Do Not Rebuild From Scratch)
 
-These areas are already implemented enough that the next pass should treat them as existing assets, not greenfield work:
+These areas already exist and should be reused:
 
-- Contracts:
-  - `core/schemas/assistant.py` includes `generation_trace`
-  - `core/schemas/chat.py` includes chat stream events and phase enum
-- Backend route surface:
-  - `apps/api/routes/chat.py` includes `/chat/respond/stream`
-  - streaming is feature-gated by `APP_CHAT_STREAMING_ENABLED`
-- Domain orchestration:
-  - `domain/chat/stream.py` emits `status`, `delta`, `trace`, `final`, and `error`
-  - `domain/chat/respond.py` attaches `generation_trace` on the blocking path
-- Provider layer:
-  - `adapters/llm/providers.py` supports streaming and normalized usage/trace data
-- Frontend wiring:
-  - `apps/web/features/tutor/hooks/use-tutor-messages.ts` has a streaming path behind `NEXT_PUBLIC_CHAT_STREAMING_ENABLED`
-  - `apps/web/lib/api/client.ts` has an SSE reader
-  - temporary assistant delta assembly now exists in `apps/web/features/tutor/stream-messages.ts`
-- Docs/examples:
-  - `.env.example` and `apps/web/.env.example` both include streaming flags
+- `apps/api/routes/chat.py`
+  - streaming route exists
+- `domain/chat/stream.py`
+  - emits chat stream events and text deltas
+- `adapters/llm/providers.py`
+  - supports streaming text deltas
+  - extracts safe reasoning metadata (`reasoning_tokens`) when available
+- `core/contracts.py`
+  - includes `TutorTextStream`
+- `core/schemas/chat.py`
+  - includes `ChatPhase` and stream event models
+- `core/schemas/assistant.py`
+  - includes `GenerationTrace`
+- `apps/web/features/tutor/hooks/use-tutor-messages.ts`
+  - already consumes stream events
+- `apps/web/features/tutor/types.ts`
+  - already has `thinking`, `searching`, `responding`, `finalizing`
 
-Do not reopen these as if they do not exist.
+Do not reopen this work as if streaming does not exist.
 
 ## Reality Check
 
-Passing tests do NOT currently prove the product works.
+What the system can safely know today:
 
-The repo now has a split state:
+- whether the request has started
+- whether retrieval is in progress
+- whether the first visible output delta has arrived
+- whether streaming is complete
+- whether reasoning metadata like `reasoning_tokens` was present after completion
 
-- implementation tests indicate most slices landed
-- browser verification still says the main user-visible behavior is not fixed
+What the system cannot safely assume today:
 
-That means the remaining work is now about:
+- that OpenAI or LiteLLM will provide raw thought text
+- that a cross-provider "thinking trace" is available in real time
+- that provider-specific reasoning items can be treated as stable product UX
 
-- transport truth
-- runtime diagnostics
-- browser integration hardening
-- eliminating silent failure modes
+Therefore:
+
+- core UX should be driven by actual output timing, not hidden-thought payloads
 
 ## Current Verification Status
 
-Verified after F0-F6 remediation pass:
+Current implementation baseline:
 
-- `python -m pytest tests/` — 348 passed
-- `npm --prefix apps/web test` — 58 passed (includes F3 edge case tests)
-- `npm --prefix apps/web run typecheck` — clean
+- stream route exists
+- delta rendering exists
+- safe trace metadata exists
 
-Implementation status:
+Current semantic mismatch:
 
-- F0 ✅ Fixed tuple unpacking bug in `stream.py` (root cause of "only Thinking…"); added diagnostics
-- F1 ✅ Analyzed Next.js proxy SSE buffering; created `scripts/verify_stream.sh` for manual transport verification
-- F2 ✅ Added `NEXT_PUBLIC_STREAM_BASE_URL` to bypass proxy; configured CORS for direct backend SSE
-- F3 ✅ Hardened abort cleanup, added edge case tests for empty deltas, multi-delta accumulation
-- F4 ✅ Exposed `streamFallback` state; fallback badge visible in timeline; console diagnostics on trigger
-- F5 ✅ Dev-only trace panel in `chat-response.tsx`; production keeps trace API/persistence-only
-- F6 ✅ Updated `API.md`, `OBSERVABILITY.md`; documented transport config and diagnostics
+- backend `responding` event is still emitted before first delta
+- frontend label for `responding` is still `Generating response…`
 
-Manual verification required:
+Manual acceptance still required:
 
-- [ ] Start backend + frontend with new env vars
-- [ ] Send a chat message in the tutor UI
-- [ ] Confirm phase changes beyond "Thinking…" (searching → responding → finalizing)
-- [ ] Confirm incremental assistant text before final persistence reload
-- [ ] Confirm `⚠ fallback` badge does NOT appear (streaming should work)
-- [ ] Check browser DevTools console for `[tutor-stream]` diagnostic logs
+- start a chat turn
+- observe `Thinking…` before any streamed text
+- observe `Generating response…` only after streamed text begins
 
 ## Current Remaining Hotspots
 
 | File | Lines | Why it still matters now |
 |---|---:|---|
-| `apps/web/features/tutor/hooks/use-tutor-messages.ts` | 265 | Stream path, fallback path, optimistic phase state, and final UI mutation all meet here. |
-| `apps/web/lib/api/client.ts` | 280 | SSE reader is here; transport-level buffering/parsing issues surface here first. |
-| `apps/web/next.config.mjs` | 14 | `/api/*` requests are rewritten through Next to the backend; this is a prime SSE buffering suspect. |
-| `apps/web/README.md` | 16 | Explicitly documents same-origin proxying via Next, which may be a mismatch for live streaming. |
-| `apps/api/routes/chat.py` | 254 | Stream route is feature-gated and must stay compatible while transport debugging proceeds. |
-| `domain/chat/stream.py` | 363 | Emits the correct event contract; browser/runtime behavior must be compared against this source of truth. |
-| `apps/web/components/chat-response.tsx` | 115 | Still does not surface `generation_trace`; lower priority than transport, but still incomplete relative to the original intent. |
-| `docs/GENERATION_STATUS_PLAN.md` | 508 | This file itself drifted into contradictory states and is being reset as the remediation source of truth. |
+| `domain/chat/stream.py` | 363 | Current source of truth for lifecycle event timing; `responding` is emitted too early. |
+| `adapters/llm/providers.py` | 563 | Current provider abstraction; only safe reasoning metadata is available cross-provider today. |
+| `core/schemas/chat.py` | 127 | Phase contract may need semantic clarification and/or new safe metadata events. |
+| `core/contracts.py` | 90 | Shared stream contract may need explicit first-delta or reasoning-capability semantics. |
+| `apps/web/features/tutor/hooks/use-tutor-messages.ts` | 265 | Frontend status behavior and delta handling meet here. |
+| `apps/web/features/tutor/types.ts` | 43 | Labels still map `responding` to generation regardless of whether content has started. |
+| `apps/web/components/chat-response.tsx` | 115 | Optional future place for safe reasoning metadata or reasoning summary UI. |
+| `docs/API.md` | 1650 | Will need to document the new phase semantics if the contract changes. |
+| `docs/OBSERVABILITY.md` | 168 | Will need to document what reasoning metadata is logged and what is intentionally not logged. |
 
 ## Current-State Findings
 
-### 1. Backend streaming exists
+### 1. OpenAI and LiteLLM do not give us a safe universal "thought stream"
 
-The backend is no longer missing the basic implementation:
+From current implementation and provider constraints:
 
-- `/chat/respond/stream` exists
-- SSE frames are emitted
-- the domain stream path emits lifecycle events and deltas
-- generation trace metadata is shaped and persisted
+- both providers can stream visible text deltas
+- both may expose usage metadata
+- some reasoning-capable models may expose reasoning-related metadata
+- neither path should be treated as a stable, universal raw-thought stream for product UI
 
-This is not a "backend does nothing" situation anymore.
+Therefore:
 
-### 2. Frontend streaming exists, but runtime success is not proven
+- "Thinking…" should be inferred from the absence of visible output after generation starts
+- not from raw reasoning text
 
-The frontend now:
+### 2. The current `responding` event is semantically wrong for UX
 
-- has a stream path behind `NEXT_PUBLIC_CHAT_STREAMING_ENABLED`
-- has a blocking fallback path
-- assembles streamed text deltas into a temporary assistant message
+Right now the backend emits `responding` before output actually appears.
 
-But the user report shows the feature still does not behave correctly in the browser.
+That makes the frontend label inaccurate even when the stream transport works correctly.
 
-### 3. The fallback path can still mask real failures
+### 3. Safe reasoning metadata is still useful
 
-Even after the recent frontend changes, the architecture still allows a stream failure to degrade to blocking behavior.
+It is reasonable to log and optionally persist:
 
-That can hide transport failures and produce a UX that still feels fake.
+- `reasoning_requested`
+- `reasoning_supported`
+- `reasoning_used`
+- `reasoning_tokens`
+- provider/model identity
 
-### 4. The Next `/api` proxy is the main transport suspect
+It is not reasonable by default to log:
 
-The frontend defaults to `NEXT_PUBLIC_API_BASE_URL=/api`, and Next rewrites that to the backend:
+- raw reasoning text
+- private chain-of-thought
+- provider-specific hidden traces
 
-- [apps/web/.env.example](/Users/louisliu/Projects/Personal/ColearniCodex/apps/web/.env.example#L4)
-- [apps/web/next.config.mjs](/Users/louisliu/Projects/Personal/ColearniCodex/apps/web/next.config.mjs#L6)
+### 4. Optional reasoning summaries are future work, not baseline UX
 
-That is good for simple JSON requests.
+If a future provider path can expose an explicit reasoning summary safely:
 
-It is not yet proven good for incremental SSE delivery.
-
-This is the highest-probability explanation for:
-
-- only the initial local `thinking` state showing
-- no incremental text appearing
-- behavior remaining wrong even after restarts
-
-This is an inference from the current code and user report, not a completed proof.
-
-### 5. The current plan/doc state was misleading
-
-The previous version of this file mixed:
-
-- "all slices are complete"
-- "these major pieces do not exist yet"
-
-That contradiction made it unusable as an execution guide.
-
-This rewrite fixes that.
+- that should be additive
+- feature-gated
+- provider-specific
+- never required for correct status semantics
 
 ## Remaining Slice IDs
 
 Use these stable IDs in commits, reports, and verification blocks:
 
-- `F0` Reality Reset and Instrumentation Baseline
-- `F1` Stream Transport Verification
-- `F2` Stream Transport Hardening
-- `F3` Frontend Live Update Hardening
-- `F4` Fallback Visibility and Diagnostics
-- `F5` Trace UX Closeout
-- `F6` End-to-End Validation and Docs Closeout
+- `S0` Status Semantics Reset
+- `S1` Backend First-Delta Phase Correction
+- `S2` Safe Reasoning Metadata Contract
+- `S3` Frontend Thinking-vs-Generating UX
+- `S4` Fallback and Non-Streaming Semantics
+- `S5` Optional Reasoning Summary Exploration
+- `S6` Docs and Acceptance Closeout
+
+### Completion Status
+
+| Slice | Status | Summary |
+|---|---|---|
+| S0 | ✅ Done | ChatPhase docstring updated with semantic contract |
+| S1 | ✅ Done | Removed premature `responding` emit; now fires on first non-empty delta |
+| S2 | ✅ Done | Added `reasoning_requested/supported/used` to GenerationTrace |
+| S3 | ✅ Done | Frontend auto-transitions to `responding` on first delta (safety net) |
+| S4 | ✅ Done | Blocking fallback keeps `Thinking…` until response arrives; no fake timers |
+| S5 | ✅ Deferred | Raw reasoning summaries explicitly deferred; metadata fields sufficient |
+| S6 | ✅ Done | API.md, OBSERVABILITY.md, and plan updated |
 
 ## Decision Log For Remaining Work
 
-These decisions are already made for the remediation phase:
+These decisions are already made for this phase:
 
-1. Completion standard:
-   - tests passing is not enough
-   - browser-visible streaming must work
-2. Blocking route policy:
-   - keep `/chat/respond`
-   - do not break existing clients
-3. Stream fallback policy:
-   - fallback may remain temporarily
-   - fallback must become visible and diagnosable
-4. Transport policy:
-   - the current `/api` rewrite path is now under suspicion
-   - it must be explicitly verified, not trusted
-5. If the Next rewrite is the problem:
-   - use a direct backend origin for streaming or introduce a stream-specific origin/config
-   - handle auth/CORS deliberately
-6. Trace UI policy:
-   - trace display is secondary to fixing live streaming
-   - do not spend the next slice polishing trace UI before transport is proven
+1. `Thinking…` is the default pre-output state.
+2. `Generating response…` begins only after the first visible text delta.
+3. Raw reasoning text is out of scope and should not be logged or shown.
+4. Safe reasoning metadata is allowed.
+5. Provider-specific reasoning summaries, if any, are optional future work.
+6. The user should not need provider-specific reasoning support to get correct status behavior.
 
 ## Slice Plan
 
-### F0. Reality Reset and Instrumentation Baseline
+### S0. Status Semantics Reset
 
 Purpose:
-- stop pretending the feature is complete and make failures observable
+- define the correct phase meanings before changing code
 
 Changes:
-- update this plan and related docs to reflect the partially-landed state
-- add temporary debug instrumentation where needed to distinguish:
-  - stream path entered
-  - first event received
-  - fallback triggered
-  - final event received
-- ensure the frontend can tell whether it is using stream or blocking mode during a request
+- update this plan to make phase semantics explicit
+- define canonical meanings:
+  - `thinking`: request started, no visible output yet
+  - `searching`: retrieval/context assembly work
+  - `responding`: first visible text delta has arrived
+  - `finalizing`: post-generation verification/persistence
+- define fallback meaning when there is no streaming
 
 Verification:
-- targeted tests remain green
-- browser/devtools can show whether the streaming branch was actually used
+- plan, docs, and implementation target all use the same semantics
 
 Exit criteria:
-- the next slice can answer "what path is actually executing?" without guesswork
+- there is no ambiguity about when each phase should appear
 
-### F1. Stream Transport Verification
+### S1. Backend First-Delta Phase Correction
 
 Purpose:
-- determine whether the current transport path is buffering or suppressing SSE in the browser
+- make the backend event stream reflect real visible generation timing
 
 Changes:
-- verify stream behavior in three paths:
-  - direct backend request to `/chat/respond/stream`
-  - frontend request through Next `/api` rewrite
-  - blocking `/chat/respond`
-- compare:
-  - response headers
-  - incremental frame arrival
-  - phase/event order
-  - first delta timing
+- update `domain/chat/stream.py` so it does NOT emit `responding` before the first text delta
+- emit `responding` only when:
+  - the first non-empty visible text delta is observed, or
+  - a non-streaming fallback path starts producing final content without incremental deltas
+- ensure clarification and social fast-paths still behave coherently
 
 Verification:
-- manual browser check with network panel
-- command-line verification with `curl -N` against the backend stream route
-- record observed differences in this file before moving on
+- backend tests for:
+  - no `responding` before first delta
+  - `responding` emitted once
+  - no duplicate phase transitions
 
 Exit criteria:
-- root cause is narrowed to one of:
-  - proxy buffering
-  - client parsing/state bug
-  - backend flush/emit bug
+- backend phase events match real visible output timing
 
-### F2. Stream Transport Hardening
+### S2. Safe Reasoning Metadata Contract
 
 Purpose:
-- make incremental delivery reliable once the failing transport path is identified
+- make reasoning-related metadata explicit without exposing raw thought text
 
 Changes:
-- if Next `/api` rewrite buffers SSE:
-  - bypass it for streaming requests
-  - or introduce a dedicated direct stream base URL
-  - update auth/CORS handling accordingly
-- if backend emit/flush is at fault:
-  - fix the generator/response behavior there instead
-- keep the blocking route unchanged
+- extend or clarify `GenerationTrace` and/or stream trace metadata with safe reasoning fields such as:
+  - `reasoning_requested`
+  - `reasoning_supported`
+  - `reasoning_used`
+  - `reasoning_tokens`
+- keep all raw reasoning text excluded
+- ensure OpenAI and LiteLLM behavior is normalized where possible, and clearly nullable where not possible
 
 Verification:
-- browser request shows incremental `text/event-stream` frames arriving before final completion
-- direct and proxied behavior are documented if both remain supported
+- schema tests
+- adapter tests for missing vs present reasoning metadata
 
 Exit criteria:
-- the browser receives real incremental stream events
+- safe reasoning metadata is explicit and raw reasoning text remains impossible through the normal contract
 
-### F3. Frontend Live Update Hardening
+### S3. Frontend Thinking-vs-Generating UX
 
 Purpose:
-- make the UI accurately reflect real stream events once transport is proven
+- show the right status at the right time
 
 Changes:
-- keep temporary assistant delta rendering stable under:
-  - multiple deltas
-  - empty delta bursts
-  - final envelope replacement
-  - aborts
-  - session changes
-- verify phase transitions move beyond the initial local `thinking`
-- prevent state races where `loadMessages()` erases useful transient stream UI too early
+- update `apps/web/features/tutor/hooks/use-tutor-messages.ts` and related types/UI so:
+  - `Thinking…` persists until first visible delta
+  - `Generating response…` begins only once text is actually streaming
+  - `Finalizing…` remains reserved for post-generation work
+- keep transient stream rendering stable while status changes
 
 Verification:
-- frontend tests for delta accumulation and cleanup
-- manual slow-response run showing:
-  - `thinking`
-  - `searching`
-  - `responding`
-  - visible incremental assistant text
+- frontend tests for phase transitions
+- manual browser run confirming the visible sequence
 
 Exit criteria:
-- the tutor visibly streams text into the chat before final persistence reload
+- the UI no longer claims content generation before content exists
 
-### F4. Fallback Visibility and Diagnostics
+### S4. Fallback and Non-Streaming Semantics
 
 Purpose:
-- remove the ambiguity between "real stream" and "fake-looking fallback"
+- make status behavior correct even when there is no incremental stream
 
 Changes:
-- surface when the UI fell back to blocking mode
-- log or expose:
-  - stream route error
-  - fallback trigger reason
-  - whether a first stream event was ever received
-- optionally suppress timer-based fake phases during debugging so failures are obvious
+- define and implement explicit fallback semantics for:
+  - blocking path
+  - stream failure
+  - provider with no delta stream
+- recommended default:
+  - keep `Thinking…` until final content is available
+  - optionally switch directly to final content without a fake intermediate generating state
+  - only use `Generating response…` in fallback when there is truly no reasoning/thinking distinction available and that compromise is documented
 
 Verification:
-- intentional stream failure produces a visible and diagnosable fallback signal
+- manual and automated fallback-path tests
 
 Exit criteria:
-- fallback no longer masks transport/runtime failures
+- fallback behavior is explicit and no longer misleading
 
-### F5. Trace UX Closeout
+### S5. Optional Reasoning Summary Exploration
 
 Purpose:
-- finish the lower-priority product surface once live streaming works
+- evaluate whether provider-specific reasoning summaries are worth adding later
 
 Changes:
-- decide whether to render `generation_trace` in the chat response UI
-- if yes, add a compact, null-safe operational trace panel
-- if no, document that trace remains API/persistence-only for now
+- investigate a gated path for safe reasoning summaries where providers support them
+- if explored, keep it behind:
+  - provider capability checks
+  - explicit feature flag
+  - clear UI separation from normal answer text
+- do not block S1-S4 on this work
 
 Verification:
-- UI and/or docs match the final product decision
+- docs or prototype showing exact supported cases
 
 Exit criteria:
-- trace behavior is explicit rather than half-landed
+- either:
+  - a small safe design is accepted, or
+  - the plan explicitly defers this work
 
-### F6. End-to-End Validation and Docs Closeout
+Status: **DEFERRED**
+Decision: Raw reasoning summaries are explicitly deferred. The S2 safe reasoning metadata
+(`reasoning_requested`, `reasoning_supported`, `reasoning_used`, `reasoning_tokens`) provides
+sufficient operational visibility. Provider reasoning summary text varies in format, quality,
+and availability across OpenAI reasoning models and LiteLLM-proxied providers. Exposing it
+would require per-provider parsing, sanitization, and a separate UI surface with clear
+separation from the answer text. This work is not justified until there is a concrete user
+need. The metadata fields already allow the frontend to show "This response used reasoning"
+without displaying any reasoning content.
+
+### S6. Docs and Acceptance Closeout
 
 Purpose:
-- close the loop with real browser verification and doc accuracy
+- document the final semantics and close the loop with real UX validation
 
 Changes:
-- update `docs/API.md` and `docs/OBSERVABILITY.md` only after the final runtime behavior is proven
-- record final runtime topology:
-  - stream origin
-  - required env vars
-  - known fallback behavior
-- mark this plan complete only after real manual proof
+- update `docs/API.md` if event semantics changed
+- update `docs/OBSERVABILITY.md` to state what reasoning metadata is logged
+- keep this file accurate with the final result
 
 Verification:
-- browser run from the actual frontend confirms:
-  - phases change beyond `thinking`
-  - text streams in incrementally
-  - final message persists correctly
-- targeted backend/frontend tests remain green
+- browser run confirms:
+  - `Thinking…` before first output
+  - `Generating response…` only after first visible delta
+  - no raw reasoning text exposed
 
 Exit criteria:
-- user-visible behavior matches the plan intent
+- implementation, docs, and browser behavior all match
 
 ## Verification Matrix
 
 | Area | Must pass |
 |---|---|
-| Backend slice tests | targeted `pytest -q` for stream/trace slices |
+| Backend tests | targeted `pytest -q` for stream/status semantics |
 | Frontend tests | `npm --prefix apps/web test` |
 | Frontend typecheck | `npm --prefix apps/web run typecheck` |
-| Direct backend stream | `curl -N` shows incremental events before completion |
-| Browser network | stream request shows incremental frames, not only terminal delivery |
-| Browser UX | tutor shows real phase changes and incremental text |
-| Fallback diagnostics | stream failure is visible and attributable |
+| Browser UX | `Thinking…` before first delta; `Generating response…` only after text appears |
+| Safety | no raw reasoning text in logs, API payloads, or UI |
+| Docs | event semantics and reasoning metadata accurately documented |
 
 ## Risks and Controls
 
-### Risk 1: Next rewrite proxy buffers SSE
+### Risk 1: Provider differences make "thinking" semantics inconsistent
 
-- Control: verify direct backend stream vs proxied stream explicitly; bypass proxy if needed
+- Control: drive UX from output timing, not hidden provider-specific thought payloads
 
-### Risk 2: Silent fallback makes the product look "implemented" while still fake
+### Risk 2: Raw reasoning accidentally leaks through logs or trace payloads
 
-- Control: make fallback visible and diagnosable
+- Control: keep reasoning contract allowlist-based and metadata-only
 
-### Risk 3: Frontend state races erase streamed text
+### Risk 3: Non-streaming fallback becomes misleading
 
-- Control: isolate delta assembly and test final-envelope replacement behavior
+- Control: define explicit fallback semantics instead of pretending generation started
 
-### Risk 4: Fixing streaming breaks existing auth or same-origin assumptions
+### Risk 4: Optional reasoning summaries distract from the core UX fix
 
-- Control: keep blocking route stable and handle direct stream origin deliberately if adopted
-
-### Risk 5: Documentation drifts again after the runtime fix
-
-- Control: only mark docs complete after manual browser verification
+- Control: keep them strictly later and gated
 
 ## What Not To Do
 
-- Do not mark the feature complete because tests pass.
-- Do not assume `/api` proxying is safe for SSE without proving it.
-- Do not keep silent fallback behavior.
-- Do not prioritize trace-panel polish over fixing live streaming.
-- Do not reopen unrelated backend architecture work.
+- Do not log or display raw chain-of-thought.
+- Do not use provider-specific hidden reasoning payloads as the baseline UX contract.
+- Do not show `Generating response…` before visible text exists.
+- Do not block the core status fix on optional reasoning-summary work.
 
 ## Deliverables
 
-1. A reliable browser-visible tutor stream.
-2. Real phase changes beyond the initial optimistic `thinking` state.
-3. Incremental assistant text before final completion.
-4. Diagnosable fallback behavior.
-5. Accurate docs describing the final runtime setup.
+1. Correct phase semantics tied to real visible output timing.
+2. Safe reasoning metadata contract with no raw reasoning leakage.
+3. Frontend UX that distinguishes thinking from generating.
+4. Explicit fallback semantics for non-streaming or degraded paths.
+5. Updated docs describing the final behavior.
 
 ## Unified Kickoff Prompt
 
@@ -514,13 +478,17 @@ You are working in the CoLearni repo.
 STRICT INSTRUCTIONS:
 
 Open docs/GENERATION_STATUS_PLAN.md now. This file is the source of truth.
-Treat the current stream feature as partially landed but not complete.
-Do not restart from G0-style greenfield work.
-Start with runtime truth: verify whether browser-visible streaming is blocked by transport, especially the Next /api rewrite path.
-Do not claim success until the actual tutor UI shows real phase changes and incremental text.
+Treat streaming transport as already mostly implemented.
+The goal is now semantic correctness:
+- show Thinking… until the first visible output delta
+- show Generating response… only after text actually starts streaming
+- never expose raw chain-of-thought
+- only use safe reasoning metadata
+
+Do not rebuild streaming from scratch.
+Do not depend on provider-specific reasoning text to get correct UX.
 Keep /chat/respond stable.
-Do not allow silent fallback to mask failures.
-Do not expose raw chain-of-thought.
+Keep routes thin.
 
 For each completed slice, report:
 - Root cause
@@ -532,6 +500,6 @@ For each completed slice, report:
 
 START:
 - Read docs/GENERATION_STATUS_PLAN.md.
-- Begin with F0.
+- Begin with S1 unless you discover the contract must change first.
 - Stop after each slice for verification before continuing.
 ```

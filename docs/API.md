@@ -444,6 +444,34 @@ SSE event types:
 | `final` | `envelope` (AssistantResponseEnvelope) | Complete response |
 | `error` | `message` | Error description |
 
+Phase semantics (S1):
+
+| Phase | Meaning | Emitted when |
+|---|---|---|
+| `thinking` | Request started, no visible output yet | On request start |
+| `searching` | Retrieval and context assembly in progress | After social fast-path check |
+| `responding` | First visible text delta has arrived | On first non-empty text delta from LLM |
+| `finalizing` | Post-generation verification and persistence | After all text generated |
+
+The `responding` phase is never emitted before actual text output begins. Fast-paths (social, onboarding) skip `responding` entirely since they produce final content without an incremental generation phase.
+
+GenerationTrace fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `provider` | `string \| null` | LLM provider name |
+| `model` | `string \| null` | Model identifier |
+| `timing_ms` | `number \| null` | Wall-clock generation time |
+| `prompt_tokens` | `int \| null` | Input tokens consumed |
+| `completion_tokens` | `int \| null` | Output tokens consumed |
+| `total_tokens` | `int \| null` | Total tokens |
+| `reasoning_tokens` | `int \| null` | Tokens consumed by internal reasoning |
+| `reasoning_requested` | `bool \| null` | Whether reasoning was requested |
+| `reasoning_supported` | `bool \| null` | Whether the model supports reasoning |
+| `reasoning_used` | `bool \| null` | Whether reasoning params were sent |
+
+Raw chain-of-thought text is never exposed through this contract.
+
 Transport notes:
 
 - The Next.js `/api` rewrite proxy may buffer SSE responses. Set `NEXT_PUBLIC_STREAM_BASE_URL` to the direct backend origin (e.g., `http://127.0.0.1:8000`) to bypass the proxy for streaming.

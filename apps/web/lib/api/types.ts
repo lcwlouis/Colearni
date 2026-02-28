@@ -454,6 +454,9 @@ export interface GenerationTrace {
   completion_tokens: number | null;
   total_tokens: number | null;
   reasoning_tokens: number | null;
+  reasoning_requested: boolean | null;
+  reasoning_supported: boolean | null;
+  reasoning_used: boolean | null;
 }
 
 export type StreamChatPhase =
