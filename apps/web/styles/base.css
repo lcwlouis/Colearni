@@ -227,6 +227,7 @@ pre {
   overflow-x: auto;
   overflow-y: auto;
   max-height: 36rem;
+  min-width: 0;
   max-width: 100%;
   font-size: 0.85rem;
   line-height: 1.55;
