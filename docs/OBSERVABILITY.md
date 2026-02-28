@@ -158,6 +158,80 @@ http.request (CHAIN)             ← middleware root span
 
 ---
 
+## Generation Trace (User-Facing)
+
+The `GenerationTrace` object is attached to every `AssistantResponseEnvelope` on the
+blocking `/chat/respond` path and emitted as a `trace` SSE event on the streaming
+`/chat/respond/stream` path.  It contains **safe operational metrics only** — no
+chain-of-thought, prompt content, or raw model output is ever included.
+
+### Trace Fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `provider` | string \| null | `"openai"` or `"litellm"` |
+| `model` | string \| null | Model identifier (e.g. `gpt-4o`, `qwen/qwen3-30b-a3b`) |
+| `timing_ms` | number \| null | Wall-clock latency in milliseconds |
+| `prompt_tokens` | integer \| null | Input token count |
+| `completion_tokens` | integer \| null | Output token count |
+| `total_tokens` | integer \| null | Sum of prompt + completion |
+| `reasoning_tokens` | integer \| null | Reasoning tokens (o1/o3/o4 models only) |
+
+All fields are nullable.  When the LLM provider does not report usage, token fields
+are `null`.  Social and onboarding fast-path responses have `generation_trace: null`.
+
+### Safety Guarantees
+
+- **No chain-of-thought**: reasoning content is never included; only the token count.
+- **No prompt leakage**: the trace carries only provider/model identifiers and numeric metrics.
+- **Capability gating**: `reasoning_tokens` is only populated for models that support the
+  reasoning API (prefix `o1`, `o3`, `o4`).  Other models return `null`.
+
+---
+
+## Stream Diagnostics
+
+When `APP_CHAT_STREAMING_ENABLED=true`, the streaming chat path emits diagnostic logs:
+
+### Backend (`apps/api/routes/chat.py`)
+
+- Logs each SSE event with its type and count: `stream event #N type=<type> ws=<ws_id>`
+- Logs stream completion: `stream complete: N events ws=<ws_id>`
+
+### Frontend (`use-tutor-messages.ts`, `client.ts`)
+
+Console diagnostics (visible in browser DevTools):
+
+| Log | Level | Meaning |
+|---|---|---|
+| `[tutor-stream] STREAMING_ENABLED=<value>` | info | Module-load: confirms streaming flag |
+| `[tutor-stream] initiating SSE stream` | info | Stream path entered |
+| `[tutor-stream] first event received: <type>` | info | First SSE event parsed |
+| `[tutor-stream] phase -> <phase>` | info | Phase transition from backend |
+| `[tutor-stream] final event received` | info | Final envelope arrived |
+| `[tutor-stream] stream error, falling back` | warn | Stream failed, blocking fallback |
+| `[respondChatStream] connecting to <url>` | info | SSE URL being used |
+| `[respondChatStream] response ok` | info | HTTP response received |
+
+### Fallback Visibility
+
+When streaming fails and falls back to blocking mode:
+
+- `streamFallback` boolean is exposed via `useTutorMessages` hook
+- The tutor timeline displays a `⚠ fallback` badge next to the phase label
+- Console warning includes the error message that triggered fallback
+
+### Transport Configuration
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_STREAM_BASE_URL` | `/api` (proxied) | Direct backend URL for SSE; set to `http://127.0.0.1:8000` to bypass Next.js proxy |
+| `APP_CORS_ALLOWED_ORIGINS` | `[]` | Backend CORS origins; must include frontend origin when using direct SSE |
+| `APP_CHAT_STREAMING_ENABLED` | `false` | Backend feature gate |
+| `NEXT_PUBLIC_CHAT_STREAMING_ENABLED` | `false` | Frontend feature gate |
+
+---
+
 ## Default (Off) Behavior
 
 When `APP_OBSERVABILITY_ENABLED=false` (the default):

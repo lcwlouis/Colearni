@@ -171,6 +171,7 @@ class AssistantResponseEnvelope(BaseModel):
     conversation_meta: ConversationMeta | None = None
     response_mode: str = Field(default="grounded")
     actions: list[dict[str, object]] = Field(default_factory=list)
+    generation_trace: GenerationTrace | None = None
 
     @field_validator("text")
     @classmethod
@@ -214,6 +215,22 @@ class ActionCTA(BaseModel):
     label: str = Field(min_length=1)
     concept_id: int | None = Field(default=None, gt=0)
     concept_name: str | None = None
+
+
+class GenerationTrace(BaseModel):
+    """Safe operational trace metadata for a single LLM generation turn.
+
+    Only operational fields are included — no prompt text, no chain-of-thought,
+    no retrieved evidence body copies.
+    """
+
+    provider: str | None = None
+    model: str | None = None
+    timing_ms: float | None = Field(default=None, ge=0)
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
 
 
 class ReadinessTopicState(BaseModel):

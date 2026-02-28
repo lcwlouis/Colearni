@@ -9,13 +9,14 @@ export type TimelineMessage = {
 };
 
 /** Lifecycle phases for the chat request indicator (E2). */
-export type ChatPhase = "idle" | "thinking" | "searching" | "responding";
+export type ChatPhase = "idle" | "thinking" | "searching" | "responding" | "finalizing";
 
 export const PHASE_LABELS: Record<ChatPhase, string> = {
   idle: "",
   thinking: "Thinking…",
   searching: "Searching knowledge base…",
   responding: "Generating response…",
+  finalizing: "Finalizing…",
 };
 
 export function errorText(error: unknown, fallback: string): string {

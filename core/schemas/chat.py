@@ -1,13 +1,14 @@
-"""Chat session and request schemas."""
+"""Chat session, request, and stream-event schemas."""
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from enum import Enum
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from core.schemas.assistant import GroundingMode
+from core.schemas.assistant import AssistantResponseEnvelope, GenerationTrace, GroundingMode
 
 ConceptSwitchDecision = Literal["accept", "reject"]
 
@@ -81,3 +82,63 @@ class OnboardingStatusResponse(BaseModel):
     has_documents: bool
     has_active_concepts: bool
     suggested_topics: list[OnboardingSuggestedTopic] = Field(default_factory=list)
+
+
+# ── Stream-event schemas (G0) ────────────────────────────────────────
+
+
+class ChatPhase(str, Enum):
+    """Backend lifecycle phases for chat generation."""
+
+    THINKING = "thinking"
+    SEARCHING = "searching"
+    RESPONDING = "responding"
+    FINALIZING = "finalizing"
+
+
+class ChatStreamStatusEvent(BaseModel):
+    """Phase transition event sent over SSE."""
+
+    event: Literal["status"] = "status"
+    phase: ChatPhase
+
+
+class ChatStreamDeltaEvent(BaseModel):
+    """Incremental text chunk from the LLM."""
+
+    event: Literal["delta"] = "delta"
+    text: str
+
+
+class ChatStreamTraceEvent(BaseModel):
+    """Safe operational trace emitted near end-of-stream."""
+
+    event: Literal["trace"] = "trace"
+    trace: GenerationTrace
+
+
+class ChatStreamFinalEvent(BaseModel):
+    """Terminal success event carrying the full response envelope."""
+
+    event: Literal["final"] = "final"
+    envelope: AssistantResponseEnvelope
+
+
+class ChatStreamErrorEvent(BaseModel):
+    """Terminal error event."""
+
+    event: Literal["error"] = "error"
+    message: str
+    phase: ChatPhase | None = None
+
+
+ChatStreamEvent = Annotated[
+    Union[
+        ChatStreamStatusEvent,
+        ChatStreamDeltaEvent,
+        ChatStreamTraceEvent,
+        ChatStreamFinalEvent,
+        ChatStreamErrorEvent,
+    ],
+    Field(discriminator="event"),
+]

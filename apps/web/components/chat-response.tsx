@@ -110,6 +110,18 @@ export function ChatResponse({ response, onCtaClick }: { response: AssistantResp
           ))}
         </div>
       ) : null}
+
+      {/* F5: Generation trace — dev-only operational metadata */}
+      {process.env.NODE_ENV === "development" && response.generation_trace ? (
+        <details className="chat-trace-panel" style={{ marginTop: "0.5rem", fontSize: "0.75rem", opacity: 0.6 }}>
+          <summary style={{ cursor: "pointer" }}>
+            ⚡ {response.generation_trace.model ?? "unknown"} · {response.generation_trace.timing_ms ?? "?"}ms · {response.generation_trace.total_tokens ?? "?"} tokens
+          </summary>
+          <pre style={{ margin: "0.25rem 0", whiteSpace: "pre-wrap", fontSize: "0.7rem" }}>
+            {JSON.stringify(response.generation_trace, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </div>
   );
 }

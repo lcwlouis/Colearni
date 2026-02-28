@@ -61,6 +61,7 @@ export interface AssistantResponseEnvelope {
   conversation_meta: ConversationMeta | null;
   response_mode?: "grounded" | "social";
   actions?: ActionCTA[];
+  generation_trace?: GenerationTrace | null;
 }
 
 export interface ChatRespondRequest {
@@ -442,3 +443,54 @@ export interface OnboardingStatusResponse {
   has_active_concepts: boolean;
   suggested_topics: OnboardingSuggestedTopic[];
 }
+
+// ── Generation Trace & Stream Events (G0) ────────────────────────────
+
+export interface GenerationTrace {
+  provider: string | null;
+  model: string | null;
+  timing_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  reasoning_tokens: number | null;
+}
+
+export type StreamChatPhase =
+  | "thinking"
+  | "searching"
+  | "responding"
+  | "finalizing";
+
+export interface ChatStreamStatusEvent {
+  event: "status";
+  phase: StreamChatPhase;
+}
+
+export interface ChatStreamDeltaEvent {
+  event: "delta";
+  text: string;
+}
+
+export interface ChatStreamTraceEvent {
+  event: "trace";
+  trace: GenerationTrace;
+}
+
+export interface ChatStreamFinalEvent {
+  event: "final";
+  envelope: AssistantResponseEnvelope;
+}
+
+export interface ChatStreamErrorEvent {
+  event: "error";
+  message: string;
+  phase: StreamChatPhase | null;
+}
+
+export type ChatStreamEvent =
+  | ChatStreamStatusEvent
+  | ChatStreamDeltaEvent
+  | ChatStreamTraceEvent
+  | ChatStreamFinalEvent
+  | ChatStreamErrorEvent;

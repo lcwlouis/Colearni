@@ -38,3 +38,8 @@ Files:
 - `practice.md`: practice quiz generation, flashcard generation
 - `suggestion.md`: "I'm feeling lucky" copy generation
 - `document_processing.md`: document summary generation
+- `refactor_plan.md`: reusable execution-plan template for repo refactors
+
+Special rule for `refactor_plan.md`:
+- The final section `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)` is mandatory.
+- If a generated plan is missing that final section and fenced prompt block, treat the plan as incomplete.

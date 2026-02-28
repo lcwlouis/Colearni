@@ -38,6 +38,8 @@ import type {
 } from "@/lib/api/types";
 
 export const DEFAULT_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
+/** Direct backend URL for SSE streaming, bypassing the Next.js rewrite proxy. */
+export const STREAM_BASE_URL = process.env.NEXT_PUBLIC_STREAM_BASE_URL ?? DEFAULT_API_BASE_URL;
 type QueryValue = string | number | boolean | null | undefined;
 type Query = Record<string, QueryValue>;
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -69,6 +71,41 @@ async function parse(res: Response) {
 }
 
 const SESSION_TOKEN_KEY = "colearni_session_token";
+
+export function consumeSseFrames(buffer: string): {
+  frames: string[];
+  remainder: string;
+} {
+  const frames: string[] = [];
+  let remaining = buffer;
+
+  while (true) {
+    const match = /\r?\n\r?\n/.exec(remaining);
+    if (!match || match.index === undefined) {
+      return { frames, remainder: remaining };
+    }
+    frames.push(remaining.slice(0, match.index));
+    remaining = remaining.slice(match.index + match[0].length);
+  }
+}
+
+export function parseSseFrame<T>(frame: string): T | null {
+  const dataLines: string[] = [];
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith("data: ")) {
+      dataLines.push(line.slice(6));
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5));
+    }
+  }
+  if (dataLines.length === 0) return null;
+
+  try {
+    return JSON.parse(dataLines.join("\n")) as T;
+  } catch {
+    return null;
+  }
+}
 
 export class ApiClient {
   private baseUrl: string;
@@ -122,6 +159,71 @@ export class ApiClient {
   deleteChatSession(wsId: string, sessionId: string) { return this.request<null>(`/workspaces/${wsId}/chat/sessions/${sessionId}`, { method: "DELETE" }); }
   renameChatSession(wsId: string, sessionId: string, title: string) { return this.request<ChatSessionSummary>(`/workspaces/${wsId}/chat/sessions/${sessionId}`, { method: "PATCH", body: JSON.stringify({ title }) }); }
   respondChat(wsId: string, p: ChatRespondRequest) { return this.request<AssistantResponseEnvelope>(`/workspaces/${wsId}/chat/respond`, { method: "POST", body: JSON.stringify(p) }); }
+
+  /**
+   * Stream chat response via SSE.  Returns an AbortController for cancellation
+   * and calls the provided handler for each parsed event.
+   */
+  respondChatStream(
+    wsId: string,
+    p: ChatRespondRequest,
+    onEvent: (event: import("@/lib/api/types").ChatStreamEvent) => void,
+    onError?: (error: Error) => void,
+  ): { abort: () => void } {
+    const controller = new AbortController();
+    const url = `${STREAM_BASE_URL}/workspaces/${wsId}/chat/respond/stream`;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const token = this.getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const run = async () => {
+      try {
+        console.info("[respondChatStream] connecting to %s", url);
+        const res = await this.fetchImpl(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(p),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const body = await parse(res);
+          const detail = body && typeof body === "object" && "detail" in body
+            ? (body as { detail: unknown }).detail
+            : body;
+          throw new ApiError(res.status, detail, body);
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response body");
+        console.info("[respondChatStream] response ok, reading body (status=%d, content-type=%s)", res.status, res.headers.get("content-type"));
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            buffer += decoder.decode();
+            const { frames } = consumeSseFrames(buffer);
+            for (const frame of frames) {
+              const parsed = parseSseFrame<import("@/lib/api/types").ChatStreamEvent>(frame);
+              if (parsed) onEvent(parsed);
+            }
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          const consumed = consumeSseFrames(buffer);
+          buffer = consumed.remainder;
+          for (const frame of consumed.frames) {
+            const parsed = parseSseFrame<import("@/lib/api/types").ChatStreamEvent>(frame);
+            if (parsed) onEvent(parsed);
+          }
+        }
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+        onError?.(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+    run();
+    return { abort: () => controller.abort() };
+  }
 
   // ── Graph (workspace-scoped) ────────────────────────────────────
   listConcepts(wsId: string, p?: { q?: string; limit?: number }) { return this.request<GraphConceptListResponse>(`/workspaces/${wsId}/graph/concepts`, { method: "GET" }, { q: p?.q, limit: p?.limit }); }

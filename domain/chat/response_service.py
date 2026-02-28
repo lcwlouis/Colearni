@@ -8,6 +8,7 @@ from adapters.db.mastery import get_mastery_status
 from adapters.llm.factory import build_graph_llm_client
 from core.contracts import GraphLLMClient
 from core.schemas import ChatRespondRequest, EvidenceItem
+from core.schemas.assistant import GenerationTrace
 from core.settings import Settings
 from domain.chat.prompt_kit import build_full_tutor_prompt, get_persona
 from domain.chat.tutor_agent import build_tutor_response_text, resolve_tutor_style
@@ -28,8 +29,11 @@ def generate_tutor_text(
     document_summaries: str = "",
     quiz_context: str = "",
     flashcard_progress: str = "",
-) -> str:
-    """Build a rich tutor prompt via prompt_kit and call the LLM."""
+) -> tuple[str, GenerationTrace | None]:
+    """Build a rich tutor prompt via prompt_kit and call the LLM.
+
+    Returns (text, trace) where trace is non-None when an LLM call succeeds.
+    """
     style = resolve_tutor_style(mastery_status=mastery_status)
     persona = get_persona("colearni")
     combined_assessment = assessment_context
@@ -54,18 +58,30 @@ def generate_tutor_text(
         len(flashcard_progress),
     )
     if llm_client is not None:
-        try:
-            text = llm_client.generate_tutor_text(prompt=prompt).strip()
-        except (RuntimeError, ValueError):
-            text = ""
-        if text:
-            return text
-    return build_tutor_response_text(
+        # Try traced path (available on our adapters); fall back to plain generate.
+        traced_fn = getattr(llm_client, "generate_tutor_text_traced", None)
+        if callable(traced_fn):
+            try:
+                text, trace = traced_fn(prompt=prompt)
+                text = text.strip()
+            except (RuntimeError, ValueError):
+                text, trace = "", None
+            if text:
+                return text, trace
+        else:
+            try:
+                text = llm_client.generate_tutor_text(prompt=prompt).strip()
+            except (RuntimeError, ValueError):
+                text = ""
+            if text:
+                return text, None
+    fallback = build_tutor_response_text(
         query=query,
         evidence=evidence,
         mastery_status=mastery_status,
         llm_client=None,
     )
+    return fallback, None
 
 
 def resolve_mastery_status(

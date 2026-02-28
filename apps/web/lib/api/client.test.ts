@@ -1,4 +1,4 @@
-import { ApiClient, ApiError, DEFAULT_API_BASE_URL } from "./client";
+import { ApiClient, ApiError, DEFAULT_API_BASE_URL, consumeSseFrames, parseSseFrame } from "./client";
 import { describe, expect, it, vi } from "vitest";
 
 describe("ApiClient", () => {
@@ -61,5 +61,62 @@ describe("ApiClient", () => {
     await new ApiClient({ baseUrl: "/api/", fetchImpl }).deleteChatSession("ws-uuid", "abc-def-123");
     expect(calledUrl).toBe("/api/workspaces/ws-uuid/chat/sessions/abc-def-123");
     expect(calledMethod).toBe("DELETE");
+  });
+
+  it("consumes complete SSE frames while keeping partial remainder", () => {
+    const consumed = consumeSseFrames(
+      'event: status\ndata: {"event":"status","phase":"thinking"}\n\n' +
+      'event: delta\ndata: {"event":"delta","text":"Hel',
+    );
+
+    expect(consumed.frames).toEqual([
+      'event: status\ndata: {"event":"status","phase":"thinking"}',
+    ]);
+    expect(consumed.remainder).toBe(
+      'event: delta\ndata: {"event":"delta","text":"Hel',
+    );
+  });
+
+  it("parses SSE data payloads into chat events", () => {
+    const parsed = parseSseFrame<{ event: string; text: string }>(
+      'event: delta\ndata: {"event":"delta","text":"Hello"}',
+    );
+
+    expect(parsed).toEqual({ event: "delta", text: "Hello" });
+  });
+
+  it("streams chat events across chunk boundaries", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: status\ndata: {"event":"status","phase":"searching"}\n'));
+        controller.enqueue(encoder.encode("\n"));
+        controller.enqueue(encoder.encode('event: delta\ndata: {"event":"delta","text":"Hello"}\n\n'));
+        controller.close();
+      },
+    });
+
+    const fetchImpl = vi.fn(async () =>
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+    const events: Array<{ event: string; phase?: string | null; text?: string }> = [];
+
+    new ApiClient({ baseUrl: "/api", fetchImpl }).respondChatStream(
+      "ws-uuid",
+      { query: "hello" },
+      (event) => {
+        events.push(event);
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(events).toEqual([
+      { event: "status", phase: "searching" },
+      { event: "delta", text: "Hello" },
+    ]);
   });
 });

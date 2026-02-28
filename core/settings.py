@@ -384,6 +384,16 @@ class Settings(BaseSettings):
             "LLM_REASONING_CHAT",
         ),
     )
+
+    # ── Chat streaming ────────────────────────────────────────────────
+    chat_streaming_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "APP_CHAT_STREAMING_ENABLED",
+            "CHAT_STREAMING_ENABLED",
+        ),
+    )
+
     llm_reasoning_quiz_grading: bool = Field(
         default=True,
         validation_alias=AliasChoices(

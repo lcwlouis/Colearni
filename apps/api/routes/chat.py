@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from adapters.db.chat import ChatNotFoundError, resolve_session_by_public_id
 from adapters.db.dependencies import get_db_session
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
@@ -13,6 +15,8 @@ from core.schemas import (
     ChatSessionSummary,
 )
 from core.settings import Settings
+
+log = logging.getLogger("apps.api.routes.chat")
 from domain.chat.respond import generate_chat_response
 from domain.chat.sessions import (
     ChatSessionNotFoundError,
@@ -22,7 +26,9 @@ from domain.chat.sessions import (
     list_sessions,
     rename_session,
 )
+from domain.chat.stream import generate_chat_response_stream
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -191,3 +197,69 @@ def respond_chat(
         )
     except ChatNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/respond/stream")
+def respond_chat_stream(
+    payload: ChatRespondAPIRequest,
+    request: Request,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> StreamingResponse:
+    """Stream chat response events via SSE."""
+    settings_state = getattr(request.app.state, "settings", None)
+    settings = settings_state if isinstance(settings_state, Settings) else None
+
+    # Check feature flag
+    active_settings = settings or Settings()
+    if not active_settings.chat_streaming_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Streaming is not enabled",
+        )
+
+    resolved_session_id: int | None = None
+    if payload.session_id:
+        try:
+            resolved_session_id = resolve_session_by_public_id(
+                db,
+                public_id=payload.session_id,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+            )
+        except ChatNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    internal = ChatRespondRequest(
+        workspace_id=ws.workspace_id,
+        user_id=ws.user.id,
+        query=payload.query,
+        session_id=resolved_session_id,
+        concept_id=payload.concept_id,
+        suggested_concept_id=payload.suggested_concept_id,
+        concept_switch_decision=payload.concept_switch_decision,
+        top_k=payload.top_k,
+        grounding_mode=payload.grounding_mode,
+    )
+
+    def _sse_generator():
+        event_count = 0
+        for event in generate_chat_response_stream(
+            session=db,
+            request=internal,
+            settings=settings,
+        ):
+            event_count += 1
+            data = event.model_dump_json()
+            log.info(
+                "stream event #%d type=%s ws=%s",
+                event_count, event.event, ws.workspace_id,
+            )
+            yield f"event: {event.event}\ndata: {data}\n\n"
+        log.info("stream complete: %d events ws=%s", event_count, ws.workspace_id)
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

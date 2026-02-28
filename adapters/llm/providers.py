@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
+from core.contracts import TutorTextStream
 from core.observability import (
     emit_event,
     extract_token_usage,
@@ -14,6 +16,8 @@ from core.observability import (
     set_llm_span_attributes,
     start_span,
 )
+
+log = logging.getLogger("adapters.llm.providers")
 
 _RAW_GRAPH_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -75,6 +79,9 @@ _DISAMBIGUATION_SCHEMA: dict[str, object] = {
 class _BaseGraphLLMClient(ABC):
     """Shared logic for observability, response parsing, and public interface."""
 
+    # Model prefixes known to support reasoning params (e.g. reasoning_effort).
+    _REASONING_CAPABLE_PREFIXES = ("o1", "o3", "o4")
+
     def __init__(
         self,
         *,
@@ -83,6 +90,7 @@ class _BaseGraphLLMClient(ABC):
         json_temperature: float = 0.0,
         tutor_temperature: float = 0.0,
         provider: str,
+        reasoning_enabled: bool = False,
     ) -> None:
         if not model.strip():
             raise ValueError("graph_llm model cannot be empty")
@@ -97,6 +105,7 @@ class _BaseGraphLLMClient(ABC):
         self._json_temperature = float(json_temperature)
         self._tutor_temperature = float(tutor_temperature)
         self._provider = provider.strip() or "unknown"
+        self._reasoning_enabled = reasoning_enabled
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         return self._chat_json(
@@ -124,12 +133,101 @@ class _BaseGraphLLMClient(ABC):
         )
 
     def generate_tutor_text(self, *, prompt: str) -> str:
-        return self._chat_text(
+        text, _ = self.generate_tutor_text_traced(prompt=prompt)
+        return text
+
+    def generate_tutor_text_traced(self, *, prompt: str) -> tuple[str, "GenerationTrace"]:
+        """Generate tutor text and return (text, trace) tuple."""
+        from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
+
+        text, trace = self._chat_text_traced(
             prompt=prompt,
             system_instruction=(
                 "You are a grounded tutor. Follow style instructions exactly and stay concise."
             ),
         )
+        return text, trace
+
+    def generate_tutor_text_stream(self, *, prompt: str) -> TutorTextStream:
+        """Stream tutor text, yielding deltas. Trace available after iteration."""
+        messages = [
+            {"role": "system", "content": "You are a grounded tutor. Follow style instructions exactly and stay concise."},
+            {"role": "user", "content": prompt},
+        ]
+        stream_obj = TutorTextStream(
+            self._iter_nothing(),  # placeholder, replaced below
+            provider=self._provider,
+            model=self._model,
+        )
+        stream_obj._delta_iter = self._stream_with_usage(
+            messages=messages,
+            temperature=self._tutor_temperature,
+            stream_obj=stream_obj,
+        )
+        return stream_obj
+
+    @staticmethod
+    def _iter_nothing() -> Iterator[str]:
+        return iter(())
+
+    def _model_supports_reasoning(self) -> bool:
+        """Check if the current model supports reasoning params."""
+        model_lower = self._model.lower()
+        return any(model_lower.startswith(p) for p in self._REASONING_CAPABLE_PREFIXES)
+
+    def _build_reasoning_kwargs(self) -> dict[str, Any]:
+        """Build capability-gated reasoning params."""
+        if not self._reasoning_enabled:
+            return {}
+        if not self._model_supports_reasoning():
+            log.debug(
+                "reasoning requested but model %s/%s does not support it; skipping",
+                self._provider, self._model,
+            )
+            return {}
+        return {"reasoning_effort": "medium"}
+
+    def _stream_with_usage(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        stream_obj: TutorTextStream,
+    ) -> Iterator[str]:
+        """Stream text deltas and capture final usage on the TutorTextStream."""
+        last_chunk: Mapping[str, Any] = {}
+        for chunk in self._sdk_stream_call(
+            messages=messages,
+            temperature=temperature,
+        ):
+            last_chunk = chunk
+            delta_content = self._extract_stream_delta(chunk)
+            if delta_content:
+                yield delta_content
+        # Extract usage from the final chunk
+        usage = self.extract_stream_usage(last_chunk)
+        # Also look for reasoning tokens
+        reasoning_tokens = self._extract_reasoning_tokens(last_chunk)
+        stream_obj.set_usage(
+            prompt_tokens=usage.get("token_prompt"),
+            completion_tokens=usage.get("token_completion"),
+            total_tokens=usage.get("token_total"),
+            reasoning_tokens=reasoning_tokens,
+        )
+
+    @staticmethod
+    def _extract_reasoning_tokens(payload: Mapping[str, Any]) -> int | None:
+        """Extract reasoning token count from provider responses when available."""
+        usage = payload.get("usage")
+        if not isinstance(usage, Mapping):
+            return None
+        # OpenAI: completion_tokens_details.reasoning_tokens
+        details = usage.get("completion_tokens_details")
+        if isinstance(details, Mapping):
+            val = details.get("reasoning_tokens")
+            if isinstance(val, int):
+                return val
+        return None
 
     def _chat_json(
         self,
@@ -158,16 +256,41 @@ class _BaseGraphLLMClient(ABC):
         return response_payload
 
     def _chat_text(self, *, prompt: str, system_instruction: str) -> str:
+        text, _ = self._chat_text_traced(prompt=prompt, system_instruction=system_instruction)
+        return text
+
+    def _chat_text_traced(
+        self, *, prompt: str, system_instruction: str
+    ) -> tuple[str, "GenerationTrace"]:
+        """Return (text, trace) from a non-streaming LLM call."""
+        import time as _time  # noqa: PLC0415
+
+        from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
+
         messages = [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": prompt},
         ]
+        t0 = _time.monotonic_ns()
         result = self._call_with_observability(
             messages=messages,
             temperature=self._tutor_temperature,
             response_format=None,
         )
-        return self._extract_content(result).strip()
+        elapsed_ms = round((_time.monotonic_ns() - t0) / 1_000_000, 2)
+        text = self._extract_content(result).strip()
+        usage = extract_token_usage(result)
+        reasoning = self._extract_reasoning_tokens(result)
+        trace = GenerationTrace(
+            provider=self._provider,
+            model=self._model,
+            timing_ms=elapsed_ms,
+            prompt_tokens=usage.get("token_prompt"),
+            completion_tokens=usage.get("token_completion"),
+            total_tokens=usage.get("token_total"),
+            reasoning_tokens=reasoning,
+        )
+        return text, trace
 
     def _call_with_observability(
         self,
@@ -250,6 +373,35 @@ class _BaseGraphLLMClient(ABC):
     ) -> Mapping[str, Any]:
         """Execute the provider-specific SDK call and return the raw response dict."""
 
+    @abstractmethod
+    def _sdk_stream_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+    ) -> Iterator[Mapping[str, Any]]:
+        """Execute a provider-specific streaming SDK call and yield raw chunk dicts."""
+
+    @staticmethod
+    def _extract_stream_delta(chunk: Mapping[str, Any]) -> str | None:
+        """Extract text delta content from a streaming chunk."""
+        choices = chunk.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        delta = choices[0]
+        if isinstance(delta, Mapping):
+            delta_msg = delta.get("delta")
+            if isinstance(delta_msg, Mapping):
+                content = delta_msg.get("content")
+                if isinstance(content, str):
+                    return content
+        return None
+
+    @staticmethod
+    def extract_stream_usage(chunk: Mapping[str, Any]) -> dict[str, int | None]:
+        """Extract usage from a streaming chunk (typically the final one)."""
+        return extract_token_usage(chunk)
+
     @staticmethod
     def _extract_content(payload: Mapping[str, Any]) -> str:
         choices = payload.get("choices")
@@ -291,6 +443,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         timeout_seconds: float,
         json_temperature: float = 0.0,
         tutor_temperature: float = 0.0,
+        reasoning_enabled: bool = False,
     ) -> None:
         if not api_key.strip():
             raise ValueError("OpenAI API key is required for graph_llm_provider=openai")
@@ -300,6 +453,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
             json_temperature=json_temperature,
             tutor_temperature=tutor_temperature,
             provider="openai",
+            reasoning_enabled=reasoning_enabled,
         )
         from openai import OpenAI  # noqa: PLC0415
 
@@ -322,6 +476,24 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         response = self._client.chat.completions.create(**kwargs)
         return response.model_dump()
 
+    def _sdk_stream_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+    ) -> Iterator[Mapping[str, Any]]:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        kwargs.update(self._build_reasoning_kwargs())
+        response = self._client.chat.completions.create(**kwargs)
+        for chunk in response:
+            yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
+
 
 class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
     """Graph LLM adapter using the LiteLLM SDK."""
@@ -335,6 +507,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         tutor_temperature: float = 0.0,
         base_url: str,
         api_key: str | None = None,
+        reasoning_enabled: bool = False,
     ) -> None:
         if not base_url.strip():
             raise ValueError("graph_llm base_url cannot be empty")
@@ -344,6 +517,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             json_temperature=json_temperature,
             tutor_temperature=tutor_temperature,
             provider="litellm",
+            reasoning_enabled=reasoning_enabled,
         )
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key.strip() if api_key and api_key.strip() else None
@@ -370,3 +544,27 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             kwargs["response_format"] = response_format
         response = litellm.completion(**kwargs)
         return response.model_dump()
+
+    def _sdk_stream_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+    ) -> Iterator[Mapping[str, Any]]:
+        import litellm  # noqa: PLC0415
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+            "api_base": self._base_url,
+            "timeout": self._timeout_seconds,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self._api_key is not None:
+            kwargs["api_key"] = self._api_key
+        kwargs.update(self._build_reasoning_kwargs())
+        response = litellm.completion(**kwargs)
+        for chunk in response:
+            yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)

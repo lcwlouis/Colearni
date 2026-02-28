@@ -2,12 +2,26 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "@/lib/api/client";
 import type {
   AssistantResponseEnvelope,
+  ChatStreamEvent,
   ConceptSwitchSuggestion,
   GraphConceptSummary,
   GroundingMode,
 } from "@/lib/api/types";
 import type { ChatPhase, TimelineMessage } from "../types";
 import { errorText, mapMessage } from "../types";
+import {
+  appendStreamingAssistantDelta,
+  removeStreamingAssistant,
+} from "../stream-messages";
+
+const STREAMING_ENABLED =
+  typeof process !== "undefined" &&
+  process.env?.NEXT_PUBLIC_CHAT_STREAMING_ENABLED === "true";
+
+// F0: diagnostic log for streaming config
+if (typeof window !== "undefined") {
+  console.info("[tutor-stream] STREAMING_ENABLED=%s", STREAMING_ENABLED);
+}
 
 interface UseTutorMessagesOptions {
   wsId: string | undefined;
@@ -42,6 +56,7 @@ export function useTutorMessages({
   const [chatLoading, setChatLoading] = useState(false);
   const [chatPhase, setChatPhase] = useState<ChatPhase>("idle");
   const [chatError, setChatError] = useState<string | null>(null);
+  const [streamFallback, setStreamFallback] = useState(false);
   const [query, setQuery] = useState("");
 
   // E1: track in-flight request so navigation cancels stale callbacks
@@ -93,6 +108,7 @@ export function useTutorMessages({
     const abortController = new AbortController();
     chatAbortRef.current = abortController;
     const requestId = ++activeRequestIdRef.current;
+    const streamAssistantId = `tmp-assistant-${requestId}`;
 
     const optimisticUser: TimelineMessage = {
       id: `tmp-user-${Date.now()}`,
@@ -104,17 +120,99 @@ export function useTutorMessages({
     setChatLoading(true);
     setChatPhase("thinking");
     setChatError(null);
+    setStreamFallback(false);
 
-    // E2: Simulate phase progression for UX feedback
+    if (STREAMING_ENABLED) {
+      // ── Backend-driven phase progression via SSE ───────────────────
+      console.info("[tutor-stream] initiating SSE stream for request #%d", requestId);
+      let firstEventReceived = false;
+      const streamAbort = apiClient.respondChatStream(
+        wsId,
+        {
+          session_id: activeSessionId,
+          query: text,
+          concept_id: currentConcept?.concept_id,
+          suggested_concept_id: suggestedConceptId ?? undefined,
+          concept_switch_decision: switchDecisionRef.current ?? undefined,
+          grounding_mode,
+        },
+        (event: ChatStreamEvent) => {
+          if (requestId !== activeRequestIdRef.current) return;
+          if (!firstEventReceived) {
+            firstEventReceived = true;
+            console.info("[tutor-stream] first event received: %s", event.event);
+          }
+          if (event.event === "status") {
+            console.info("[tutor-stream] phase -> %s", event.phase);
+            setChatPhase(event.phase as ChatPhase);
+          } else if (event.event === "delta") {
+            setMessages((prev) =>
+              appendStreamingAssistantDelta(prev, streamAssistantId, event.text),
+            );
+          } else if (event.event === "final") {
+            console.info("[tutor-stream] final event received");
+            const response = event.envelope;
+            void loadMessages(activeSessionId).then(() => {
+              const resolvedConceptId = response.conversation_meta?.resolved_concept_id;
+              if (resolvedConceptId) {
+                const resolved = concepts.find((item) => item.concept_id === resolvedConceptId);
+                if (resolved) setCurrentConcept(resolved);
+              }
+              if (response.conversation_meta?.concept_switch_suggestion) {
+                setSwitchSuggestion(response.conversation_meta.concept_switch_suggestion);
+              } else {
+                setSwitchSuggestion(null);
+              }
+              setSuggestedConceptId(null);
+              setSwitchDecision(null);
+              switchDecisionRef.current = null;
+              void refreshSessions();
+              setChatLoading(false);
+              setChatPhase("idle");
+            });
+          } else if (event.event === "error") {
+            setMessages((prev) => removeStreamingAssistant(prev, streamAssistantId));
+            setChatError(event.message);
+            setChatLoading(false);
+            setChatPhase("idle");
+          }
+        },
+        (error: Error) => {
+          if (requestId !== activeRequestIdRef.current) return;
+          console.warn("[tutor-stream] stream error, falling back to blocking: %s", error.message);
+          setStreamFallback(true);
+          setMessages((prev) => removeStreamingAssistant(prev, streamAssistantId));
+          // Fallback to blocking path on stream failure
+          void _blockingFallback(
+            text, requestId, abortController,
+          );
+        },
+      );
+
+      // Wire abort to the stream and clean up temporary message
+      abortController.signal.addEventListener("abort", () => {
+        streamAbort.abort();
+        setMessages((prev) => removeStreamingAssistant(prev, streamAssistantId));
+      });
+    } else {
+      // ── Legacy blocking path with timer-based phases ───────────────
+      void _blockingFallback(text, requestId, abortController);
+    }
+  }
+
+  async function _blockingFallback(
+    text: string,
+    requestId: number,
+    abortController: AbortController,
+  ) {
+    if (!wsId || !activeSessionId) return;
+
+    // Simulated phase progression for blocking path
     const phaseTimer = setTimeout(() => {
-      if (requestId === activeRequestIdRef.current) {
-        setChatPhase("searching");
-      }
+      if (requestId === activeRequestIdRef.current) setChatPhase("searching");
     }, 1500);
     const phaseTimer2 = setTimeout(() => {
-      if (requestId === activeRequestIdRef.current) {
-        setChatPhase("responding");
-      }
+      if (requestId === activeRequestIdRef.current) setChatPhase("responding");
     }, 4000);
 
     try {
@@ -180,6 +278,7 @@ export function useTutorMessages({
     chatLoading,
     chatPhase,
     chatError,
+    streamFallback,
     query,
     setQuery,
     onSubmitChat,

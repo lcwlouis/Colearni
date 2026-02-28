@@ -20,6 +20,7 @@ from core.schemas import (
     ConversationMeta,
     GroundingMode,
 )
+from core.schemas.chat import ChatPhase
 from core.settings import Settings, get_settings
 from core.verifier import verify_assistant_draft
 from sqlalchemy.orm import Session
@@ -31,6 +32,7 @@ from domain.chat.evidence_builder import (
     build_workspace_evidence,
     filter_used_citations,
 )
+from domain.chat.progress import ProgressSink, noop_sink
 from domain.chat.response_service import (
     build_quiz_context,
     build_tutor_llm_client,
@@ -56,8 +58,10 @@ def generate_chat_response(
     *,
     request: ChatRespondRequest,
     settings: Settings | None = None,
+    progress: ProgressSink | None = None,
 ) -> AssistantResponseEnvelope:
     """Build a deterministic chat response and enforce citation policy."""
+    sink = progress or noop_sink()
     with observation_context(
         component="chat",
         operation="chat.respond",
@@ -73,6 +77,9 @@ def generate_chat_response(
         active_settings = settings or get_settings()
         grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
 
+        # ── Phase: thinking ───────────────────────────────────────────
+        sink.on_phase(ChatPhase.THINKING)
+
         # ── Social intent fast-path ───────────────────────────────────
         social_llm = build_tutor_llm_client(settings=active_settings)
         social_envelope = try_social_response(
@@ -82,6 +89,7 @@ def generate_chat_response(
             social_llm=social_llm,
         )
         if social_envelope is not None:
+            sink.on_phase(ChatPhase.FINALIZING)
             persist_turn(
                 session,
                 workspace_id=request.workspace_id,
@@ -94,6 +102,8 @@ def generate_chat_response(
             return social_envelope
 
         # ── Standard grounded path ────────────────────────────────────
+        # ── Phase: searching ──────────────────────────────────────────
+        sink.on_phase(ChatPhase.SEARCHING)
         history_text = load_history_text(session, session_id=request.session_id)
         assessment_context = load_assessment_context(
             session, session_id=request.session_id
@@ -119,6 +129,7 @@ def generate_chat_response(
 
         # ── Empty workspace fast-path ─────────────────────────────────
         if not ranked_chunks and workspace_has_no_chunks(session, request.workspace_id):
+            sink.on_phase(ChatPhase.FINALIZING)
             no_docs_text = (
                 "It looks like your workspace doesn't have any documents yet! "
                 "I'd love to help you learn, but I need some study material first.\n\n"
@@ -227,10 +238,13 @@ def generate_chat_response(
                     f"{concept_resolution.switch_suggestion.from_concept_name} -> {concept_resolution.switch_suggestion.to_concept_name}",
                 )
 
-        assistant_text = (
-            concept_resolution.clarification_prompt
-            if concept_resolution.requires_clarification
-            else generate_tutor_text(
+        # ── Phase: responding (LLM generation) ────────────────────────
+        sink.on_phase(ChatPhase.RESPONDING)
+        generation_trace = None
+        if concept_resolution.requires_clarification:
+            assistant_text = concept_resolution.clarification_prompt
+        else:
+            assistant_text, generation_trace = generate_tutor_text(
                 query=request.query,
                 evidence=evidence,
                 mastery_status=mastery_status,
@@ -245,7 +259,6 @@ def generate_chat_response(
                 quiz_context=quiz_context_text,
                 flashcard_progress=flashcard_progress,
             )
-        )
 
         draft = AssistantDraft(
             text=assistant_text,
@@ -297,11 +310,13 @@ def generate_chat_response(
                 if callable(getattr(session, "rollback", None)):
                     session.rollback()
         envelope = envelope.model_copy(
-            update={"actions": actions, "response_mode": "grounded"}
+            update={"actions": actions, "response_mode": "grounded", "generation_trace": generation_trace}
         )
 
         set_input_output(span, output_value=envelope.text)
 
+        # ── Phase: finalizing ─────────────────────────────────────────
+        sink.on_phase(ChatPhase.FINALIZING)
         persist_turn(
             session,
             workspace_id=request.workspace_id,

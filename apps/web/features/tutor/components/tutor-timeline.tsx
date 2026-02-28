@@ -9,6 +9,7 @@ interface TutorTimelineProps {
   chatLoading: boolean;
   chatPhase: ChatPhase;
   chatError: string | null;
+  streamFallback: boolean;
   onboarding: OnboardingStatusResponse | null;
   concepts: GraphConceptSummary[];
   setCurrentConcept: (concept: GraphConceptSummary | null) => void;
@@ -21,6 +22,7 @@ export function TutorTimeline({
   chatLoading,
   chatPhase,
   chatError,
+  streamFallback,
   onboarding,
   concepts,
   setCurrentConcept,
@@ -90,6 +92,9 @@ export function TutorTimeline({
               <span className="dot" />
             </span>
             <span className="chat-status-label">{PHASE_LABELS[chatPhase]}</span>
+            {streamFallback ? (
+              <span className="chat-fallback-badge" title="Stream unavailable — using fallback mode">⚠ fallback</span>
+            ) : null}
           </div>
         </div>
       ) : null}

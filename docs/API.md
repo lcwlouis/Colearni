@@ -424,6 +424,37 @@ curl -sS http://localhost:8000/chat/respond \
 }
 ```
 
+### POST /workspaces/{ws_id}/chat/respond/stream
+
+Tag/group: `chat`
+
+Purpose: streaming variant of `/chat/respond`. Returns Server-Sent Events (SSE) with lifecycle phases, text deltas, and a final envelope.
+
+Feature-gated: requires `APP_CHAT_STREAMING_ENABLED=true`. Returns `404` when disabled.
+
+Request contract: same as `POST /chat/respond`.
+
+SSE event types:
+
+| Event | Data fields | Notes |
+|---|---|---|
+| `status` | `phase` (thinking/searching/responding/finalizing) | Lifecycle phase change |
+| `delta` | `text` | Incremental text token |
+| `trace` | `trace` (GenerationTrace) | Operational timing/token metrics |
+| `final` | `envelope` (AssistantResponseEnvelope) | Complete response |
+| `error` | `message` | Error description |
+
+Transport notes:
+
+- The Next.js `/api` rewrite proxy may buffer SSE responses. Set `NEXT_PUBLIC_STREAM_BASE_URL` to the direct backend origin (e.g., `http://127.0.0.1:8000`) to bypass the proxy for streaming.
+- Backend CORS must allow the frontend origin when using direct backend streaming. Set `APP_CORS_ALLOWED_ORIGINS` accordingly.
+- Response headers include `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
+
+Error responses:
+
+- `404 Not Found` when streaming is not enabled
+- `422 Unprocessable Entity` for request validation failures
+
 ### POST /workspaces/{ws_id}/chat/sessions
 
 Tag/group: `chat`

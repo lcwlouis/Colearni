@@ -83,6 +83,7 @@ export default function TutorPage() {
           chatLoading={t.chatLoading}
           chatPhase={t.chatPhase}
           chatError={t.chatError}
+          streamFallback={t.streamFallback}
           onboarding={t.onboarding}
           concepts={t.concepts}
           setCurrentConcept={t.setCurrentConcept}
