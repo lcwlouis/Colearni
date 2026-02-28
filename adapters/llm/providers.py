@@ -97,6 +97,7 @@ class _BaseGraphLLMClient(ABC):
         tutor_temperature: float = 0.0,
         provider: str,
         reasoning_enabled: bool = False,
+        reasoning_effort: str | None = None,
     ) -> None:
         if not model.strip():
             raise ValueError("graph_llm model cannot be empty")
@@ -112,6 +113,7 @@ class _BaseGraphLLMClient(ABC):
         self._tutor_temperature = float(tutor_temperature)
         self._provider = provider.strip() or "unknown"
         self._reasoning_enabled = reasoning_enabled
+        self._reasoning_effort = reasoning_effort
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         prompt_meta = None
@@ -181,6 +183,8 @@ class _BaseGraphLLMClient(ABC):
         ]
         supported = self._model_supports_reasoning()
         used = self._reasoning_enabled and supported
+        effort = self._reasoning_effort if used else None
+        effort_source = "settings" if effort is not None else None
         stream_obj = TutorTextStream(
             self._iter_nothing(),  # placeholder, replaced below
             provider=self._provider,
@@ -188,6 +192,8 @@ class _BaseGraphLLMClient(ABC):
             reasoning_requested=self._reasoning_enabled,
             reasoning_supported=supported,
             reasoning_used=used,
+            reasoning_effort=effort,
+            reasoning_effort_source=effort_source,
         )
         stream_obj._delta_iter = self._stream_with_usage(
             messages=messages,
@@ -206,7 +212,7 @@ class _BaseGraphLLMClient(ABC):
         return any(model_lower.startswith(p) for p in self._REASONING_CAPABLE_PREFIXES)
 
     def _build_reasoning_kwargs(self) -> dict[str, Any]:
-        """Build capability-gated reasoning params."""
+        """Build capability-gated reasoning params with configurable effort."""
         if not self._reasoning_enabled:
             return {}
         if not self._model_supports_reasoning():
@@ -215,7 +221,8 @@ class _BaseGraphLLMClient(ABC):
                 self._provider, self._model,
             )
             return {}
-        return {"reasoning_effort": "medium"}
+        effort = self._reasoning_effort or "medium"
+        return {"reasoning_effort": effort}
 
     def _stream_with_usage(
         self,
@@ -223,6 +230,8 @@ class _BaseGraphLLMClient(ABC):
         messages: list[dict[str, str]],
         temperature: float,
         stream_obj: TutorTextStream,
+        prompt_meta: Any | None = None,
+        rendered_length: int | None = None,
     ) -> Iterator[str]:
         """Stream text deltas inside an LLM span and capture final usage."""
         context = get_observation_context()
@@ -248,6 +257,7 @@ class _BaseGraphLLMClient(ABC):
                 },
                 messages=messages,
             )
+            set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
 
             last_chunk: Mapping[str, Any] = {}
             try:
@@ -371,6 +381,8 @@ class _BaseGraphLLMClient(ABC):
         reasoning = self._extract_reasoning_tokens(result)
         supported = self._model_supports_reasoning()
         used = self._reasoning_enabled and supported
+        effort = self._reasoning_effort if used else None
+        effort_source = "settings" if effort is not None else None
         trace = GenerationTrace(
             provider=self._provider,
             model=self._model,
@@ -382,6 +394,8 @@ class _BaseGraphLLMClient(ABC):
             reasoning_requested=self._reasoning_enabled,
             reasoning_supported=supported,
             reasoning_used=used,
+            reasoning_effort=effort,
+            reasoning_effort_source=effort_source,
         )
         return text, trace
 
@@ -541,6 +555,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         json_temperature: float = 0.0,
         tutor_temperature: float = 0.0,
         reasoning_enabled: bool = False,
+        reasoning_effort: str | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("OpenAI API key is required for graph_llm_provider=openai")
@@ -551,6 +566,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
             tutor_temperature=tutor_temperature,
             provider="openai",
             reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
         )
         from openai import OpenAI  # noqa: PLC0415
 
@@ -605,6 +621,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         base_url: str,
         api_key: str | None = None,
         reasoning_enabled: bool = False,
+        reasoning_effort: str | None = None,
     ) -> None:
         if not base_url.strip():
             raise ValueError("graph_llm base_url cannot be empty")
@@ -615,6 +632,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             tutor_temperature=tutor_temperature,
             provider="litellm",
             reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
         )
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key.strip() if api_key and api_key.strip() else None

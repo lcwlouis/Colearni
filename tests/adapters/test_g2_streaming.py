@@ -48,7 +48,7 @@ def otel_exporter():
     exporter = _InMemoryExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    set_tracer_provider_for_testing(provider)
+    # Enable observability first, then override tracer provider for capture
     configure_observability(
         get_settings().model_copy(
             update={
@@ -59,6 +59,7 @@ def otel_exporter():
             }
         )
     )
+    set_tracer_provider_for_testing(provider)
     yield exporter
     set_tracer_provider_for_testing(None)
 
