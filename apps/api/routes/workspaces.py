@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from adapters.db.dependencies import get_db_session
 from apps.api.dependencies import WorkspaceContext, get_current_user, get_workspace_context
+from domain.workspaces.service import WorkspaceNotFoundError
+from domain.workspaces import service as ws_service
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -53,40 +54,13 @@ def create_workspace(
     db: Session = Depends(get_db_session),
 ) -> WorkspaceSummary:
     """Create a workspace and add the current user as owner-member."""
-    row = (
-        db.execute(
-            text(
-                """
-                INSERT INTO workspaces (name, description, owner_user_id)
-                VALUES (:name, :description, :owner_user_id)
-                RETURNING id, public_id, name, description
-                """
-            ),
-            {
-                "name": payload.name.strip(),
-                "description": (payload.description or "").strip() or None,
-                "owner_user_id": user.id,
-            },
-        )
-        .mappings()
-        .one()
+    result = ws_service.create_workspace(
+        db,
+        name=payload.name,
+        description=payload.description,
+        owner_user_id=user.id,
     )
-    db.execute(
-        text(
-            """
-            INSERT INTO workspace_members (workspace_id, user_id, role)
-            VALUES (:workspace_id, :user_id, 'owner')
-            """
-        ),
-        {"workspace_id": int(row["id"]), "user_id": user.id},
-    )
-    db.commit()
-    return WorkspaceSummary(
-        workspace_id=int(row["id"]),
-        public_id=str(row["public_id"]),
-        name=str(row["name"]),
-        description=str(row["description"]) if row["description"] else None,
-    )
+    return WorkspaceSummary(**result)
 
 
 @router.get("", response_model=WorkspaceListResponse)
@@ -95,33 +69,8 @@ def list_workspaces(
     db: Session = Depends(get_db_session),
 ) -> WorkspaceListResponse:
     """List workspaces the current user is a member of."""
-    rows = (
-        db.execute(
-            text(
-                """
-                SELECT w.id, w.public_id, w.name, w.description
-                FROM workspaces w
-                JOIN workspace_members wm ON w.id = wm.workspace_id
-                WHERE wm.user_id = :user_id
-                ORDER BY w.name ASC
-                """
-            ),
-            {"user_id": user.id},
-        )
-        .mappings()
-        .all()
-    )
-    return WorkspaceListResponse(
-        workspaces=[
-            WorkspaceSummary(
-                workspace_id=int(row["id"]),
-                public_id=str(row["public_id"]),
-                name=str(row["name"]),
-                description=str(row["description"]) if row["description"] else None,
-            )
-            for row in rows
-        ]
-    )
+    items = ws_service.list_workspaces(db, user_id=user.id)
+    return WorkspaceListResponse(workspaces=[WorkspaceSummary(**r) for r in items])
 
 
 @router.get("/{ws_id}", response_model=WorkspaceDetail)
@@ -130,30 +79,11 @@ def get_workspace(
     db: Session = Depends(get_db_session),
 ) -> WorkspaceDetail:
     """Get workspace details (requires membership)."""
-    row = (
-        db.execute(
-            text(
-                """
-                SELECT id, public_id, name, description, settings
-                FROM workspaces
-                WHERE id = :workspace_id
-                LIMIT 1
-                """
-            ),
-            {"workspace_id": ws.workspace_id},
-        )
-        .mappings()
-        .first()
-    )
-    if row is None:
+    try:
+        result = ws_service.get_workspace(db, workspace_id=ws.workspace_id)
+    except WorkspaceNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
-    return WorkspaceDetail(
-        workspace_id=int(row["id"]),
-        public_id=str(row["public_id"]),
-        name=str(row["name"]),
-        description=str(row["description"]) if row["description"] else None,
-        settings=row["settings"] if row["settings"] else {},
-    )
+    return WorkspaceDetail(**result)
 
 
 @router.patch("/{ws_id}", response_model=WorkspaceDetail)
@@ -163,37 +93,16 @@ def update_workspace(
     db: Session = Depends(get_db_session),
 ) -> WorkspaceDetail:
     """Update workspace name and description."""
-    row = (
-        db.execute(
-            text(
-                """
-                UPDATE workspaces
-                SET name = :name,
-                    description = :description,
-                    updated_at = now()
-                WHERE id = :workspace_id
-                RETURNING id, public_id, name, description, settings
-                """
-            ),
-            {
-                "workspace_id": ws.workspace_id,
-                "name": payload.name.strip(),
-                "description": (payload.description or "").strip() or None,
-            },
+    try:
+        result = ws_service.update_workspace(
+            db,
+            workspace_id=ws.workspace_id,
+            name=payload.name,
+            description=payload.description,
         )
-        .mappings()
-        .first()
-    )
-    if row is None:
+    except WorkspaceNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
-    db.commit()
-    return WorkspaceDetail(
-        workspace_id=int(row["id"]),
-        public_id=str(row["public_id"]),
-        name=str(row["name"]),
-        description=str(row["description"]) if row["description"] else None,
-        settings=row["settings"] if row["settings"] else {},
-    )
+    return WorkspaceDetail(**result)
 
 
 @router.patch("/{ws_id}/settings", response_model=WorkspaceDetail)
@@ -203,44 +112,15 @@ def update_workspace_settings(
     db: Session = Depends(get_db_session),
 ) -> WorkspaceDetail:
     """Merge settings into the workspace JSONB column."""
-    row = (
-        db.execute(
-            text(
-                """
-                UPDATE workspaces
-                SET settings = settings || :new_settings,
-                    updated_at = now()
-                WHERE id = :workspace_id
-                RETURNING id, public_id, name, description, settings
-                """
-            ),
-            {
-                "workspace_id": ws.workspace_id,
-                "new_settings": _jsonb_cast(payload.settings),
-            },
+    try:
+        result = ws_service.update_workspace_settings(
+            db,
+            workspace_id=ws.workspace_id,
+            new_settings=payload.settings,
         )
-        .mappings()
-        .first()
-    )
-    if row is None:
+    except WorkspaceNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
-    db.commit()
-    return WorkspaceDetail(
-        workspace_id=int(row["id"]),
-        public_id=str(row["public_id"]),
-        name=str(row["name"]),
-        description=str(row["description"]) if row["description"] else None,
-        settings=row["settings"] if row["settings"] else {},
-    )
-
-
-# ── Helpers ───────────────────────────────────────────────────────────
-
-
-def _jsonb_cast(data: dict[str, object]) -> str:
-    import json
-
-    return json.dumps(data, default=str)
+    return WorkspaceDetail(**result)
 
 
 __all__ = ["router"]
