@@ -5,6 +5,7 @@
 - docs/ARCHITECTURE.md
 - docs/PRODUCT_SPEC.md
 - docs/GRAPH.md
+- docs/FRONTEND.md (required when touching `apps/web/`)
 
 ## Repo expectations (summary)
 - Small PRs (<= 400 LOC net). Split if larger.
