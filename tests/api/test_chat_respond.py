@@ -43,7 +43,7 @@ def _override_db() -> Any:
 def _patch_tutor_llm(monkeypatch: Any, client: DummyTutorLLMClient | None = None) -> None:
     resolved_client = client or DummyTutorLLMClient()
     monkeypatch.setattr(
-        "domain.chat.respond.build_graph_llm_client",
+        "domain.chat.response_service.build_graph_llm_client",
         lambda settings: resolved_client,
     )
 
@@ -53,7 +53,7 @@ def test_chat_respond_uses_default_grounding_mode_when_request_omits_mode(
 ) -> None:
     """Request mode should default from app settings when not provided."""
     monkeypatch.setattr(
-        "domain.chat.respond.build_embedding_provider",
+        "domain.chat.retrieval_context.build_embedding_provider",
         lambda settings: DummyEmbeddingProvider(),
     )
     monkeypatch.setattr(
@@ -85,7 +85,7 @@ def test_chat_respond_uses_default_grounding_mode_when_request_omits_mode(
 def test_chat_respond_request_mode_overrides_default(monkeypatch: Any) -> None:
     """Explicit request mode should override settings default."""
     monkeypatch.setattr(
-        "domain.chat.respond.build_embedding_provider",
+        "domain.chat.retrieval_context.build_embedding_provider",
         lambda settings: DummyEmbeddingProvider(),
     )
     monkeypatch.setattr(
@@ -134,7 +134,7 @@ def test_chat_respond_returns_answer_envelope_with_workspace_citations(
     ]
 
     monkeypatch.setattr(
-        "domain.chat.respond.build_embedding_provider",
+        "domain.chat.retrieval_context.build_embedding_provider",
         lambda settings: DummyEmbeddingProvider(),
     )
     monkeypatch.setattr(
@@ -143,7 +143,7 @@ def test_chat_respond_returns_answer_envelope_with_workspace_citations(
         lambda self, query, workspace_id, top_k: ranked_rows,  # noqa: ARG005
     )
     monkeypatch.setattr(
-        "domain.chat.respond.get_document_by_id",
+        "domain.chat.evidence_builder.get_document_by_id",
         lambda session, workspace_id, document_id: DocumentRow(  # noqa: ARG005
             id=document_id,
             workspace_id=workspace_id,
@@ -184,7 +184,7 @@ def test_chat_respond_uses_hybrid_retriever_path(monkeypatch: Any) -> None:
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "domain.chat.respond.build_embedding_provider",
+        "domain.chat.retrieval_context.build_embedding_provider",
         lambda settings: DummyEmbeddingProvider(),
     )
 
@@ -253,7 +253,7 @@ def test_chat_respond_mastery_gating_matrix_with_evidence(
     ]
 
     monkeypatch.setattr(
-        "domain.chat.respond.build_embedding_provider",
+        "domain.chat.retrieval_context.build_embedding_provider",
         lambda settings: DummyEmbeddingProvider(),
     )
     monkeypatch.setattr(
@@ -262,7 +262,7 @@ def test_chat_respond_mastery_gating_matrix_with_evidence(
         lambda self, query, workspace_id, top_k: ranked_rows,  # noqa: ARG005
     )
     monkeypatch.setattr(
-        "domain.chat.respond.get_document_by_id",
+        "domain.chat.evidence_builder.get_document_by_id",
         lambda session, workspace_id, document_id: DocumentRow(  # noqa: ARG005
             id=document_id,
             workspace_id=workspace_id,
@@ -273,7 +273,7 @@ def test_chat_respond_mastery_gating_matrix_with_evidence(
         ),
     )
     monkeypatch.setattr(
-        "domain.chat.respond.get_mastery_status",
+        "domain.chat.response_service.get_mastery_status",
         lambda session, workspace_id, user_id, concept_id: mastery_status,  # noqa: ARG005
     )
     _patch_tutor_llm(monkeypatch)
@@ -317,7 +317,7 @@ def test_chat_respond_refusal_policy_unchanged_across_mastery_states(
     expected_reason: str,
 ) -> None:
     monkeypatch.setattr(
-        "domain.chat.respond.build_embedding_provider",
+        "domain.chat.retrieval_context.build_embedding_provider",
         lambda settings: DummyEmbeddingProvider(),
     )
     monkeypatch.setattr(
@@ -326,7 +326,7 @@ def test_chat_respond_refusal_policy_unchanged_across_mastery_states(
         lambda self, query, workspace_id, top_k: [],  # noqa: ARG005
     )
     monkeypatch.setattr(
-        "domain.chat.respond.get_mastery_status",
+        "domain.chat.response_service.get_mastery_status",
         lambda session, workspace_id, user_id, concept_id: mastery_status,  # noqa: ARG005
     )
     _patch_tutor_llm(monkeypatch)
