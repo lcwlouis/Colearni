@@ -7,6 +7,7 @@ import json
 from adapters.embeddings.factory import build_embedding_provider
 from core.observability import (
     SPAN_KIND_RETRIEVER,
+    record_content_enabled,
     start_span,
 )
 from core.settings import Settings
@@ -56,8 +57,19 @@ def retrieve_ranked_chunks(
         if span is not None:
             span.set_attribute("retrieval.results_count", len(results))
             if results:
+                include_preview = record_content_enabled()
                 doc_summary = json.dumps(
-                    [{"chunk_id": r.chunk_id, "score": round(r.score, 3)} for r in results[:5]],
+                    [
+                        {
+                            "rank": i + 1,
+                            "chunk_id": r.chunk_id,
+                            "document_id": r.document_id,
+                            "score": round(r.score, 3),
+                            "method": r.retrieval_method,
+                            **({"preview": r.text[:120]} if include_preview else {}),
+                        }
+                        for i, r in enumerate(results[:5])
+                    ],
                     default=str,
                 )
                 span.set_attribute("retrieval.documents", doc_summary[:1024])

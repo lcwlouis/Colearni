@@ -8,6 +8,7 @@ from adapters.db import chunks_repository
 from core.contracts import ChunkRetriever
 from core.observability import (
     SPAN_KIND_RETRIEVER,
+    record_content_enabled,
     start_span,
 )
 from sqlalchemy.orm import Session
@@ -46,10 +47,20 @@ class PgFtsRetriever(ChunkRetriever):
             if span is not None:
                 span.set_attribute("retrieval.results_count", len(results))
                 if results:
+                    include_preview = record_content_enabled()
                     span.set_attribute(
                         "retrieval.documents",
                         json.dumps(
-                            [{"chunk_id": r.chunk_id, "score": round(r.score, 3)} for r in results[:5]],
+                            [
+                                {
+                                    "rank": i + 1,
+                                    "chunk_id": r.chunk_id,
+                                    "document_id": r.document_id,
+                                    "score": round(r.score, 3),
+                                    **({"preview": r.text[:120]} if include_preview else {}),
+                                }
+                                for i, r in enumerate(results[:5])
+                            ],
                             default=str,
                         )[:1024],
                     )

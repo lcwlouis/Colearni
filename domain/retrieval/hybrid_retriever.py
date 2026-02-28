@@ -8,6 +8,7 @@ from typing import Literal
 from core.contracts import ChunkRetriever
 from core.observability import (
     SPAN_KIND_RETRIEVER,
+    record_content_enabled,
     start_span,
 )
 
@@ -110,12 +111,20 @@ class HybridRetriever(ChunkRetriever):
                 span.set_attribute("retrieval.results_count", len(results))
                 span.set_attribute("retrieval.method_distribution", json.dumps(method_counts))
                 if results:
+                    include_preview = record_content_enabled()
                     span.set_attribute(
                         "retrieval.documents",
                         json.dumps(
                             [
-                                {"chunk_id": r.chunk_id, "score": round(r.score, 4), "method": r.retrieval_method}
-                                for r in results[:5]
+                                {
+                                    "rank": i + 1,
+                                    "chunk_id": r.chunk_id,
+                                    "document_id": r.document_id,
+                                    "score": round(r.score, 4),
+                                    "method": r.retrieval_method,
+                                    **({"preview": r.text[:120]} if include_preview else {}),
+                                }
+                                for i, r in enumerate(results[:5])
                             ],
                             default=str,
                         )[:1024],
