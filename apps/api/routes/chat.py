@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 
 from adapters.db.chat import ChatNotFoundError, resolve_session_by_public_id
 from adapters.db.dependencies import get_db_session
@@ -244,19 +245,28 @@ def respond_chat_stream(
 
     def _sse_generator():
         event_count = 0
+        event_types: Counter[str] = Counter()
+        log.info("stream start ws=%s session=%s", ws.workspace_id, resolved_session_id)
         for event in generate_chat_response_stream(
             session=db,
             request=internal,
             settings=settings,
         ):
             event_count += 1
+            event_types[event.event] += 1
             data = event.model_dump_json()
-            log.info(
+            log.debug(
                 "stream event #%d type=%s ws=%s",
                 event_count, event.event, ws.workspace_id,
             )
             yield f"event: {event.event}\ndata: {data}\n\n"
-        log.info("stream complete: %d events ws=%s", event_count, ws.workspace_id)
+        log.info(
+            "stream complete ws=%s session=%s events=%d breakdown=%s",
+            ws.workspace_id,
+            resolved_session_id,
+            event_count,
+            dict(event_types),
+        )
 
     return StreamingResponse(
         _sse_generator(),
