@@ -19,7 +19,7 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 - `POST /auth/logout`
 - `GET /auth/me`
 - `GET /auth/me/tutor-profile`
-- `POST /documents/upload`
+- `POST /documents/upload` *(deprecated — see KB upload)*
 - `GET /workspaces`
 - `POST /workspaces`
 - `GET /workspaces/{ws_id}`
@@ -538,6 +538,10 @@ Error responses:
 - `422 Unprocessable Entity` for validation failures
 
 ### POST /documents/upload
+
+> **Deprecated — compatibility only.** Use `POST /workspaces/{ws_id}/knowledge-base/documents/upload` instead.
+> This route remains available for backward compatibility but delegates to the shared upload flow internally.
+> It may be removed in a future release.
 
 Tag/group: `documents`
 
@@ -1341,7 +1345,7 @@ Error responses:
 
 Tag/group: `knowledge-base`
 
-Purpose: upload a document (txt, md, pdf) to the workspace knowledge base.
+Purpose: upload a document (txt, md, pdf) to the workspace knowledge base. **This is the canonical upload endpoint.**
 
 Request contract (multipart/form-data):
 

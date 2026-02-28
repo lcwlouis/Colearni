@@ -2,12 +2,15 @@
 
 Last updated: 2026-02-28
 
+Archive snapshot of the previous full-plan version:
+- `docs/archive/REFACTOR_PLAN_2026-02-28_pre-remaining-rewrite.md`
+
 ## Non-Negotiable Run Rules
 
 1. You MUST re-open and re-read this file:
    - at the start of the run
    - after every 2 refactor slices
-   - after any context compaction / summarization / “I may lose context” moment
+   - after any context compaction / summarization / "I may lose context" moment
    - before claiming any slice complete
 2. Do not overclaim. A slice is ONLY complete if:
    - code or docs for that slice are changed
@@ -23,688 +26,424 @@ Last updated: 2026-02-28
    - Commands run
    - Manual verification steps
    - Observed outcome
-5. Keep an ordered list of outstanding slices and follow the execution order strictly.
+5. Do not reopen completed slices unless:
+   - the current slice is blocked by them, or
+   - the code no longer matches the assumptions in this file
 6. If implementation uncovers a behavior change risk, STOP and update this plan before widening scope.
 7. This is a maintainability refactor plan. Do not mix in unrelated feature work.
 
 ## Purpose
 
-This document is the implementation plan for the post-fix refactor audit described in `docs/RUN_VERIFY_FIXES.md` section `G) Refactor and maintainability (NO behavior change)`.
+This document replaces the earlier broad refactor plan now that the first wave of refactor work has already landed.
 
-This plan is intentionally concrete:
+The old version has been archived intact. This active file now covers only the remaining refactor work so the next implementation run is not forced to rediscover what is already done.
 
-- it names the current hotspots
-- it proposes exact module splits
-- it sequences work into PR-sized slices
-- it defines what must stay stable during each slice
-- it lists verification gates so implementation does not drift
-
-Use this document as the source of truth when the refactor begins. If implementation discovers a new constraint, update this file before widening scope.
+Use this document as the source of truth for the remaining cleanup. If implementation discovers a new constraint, update this file before widening scope.
 
 ## Inputs Used
 
 This plan is based on:
 
-- `docs/RUN_VERIFY_FIXES.md`
+- `docs/archive/RUN_VERIFY_FIXES.md`
+- `docs/archive/REFACTOR_PLAN_2026-02-28_pre-remaining-rewrite.md`
 - `docs/CODEX.md`
 - `docs/ARCHITECTURE.md`
-- `docs/PLAN.md`
-- `docs/PROGRESS.md`
-- current repository layout and test suite status as of 2026-02-28
+- `docs/PRODUCT_SPEC.md`
+- `docs/GRAPH.md`
+- current repository layout and verification status as of 2026-02-28
 
 ## Executive Summary
 
-The repository is not in rewrite territory. The architecture still has a valid backbone:
+The first refactor wave was successful.
 
-- backend separation into `apps/`, `domain/`, `adapters/`, and `core/`
-- a reasonably complete automated test suite
-- no detected `core -> apps` or `domain -> apps` import boundary violations
+The codebase is in materially better shape than before:
 
-The refactor is justified because complexity has started to pool in a small number of files and because the documented patterns are only enforced inconsistently.
+- schema definitions are split into `core/schemas/`
+- workspaces and research routes are thin
+- chat orchestration has been split into smaller domain modules
+- graph repository code is split behind a small facade
+- tutor, graph, KB, and sidebar UI have feature-level structure
+- global CSS is now a thin aggregator over feature-scoped files
+- `pytest`, web tests, and web typecheck are green
 
-The biggest problems are:
+The remaining work is narrower and should stay narrow.
 
-1. Large orchestration modules own too many responsibilities.
-2. Several API routes still contain SQL and business logic directly.
-3. The web app has page-level components that own too much data loading, UI state, and behavior.
-4. Global styling is too centralized in one file.
-5. There are stale or duplicated surfaces that make the codebase harder to reason about.
+The main unfinished areas are:
 
-The right move is an incremental refactor in small PRs, not a redesign.
+1. ~~The legacy `/documents/upload` route is still a real implementation path, not just a compatibility wrapper.~~ → Done (R3A).
+2. ~~`apps/api/routes/knowledge_base.py` still owns provider construction and background-task orchestration.~~ → Done (R3B).
+3. ~~`domain/learning/practice.py` still depends directly on `domain.learning.level_up`.~~ → Done (R6A).
+4. ~~`domain/learning/level_up.py` is smaller than before, but still holds too much persistence and orchestration.~~ → Done (R6A).
+5. The active plan and API docs still describe some pre-refactor conditions that are no longer true. → In progress (R11B).
+
+The right move now is a short second pass focused on unifying the upload path, finishing the shared quiz boundary, and cleaning up facades and stale docs.
 
 ## Non-Negotiable Constraints
 
-These constraints apply to every refactor slice:
+These constraints apply to every remaining slice:
 
-1. No intentional behavior change unless the slice is explicitly marked as a bug fix prerequisite.
+1. No intentional behavior change unless the slice is explicitly marked as a compatibility decision.
 2. Keep PRs small. Target `<= 400 LOC net` per PR wherever possible.
-3. Preserve public API contracts and route paths during refactor.
-4. Preserve current CSS class names unless the slice is explicitly the CSS split.
-5. Add or update tests for every extracted behavior that gains a new module seam.
-6. Keep FastAPI routes thin by the end of the route refactor slices.
-7. Do not mix schema redesign with module moves in the same PR.
-8. Prefer facade modules and staged re-exports while imports are being migrated.
+3. Preserve public API contracts unless the slice explicitly updates docs, tests, and rollback notes together.
+4. Keep FastAPI routes thin: request validation, service call, error translation, response.
+5. Keep tutor evidence/citation behavior unchanged.
+6. Do not reopen finished frontend/CSS decomposition work unless it directly blocks a remaining slice.
+7. Prefer staged wrappers and facades over hard deletion when public surfaces are involved.
 
-## Refactor Slice IDs
+## Completed Work (Do Not Reopen Unless Blocked)
+
+These areas are considered landed enough for this phase:
+
+- `R1` Schema decomposition:
+  - `core/schemas/` exists and `core/schemas/__init__.py` is the compatibility facade
+- `R2` Thin routes pass I:
+  - `apps/api/routes/workspaces.py` delegates to `domain.workspaces.service`
+  - `apps/api/routes/research.py` delegates to `domain.research.service`
+- `R5` Chat orchestration split:
+  - `domain/chat/respond.py` is now coordinator-sized
+  - retrieval, evidence, social flow, and tutor generation helpers live in dedicated modules
+- `R7` Graph repository split:
+  - `adapters/db/graph/` exists
+  - `adapters/db/graph_repository.py` is now a facade
+- `R8` Tutor page split:
+  - `apps/web/app/tutor/page.tsx` is now a container page
+- `R9` Graph, KB, and sidebar split:
+  - feature folders exist under `apps/web/features/`
+  - stale `/practice` sidebar nav is no longer present
+- `R10` CSS decomposition:
+  - `apps/web/app/globals.css` is now an aggregator over `apps/web/styles/*.css`
+
+These slices are not "perfect forever", but they are not the current execution target.
+
+## Remaining Slice IDs
 
 Use these stable IDs in commits, reports, and verification blocks:
 
-- `R0` Baseline and Guardrails
-- `R1` Schema Decomposition
-- `R2` Thin Routes Pass I - Workspaces and Research
-- `R3` Thin Routes Pass II - Knowledge Base and Upload Surface Unification
-- `R4` Ingestion Split
-- `R5` Chat Orchestration Split
-- `R6` Quiz and Practice Split
-- `R7` Graph Repository Split
-- `R8` Tutor Page Split
-- `R9` Graph Page, KB Page, and Sidebar Split
-- `R10` CSS Decomposition
-- `R11` Cleanup and Facade Removal
+- `R3A` Upload Surface Consolidation
+- `R3B` Knowledge Base Route Final Thin Pass
+- `R6A` Shared Quiz Core Completion
+- `R11A` Cleanup and Artifact Removal
+- `R11B` Docs and Contract Sync
 
-## Current-State Findings
+## Decision Log For Remaining Work
 
-### Backend hotspots
+These decisions are already made for the remaining phase:
 
-Largest behavior-heavy backend files:
+1. Canonical upload surface:
+   - `POST /workspaces/{ws_id}/knowledge-base/documents/upload`
+2. Legacy upload route policy:
+   - `POST /documents/upload` remains temporary compatibility surface until removal is explicitly approved
+   - during this plan it should be reduced to a thin wrapper, not kept as a second implementation
+3. `core/schemas/__init__.py` policy:
+   - keep it for now
+   - do not remove it in this phase because many imports still rely on it
+4. `adapters/db/graph_repository.py` policy:
+   - removable only if there is no remaining in-repo use and no compatibility requirement
+5. Frontend/CSS policy:
+   - do not create new decomposition work here unless a remaining backend slice forces it
 
-- `domain/learning/level_up.py`
-- `adapters/db/graph_repository.py`
-- `domain/learning/practice.py`
-- `domain/chat/respond.py`
-- `domain/graph/resolver.py`
-- `domain/graph/explore.py`
-- `core/ingestion.py`
-- `core/schemas.py`
+## Removal Safety Rules
 
-Observed issues:
+These rules apply whenever a remaining slice removes, replaces, inlines, or archives code:
 
-- `domain/learning/level_up.py` combines quiz creation, generation retries, MCQ normalization, grading, mastery updates, observability, and payload shaping.
-- `domain/learning/practice.py` partly duplicates level-up concerns and already aliases level-up exception classes, which is a strong sign that the current module boundary is wrong.
-- `domain/chat/respond.py` builds retrievers, loads session context, resolves concepts, assembles evidence, chooses tutor behavior, verifies output, and persists the turn in one orchestration path.
-- `adapters/db/graph_repository.py` is acting like several repositories merged into one file: concepts, edges, candidate lookup, merge logs, provenance, and gardener support.
-- `core/ingestion.py` mixes ingestion validation, document dedup, chunk insertion, embedding population, summary generation, graph building, and background-task behavior.
+1. Do not remove a file, function, route, schema, type, selector, or compatibility shim without recording:
+   - what is being removed
+   - why removal is safe
+   - what replaces it
+   - how to restore it if rollback is needed
+2. Prefer staged removal over hard deletion:
+   - deprecate -> route through facade/shim -> migrate callers -> delete
+3. For deletions larger than trivial dead code, capture:
+   - previous import/call sites
+   - replacement module path
+   - tests or checks proving parity
+4. If a public route, payload, or CSS contract is being removed, include a compatibility note and rollback path in the slice verification block.
+5. Maintain a removal ledger in this file during the run.
 
-### Route-layer drift
+## Removal Entry Template
 
-Routes that are relatively thin already:
+Use this exact structure for every meaningful removal:
 
-- `apps/api/routes/chat.py`
-- `apps/api/routes/practice.py`
+```text
+Removal Entry - <slice-id>
 
-Routes that still own too much SQL or workflow:
+Removed artifact
+- <file / function / route / schema / selector>
 
-- `apps/api/routes/workspaces.py`
-- `apps/api/routes/research.py`
-- `apps/api/routes/knowledge_base.py`
+Reason for removal
+- <why it was dead, duplicated, or replaced>
 
-Observed issues:
+Replacement
+- <new file/module/path or "none" if true deletion>
 
-- direct `text(...)` SQL in route files
-- route handlers assembling response objects themselves
-- repeated transaction and error-handling patterns
-- duplicate ingestion surfaces between `/documents/upload` and workspace-scoped KB upload
+Reverse path
+- <exact steps to restore or revert>
 
-### Frontend hotspots
+Compatibility impact
+- <public/internal, none/minor/major>
 
-Main page/component hotspots:
+Verification
+- <tests or manual checks proving the replacement works>
+```
 
-- `apps/web/app/tutor/page.tsx`
-- `apps/web/app/kb/page.tsx`
-- `apps/web/app/graph/page.tsx`
-- `apps/web/components/global-sidebar.tsx`
-- `apps/web/components/concept-graph.tsx`
-- `apps/web/app/globals.css`
+## Current Verification Status
 
-Observed issues:
-
-- `apps/web/app/tutor/page.tsx` owns session resolution, message loading, graph drawer state, quiz drawer state, onboarding state, concept switching, local storage, and submission flows.
-- `apps/web/app/kb/page.tsx` owns document polling, queue state, upload execution, action confirmation, and status reconciliation.
-- `apps/web/app/graph/page.tsx` owns concept search, full-graph loading, detail loading, lucky picks, practice state, stateful flashcards, and graph control state.
-- `apps/web/components/global-sidebar.tsx` owns nav, session list, context menu, workspace creation, workspace rename, collapsed-mode behavior, and footer actions in one file.
-- `apps/web/components/concept-graph.tsx` directly mixes rendering, D3 setup, zoom behavior, focus mode, search highlighting, and reset wiring.
-- `apps/web/app/globals.css` is a monolith containing design tokens, shell, sidebar, tutor, KB, graph, cards, and state styles.
-
-### Tooling and hygiene findings
-
-Current verification status:
+Current repo verification status:
 
 - `pytest -q`: passing
 - `npm --prefix apps/web test`: passing
-- `npm --prefix apps/web run typecheck`: failing
+- `npm --prefix apps/web run typecheck`: passing
 
-Current typecheck failures:
+Current remaining hotspots:
 
-- `apps/web/app/tutor/page.tsx`: wrong argument passed to `onSubmitChat`
-- `apps/web/components/concept-graph.tsx`: D3 selection typing issue on `.transition()`
+| File | Lines | Why it still matters |
+|---|---:|---|
+| `domain/learning/practice.py` | 718 | Practice quiz flow — now imports shared `quiz_flow` directly (no longer depends on `level_up`). Stable. |
+| `domain/learning/quiz_flow.py` | 840 | Shared quiz create/submit orchestration. Core shared module. |
+| `domain/learning/level_up.py` | 45 | Thin backward-compat wrapper over `quiz_flow` and `quiz_persistence`. |
+| `apps/api/routes/knowledge_base.py` | 146 | Fully thinned — HTTP concerns only. |
+| `apps/api/routes/documents.py` | 169 | Compatibility wrapper over `upload_flow`. |
+| `adapters/db/graph_repository.py` | 32 | Facade — still used by `domain/graph/` and tests. Kept. |
 
-Tracked generated or low-signal artifacts:
+Known cleanup candidates:
 
 - `apps/web/tsconfig.tsbuildinfo`
 - `colearni_backend.egg-info/PKG-INFO`
 - `colearni_backend.egg-info/SOURCES.txt`
+- repo-root `.DS_Store`
 
-Likely stale or confusing surfaces:
+Known docs drift:
 
-- legacy upload route in `apps/api/routes/documents.py` while the web app uses only workspace-scoped KB routes
-- stale `/practice` nav entry in `apps/web/components/global-sidebar.tsx`
-- stale rename TODO in `apps/web/components/global-sidebar.tsx`
+- this file previously described pre-refactor file sizes and stale sidebar issues
+- `docs/API.md` still documents the legacy upload route as a first-class endpoint
 
-## Refactor Objectives
+## Remaining Work Overview
 
-The refactor must achieve the following:
+### 1. Upload unification is not complete
 
-1. Make module ownership obvious.
-2. Make API routes uniformly thin.
-3. Reduce file size by splitting on behavior seams, not arbitrary line counts.
-4. Preserve existing behavior and contracts while code moves.
-5. Make future fixes in `RUN_VERIFY_FIXES` cheaper to implement.
-6. Reduce duplicate ingestion and quiz logic.
-7. Make frontend pages mostly container-level code.
-8. Make CSS navigable and feature-scoped without restyling the app.
+The web app already uses the workspace-scoped KB upload route, but the legacy route still contains its own implementation.
 
-## Target Architecture After Refactor
+That means:
 
-### Backend target
+- two real upload code paths still exist
+- background task orchestration is duplicated
+- API docs and tests still treat the legacy route as fully primary
 
-Keep the current top-level layering, but split large feature modules inside each layer.
+The remaining plan should unify implementation first, then make a separate explicit decision about final public contract removal.
 
-Target shape:
+### 2. KB routes are thinner, but not fully thin
 
-```text
-apps/api/routes/
-  chat.py
-  practice.py
-  quizzes.py
-  workspaces.py
-  research.py
-  knowledge_base.py
-  documents.py                # either removed later or narrowed to compatibility wrapper
+`apps/api/routes/knowledge_base.py` has already moved list/delete/reset behavior into the domain layer, but upload and reprocess still:
 
-apps/api/contracts/
-  chat.py
-  practice.py
-  workspaces.py
-  research.py
-  knowledge_base.py
+- inspect app state
+- build providers
+- enqueue background tasks directly
 
-domain/chat/
-  respond.py                  # thin facade/orchestrator only
-  response_service.py
-  retrieval_context.py
-  evidence_builder.py
-  social_turns.py
-  session_memory.py
-  sessions.py
+That logic should move behind a domain seam so the route returns to pure HTTP handling.
 
-domain/learning/
-  level_up.py                 # public facade
-  quiz_generation.py
-  quiz_grading.py
-  quiz_context.py
-  quiz_persistence.py
-  practice.py                 # public facade
-  practice_flashcards.py
-  practice_quizzes.py
-  practice_novelty.py
-  spaced_repetition.py
+### 3. Shared quiz extraction is incomplete
 
-domain/knowledge_base/
-  service.py
-  status.py
+The existing refactor already extracted:
 
-domain/workspaces/
-  service.py
+- `domain/learning/quiz_generation.py`
+- `domain/learning/quiz_grading.py`
+- `domain/learning/practice_novelty.py`
 
-domain/research/
-  service.py
-  runner.py
+But the most important boundary is still not finished:
 
-domain/ingestion/
-  service.py
-  document_status.py
-  post_ingest.py
+- `practice.py` imports `level_up.py`
+- `level_up.py` still owns shared persistence and orchestration logic
+- chat quiz summary lookup still comes from `level_up.py`
 
-domain/graph/
-  resolver.py                 # public facade
-  resolver_candidates.py
-  resolver_decision.py
-  resolver_apply.py
-  explore.py
-  gardener.py
+The remaining slice should finish the shared quiz core so level-up and practice are sibling flows, not parent/child modules.
 
-adapters/db/
-  workspaces.py
-  research.py
-  knowledge_base.py
-  documents.py
-  chat.py
-  graph/
-    __init__.py
-    concepts.py
-    edges.py
-    merge_map.py
-    provenance.py
-    candidates.py
-    gardener.py
+### 4. Cleanup is now mostly about deleting the right things, not moving more code
 
-core/
-  settings.py
-  observability.py
-  verifier.py
-  schemas/
-    __init__.py
-    assistant.py
-    chat.py
-    graph.py
-    knowledge_base.py
-    practice.py
-    quizzes.py
-    research.py
-    workspaces.py
-```
+The second pass should remove or classify:
 
-Notes:
+- generated artifacts
+- dead facades
+- stale docs
+- stale tests or API references for deprecated paths
 
-- Do not make this folder move all at once.
-- Use facade modules first so imports can migrate gradually.
-- `core/schemas.py` should become a package only after its imports are mapped and tested.
-
-### Frontend target
-
-Preserve `app/`, `components/`, and `lib/`, but introduce feature folders for page-owned behavior.
-
-Target shape:
-
-```text
-apps/web/app/
-  tutor/page.tsx              # container only
-  graph/page.tsx              # container only
-  kb/page.tsx                 # container only
-  layout.tsx
-
-apps/web/features/tutor/
-  hooks/
-    use-tutor-page.ts
-    use-tutor-messages.ts
-    use-level-up-flow.ts
-  components/
-    tutor-layout.tsx
-    tutor-toolbar.tsx
-    tutor-timeline.tsx
-    tutor-graph-drawer.tsx
-    tutor-quiz-drawer.tsx
-    concept-switch-banner.tsx
-
-apps/web/features/graph/
-  hooks/
-    use-graph-page.ts
-    use-graph-practice.ts
-  components/
-    graph-controls.tsx
-    graph-detail-panel.tsx
-    graph-practice-panel.tsx
-
-apps/web/features/kb/
-  hooks/
-    use-kb-documents.ts
-    use-kb-upload-queue.ts
-  components/
-    kb-header.tsx
-    kb-empty-state.tsx
-    kb-table.tsx
-    kb-row-actions.tsx
-
-apps/web/features/sidebar/
-  components/
-    global-sidebar.tsx        # wrapper only
-    sidebar-nav.tsx
-    sidebar-sessions.tsx
-    sidebar-workspaces.tsx
-    sidebar-collapsed-controls.tsx
-
-apps/web/components/
-  concept-graph.tsx           # either stays generic or becomes a wrapper over a feature-local graph canvas
-  level-up-card.tsx
-  practice-quiz-card.tsx
-  stateful-flashcard-list.tsx
-
-apps/web/styles/
-  tokens.css
-  base.css
-  shell.css
-  sidebar.css
-  tutor.css
-  graph.css
-  kb.css
-  shared-components.css
-```
+It should not invent new architecture work.
 
 ## Implementation Sequencing
 
-The work should be executed in the order below.
+The remaining work should be executed in the order below.
 
 Each slice should end with green tests before the next slice starts.
 
-### R0. Slice 0: Baseline and Guardrails
+### R3A. Slice 1: Upload Surface Consolidation
 
 Purpose:
 
-- make the repository safe to refactor
-- remove obvious noise that will confuse future diffs
+- reduce the repository to one real upload implementation while preserving current public contracts
 
-Changes:
+Root problem:
 
-- fix current TS typecheck failures in:
-  - `apps/web/app/tutor/page.tsx`
-  - `apps/web/components/concept-graph.tsx`
-- stop tracking generated artifacts:
-  - `apps/web/tsconfig.tsbuildinfo`
-  - `colearni_backend.egg-info/*`
-- add or tighten `.gitignore` coverage if needed
-- add a lightweight architecture test to prevent `core`/`domain` importing from `apps`
+- `apps/api/routes/documents.py` and `apps/api/routes/knowledge_base.py` both perform ingestion orchestration
+- the web app only uses the workspace-scoped route
+- docs/tests still keep the legacy route alive
+
+Files involved:
+
+- create `domain/knowledge_base/upload_flow.py`
+- slim:
+  - `apps/api/routes/documents.py`
+  - `apps/api/routes/knowledge_base.py`
+
+Implementation steps:
+
+1. Create a shared service-level upload flow that owns:
+   - `IngestionRequest` assembly inputs
+   - fast-ingest invocation
+   - app-state runtime resolution for graph/chunk providers
+   - background-task scheduling helper inputs
+2. Keep transport parsing in routes only:
+   - multipart/raw-body parsing in `documents.py`
+   - `UploadFile` handling in `knowledge_base.py`
+3. Keep public response contracts stable:
+   - workspace KB route keeps its current `202 Accepted` response shape
+   - legacy `/documents/upload` route keeps current status/response behavior while deprecated
+4. Refactor `documents.py` into a compatibility wrapper over the shared upload flow.
+5. Refactor KB upload endpoint to use the same shared upload flow.
 
 What stays the same:
 
-- no route, API, or UI behavior changes
+- both route paths
+- current response payload shapes
+- current status code behavior
+- frontend upload behavior
 
 Verification:
 
 - `pytest -q`
-- `npm --prefix apps/web test`
-- `npm --prefix apps/web run typecheck`
-
-Exit criteria:
-
-- typecheck is green
-- generated artifacts no longer create noise in routine diffs
-
-### R1. Slice 1: Schema Decomposition
-
-Purpose:
-
-- split `core/schemas.py` before adding more feature contracts
-
-Files involved:
-
-- create `core/schemas/` package
-- migrate content out of `core/schemas.py`
-- update imports across backend modules and tests
-
-Exact split:
-
-- `assistant.py`: `AssistantResponseEnvelope`, `AssistantDraft`, citations, evidence, grounding types
-- `chat.py`: `ChatRespondRequest`, conversation metadata, chat payload models
-- `graph.py`: graph concept and subgraph response models
-- `knowledge_base.py`: KB list and summary models
-- `practice.py`: flashcard and practice quiz payloads
-- `quizzes.py`: level-up quiz create/submit payloads
-- `research.py`: research source/run/candidate payloads
-- `workspaces.py`: workspace request/response payloads
-
-Migration rule:
-
-- keep `core/schemas.py` temporarily as a compatibility facade that re-exports from the new package
-- once all imports are updated and green, remove the facade in a later cleanup slice
-
-What stays the same:
-
-- import names
-- payload shapes
-- API docs
-
-Verification:
-
-- all current tests
-- `tests/core/test_schemas.py`
-- `tests/api/test_response_contracts.py`
-
-Exit criteria:
-
-- schema files are feature-scoped
-- no payload contract changes
-
-### R2. Slice 2: Thin Routes Pass I - Workspaces and Research
-
-Purpose:
-
-- remove direct SQL from the simpler route files first
-
-Files involved:
-
-- create `adapters/db/workspaces.py`
-- create `domain/workspaces/service.py`
-- create `adapters/db/research.py`
-- create `domain/research/service.py`
-- slim:
-  - `apps/api/routes/workspaces.py`
-  - `apps/api/routes/research.py`
-
-Moves:
-
-- all SQL from workspace routes into adapter functions
-- all multi-step workspace actions into domain service functions
-- all SQL from research routes into adapter functions
-- all response shaping and transaction handling into domain service functions
-
-Route target shape:
-
-- validate request
-- call one service function
-- translate domain errors to HTTP
-- return response model
-
-What stays the same:
-
-- route paths
-- request and response models
-- auth and workspace guard behavior
-
-Verification:
-
-- `tests/api/test_auth.py`
-- `tests/api/test_response_contracts.py`
-- add targeted route/service tests for workspaces and research
-
-Exit criteria:
-
-- `apps/api/routes/workspaces.py` and `apps/api/routes/research.py` contain no direct SQL
-
-### R3. Slice 3: Thin Routes Pass II - Knowledge Base and Upload Surface Unification
-
-Purpose:
-
-- remove the most confusing route duplication in the repo
-
-Files involved:
-
-- create `adapters/db/knowledge_base.py`
-- create `domain/knowledge_base/service.py`
-- slim:
-  - `apps/api/routes/knowledge_base.py`
-  - `apps/api/routes/documents.py`
-
-Required decisions:
-
-1. Choose one canonical upload surface.
-2. Keep the legacy surface only as a compatibility wrapper or remove it completely if no clients use it.
-
-Recommended decision:
-
-- keep workspace-scoped KB routes as canonical
-- convert `apps/api/routes/documents.py` into:
-  - a deprecated compatibility wrapper around the same service, or
-  - a removed route if tests and docs confirm no active use
-
-Moves:
-
-- document listing query
-- delete cascade logic
-- reprocess validation
-- upload request assembly
-- background task scheduling helpers
-
-What stays the same:
-
-- KB UI behavior
-- workspace-scoped route paths
-- ingestion API contract for current frontend
-
-Verification:
-
 - `tests/api/test_documents_upload.py`
-- `tests/db/test_document_ingestion_integration.py`
 - `tests/api/test_response_contracts.py`
+- `tests/db/test_document_ingestion_integration.py`
 
 Exit criteria:
 
 - only one real upload implementation exists
-- route-level SQL is removed from KB handlers
+- the legacy route is clearly marked as compatibility-only
 
-### R4. Slice 4: Ingestion Split
-
-Purpose:
-
-- isolate document ingestion workflow and status logic from `core/ingestion.py`
-
-Files involved:
-
-- create:
-  - `domain/ingestion/service.py`
-  - `domain/ingestion/post_ingest.py`
-  - `domain/ingestion/document_status.py`
-- slim `core/ingestion.py`
-
-Exact split:
-
-- `service.py`
-  - request validation
-  - document dedup flow
-  - document insert and chunk insert orchestration
-- `post_ingest.py`
-  - embedding population
-  - document summary generation
-  - graph build invocation
-- `document_status.py`
-  - future home for persisted lifecycle state machine
-  - central status transition helpers
-
-Keep in `core/ingestion.py` only:
-
-- public compatibility entrypoints
-- exception classes
-- thin wrapper functions calling the new domain services
-
-Why now:
-
-- `RUN_VERIFY_FIXES` already points to document lifecycle truthfulness and async ingestion as ongoing concerns
-- the current file is both orchestration and implementation
-
-Verification:
-
-- `tests/core/test_ingestion_embeddings.py`
-- `tests/db/test_document_ingestion_integration.py`
-- `tests/core/test_ingestion_pdf.py`
-
-Exit criteria:
-
-- `core/ingestion.py` is a facade, not the implementation center
-
-### R5. Slice 5: Chat Orchestration Split
+### R3B. Slice 2: Knowledge Base Route Final Thin Pass
 
 Purpose:
 
-- reduce risk in `domain/chat/respond.py`
+- finish route thinning for KB upload and reprocess flows
+
+Root problem:
+
+- `apps/api/routes/knowledge_base.py` still owns provider construction and background task wiring inline
 
 Files involved:
 
-- create:
-  - `domain/chat/response_service.py`
-  - `domain/chat/retrieval_context.py`
-  - `domain/chat/evidence_builder.py`
-  - `domain/chat/social_turns.py`
-- slim `domain/chat/respond.py`
+- extend `domain/knowledge_base/service.py`
+- extend or reuse `domain/knowledge_base/upload_flow.py`
+- slim `apps/api/routes/knowledge_base.py`
 
-Exact split:
+Implementation steps:
 
-- `social_turns.py`
-  - social intent fast-path
-  - social fallback generation
-- `retrieval_context.py`
-  - retriever construction
-  - ranked chunk retrieval
-  - concept-bias application
-- `evidence_builder.py`
-  - evidence conversion
-  - citation assembly
-  - related helper filters
-- `response_service.py`
-  - top-level orchestration for grounded tutor flow
-
-Keep in `respond.py`:
-
-- `generate_chat_response()` as a thin stable facade
+1. Move provider/runtime resolution behind a domain helper.
+2. Move reprocess scheduling behind a domain helper that:
+   - resets document state
+   - resolves runtime dependencies
+   - enqueues post-ingest work
+3. Keep route responsibilities limited to:
+   - HTTP validation
+   - file-size guardrails
+   - dependency injection
+   - error translation
+   - response model shaping
+4. Do not move raw file/body transport parsing out of the route unless it directly reduces duplication.
 
 What stays the same:
 
-- chat route behavior
-- verifier usage
-- persistence shape
-- observability fields
+- route paths
+- response shapes
+- background processing semantics
+- document status behavior
 
 Verification:
 
-- `tests/api/test_chat_respond.py`
-- `tests/domain/test_tutor_agent.py`
-- `tests/domain/test_prompt_kit.py`
-- `tests/domain/test_chat_context_for_quiz.py`
+- `pytest -q`
+- `tests/api/test_response_contracts.py`
+- `tests/db/test_document_ingestion_integration.py`
+- manual smoke:
+  - upload document
+  - refresh list
+  - reprocess document
 
 Exit criteria:
 
-- `generate_chat_response()` is orchestration only
-- retriever creation and evidence shaping are no longer embedded inline
+- `apps/api/routes/knowledge_base.py` no longer builds providers or schedules post-ingest work inline
 
-### R6. Slice 6: Quiz and Practice Split
+### R6A. Slice 3: Shared Quiz Core Completion
 
 Purpose:
 
-- separate reusable quiz primitives from feature-specific wrappers
+- finish the split between level-up and practice so they share infrastructure without one flow depending on the other
+
+Root problem:
+
+- `practice.py` still imports `level_up.py`
+- `level_up.py` still owns persistence and orchestration that should be shared
 
 Files involved:
 
-- create:
-  - `domain/learning/quiz_generation.py`
-  - `domain/learning/quiz_grading.py`
-  - `domain/learning/quiz_context.py`
-  - `domain/learning/quiz_persistence.py`
-  - `domain/learning/practice_flashcards.py`
-  - `domain/learning/practice_quizzes.py`
-  - `domain/learning/practice_novelty.py`
+- create `domain/learning/quiz_persistence.py`
+- create `domain/learning/quiz_flow.py`
+- optionally create `domain/learning/quiz_errors.py` if exception sharing becomes noisy
 - slim:
   - `domain/learning/level_up.py`
   - `domain/learning/practice.py`
+- update imports in:
+  - `domain/chat/response_service.py`
+  - `apps/api/routes/quizzes.py`
+  - `apps/jobs/quiz_gardener.py`
+  - `domain/learning/__init__.py`
+  - affected tests
 
-Exact split:
+Implementation steps:
 
-- shared generation helpers move out of `level_up.py`
-- grading and mastery update logic move out of `level_up.py`
-- practice quiz generation stops depending on `level_up.py` as an implicit internal library
-- exception types become explicit shared quiz errors rather than aliases
-
-Important rule:
-
-- first create shared quiz modules and keep `level_up.py`/`practice.py` as facades
-- only remove duplicated helpers after both flows are using the new shared modules
+1. Move shared quiz DB reads/writes into `quiz_persistence.py`:
+   - quiz creation writes
+   - quiz item persistence
+   - attempt lookup / idempotent replay helpers
+   - latest quiz summary lookup
+2. Move generic create/submit orchestration into `quiz_flow.py`:
+   - create quiz from normalized items
+   - submit quiz with shared grading pipeline
+   - keep hooks/flags for:
+     - quiz type
+     - mastery update on/off
+     - retry hint
+3. Keep level-up specific behavior in `level_up.py` only:
+   - mastery transitions
+   - public level-up errors or adapters over shared errors
+   - level-up specific defaults
+4. Keep practice specific behavior in `practice.py` only:
+   - novelty filtering
+   - flashcard generation
+   - practice-specific validation and error mapping
+5. Update chat quiz summary access so it imports from the shared quiz module, not `level_up.py`.
+6. End state:
+   - `practice.py` does not import `level_up.py`
+   - `level_up.py` and `practice.py` are sibling wrappers over shared quiz core modules
 
 What stays the same:
 
 - route contracts
 - quiz payloads
-- mastery behavior
+- grading semantics
+- mastery update behavior
 - practice remains non-leveling
 
 Verification:
 
+- `pytest -q`
 - `tests/db/test_level_up_quiz_flow_integration.py`
 - `tests/db/test_practice_flow_integration.py`
 - `tests/domain/test_level_up_feedback_contract.py`
@@ -712,283 +451,117 @@ Verification:
 
 Exit criteria:
 
-- practice no longer depends on level-up through aliased exceptions and hidden helper reuse
+- `domain/learning/practice.py` no longer imports `domain.learning.level_up`
+- quiz summary lookup no longer lives behind `level_up.py`
 
-### R7. Slice 7: Graph Repository Split
-
-Purpose:
-
-- make graph data access navigable and safer to modify
-
-Files involved:
-
-- create `adapters/db/graph/` package
-- split `adapters/db/graph_repository.py` into:
-  - `concepts.py`
-  - `edges.py`
-  - `merge_map.py`
-  - `provenance.py`
-  - `candidates.py`
-  - `gardener.py`
-- keep `adapters/db/graph_repository.py` as a re-export facade until imports are migrated
-
-Then split domain resolver helpers:
-
-- `domain/graph/resolver_candidates.py`
-- `domain/graph/resolver_decision.py`
-- `domain/graph/resolver_apply.py`
-
-What stays the same:
-
-- `domain/graph/resolver.py` public behavior
-- `domain/graph/gardener.py` public behavior
-- graph tables and migrations
-
-Verification:
-
-- `tests/domain/test_graph_resolver.py`
-- `tests/db/test_graph_resolver_integration.py`
-- `tests/domain/test_graph_gardener.py`
-- `tests/db/test_graph_gardener_integration.py`
-
-Exit criteria:
-
-- graph data access is split by concern
-- resolver and gardener imports remain stable through a facade layer
-
-### R8. Slice 8: Tutor Page Split
+### R11A. Slice 4: Cleanup and Artifact Removal
 
 Purpose:
 
-- make the tutor page maintainable without changing UX
+- remove low-signal repo noise and delete only the compatibility layers that are actually ready to go
 
 Files involved:
 
-- create `apps/web/features/tutor/`
-- move behavior from `apps/web/app/tutor/page.tsx` into:
-  - `hooks/use-tutor-page.ts`
-  - `hooks/use-tutor-messages.ts`
-  - `hooks/use-level-up-flow.ts`
-  - `components/tutor-layout.tsx`
-  - `components/tutor-timeline.tsx`
-  - `components/tutor-graph-drawer.tsx`
-  - `components/tutor-quiz-drawer.tsx`
-  - `components/concept-switch-banner.tsx`
+- `.gitignore`
+- generated artifacts and repo noise
+- potential facade removals:
+  - `adapters/db/graph_repository.py`
+  - other dead helpers discovered during earlier slices
 
-Container target:
+Implementation steps:
 
-- `app/tutor/page.tsx` should mostly:
-  - get auth context
-  - invoke one page hook
-  - render feature components
+1. Stop tracking generated artifacts if they are still tracked.
+2. Remove repo-root `.DS_Store`.
+3. Remove dead imports and stale helper references introduced by the remaining slices.
+4. Evaluate `adapters/db/graph_repository.py`:
+   - remove it only if no internal imports remain and no compatibility need is documented
+   - otherwise keep it and document why it stays
+5. Do NOT remove `core/schemas/__init__.py` in this slice.
+6. Do NOT remove `/documents/upload` in this slice unless `R11B` updates docs/tests/contracts in the same change and rollback is straightforward.
 
 What stays the same:
 
-- URL behavior
-- local storage persistence semantics
-- active chat session behavior
-- level-up UX
+- application behavior
+- schema package import surface
 
 Verification:
 
+- `pytest -q`
 - `npm --prefix apps/web test`
 - `npm --prefix apps/web run typecheck`
-- manual tutor smoke test
+- `git status --short` shows no tracked generated-noise files remaining
 
 Exit criteria:
 
-- `apps/web/app/tutor/page.tsx` becomes a container, not a behavior monolith
+- generated artifacts no longer pollute diffs
+- only justified compatibility facades remain
 
-### R9. Slice 9: Graph Page, KB Page, and Sidebar Split
-
-Purpose:
-
-- finish the major frontend decomposition
-
-Files involved:
-
-- `apps/web/features/graph/`
-- `apps/web/features/kb/`
-- `apps/web/features/sidebar/`
-- slim:
-  - `apps/web/app/graph/page.tsx`
-  - `apps/web/app/kb/page.tsx`
-  - `apps/web/components/global-sidebar.tsx`
-
-Exact split:
-
-- Graph:
-  - page data and UI control state into hooks
-  - detail/practice/control panels into separate components
-- KB:
-  - polling and upload queue logic into hooks
-  - document table and row actions into components
-- Sidebar:
-  - nav rail
-  - recent sessions
-  - workspace actions
-  - collapsed footer controls
-
-Cleanup to do during this slice:
-
-- remove stale `/practice` nav entry unless a real page is being added
-- remove stale rename TODO once split confirms the behavior already persists correctly
-
-Verification:
-
-- `npm --prefix apps/web test`
-- `npm --prefix apps/web run typecheck`
-- manual checks for tutor, graph, KB, and sidebar flows
-
-Exit criteria:
-
-- the three largest frontend containers are feature-composed rather than single-file implementations
-
-### R10. Slice 10: CSS Decomposition
+### R11B. Slice 5: Docs and Contract Sync
 
 Purpose:
 
-- reduce `apps/web/app/globals.css` without changing styling behavior
+- make docs and contract tests match the actual post-refactor state
+
+Root problem:
+
+- the old plan and API docs still describe pre-refactor conditions
+- the legacy upload route is still documented as first-class instead of compatibility-only
 
 Files involved:
 
-- create:
-  - `apps/web/styles/tokens.css`
-  - `apps/web/styles/base.css`
-  - `apps/web/styles/shell.css`
-  - `apps/web/styles/sidebar.css`
-  - `apps/web/styles/tutor.css`
-  - `apps/web/styles/graph.css`
-  - `apps/web/styles/kb.css`
-  - `apps/web/styles/shared-components.css`
-- slim `apps/web/app/globals.css`
-- update `apps/web/app/layout.tsx` imports if needed
+- `docs/REFACTOR_PLAN.md`
+- `docs/API.md`
+- `tests/api/test_response_contracts.py`
+- any docs/tests directly tied to removal or deprecation decisions
 
-Rules:
+Implementation steps:
 
-- do not rename existing classes in the first CSS split
-- first move blocks intact
-- only consolidate duplicates after files are separated and visual regression has been checked
+1. Update this file with actual completion state after the remaining slices land.
+2. Update `docs/API.md` to reflect the upload decision:
+   - if legacy route remains:
+     - mark it deprecated and compatibility-only
+     - clearly call the workspace-scoped KB route canonical
+   - if legacy route is removed:
+     - delete the old docs section
+     - update tests and rollback notes in the same slice
+3. Remove stale claims from docs:
+   - pre-refactor file-size inventory that is no longer true
+   - stale sidebar cleanup items already resolved
+4. Align response contract tests with the final intended public API.
 
 What stays the same:
 
-- selectors
-- visual design
-- DOM structure
+- documented behavior should match real code, not vice versa
 
 Verification:
 
-- manual visual pass on tutor, graph, KB, login, sidebar
-- `npm --prefix apps/web run typecheck`
+- `pytest -q`
+- `tests/api/test_response_contracts.py`
+- manual review of docs against code paths touched in `R3A`, `R3B`, and `R6A`
 
 Exit criteria:
 
-- `globals.css` becomes a thin aggregator or minimal shell file
-
-### R11. Slice 11: Cleanup and Facade Removal
-
-Purpose:
-
-- remove compatibility layers only after all slices above are green
-
-Targets:
-
-- remove `core/schemas.py` facade if no longer needed
-- remove `adapters/db/graph_repository.py` facade if no longer needed
-- remove legacy upload route if confirmed unused
-- delete dead imports and stale types
-- remove redundant helpers discovered during earlier slices
-
-Verification:
-
-- full backend and frontend test suite
-- API smoke pass
-
-Exit criteria:
-
-- no duplicate implementation paths remain
-
-## Risks and How to Control Them
-
-### Risk 1: Refactor accidentally changes API behavior
-
-Mitigation:
-
-- route refactors must preserve exact request and response models
-- keep handlers thin but behaviorally identical
-- run `tests/api/test_response_contracts.py` after every route slice
-
-### Risk 2: Shared quiz extraction breaks grading or mastery
-
-Mitigation:
-
-- extract generation and grading separately
-- keep `level_up.py` facade stable
-- verify with integration tests before deleting old helpers
-
-### Risk 3: Frontend split causes state reset regressions
-
-Mitigation:
-
-- move one state cluster at a time
-- preserve URL, local storage keys, and reducer interfaces
-- keep page-level integration manual checks after each frontend slice
-
-### Risk 4: CSS split creates subtle layout regressions
-
-Mitigation:
-
-- move CSS by feature block, not selector-by-selector
-- no class renames in the first pass
-- visual smoke test every page before merge
-
-### Risk 5: Facade modules become permanent debt
-
-Mitigation:
-
-- every facade added in a slice must have a removal target in Slice 11
-- track removal explicitly in PR descriptions
+- no active plan/doc says something materially false about the current codebase
+- upload contract status is explicit and unambiguous
 
 ## Execution Order (Update After Each Run)
 
-Start with the highest-priority maintainability slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
+Start with the highest-priority remaining slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
 
-1. `R0` Baseline and Guardrails
-   - This is mandatory before all other refactor work.
-   - The repo must be typecheck-clean before deeper module moves.
+1. `R3A` Upload Surface Consolidation
+   - This removes the biggest remaining duplicate implementation path.
 
-2. `R1` Schema Decomposition
-   - Do not start route or domain splits until schema ownership is clearer.
+2. `R3B` Knowledge Base Route Final Thin Pass
+   - Finish route thinning once upload implementation is shared.
 
-3. `R2` Thin Routes Pass I - Workspaces and Research
-   - Start with the simpler route refactors first.
+3. `R6A` Shared Quiz Core Completion
+   - Finish the major remaining backend boundary after upload/KB seams are stable.
 
-4. `R3` Thin Routes Pass II - Knowledge Base and Upload Surface Unification
-   - Resolve duplicate upload surfaces before deeper ingestion refactors.
+4. `R11A` Cleanup and Artifact Removal
+   - Only after the real implementation moves are complete.
 
-5. `R4` Ingestion Split
-   - Refactor orchestration after route unification so there is one ingestion service path.
-
-6. `R5` Chat Orchestration Split
-   - Stabilize tutor orchestration before touching page-level tutor decomposition.
-
-7. `R6` Quiz and Practice Split
-   - Extract shared quiz primitives after chat and ingestion seams are cleaner.
-
-8. `R7` Graph Repository Split
-   - Split graph data access after the earlier service patterns are established.
-
-9. `R8` Tutor Page Split
-   - Break up the largest frontend page first.
-
-10. `R9` Graph Page, KB Page, and Sidebar Split
-   - Finish major frontend decomposition after the tutor page pattern is proven.
-
-11. `R10` CSS Decomposition
-   - CSS split comes after page/component ownership is stable.
-
-12. `R11` Cleanup and Facade Removal
-   - Only after all other slices are green.
+5. `R11B` Docs and Contract Sync
+   - Finish by making the docs and tests match the final state.
 
 Re-read this file after every 2 completed slices and restate which slices remain.
 
@@ -1034,43 +607,130 @@ Run these additionally when relevant:
 ruff check .
 ```
 
+Slice-specific emphasis:
+
+- `R3A` / `R3B`
+  - `tests/api/test_documents_upload.py`
+  - `tests/api/test_response_contracts.py`
+  - `tests/db/test_document_ingestion_integration.py`
+- `R6A`
+  - `tests/db/test_level_up_quiz_flow_integration.py`
+  - `tests/db/test_practice_flow_integration.py`
+  - `tests/domain/test_level_up_feedback_contract.py`
+- `R11A`
+  - clean `git status --short`
+- `R11B`
+  - docs reviewed against active code paths
+
 Manual smoke checklist:
 
-1. Tutor page loads, sends a message, reloads an existing session, and opens/closes graph and quiz drawers.
-2. Graph page loads full graph, selects a concept, runs lucky pick, opens practice quiz and flashcards.
-3. Sources page uploads, refreshes, deletes, and reprocesses documents.
-4. Sidebar supports collapse/expand, session switch, session rename, and workspace switching.
+1. Sources page uploads a document, shows it in the list, and reprocesses it.
+2. Legacy upload route, if still present, returns the documented compatibility response.
+3. Practice quiz generation and submission still work without updating mastery.
+4. Level-up quiz generation and submission still update mastery correctly.
 
 ## What Not To Do
 
-Do not do the following during the refactor:
+Do not do the following during the remaining refactor:
 
-- do not introduce a new state management library
-- do not switch to a CSS framework as part of this plan
-- do not move to LangChain as part of this refactor
-- do not redesign public API paths
-- do not combine status-machine feature work with pure module moves unless the slice is explicitly a prerequisite bug fix
+- do not redesign the frontend again
+- do not reopen CSS decomposition for aesthetic changes
+- do not remove `core/schemas/__init__.py` yet
+- do not delete `/documents/upload` before docs/tests/rollback notes are updated together
+- do not move unrelated graph or retrieval code while finishing the quiz split
+- do not change public response payloads as a side effect of module cleanup
 
-## Deliverables
+## Removal Ledger
 
-At the end of the full refactor plan execution, the repo should have:
+Append removal entries here during implementation.
 
-1. Thin API routes across all workspace-scoped endpoints.
-2. Feature-scoped schema modules instead of one large `core/schemas.py`.
-3. Quiz, practice, ingestion, and graph logic split along behavior seams.
-4. Page-container frontend architecture for tutor, graph, KB, and sidebar.
-5. Feature-scoped CSS files with `globals.css` reduced to a minimal entrypoint.
-6. Removed duplicate or stale surfaces that currently confuse maintenance.
+### Removal Entry - R3A
 
-## Tracking During Implementation
+Removed artifact
+- Inline upload orchestration in `apps/api/routes/documents.py` (~60 lines of ingestion/provider/scheduling logic)
+- Inline upload orchestration in `apps/api/routes/knowledge_base.py` (~40 lines of provider/scheduling logic)
 
-When implementation starts, also maintain `docs/REFACTOR.md` as the running audit log required by `docs/RUN_VERIFY_FIXES.md`.
+Reason for removal
+- Duplicated upload implementation across two routes
 
-Use this file, `docs/REFACTOR_PLAN.md`, as the stable roadmap and use `docs/REFACTOR.md` as the live execution journal.
+Replacement
+- `domain/knowledge_base/upload_flow.py` (shared `execute_upload`, `resolve_settings`, `resolve_post_ingest_context`, `schedule_post_ingest`)
 
-## Kickoff Prompt
+Reverse path
+- Revert commit `0752765`
 
-Use this prompt to start or resume the refactor run:
+Compatibility impact
+- Internal only. Both route paths and response shapes preserved.
+
+Verification
+- 296 tests pass. `test_documents_upload.py`, `test_response_contracts.py`, `test_document_ingestion_integration.py` all green.
+
+### Removal Entry - R3B
+
+Removed artifact
+- Inline reprocess orchestration in `apps/api/routes/knowledge_base.py` (~15 lines of reset/provider/scheduling logic)
+
+Reason for removal
+- Route still owned provider construction and background task wiring for reprocess
+
+Replacement
+- `domain/knowledge_base/service.reprocess_document()` in `domain/knowledge_base/service.py`
+
+Reverse path
+- Revert commit `760d430`
+
+Compatibility impact
+- Internal only. Route paths, response shapes, and background processing semantics preserved.
+
+Verification
+- 296 tests pass. `test_response_contracts.py`, `test_document_ingestion_integration.py` all green.
+
+### Removal Entry - R6A
+
+Removed artifact
+- Quiz create/submit orchestration logic in `domain/learning/level_up.py` (~850 lines)
+- `get_latest_quiz_summary_for_concept` in `domain/learning/level_up.py`
+
+Reason for removal
+- `level_up.py` mixed quiz orchestration, persistence, and level-up specific behavior. `practice.py` depended on `level_up` module.
+
+Replacement
+- `domain/learning/quiz_flow.py` (shared quiz create/submit orchestration, 840 lines)
+- `domain/learning/quiz_persistence.py` (shared quiz DB reads, 69 lines)
+- `domain/learning/level_up.py` retained as thin re-export wrapper with backward-compat aliases
+
+Reverse path
+- Revert commit `bd22808`
+
+Compatibility impact
+- Internal only. All public names re-exported via `level_up.py` aliases. Route contracts, quiz payloads, grading semantics unchanged.
+
+Verification
+- 296 tests pass. `test_level_up_quiz_flow_integration.py`, `test_practice_flow_integration.py`, `test_level_up_feedback_contract.py`, `test_spaced_repetition.py` all green.
+
+### Removal Entry - R11A
+
+Removed artifact
+- `get_mastered_neighbor_context()` in `domain/learning/level_up.py` (dead function, ~50 lines)
+
+Reason for removal
+- Defined but never called anywhere in the codebase
+
+Replacement
+- None (true deletion of dead code)
+
+Reverse path
+- Revert commit `43584f7`
+
+Compatibility impact
+- None — function was internal and unused
+
+Verification
+- `grep -rn get_mastered_neighbor_context` returns 0 hits; 296 tests pass
+
+## Unified Refactor Prompt
+
+Use this single prompt for the remaining implementation phase:
 
 ```text
 You are working in the CoLearni repo.
@@ -1086,15 +746,35 @@ What changed
 Commands run
 Manual verification steps
 Observed outcome
+
+Before removing or replacing any file, function, route, schema, type, selector, compatibility shim, or docs surface, you MUST document the removal in docs/REFACTOR_PLAN.md using the Removal Entry Template.
+For every removal, include:
+Removed artifact
+Reason for removal
+Replacement
+Reverse path
+Compatibility impact
+Verification
+
+Removal policy:
+- Prefer reversible staged removals over hard deletes.
+- If rollback would be difficult, stop and introduce a facade/shim instead of deleting immediately.
+- Do not delete public contracts without a compatibility note and rollback path.
+- Do not claim the removal is complete until the replacement behavior is verified.
+
 After every 2 slices OR if your context is compacted/summarized, re-open docs/REFACTOR_PLAN.md and restate which slices remain.
 Work in small commits: chore(refactor): <slice-id> <short desc>.
 If you discover a mismatch between current repo behavior and the assumptions in docs/REFACTOR_PLAN.md, STOP and update the plan before moving on.
 
+When you finish a slice, include both:
+1. The normal Verification Block for the slice
+2. A summary of all Removal Entries added during that slice
+
 START:
 
 Read docs/REFACTOR_PLAN.md.
-Begin with slice R0 (Baseline and Guardrails) exactly as described.
-Do not proceed beyond R0 until verified.
+Begin with the current slice in execution order. If starting fresh, begin with slice R3A (Upload Surface Consolidation) exactly as described.
+Do not proceed beyond the current slice until verified.
 Continue once verified, then go back to the start of this prompt for the next slice.
 Make sure you re-read docs/REFACTOR_PLAN.md before every move to the next slice. It can be dynamically updated. Check the latest version and continue.
 ```
