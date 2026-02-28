@@ -12,3 +12,5 @@ apps/web/.next/
 apps/web/coverage/
 package-lock.json
 apps/web/package-lock.json
+*.egg-info/
+apps/web/tsconfig.tsbuildinfo
