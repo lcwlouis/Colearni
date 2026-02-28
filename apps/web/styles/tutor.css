@@ -553,7 +553,6 @@
   min-width: 0;
   display: grid;
   gap: 0.5rem;
-  overflow: hidden;
 }
 
 .chat-role {

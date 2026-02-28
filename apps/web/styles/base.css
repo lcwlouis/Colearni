@@ -303,6 +303,7 @@ pre {
   border: 1px solid var(--line);
   border-radius: 0.5rem;
   background: var(--accent-light);
+  min-width: 0;
 }
 
 .chat-hint-toggle {

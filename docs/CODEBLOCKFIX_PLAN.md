@@ -86,7 +86,7 @@ The current codebase is already structured well enough for a narrow fix:
 
 What is still materially missing is a complete width contract across the nested wrapper chain:
 
-- `.chat-content` still uses `overflow: visible`
+- the current attempted fix changed `.chat-content` to `overflow: hidden`, which suppresses page-level blowout by clipping descendants at the wrong layer
 - `.chat-response` and `.markdown-content` do not explicitly opt out of intrinsic min-content sizing
 - the fenced code frame does not fully assert ownership of its own inline size
 - the repo has no browser-capable automated layout test harness for this class of overflow regression
@@ -134,8 +134,9 @@ These decisions are already made for the remaining phase:
 1. Overflow ownership belongs to the fenced code frame, not the page shell.
 2. The parent chat column must stay width-bounded even when a child code line has extreme max-content width.
 3. `min-width: 0` and `max-width: 100%` should be applied intentionally along the chat wrapper chain instead of relying on browser defaults.
-4. If markup changes are needed, they should add stable classes or component hooks around fenced code only; do not replace `react-markdown`.
-5. A true JavaScript execution surface in chat is a separate feature track and must not be slipped into this bug fix.
+4. `.chat-content` and other outer wrappers must not become the effective horizontal overflow sink; clipping at that layer is not an acceptable end state.
+5. If markup changes are needed, they should add stable classes or component hooks around fenced code only; do not replace `react-markdown`.
+6. A true JavaScript execution surface in chat is a separate feature track and must not be slipped into this bug fix.
 
 ## Removal Safety Rules
 
@@ -188,12 +189,13 @@ Current repo verification status:
 - `pytest -q`: failing before this bug-fix work; `tests/api/test_api_docs_sync.py::test_api_doc_endpoint_headings_match_openapi` reports that OpenAPI includes `POST /workspaces/{ws_id}/chat/respond/stream` but the docs headings do not
 - `npm --prefix apps/web test`: passing
 - `npm --prefix apps/web run typecheck`: passing
+- manual UI check after the first containment attempt: page-level overflow is reduced, but fenced code inside the hint card is visually clipped because `.chat-content` now uses `overflow: hidden`
 
 Current remaining hotspots:
 
 | File | Lines | Why it still matters |
 |---|---:|---|
-| `apps/web/styles/tutor.css` | `668` | Owns the chat wrapper chain; `.chat-content` currently keeps `overflow: visible` and only part of the chain resets intrinsic sizing. |
+| `apps/web/styles/tutor.css` | `668` | Owns the chat wrapper chain; `.chat-content` currently uses `overflow: hidden`, which prevents page blowout by clipping the codeblock at the wrong layer. |
 | `apps/web/styles/base.css` | `422` | Holds `.markdown-content`, `.markdown-content pre`, and `.markdown-content pre code`; current rules are close but incomplete for width ownership. |
 | `apps/web/components/markdown-content.tsx` | `18` | Central markdown renderer; currently exposes no dedicated fenced-code classes or `components` overrides. |
 | `apps/web/components/chat-response.tsx` | `115` | Assistant markdown/hint wrapper; may need explicit width containment if grid defaults are participating. |
@@ -213,6 +215,12 @@ The chat render path is a nested flex/grid chain:
 - `pre > code`
 
 Only some of those wrappers currently opt out of intrinsic min-content sizing. A very long unbroken code token can still pressure ancestors to grow instead of keeping overflow local to the code frame.
+
+The latest screenshot confirms that the first containment attempt solved the wrong problem at the wrong layer:
+
+- page-level horizontal overflow is reduced
+- the codeblock is not clearly owning its own scroll behavior
+- the hint-card path now clips the code frame because `.chat-content` is hiding descendant overflow
 
 ### 2. The code frame does not fully own horizontal overflow yet
 
@@ -247,7 +255,7 @@ Purpose:
 
 Root problem:
 
-- the chat wrapper chain only partially resets automatic minimum sizing, so a max-content child can still pressure ancestors to grow
+- the current outer-wrapper containment is incomplete and partly incorrect: `.chat-content` is clipping overflow, but the underlying max-content pressure is still not fully transferred to the `pre` scroll container
 
 Files involved:
 
@@ -258,8 +266,9 @@ Files involved:
 Implementation steps:
 
 1. Trace the width path from `.chat-message` through `.markdown-content` and document which wrappers rely on automatic min-content sizing.
-2. Add explicit containment rules such as `min-width: 0` and `max-width: 100%` to intermediate wrappers that still allow width escape.
-3. Decide whether the outer assistant content wrapper needs `overflow-x: clip` or `overflow-x: hidden` after the inner code frame is hardened.
+2. Replace the current `.chat-content { overflow: hidden; }` workaround with non-clipping containment rules unless a narrower wrapper-specific rule is proven necessary.
+3. Add explicit containment rules such as `min-width: 0` and `max-width: 100%` to intermediate wrappers that still allow width escape.
+4. Audit the hint-card path (`.chat-hint-section` and `.chat-hint-content`) so nested assistant markdown does not reintroduce clipping.
 
 What stays the same:
 
@@ -277,6 +286,7 @@ Exit criteria:
 
 - the chat message stays within its intended max width
 - page-level horizontal scrolling is gone for the reproduction case
+- outer chat wrappers are no longer clipping the fenced code content
 
 ### CB2. Slice 2: Codeblock Scroll Ownership
 
@@ -297,7 +307,8 @@ Implementation steps:
 
 1. Update fenced-code styles so the scroll container explicitly owns its width, including `width: 100%`, `max-width: 100%`, `min-width: 0`, and `box-sizing: border-box` on the `pre` path if needed.
 2. Keep `pre code` non-wrapping and, if required, render it as a block-sized content box so scroll remains local to the `pre`.
-3. If selector specificity or inline-vs-fenced separation becomes ambiguous, add a minimal `ReactMarkdown` component override to attach dedicated fenced-code classes without changing markdown semantics.
+3. Verify the same behavior inside nested containers such as the collapsible hint card, not only in the top-level assistant body.
+4. If selector specificity or inline-vs-fenced separation becomes ambiguous, add a minimal `ReactMarkdown` component override to attach dedicated fenced-code classes without changing markdown semantics.
 
 What stays the same:
 
@@ -314,6 +325,7 @@ Exit criteria:
 
 - long code lines scroll inside the code frame only
 - bordered code frames do not visually clip or exceed their parent width
+- the hint-card reproduction from the screenshot behaves the same as the main assistant body
 
 ### CB3. Slice 3: Regression Coverage and Verification
 
@@ -360,9 +372,9 @@ Exit criteria:
 
 Start with the highest-priority remaining slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
 
-1. ~~`CB1` Width Containment Audit~~ ✅ done
-2. ~~`CB2` Codeblock Scroll Ownership~~ ✅ done
-3. ~~`CB3` Regression Coverage and Verification~~ ✅ done
+1. `CB1` Width Containment Audit — reopened: `.chat-content { overflow: hidden }` is clipping at the wrong layer; hint-card path lacks `min-width: 0`
+2. `CB2` Codeblock Scroll Ownership — reopened: verify scroll ownership holds after CB1 fix
+3. `CB3` Regression Coverage and Verification — reopened: update tests/smoke checklist after CB1+CB2
 
 Re-read this file after every 2 completed slices and restate which slices remain.
 
@@ -411,9 +423,11 @@ Slice-specific emphasis:
 - `CB1`
   - reproduce the overflow with one long fenced code line
   - verify the chat bubble remains within `48rem`
+  - verify removing outer clipping does not reintroduce page-wide scroll
 - `CB2`
   - verify only the fenced code frame gains a horizontal scrollbar
   - verify inline code and normal paragraphs still wrap/read normally
+  - verify the hint card does not crop the code frame
 - `CB3`
   - verify any new fenced-code class or render hook is covered by an automated test
   - verify the manual smoke recipe works on desktop and narrow width
@@ -422,7 +436,8 @@ Manual smoke checklist:
 
 1. Send or inject a tutor response containing a fenced codeblock with one very long unbroken line and confirm the overall chat UI does not widen.
 2. Confirm the codeblock itself can be horizontally scrolled without clipping its border/background.
-3. Confirm ordinary markdown paragraphs, inline code, hints, and citations still render normally.
+3. Repeat the same reproduction inside a collapsible hint section and confirm the nested codeblock is not cropped.
+4. Confirm ordinary markdown paragraphs, inline code, hints, and citations still render normally.
 
 ## What Not To Do
 
@@ -434,7 +449,28 @@ Do not do the following during the remaining refactor:
 
 ## Removal Ledger
 
-No removals were made during this refactor. All changes were additive CSS property additions and a new test file.
+```text
+Removal Entry - CB1
+
+Removed artifact
+- `.chat-content { overflow: hidden; }` selector property in `apps/web/styles/tutor.css`
+
+Reason for removal
+- Clipping at the wrong layer; `.chat-content` was acting as the overflow sink instead of letting each fenced code `pre` frame own its own horizontal scroll via `overflow-x: auto`. This caused fenced code inside hint cards to be visually clipped.
+
+Replacement
+- Non-clipping containment via `min-width: 0` on every grid/flex item in the chat wrapper chain (`.chat-content`, `.chat-response`, `.chat-hint-section`, `.markdown-content`, `.markdown-content pre`). The `pre` element's existing `overflow-x: auto` is the sole scroll container.
+
+Reverse path
+- Add `overflow: hidden;` back to `.chat-content` in `apps/web/styles/tutor.css`
+
+Compatibility impact
+- Internal CSS contract only; no public API or payload change. Minor: if any other content was relying on `.chat-content` clipping, it would now be visible instead.
+
+Verification
+- `npm --prefix apps/web test`, `npm --prefix apps/web run typecheck`
+- Manual: fenced code in main body AND hint card scrolls locally without clipping
+```
 
 ## Mandatory Manual Smoke Test (CB3)
 
