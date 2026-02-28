@@ -11,6 +11,7 @@ DB reads and writes are delegated to :mod:`domain.learning.quiz_persistence`.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -23,6 +24,7 @@ from core.observability import (
     set_span_kind,
     start_span,
 )
+from core.prompting import PromptRegistry
 from sqlalchemy.orm import Session
 
 from domain.chat.session_memory import load_chat_context_for_quiz
@@ -122,6 +124,9 @@ MAX_ITEMS = 12
 PASS_SCORE = 0.75
 RETRY_HINT = "create a new level-up quiz to retry"
 MAX_GENERATION_ATTEMPTS = 3
+
+log = logging.getLogger("domain.learning.quiz_flow")
+_registry = PromptRegistry()
 
 
 class QuizNotFoundError(ValueError):
@@ -589,25 +594,13 @@ def _generate_items_with_retries(
             "struggled with, or showed curiosity about):\n"
             f"{chat_history}\n"
         )
-    prompt = (
-        "You are creating a quiz to assess understanding of a concept.\n"
-        f"CONCEPT: {concept_name}\n"
-        f"DESCRIPTION: {concept_desc}\n"
-        f"RELATED CONCEPTS: {adjacent_str}\n"
-        f"{chunks_block}"
-        f"{chat_block}\n"
-        "Return ONLY valid JSON with this schema:\n"
-        '{"items":[{"item_type":"short_answer"|"mcq","prompt":"...","payload":{...}}]}\n\n'
-        "Rules:\n"
-        f"- Produce exactly {target_count} items with a mix of short_answer and mcq types.\n"
-        "- Each question must be SPECIFIC to the concept — reference facts, examples, or properties unique to it.\n"
-        "- short_answer payload: {\"rubric_keywords\":[...],\"critical_misconception_keywords\":[...]}\n"
-        "- mcq payload: {\"choices\":[{\"id\":\"a\",\"text\":\"...\"}, ...], \"correct_choice_id\":\"a\", "
-        "\"critical_choice_ids\":[\"d\"], \"choice_explanations\":{\"a\":\"...\", ...}}\n"
-        "- MCQ choices must contain SPECIFIC, distinct content — not generic placeholders.\n"
-        "  The correct answer must be clearly right, distractors must be plausible but wrong.\n"
-        "- Make questions progressively harder: start with recall, then application, then analysis.\n"
-        "- Do NOT use generic prompts like 'Which is most accurate about X'. Ask specific questions.\n"
+    prompt = _build_quiz_generation_prompt(
+        concept_name=concept_name,
+        concept_desc=concept_desc,
+        adjacent_str=adjacent_str,
+        chunks_block=chunks_block,
+        chat_block=chat_block,
+        target_count=target_count,
     )
     retry_prompt = prompt
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
@@ -640,3 +633,40 @@ def _generate_items_with_retries(
                 "Regenerate from scratch with fully valid JSON."
             )
     return None
+
+
+def _build_quiz_generation_prompt(
+    *,
+    concept_name: str,
+    concept_desc: str,
+    adjacent_str: str,
+    chunks_block: str,
+    chat_block: str,
+    target_count: int,
+) -> str:
+    """Build the quiz generation prompt from the asset or inline fallback."""
+    try:
+        return _registry.render("assessment_levelup_generate_v1", {
+            "target_count": str(target_count),
+            "concept_name": concept_name,
+            "concept_description": concept_desc,
+            "adjacent_concepts": adjacent_str,
+            "chunk_excerpts": chunks_block or "(none)",
+            "chat_history": chat_block or "(none)",
+        })
+    except Exception:
+        log.debug("asset render failed for levelup_generate_v1, using inline fallback")
+        return (
+            "You are creating a quiz to assess understanding of a concept.\n"
+            f"CONCEPT: {concept_name}\n"
+            f"DESCRIPTION: {concept_desc}\n"
+            f"RELATED CONCEPTS: {adjacent_str}\n"
+            f"{chunks_block}"
+            f"{chat_block}\n"
+            "Return ONLY valid JSON with this schema:\n"
+            '{"items":[{"item_type":"short_answer"|"mcq","prompt":"...","payload":{...}}]}\n\n'
+            "Rules:\n"
+            f"- Produce exactly {target_count} items with a mix of short_answer and mcq.\n"
+            "- Each question must be SPECIFIC to the concept.\n"
+            "- Make questions progressively harder.\n"
+        )

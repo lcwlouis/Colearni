@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
+
+from core.prompting import PromptRegistry
+
+log = logging.getLogger("domain.learning.quiz_grading")
+_registry = PromptRegistry()
 
 
 class QuizGradingError(ValueError):
@@ -93,13 +99,27 @@ def grade_short_items_without_llm(
 def grading_prompt(items: list[dict[str, Any]], answer_map: dict[int, str]) -> str:
     ids = [item["item_id"] for item in items]
     submission = [{**item, "answer": answer_map[item["item_id"]]} for item in items]
+    ids_json = json.dumps(ids, ensure_ascii=True)
+    submission_json = json.dumps(submission, ensure_ascii=True)
+    try:
+        return _registry.render("assessment_levelup_grade_v1", {
+            "item_ids_json": ids_json,
+            "quiz_submission_json": submission_json,
+        })
+    except Exception:
+        log.debug("asset render failed for levelup_grade_v1, using inline fallback")
+        return _grading_prompt_inline(ids_json, submission_json)
+
+
+def _grading_prompt_inline(ids_json: str, submission_json: str) -> str:
+    """Inline fallback for grading prompt."""
     return (
         "Return JSON only with keys items and overall_feedback. "
         "Use payload._generation_context as the canonical generation-time context. "
         "Each items entry must include item_id, score(0..1), "
         "critical_misconception(bool), feedback.\n"
-        f"ITEM_IDS_JSON: {json.dumps(ids, ensure_ascii=True)}\n"
-        f"QUIZ_SUBMISSION_JSON: {json.dumps(submission, ensure_ascii=True)}"
+        f"ITEM_IDS_JSON: {ids_json}\n"
+        f"QUIZ_SUBMISSION_JSON: {submission_json}"
     )
 
 
