@@ -14,6 +14,7 @@ from core.contracts import EmbeddingProvider, GraphLLMClient
 from core.observability import (
     SPAN_KIND_CHAIN,
     observation_context,
+    set_span_summary,
     start_span,
 )
 from core.prompting import PromptRegistry
@@ -99,6 +100,10 @@ def run_post_ingest_tasks(
             )
             chunk_texts = [c.text for c in chunks_rows]
             _log.info("post_ingest loaded %d chunks for doc=%s", len(chunk_texts), document_id)
+            set_span_summary(
+                span,
+                input_summary=f"doc={document_id}, chunks={len(chunk_texts)}",
+            )
 
             # 1) Populate embeddings
             if active_settings.ingest_populate_embeddings:
@@ -173,6 +178,10 @@ def run_post_ingest_tasks(
 
             db.commit()
             _log.info("post_ingest_tasks DONE ws=%s doc=%s", workspace_id, document_id)
+            set_span_summary(
+                span,
+                output_summary=f"chunks={len(chunk_texts)}, graph={'yes' if active_settings.ingest_build_graph else 'no'}",
+            )
     except Exception as exc:
         _log.exception("Post-ingest background task failed ws=%s doc=%s", workspace_id, document_id)
         db.rollback()

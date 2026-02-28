@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from core.contracts import GraphLLMClient
-from core.observability import SPAN_KIND_CHAIN, observation_context, start_span
+from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_summary, start_span
 from core.prompting import PromptRegistry
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -107,10 +107,17 @@ def generate_practice_flashcards(
     ) as span:
         if span is not None:
             span.set_attribute("concept.id", concept_id)
+            set_span_summary(span, input_summary=context["concept_name"])
         payload = _parse_json(
             llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta),
             "Flashcard generation response is not valid JSON.",
         )
+        if span is not None:
+            _cards_tmp = payload.get("flashcards")
+            set_span_summary(
+                span,
+                output_summary=f"{len(_cards_tmp) if isinstance(_cards_tmp, list) else 0} flashcards",
+            )
     cards = payload.get("flashcards")
     if not isinstance(cards, list) or len(cards) != card_count:
         raise PracticeGenerationError("Flashcard response must contain exactly card_count entries.")
@@ -177,6 +184,7 @@ def create_practice_quiz(
         ) as span:
             if span is not None and concept_id is not None:
                 span.set_attribute("concept.id", concept_id)
+                set_span_summary(span, input_summary=context["concept_name"])
             items = _generate_practice_items_with_retries(
                 llm_client=llm_client,
                 prompt=prompt,
@@ -184,6 +192,8 @@ def create_practice_quiz(
                 context=context,
                 question_count=overfetch,
             )
+            if span is not None:
+                set_span_summary(span, output_summary=f"{len(items)} items")
 
     # Slice 11: Filter out already-seen quiz items
     if seen_fps:
@@ -495,10 +505,17 @@ def generate_stateful_flashcards(
     ) as span:
         if span is not None and concept_id is not None:
             span.set_attribute("concept.id", concept_id)
+            set_span_summary(span, input_summary=context["concept_name"])
         payload = _parse_json(
             llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta),
             "Flashcard generation response is not valid JSON.",
         )
+        if span is not None:
+            _cards_tmp = payload.get("flashcards")
+            set_span_summary(
+                span,
+                output_summary=f"{len(_cards_tmp) if isinstance(_cards_tmp, list) else 0} flashcards",
+            )
 
     raw_cards = payload.get("flashcards")
     if not isinstance(raw_cards, list) or not raw_cards:

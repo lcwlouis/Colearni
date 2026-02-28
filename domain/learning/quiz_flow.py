@@ -21,6 +21,7 @@ from core.observability import (
     emit_event,
     observation_context,
     set_input_output,
+    set_span_summary,
     start_span,
 )
 from core.prompting import PromptRegistry
@@ -270,6 +271,7 @@ def submit_quiz(
         quiz_id=quiz_id,
         run_id=resolved_run_id,
     ) as span:
+        set_span_summary(span, input_summary=f"quiz={quiz_id}, answers={len(answers)}")
         try:
             quiz = _load_quiz_for_grading(
                 session,

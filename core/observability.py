@@ -330,6 +330,29 @@ def set_input_output(
             span.set_attribute(OUTPUT_MIME_TYPE, output_mime_type)
 
 
+def set_span_summary(
+    span: Any,
+    *,
+    input_summary: str | None = None,
+    output_summary: str | None = None,
+) -> None:
+    """Set always-emitted compact metadata summaries for Phoenix list view columns.
+
+    Unlike ``set_input_output``, this is **not** gated by ``record_content_enabled()``.
+    Use only for non-sensitive metadata (IDs, counts) — never for raw user content.
+    If ``set_input_output`` is also called on the same span, its values will overwrite
+    these only when content recording is enabled.
+    """
+    if span is None:
+        return
+    if input_summary is not None:
+        span.set_attribute(INPUT_VALUE, input_summary[:_MAX_VALUE_CHARS])
+        span.set_attribute(INPUT_MIME_TYPE, "text/plain")
+    if output_summary is not None:
+        span.set_attribute(OUTPUT_VALUE, output_summary[:_MAX_VALUE_CHARS])
+        span.set_attribute(OUTPUT_MIME_TYPE, "text/plain")
+
+
 def classify_usage_source(
     token_usage: Mapping[str, int | None],
 ) -> str:
@@ -596,6 +619,7 @@ __all__ = [
     "record_content_enabled",
     "set_event_sink",
     "set_input_output",
+    "set_span_summary",
     "set_llm_span_attributes",
     "set_prompt_metadata",
     "set_span_kind",

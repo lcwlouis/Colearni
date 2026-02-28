@@ -13,6 +13,7 @@ from core.observability import (
     SPAN_KIND_CHAIN,
     emit_event,
     observation_context,
+    set_span_summary,
     start_span,
 )
 from core.settings import Settings
@@ -383,6 +384,15 @@ def run_graph_gardener(
             span.set_attribute("graph.llm_calls", budgets.llm_calls)
             span.set_attribute("graph.stopped_by_cluster_budget", stopped_by_cluster_budget)
             span.set_attribute("graph.stopped_by_llm_budget", stopped_by_llm_budget)
+            set_span_summary(
+                span,
+                input_summary=f"workspace={workspace_id}, seeds={len(seeds)}",
+                output_summary=(
+                    f"processed={budgets.clusters_processed}, merges={merges_applied}, "
+                    f"llm={budgets.llm_calls}"
+                    + (", budget_stop" if stopped_by_cluster_budget or stopped_by_llm_budget else "")
+                ),
+            )
         return result
 
 

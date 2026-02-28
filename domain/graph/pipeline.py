@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from adapters.db import graph_repository
 from core.contracts import EmbeddingProvider, GraphLLMClient
-from core.observability import SPAN_KIND_CHAIN, observation_context, start_span
+from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_summary, start_span
 from core.settings import Settings
 from sqlalchemy.orm import Session
 
@@ -47,6 +47,7 @@ def build_graph_for_chunks(
     ) as span:
         if span is not None:
             span.set_attribute("graph.chunk_count", len(chunks))
+            set_span_summary(span, input_summary=f"{len(chunks)} chunks")
         config = ResolverConfig.from_settings(settings)
         resolver = OnlineResolver(
             session=session,
@@ -78,6 +79,9 @@ def build_graph_for_chunks(
                     concept_description_max_chars=settings.resolver_concept_description_max_chars,
                     edge_description_max_chars=settings.resolver_edge_description_max_chars,
                 )
+                if chunk_span is not None:
+                    chunk_span.set_attribute("graph.concepts_extracted", len(extraction.concepts))
+                    chunk_span.set_attribute("graph.edges_extracted", len(extraction.edges))
 
                 raw_concepts_written += graph_repository.insert_raw_concepts(
                     session,
@@ -150,6 +154,13 @@ def build_graph_for_chunks(
             span.set_attribute("graph.llm_disambiguations", budgets.llm_calls_document)
             span.set_attribute("graph.raw_concepts_written", raw_concepts_written)
             span.set_attribute("graph.raw_edges_written", raw_edges_written)
+            set_span_summary(
+                span,
+                output_summary=(
+                    f"chunks={len(chunks)}, created={canonical_created}, "
+                    f"merged={canonical_merged}, llm={budgets.llm_calls_document}"
+                ),
+            )
         return result
 
 
