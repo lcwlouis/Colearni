@@ -123,6 +123,7 @@ export default function TutorPage() {
   const [suggestedConceptId, setSuggestedConceptId] = useState<number | null>(null);
   const [switchSuggestion, setSwitchSuggestion] = useState<ConceptSwitchSuggestion | null>(null);
   const [switchDecision, setSwitchDecision] = useState<"accept" | "reject" | null>(null);
+  const switchDecisionRef = useRef<"accept" | "reject" | null>(null);
 
   const [onboarding, setOnboarding] = useState<OnboardingStatusResponse | null>(null);
 
@@ -291,7 +292,7 @@ export default function TutorPage() {
         query: text,
         concept_id: currentConcept?.concept_id,
         suggested_concept_id: suggestedConceptId ?? undefined,
-        concept_switch_decision: switchDecision ?? undefined,
+        concept_switch_decision: switchDecisionRef.current ?? undefined,
         grounding_mode,
       });
 
@@ -318,6 +319,7 @@ export default function TutorPage() {
 
       setSuggestedConceptId(null);
       setSwitchDecision(null);
+      switchDecisionRef.current = null;
       await refreshSessions(); // update session titles if it changed
     } catch (error: unknown) {
       if (requestId !== activeRequestIdRef.current) return;
@@ -653,6 +655,7 @@ export default function TutorPage() {
                   }
                   setSuggestedConceptId(switchSuggestion.to_concept_id);
                   setSwitchDecision("accept");
+                  switchDecisionRef.current = "accept";
                   setSwitchSuggestion(null);
                 }}
               >
@@ -663,15 +666,11 @@ export default function TutorPage() {
                 className="secondary"
                 onClick={() => {
                   setSwitchDecision("reject");
+                  switchDecisionRef.current = "reject";
                   setSwitchSuggestion(null);
-                  setMessages((prev) => [
-                    ...prev,
-                    {
-                      id: `sys-${Date.now()}`,
-                      role: "system",
-                      text: "Concept switch rejected. Send your next message and the tutor will ask a clarifying question.",
-                    },
-                  ]);
+                  // E3: Auto-fire a follow-up to get the clarification question
+                  // instead of requiring the user to manually re-prompt.
+                  void onSubmitChat("Which concept should we focus on?");
                 }}
               >
                 Keep current

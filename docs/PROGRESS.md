@@ -612,3 +612,8 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Fix: Replaced with a rich `.kb-empty-state` card featuring a dashed border, document-plus SVG icon, heading, descriptive paragraph, and a CTA button that directly opens the file picker. Added corresponding CSS classes.
 - Files: `apps/web/app/kb/page.tsx`, `apps/web/app/globals.css`
 
+#### E3 — Concept Switch Rejection Flow (Completed)
+- Root cause: When reviewing the concept switch rejection, the "Keep current" button set `switchDecision = "reject"` and showed a dead-end system message: "Concept switch rejected. Send your next message and the tutor will ask a clarifying question." The user had to manually send another message to trigger the backend's `requires_clarification` path.
+- Fix: Replaced the dead-end system message with an automatic follow-up API call. When the user clicks "Keep current", the handler sets `switchDecisionRef.current = "reject"` (via ref for synchronous availability) and immediately calls `onSubmitChat("Which concept should we focus on?")`. This triggers the backend's concept resolution with `switch_decision == "reject"`, which returns the clarification prompt directly. Added `switchDecisionRef` to avoid stale closure issues with React state batching.
+- Files: `apps/web/app/tutor/page.tsx`
+
