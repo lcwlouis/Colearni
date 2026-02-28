@@ -69,7 +69,8 @@ def build_graph_for_chunks(
             with observation_context(chunk_id=chunk.id), start_span(
                 "graph.resolver.chunk",
                 chunk_id=chunk.id,
-            ):
+            ) as chunk_span:
+                set_span_kind(chunk_span, SPAN_KIND_CHAIN)
                 budgets.reset_chunk()
                 extraction = extract_raw_graph_from_chunk(
                     llm_client=llm_client,

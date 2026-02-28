@@ -127,11 +127,11 @@ def test_observability_context_includes_request_id(client: TestClient) -> None:
     assert sink[0].get("request_id") == custom_id
 
 
-# ---- OBS-1: HTTP root span tests ----
+# ---- OBS-1: Phoenix scope – no generic HTTP spans ----
 
 
-def test_http_request_root_span_created(otel_exporter) -> None:
-    """Middleware creates an http.request root span with method, route, status."""
+def test_no_http_request_span_exported(otel_exporter) -> None:
+    """Middleware must NOT create http.request spans – they pollute Phoenix."""
     settings = Settings(
         APP_CORS_ALLOWED_ORIGINS=["*"],
         APP_CORS_ALLOWED_METHODS=["*"],
@@ -145,29 +145,4 @@ def test_http_request_root_span_created(otel_exporter) -> None:
 
     spans = otel_exporter.get_finished_spans()
     http_spans = [s for s in spans if s.name == "http.request"]
-    assert len(http_spans) >= 1
-    span = http_spans[0]
-    assert span.attributes.get("http.method") == "GET"
-    assert span.attributes.get("http.route") == "/healthz"
-    assert span.attributes.get("http.status_code") == 200
-    assert span.status.status_code == trace.StatusCode.OK
-
-
-def test_http_request_span_carries_request_id(otel_exporter) -> None:
-    """Middleware root span includes the propagated request_id."""
-    settings = Settings(
-        APP_CORS_ALLOWED_ORIGINS=["*"],
-        APP_CORS_ALLOWED_METHODS=["*"],
-        APP_OBSERVABILITY_ENABLED=True,
-    )
-    app = create_app(settings=settings)
-    client = TestClient(app)
-
-    custom_id = "span-rid-test-42"
-    response = client.get("/healthz", headers={"X-Request-ID": custom_id})
-    assert response.status_code == 200
-
-    spans = otel_exporter.get_finished_spans()
-    http_spans = [s for s in spans if s.name == "http.request"]
-    assert len(http_spans) >= 1
-    assert http_spans[0].attributes.get("request_id") == custom_id
+    assert http_spans == [], "http.request spans must not be exported to Phoenix"
