@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from typing import Any
@@ -11,6 +10,16 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from domain.learning import level_up
+from domain.learning.practice_novelty import (
+    fingerprint_text,
+    load_existing_fingerprints as _load_existing_fingerprints,
+    record_item_fingerprints as _record_item_fingerprints,
+)
+from domain.learning.quiz_generation import (
+    QuizValidationError,
+    auto_items,
+    normalize_items,
+)
 
 MIN_FLASHCARDS = 3
 MAX_FLASHCARDS = 12
@@ -20,78 +29,26 @@ ADJACENT_LIMIT = 6
 MAX_GENERATION_ATTEMPTS = 3
 RETRY_HINT = "create a new practice quiz to retry"
 
-PracticeNotFoundError = level_up.LevelUpQuizNotFoundError
-PracticeValidationError = level_up.LevelUpQuizValidationError
-PracticeGenerationError = level_up.LevelUpQuizValidationError
-PracticeGradingError = level_up.LevelUpQuizGradingError
-PracticeUnavailableError = level_up.LevelUpQuizUnavailableError
+
+class PracticeNotFoundError(ValueError):
+    pass
 
 
-# ── Fingerprint helpers (Slice 11: Novelty Engine) ────────────────────
+class PracticeValidationError(ValueError):
+    pass
 
 
-def fingerprint_text(text_value: str) -> str:
-    """Produce a SHA-256 fingerprint for dedup purposes."""
-    return hashlib.sha256(text_value.strip().lower().encode("utf-8")).hexdigest()
+class PracticeGenerationError(ValueError):
+    pass
 
 
-def _load_existing_fingerprints(
-    session: Session,
-    *,
-    workspace_id: int,
-    user_id: int,
-    concept_id: int,
-    item_type: str,
-) -> set[str]:
-    """Return fingerprints of items the user has already seen for this concept."""
-    rows = session.execute(
-        text(
-            """
-            SELECT fingerprint
-            FROM practice_item_history
-            WHERE workspace_id = :workspace_id
-              AND user_id = :user_id
-              AND concept_id = :concept_id
-              AND item_type = :item_type
-            """
-        ),
-        {
-            "workspace_id": workspace_id,
-            "user_id": user_id,
-            "concept_id": concept_id,
-            "item_type": item_type,
-        },
-    ).all()
-    return {str(row[0]) for row in rows}
+class PracticeGradingError(ValueError):
+    pass
 
 
-def _record_item_fingerprints(
-    session: Session,
-    *,
-    workspace_id: int,
-    user_id: int,
-    concept_id: int,
-    item_type: str,
-    fingerprints: list[str],
-) -> None:
-    """Record fingerprints so future generations avoid duplicates."""
-    for fp in fingerprints:
-        session.execute(
-            text(
-                """
-                INSERT INTO practice_item_history
-                    (workspace_id, user_id, concept_id, item_type, fingerprint)
-                VALUES (:workspace_id, :user_id, :concept_id, :item_type, :fingerprint)
-                """
-            ),
-            {
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-                "concept_id": concept_id,
-                "item_type": item_type,
-                "fingerprint": fp,
-            },
-        )
+class PracticeUnavailableError(RuntimeError):
+    pass
+
 
 
 def generate_practice_flashcards(
@@ -235,19 +192,26 @@ def create_practice_quiz(
         if callable(getattr(session, "rollback", None)):
             session.rollback()  # Reset failed transaction state
 
-    return level_up.create_level_up_quiz(
-        session,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        concept_id=concept_id,
-        session_id=session_id,
-        question_count=question_count,
-        items=items,
-        quiz_type="practice",
-        min_items=MIN_ITEMS,
-        max_items=MAX_ITEMS,
-        context_source="generated",
-    )
+    try:
+        return level_up.create_level_up_quiz(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            concept_id=concept_id,
+            session_id=session_id,
+            question_count=question_count,
+            items=items,
+            quiz_type="practice",
+            min_items=MIN_ITEMS,
+            max_items=MAX_ITEMS,
+            context_source="generated",
+        )
+    except level_up.LevelUpQuizNotFoundError as exc:
+        raise PracticeNotFoundError(str(exc)) from exc
+    except level_up.LevelUpQuizValidationError as exc:
+        raise PracticeValidationError(str(exc)) from exc
+    except level_up.LevelUpQuizUnavailableError as exc:
+        raise PracticeUnavailableError(str(exc)) from exc
 
 
 def submit_practice_quiz(
@@ -259,17 +223,26 @@ def submit_practice_quiz(
     answers: list[dict[str, Any]],
     llm_client: GraphLLMClient | None,
 ) -> dict[str, Any]:
-    return level_up.submit_level_up_quiz(
-        session,
-        quiz_id=quiz_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        answers=answers,
-        llm_client=llm_client,
-        quiz_type="practice",
-        update_mastery=False,
-        retry_hint=RETRY_HINT,
-    )
+    try:
+        return level_up.submit_level_up_quiz(
+            session,
+            quiz_id=quiz_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            answers=answers,
+            llm_client=llm_client,
+            quiz_type="practice",
+            update_mastery=False,
+            retry_hint=RETRY_HINT,
+        )
+    except level_up.LevelUpQuizNotFoundError as exc:
+        raise PracticeNotFoundError(str(exc)) from exc
+    except level_up.LevelUpQuizValidationError as exc:
+        raise PracticeValidationError(str(exc)) from exc
+    except level_up.LevelUpQuizGradingError as exc:
+        raise PracticeGradingError(str(exc)) from exc
+    except level_up.LevelUpQuizUnavailableError as exc:
+        raise PracticeUnavailableError(str(exc)) from exc
 
 
 def _generate_practice_items_with_retries(
@@ -296,7 +269,7 @@ def _generate_practice_items_with_retries(
                     "Practice quiz generation response is not valid JSON.",
                 )
             raw_items = _coerce_generated_items(payload.get("items"))
-            items = level_up._normalize_items(
+            items = normalize_items(
                 raw_items,
                 min_items=MIN_ITEMS,
                 max_items=MAX_ITEMS,
@@ -308,7 +281,7 @@ def _generate_practice_items_with_retries(
             return items
         except PracticeGenerationError as exc:
             last_error = exc
-        except PracticeValidationError as exc:
+        except (PracticeValidationError, QuizValidationError) as exc:
             last_error = exc
         if attempt < MAX_GENERATION_ATTEMPTS:
             retry_prompt = (
@@ -328,7 +301,7 @@ def _fallback_practice_items(
     context: dict[str, Any],
     question_count: int,
 ) -> list[dict[str, Any]]:
-    return level_up._auto_items(
+    return auto_items(
         {
             "canonical_name": context["concept_name"],
             "description": context["concept_description"],
