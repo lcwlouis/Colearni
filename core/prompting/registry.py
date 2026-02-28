@@ -42,6 +42,18 @@ class PromptRegistry:
         asset = self.get(prompt_id)
         return render(asset, context)
 
+    def render_with_meta(
+        self, prompt_id: str, context: dict[str, Any]
+    ) -> tuple[str, PromptMeta]:
+        """Render and return both the rendered text and metadata.
+
+        Useful for observability: callers can log prompt_id, version,
+        task_type, and rendered length from the returned meta.
+        """
+        asset = self.get(prompt_id)
+        rendered = render(asset, context)
+        return rendered, asset.meta
+
     def meta(self, prompt_id: str) -> PromptMeta:
         """Return metadata for a prompt asset."""
         return self.get(prompt_id).meta
