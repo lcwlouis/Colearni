@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { LogOut, Sun, Moon, Check, Edit2, Pencil, Search, Clock, GraduationCap, Network, BookOpen, Target } from "lucide-react";
+import { LogOut, Sun, Moon, Check, Search, Clock, GraduationCap, Network, BookOpen, Target } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { HealthDot } from "@/components/health-dot";
 import { useRequireAuth } from "@/lib/auth";
@@ -14,7 +15,7 @@ const navLinks = [
     ["/tutor", "Tutor", "🎓"],
     ["/graph", "Graph", "🕸️"],
     ["/practice", "Practice", "🎯"],
-    ["/kb", "Knowledge Base", "📚"],
+    ["/kb", "Sources", "📚"],
 ] as const;
 
 function toTitleCase(str: string): string {
@@ -46,6 +47,18 @@ export function GlobalSidebar() {
     const [newWorkspaceName, setNewWorkspaceName] = useState("");
     const [renamingWorkspaceId, setRenamingWorkspaceId] = useState<string | null>(null);
     const [renameWorkspaceName, setRenameWorkspaceName] = useState("");
+    const [collapsed, setCollapsed] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('sidebar-collapsed') === 'true';
+        }
+        return false;
+    });
+    const [wsMenuOpen, setWsMenuOpen] = useState(false);
+
+    // D3: Persist collapsed state
+    useEffect(() => {
+        localStorage.setItem('sidebar-collapsed', String(collapsed));
+    }, [collapsed]);
 
     useEffect(() => {
         const handleGlobalClick = () => {
@@ -53,6 +66,7 @@ export function GlobalSidebar() {
                 setContextMenuId(null);
                 setContextMenuPos(null);
             }
+            if (wsMenuOpen) setWsMenuOpen(false);
         };
         document.addEventListener("click", handleGlobalClick);
         return () => document.removeEventListener("click", handleGlobalClick);
@@ -63,37 +77,64 @@ export function GlobalSidebar() {
     }
 
     return (
-        <aside className="global-sidebar">
+        <aside className={`global-sidebar${collapsed ? ' collapsed' : ''}`}>
             <div className="sidebar-header">
+                <Image src="/colearniTreeLogo.png" alt="CoLearni" width={28} height={28} className="sidebar-logo" />
                 <h1 className="brand" style={{ fontSize: "1.25rem", margin: 0 }}>CoLearni</h1>
                 <HealthDot />
+                <button
+                    type="button"
+                    className="sidebar-collapse-btn"
+                    onClick={() => setCollapsed(!collapsed)}
+                    title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                    aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        {collapsed
+                            ? <polyline points="9 18 15 12 9 6" />
+                            : <polyline points="15 18 9 12 15 6" />
+                        }
+                    </svg>
+                </button>
             </div>
 
             <nav className="nav" aria-label="Primary">
                 <div className="nav-items-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <Link href="/tutor" className={`nav-link ${pathname === "/tutor" ? "active" : ""}`}>
+                    <Link href="/tutor" className={`nav-link ${pathname === "/tutor" ? "active" : ""}`} title="Tutor">
                         <GraduationCap className="nav-icon" />
                         <span>Tutor</span>
                     </Link>
-                    <Link href="/graph" className={`nav-link ${pathname === "/graph" ? "active" : ""}`}>
+                    <Link href="/graph" className={`nav-link ${pathname === "/graph" ? "active" : ""}`} title="Graph">
                         <Network className="nav-icon" />
                         <span>Graph</span>
                     </Link>
-                    <Link href="/kb" className={`nav-link ${pathname === "/kb" ? "active" : ""}`}>
+                    <Link href="/kb" className={`nav-link ${pathname === "/kb" ? "active" : ""}`} title="Sources">
                         <BookOpen className="nav-icon" />
-                        <span>Knowledge Base</span>
+                        <span>Sources</span>
                     </Link>
                 </div>
             </nav>
 
+            {/* Collapsed: show just a new-chat icon */}
+            {collapsed && (
+                <div className="collapsed-new-chat">
+                    <button type="button" className="icon-btn" onClick={() => void startNewSession()} title="New chat" aria-label="New chat" style={{ padding: '0.55rem', borderRadius: '0.5rem', width: '100%', display: 'grid', placeItems: 'center' }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                </div>
+            )}
+
             <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", marginTop: "0.5rem" }}>
+                {!collapsed && (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
                     <h2 style={{ margin: 0, fontSize: "0.9rem", color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recent Chats</h2>
                     <button type="button" className="icon-btn" onClick={() => void startNewSession()} style={{ padding: "0.2rem" }} aria-label="New chat" title="New chat">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     </button>
                 </div>
+                )}
 
+                {!collapsed && (
                 <div className="session-list">
                     {sessionsLoading && sessions.length === 0 ? <p className="status loading" style={{ padding: "0.5rem", fontSize: "0.85rem" }}>Loading...</p> : null}
                     {sessionsError ? <p className="status error" style={{ padding: "0.5rem", fontSize: "0.85rem" }}>{sessionsError}</p> : null}
@@ -196,7 +237,7 @@ export function GlobalSidebar() {
                                                 e.stopPropagation();
                                                 setContextMenuId(null);
                                                 setContextMenuPos(null);
-                                                void deleteSession(chat.public_id);
+                                                setDeleteConfirmId(chat.public_id);
                                             }}
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
@@ -205,9 +246,34 @@ export function GlobalSidebar() {
                                     </div>
                                 )}
                             </div>
+                            {deleteConfirmId === chat.public_id && (
+                                <div className="delete-confirm-bar" style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.3rem 0.5rem', background: 'var(--surface)', borderRadius: '0.35rem', fontSize: '0.8rem' }}>
+                                    <span style={{ flex: 1, color: 'var(--muted)' }}>Delete?</span>
+                                    <button
+                                        type="button"
+                                        className="danger-text"
+                                        style={{ padding: '0.15rem 0.5rem', fontSize: '0.78rem' }}
+                                        onClick={() => {
+                                            void deleteSession(chat.public_id);
+                                            setDeleteConfirmId(null);
+                                        }}
+                                    >
+                                        Yes
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="secondary"
+                                        style={{ padding: '0.15rem 0.5rem', fontSize: '0.78rem' }}
+                                        onClick={() => setDeleteConfirmId(null)}
+                                    >
+                                        No
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>
+                )}
             </div>
 
             <div className="sidebar-footer" style={{ borderTop: "none", paddingTop: 0 }}>
@@ -252,45 +318,62 @@ export function GlobalSidebar() {
                         </div>
                     </form>
                 ) : (
-                    <div className="sidebar-workspace-block" style={{ padding: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                    <div className="sidebar-workspace-block" style={{ padding: "0.5rem", display: "flex", alignItems: "center", gap: "0.25rem", position: "relative" }}>
                         <select
                             value={activeWorkspaceId ?? ""}
                             onChange={(event) => {
-                                if (event.target.value === "NEW_WORKSPACE") {
-                                    setNewWorkspaceName("");
-                                    setIsCreatingWorkspace(true);
-                                } else {
-                                    setActiveWorkspaceId(event.target.value);
-                                }
+                                setActiveWorkspaceId(event.target.value);
                             }}
                             aria-label="Select workspace"
-                            style={{ flex: 1, fontSize: "0.85rem", padding: "0.4rem" }}
+                            style={{ flex: 1, fontSize: "0.85rem" }}
                         >
                             {workspaces.map((workspace) => (
                                 <option key={workspace.public_id} value={workspace.public_id}>
                                     {workspace.name}
                                 </option>
                             ))}
-                            <option disabled>──────────</option>
-                            <option value="NEW_WORKSPACE">+ Add workspace</option>
                         </select>
                         <button
                             type="button"
                             className="icon-btn secondary"
-                            title="Rename workspace"
+                            title="Workspace options"
                             style={{ padding: "0.4rem" }}
-                            onClick={() => {
-                                if (activeWorkspaceId) {
-                                    const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
-                                    if (ws) {
-                                        setRenameWorkspaceName(ws.name);
-                                        setRenamingWorkspaceId(ws.public_id);
-                                    }
-                                }
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setWsMenuOpen((prev) => !prev);
                             }}
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="1.5"></circle>
+                                <circle cx="19" cy="12" r="1.5"></circle>
+                                <circle cx="5" cy="12" r="1.5"></circle>
+                            </svg>
                         </button>
+                        {wsMenuOpen && (
+                            <div className="session-context-menu" style={{ position: "absolute", right: 0, bottom: "100%", marginBottom: "4px", zIndex: 100 }} onClick={(e) => e.stopPropagation()}>
+                                <button type="button" onClick={() => {
+                                    setWsMenuOpen(false);
+                                    setNewWorkspaceName("");
+                                    setIsCreatingWorkspace(true);
+                                }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    New workspace
+                                </button>
+                                <button type="button" onClick={() => {
+                                    setWsMenuOpen(false);
+                                    if (activeWorkspaceId) {
+                                        const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
+                                        if (ws) {
+                                            setRenameWorkspaceName(ws.name);
+                                            setRenamingWorkspaceId(ws.public_id);
+                                        }
+                                    }
+                                }}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                    Rename
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
                 <div className="sidebar-profile-block" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.6rem" }}>

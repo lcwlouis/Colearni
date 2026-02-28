@@ -582,3 +582,18 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Fix: Added `onResetViewReady` callback prop to `ConceptGraph` that passes a `resetView` function to the parent. The function calls `zoomRef.current.transform` with `zoomIdentity` via a 300ms transition. Added "Reset view" button to graph controls. "Clear focus" button now also resets zoom.
 - Files: `apps/web/components/concept-graph.tsx`, `apps/web/app/graph/page.tsx`
 
+#### D1 — Collapsed Sidebar Logo/Arrow Swap (Completed)
+- Root cause: In collapsed mode, the logo and expand arrow were shown side-by-side, wasting limited sidebar width.
+- Fix: Added CSS rules to hide `.sidebar-collapse-btn` in collapsed mode by default, then show it on `.global-sidebar.collapsed:hover` while hiding `.sidebar-logo`. This swaps logo → expand arrow on hover.
+- Files: `apps/web/app/globals.css`
+
+#### D2 — Collapsed Sidebar Footer Cleanup (Completed)
+- Root cause: Collapsed sidebar workspace block still partially rendered (select and icon-btn hidden individually but the block itself visible). Profile block alignment was inconsistent.
+- Fix: Hide the entire `.sidebar-workspace-block` when collapsed (single `display: none` rule, replacing the two individual child-hiding rules). Profile block now stacks theme toggle and logout vertically with centered alignment.
+- Files: `apps/web/app/globals.css`
+
+#### D3 — Sidebar Collapsed State Persistence (Completed)
+- Root cause: `collapsed` state was initialized with `useState(false)` — not persisted across page navigations or page refresh.
+- Fix: Initialize from `localStorage.getItem('sidebar-collapsed')` via lazy initializer. Added `useEffect` to persist changes to localStorage on every toggle.
+- Files: `apps/web/components/global-sidebar.tsx`
+

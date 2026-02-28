@@ -113,8 +113,6 @@ body {
 .global-sidebar.collapsed .nav-link span,
 .global-sidebar.collapsed .sidebar-header .brand,
 .global-sidebar.collapsed .session-list,
-.global-sidebar.collapsed .sidebar-workspace-block select,
-.global-sidebar.collapsed .sidebar-workspace-block .icon-btn,
 .global-sidebar.collapsed .sidebar-user-name,
 .global-sidebar.collapsed h2,
 .global-sidebar.collapsed .sidebar-header .health-dot {
@@ -170,6 +168,19 @@ body {
   justify-content: center;
 }
 
+/* D1: In collapsed mode, show logo by default; swap to expand arrow on hover */
+.global-sidebar.collapsed .sidebar-collapse-btn {
+  display: none;
+}
+
+.global-sidebar.collapsed:hover .sidebar-collapse-btn {
+  display: grid;
+}
+
+.global-sidebar.collapsed:hover .sidebar-logo {
+  display: none;
+}
+
 .global-sidebar.collapsed .sidebar-footer {
   border-top: none;
   padding-top: 0;
@@ -178,11 +189,19 @@ body {
 .global-sidebar.collapsed .sidebar-profile-block {
   justify-content: center;
   padding: 0.3rem;
+  flex-direction: column;
+  align-items: center;
 }
 
 .global-sidebar.collapsed .sidebar-profile-actions {
   flex-direction: column;
   gap: 0.35rem;
+  align-items: center;
+}
+
+/* D2: Hide workspace block entirely when collapsed */
+.global-sidebar.collapsed .sidebar-workspace-block {
+  display: none;
 }
 
 .collapsed-new-chat {
