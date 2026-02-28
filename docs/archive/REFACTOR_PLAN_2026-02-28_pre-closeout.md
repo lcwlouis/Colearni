@@ -5,7 +5,6 @@ Last updated: 2026-02-28
 Archive snapshots:
 - `docs/archive/REFACTOR_PLAN_2026-02-28_pre-remaining-rewrite.md`
 - `docs/archive/REFACTOR_PLAN_2026-02-28_pre-template-rewrite.md`
-- `docs/archive/REFACTOR_PLAN_2026-02-28_pre-closeout.md`
 
 Template source:
 - `docs/prompt_templates/refactor_plan.md`
@@ -53,15 +52,15 @@ This active plan should be treated as invalid if any of the following are missin
 
 ## Purpose
 
-This document is the closeout record for the CoLearni refactor.
+This document is now the follow-up refactor plan after the second refactor wave.
 
-The previous active versions have been archived. All targeted work items are now complete:
+The previous active version has been archived. This file now targets only the items that were still missed in the post-refactor review:
 
-- the shared quiz persistence split is finished (R6B)
-- the legacy upload route is deprecated in route metadata (R11B)
-- the active plan is internally consistent (R11C)
+- the shared quiz persistence split is only partially complete
+- the legacy upload route is deprecated in human docs but not fully in route metadata
+- the active plan itself still contains stale prose from before completed slices landed
 
-This document remains as the source of truth for what was done and why.
+Use this document as the source of truth for the remaining cleanup. If implementation discovers a new constraint, update this file before widening scope.
 
 ## Inputs Used
 
@@ -78,9 +77,9 @@ This plan is based on:
 
 ## Executive Summary
 
-The refactor is complete.
+The refactor is mostly successful.
 
-All structural outcomes are in place:
+The expected structural outcomes are already in place:
 
 - schema definitions are split into `core/schemas/`
 - workspaces and research routes are thin
@@ -89,14 +88,20 @@ All structural outcomes are in place:
 - `practice.py` now depends on shared quiz core, not `level_up.py`
 - `level_up.py` is a thin compatibility wrapper
 - frontend feature decomposition and CSS decomposition are landed
-- `quiz_flow.py` is now pure orchestration; all DB access is in `quiz_persistence.py`
-- `/documents/upload` is explicitly deprecated in FastAPI metadata, docstrings, and docs
-- all replacement path strings point to the correct `/knowledge-base/` canonical route
 - `pytest`, web tests, and web typecheck are green
 
-## Constraints Applied During Refactor
+The remaining work is small but still worth doing because it affects source-of-truth quality and architectural finish:
 
-These constraints were applied to every slice:
+1. `domain/learning/quiz_flow.py` still contains most shared quiz SQL, so the persistence seam promised in the prior plan is only partially complete.
+2. `/documents/upload` is deprecated in docs but not fully marked as deprecated in FastAPI/OpenAPI metadata.
+3. `apps/api/routes/documents.py` still points users at the wrong replacement path string (`/kb/...` instead of `/knowledge-base/...`).
+4. This plan still contains stale narrative sections that say completed work is unfinished.
+
+The right move now is a short final pass focused on persistence extraction, contract metadata sync, and plan closeout.
+
+## Non-Negotiable Constraints
+
+These constraints apply to every remaining slice:
 
 1. No intentional behavior change unless the slice is explicitly marked as a contract metadata fix.
 2. Keep PRs small. Target `<= 400 LOC net` per PR wherever possible.
@@ -108,7 +113,7 @@ These constraints were applied to every slice:
 
 ## Completed Work (Do Not Reopen Unless Blocked)
 
-These areas are considered complete for this phase:
+These areas are considered complete enough for this phase:
 
 - `R1` Schema decomposition
 - `R2` Thin routes pass I
@@ -116,20 +121,25 @@ These areas are considered complete for this phase:
 - `R3B` Knowledge base route final thin pass
 - `R5` Chat orchestration split
 - `R6A` Shared quiz core initial completion
-- `R6B` Quiz persistence finalization
 - `R7` Graph repository split
 - `R8` Tutor page split
 - `R9` Graph, KB, and sidebar split
 - `R10` CSS decomposition
 - `R11A` Cleanup and artifact removal
-- `R11B` Contract metadata and docs sync
-- `R11C` Final plan closeout
 
-All slices are complete. No execution targets remain.
+These slices are not execution targets anymore unless a remaining slice directly depends on them.
 
-## Decision Log
+## Remaining Slice IDs
 
-These decisions were made during the refactor:
+Use these stable IDs in commits, reports, and verification blocks:
+
+- `R6B` Quiz Persistence Finalization
+- `R11B` Contract Metadata and Docs Sync
+- `R11C` Final Plan Closeout
+
+## Decision Log For Remaining Work
+
+These decisions are already made for the remaining phase:
 
 1. Canonical upload surface:
    - `POST /workspaces/{ws_id}/knowledge-base/documents/upload`
@@ -146,7 +156,7 @@ These decisions were made during the refactor:
 
 ## Removal Safety Rules
 
-These rules were applied whenever a slice removed, replaced, inlined, or archived code:
+These rules apply whenever a remaining slice removes, replaces, inlines, or archives code:
 
 1. Do not remove a file, function, route, schema, type, selector, or compatibility shim without recording:
    - what is being removed
@@ -192,18 +202,18 @@ Verification
 
 Current repo verification status:
 
-- `pytest -q`: 347 passed, 1 failed (pre-existing unrelated `test_g3_stream`)
+- `pytest -q`: passing
 - `npm --prefix apps/web test`: passing
 - `npm --prefix apps/web run typecheck`: passing
 
-Post-refactor file sizes:
+Current remaining hotspots:
 
-| File | Lines | Status |
+| File | Lines | Why it still matters |
 |---|---:|---|
-| `domain/learning/quiz_flow.py` | 642 | Pure orchestration — no inline SQL. |
-| `domain/learning/quiz_persistence.py` | 472 | Owns all shared quiz DB access. |
-| `apps/api/routes/documents.py` | 170 | Deprecated in FastAPI metadata; correct replacement path. |
-| `docs/REFACTOR_PLAN.md` | active | Closeout document — internally consistent. |
+| `domain/learning/quiz_flow.py` | 873 | Shared quiz orchestration still contains most DB queries and persistence writes. |
+| `domain/learning/quiz_persistence.py` | 69 | Only partially filled; currently holds summary lookup only. |
+| `apps/api/routes/documents.py` | 169 | Compatibility route is thin, but route metadata and deprecation strings are still inconsistent. |
+| `docs/REFACTOR_PLAN.md` | active | Still contains stale sections if not rewritten cleanly. |
 
 Known cleanup candidates outside this plan:
 
@@ -213,60 +223,209 @@ Known cleanup candidates outside this plan:
 
 These are not automatic deletion candidates. Review them separately as normal docs work.
 
-## Completed Work Summary
+## Remaining Work Overview
 
-### 1. Shared quiz persistence extraction — complete (R6B)
+### 1. Shared quiz persistence extraction is only partially finished
 
-- `quiz_persistence.py` now owns 12 DB helper functions: concept lookup, quiz CRUD, attempt insert, mastery operations, generation context loading, session scope check.
-- `quiz_flow.py` is pure orchestration: validation, grading pipeline, observability, policy.
-- `quiz_flow.py` reduced from 874 to 642 lines (−27%).
-- All 13 slice-specific tests pass.
+The outcome-level architecture improved:
 
-### 2. Upload deprecation metadata — complete (R11B)
+- `practice.py` no longer imports `level_up.py`
+- `level_up.py` is a wrapper
+- shared orchestration exists in `quiz_flow.py`
 
-- FastAPI route metadata includes `deprecated=True`.
-- All docstrings point to `/knowledge-base/documents/upload` (not `/kb/`).
-- New `test_legacy_upload_route_marked_deprecated_in_openapi` asserts the contract.
+But the seam promised in the prior plan is only partial:
 
-### 3. Replacement path strings — complete (R11B)
+- `quiz_persistence.py` only contains the latest-summary lookup
+- `quiz_flow.py` still performs concept lookup, quiz creation, item inserts, attempt replay queries, attempt insert, and quiz status updates directly
 
-- No stale `/kb/` replacement strings remain in code or docs.
-- `docs/API.md` already had the correct canonical path.
+That leaves the shared quiz core cleaner than before, but still heavier than intended.
 
-### 4. Plan consistency — complete (R11C)
+### 2. Upload deprecation metadata is not fully synced
 
-- This plan is now a closeout document.
-- All sections reflect the actual post-refactor state.
-- Pre-closeout version archived.
+The docs now describe `/documents/upload` as deprecated and compatibility-only, but the route itself is still missing explicit FastAPI deprecation metadata.
+
+That means:
+
+- generated OpenAPI does not communicate deprecation cleanly
+- test coverage does not assert the deprecation contract
+- code comments and API docs are not fully aligned
+
+### 3. Replacement path strings are inconsistent
+
+The legacy documents route still tells users to use `/api/workspaces/{ws_id}/kb/documents/upload`, but the canonical route is `/workspaces/{ws_id}/knowledge-base/documents/upload`.
+
+That mismatch is small, but it is exactly the kind of drift that causes confusion in later maintenance and support work.
+
+### 4. The active plan must stop contradicting itself
+
+The previous active version mixed:
+
+- completed-slice status updates
+- stale prose from before those slices were done
+
+This final pass should leave the plan internally consistent so it can serve as a real closeout/source-of-truth document.
 
 ## Implementation Sequencing
 
-All slices have been executed and verified. The original execution order was:
+The remaining work should be executed in the order below.
 
-### R6B. Slice 1: Quiz Persistence Finalization ✅
+Each slice should end with green tests before the next slice starts.
 
-Extracted 12 DB helper functions from `quiz_flow.py` into `quiz_persistence.py`.
-`quiz_flow.py` reduced from 874 to 642 lines. All tests green.
+### R6B. Slice 1: Quiz Persistence Finalization
 
-### R11B. Slice 2: Contract Metadata and Docs Sync ✅
+Purpose:
 
-Added `deprecated=True` to FastAPI route metadata. Fixed stale `/kb/` replacement path
-strings. Added deprecation contract test. All tests green.
+- finish the shared quiz seam so orchestration and persistence are more clearly separated
 
-### R11C. Slice 3: Final Plan Closeout ✅
+Root problem:
 
-Archived pre-closeout version. Updated all stale sections to reflect actual state.
-Plan is now a closeout document.
+- `quiz_flow.py` still owns most shared quiz SQL directly
+- `quiz_persistence.py` does not yet justify its intended role as the shared DB layer
 
-## Execution Order (Final)
+Files involved:
 
-All slices are complete:
+- extend `domain/learning/quiz_persistence.py`
+- slim `domain/learning/quiz_flow.py`
+- update affected imports/tests if helper signatures change
 
-1. ✅ `R6B` Quiz Persistence Finalization
-2. ✅ `R11B` Contract Metadata and Docs Sync
-3. ✅ `R11C` Final Plan Closeout
+Implementation steps:
 
-No further execution targets remain in this plan.
+1. Move shared DB reads/writes from `quiz_flow.py` into `quiz_persistence.py`, including as appropriate:
+   - concept lookup for quiz creation
+   - quiz row insert
+   - quiz item insert
+   - persisted item reload
+   - existing graded-attempt lookup
+   - mastery lookup used on replay
+   - attempt insert
+   - quiz status updates
+2. Keep `quiz_flow.py` responsible for:
+   - orchestration
+   - validation ordering
+   - grading pipeline sequencing
+   - observability
+   - policy decisions such as `update_mastery`
+3. Keep public wrappers stable:
+   - `domain/learning/level_up.py`
+   - `domain/learning/practice.py`
+4. Do not redesign quiz payloads or grading behavior.
+
+What stays the same:
+
+- route contracts
+- quiz payloads
+- grading semantics
+- mastery update behavior
+- practice remains non-leveling
+
+Verification:
+
+- `pytest -q`
+- `tests/db/test_level_up_quiz_flow_integration.py`
+- `tests/db/test_practice_flow_integration.py`
+- `tests/domain/test_level_up_feedback_contract.py`
+
+Exit criteria:
+
+- `quiz_persistence.py` owns the shared DB helpers that `quiz_flow.py` currently inlines
+- `quiz_flow.py` reads primarily as orchestration rather than mixed SQL + orchestration
+
+### R11B. Slice 2: Contract Metadata and Docs Sync
+
+Purpose:
+
+- make the legacy upload deprecation contract consistent across route metadata, docs, and tests
+
+Root problem:
+
+- docs say deprecated, but FastAPI route metadata does not
+- route docstrings still point at the wrong replacement path
+
+Files involved:
+
+- `apps/api/routes/documents.py`
+- `docs/API.md`
+- `tests/api/test_response_contracts.py`
+- this file if assumptions change during the slice
+
+Implementation steps:
+
+1. Mark the legacy upload route deprecated in FastAPI route metadata if not already.
+2. Fix stale route replacement strings:
+   - replace `/kb/documents/upload`
+   - with `/knowledge-base/documents/upload`
+3. Make sure `docs/API.md` and route docstrings say the same thing about:
+   - deprecation status
+   - compatibility-only status
+   - canonical replacement path
+4. Add or update API contract tests to assert the final intended contract if practical.
+
+What stays the same:
+
+- route path
+- response shape
+- compatibility behavior
+
+Verification:
+
+- `pytest -q`
+- `tests/api/test_response_contracts.py`
+- manual inspection of generated OpenAPI route metadata if needed
+
+Exit criteria:
+
+- no stale `/kb/...` replacement strings remain
+- the legacy route is explicitly deprecated in code and docs
+
+### R11C. Slice 3: Final Plan Closeout
+
+Purpose:
+
+- leave `docs/REFACTOR_PLAN.md` as a truthful closeout document instead of a half-finished execution note
+
+Root problem:
+
+- the current plan has stale sections that describe completed work as unfinished
+
+Files involved:
+
+- `docs/REFACTOR_PLAN.md`
+- optionally archive one more snapshot if the final closeout materially changes structure
+
+Implementation steps:
+
+1. Remove stale "remaining work" prose that no longer matches the codebase.
+2. Update current verification status and remaining work to the actual post-`R6B` and post-`R11B` state.
+3. If all slices are complete:
+   - mark them complete explicitly
+   - keep a short residual-risk section if anything intentionally remains
+4. If the final document becomes more of a closeout than an execution plan:
+   - archive the pre-closeout version first
+   - keep the active file concise and accurate
+
+What stays the same:
+
+- the document remains the source of truth
+
+Verification:
+
+- manual review of the document for internal consistency
+- `pytest -q` if any linked tests/docs changed in the same slice
+
+Exit criteria:
+
+- no active section in this file materially contradicts another section
+- the plan accurately reflects what is done versus what remains
+
+## Execution Order (Update After Each Run)
+
+Start with the highest-priority remaining slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
+
+1. `R6B` Quiz Persistence Finalization
+2. `R11B` Contract Metadata and Docs Sync
+3. `R11C` Final Plan Closeout
+
+Re-read this file after every 2 completed slices and restate which slices remain.
 
 ## Verification Block Template
 
@@ -328,9 +487,9 @@ Manual smoke checklist:
 2. Level-up quiz generation and submission still update mastery correctly.
 3. Legacy upload route, if still present, is clearly marked deprecated and points to the correct canonical replacement route.
 
-## What Was Not In Scope
+## What Not To Do
 
-The following were explicitly excluded from the refactor:
+Do not do the following during the remaining refactor:
 
 - do not redesign the frontend again
 - do not reopen CSS decomposition
@@ -344,7 +503,7 @@ The following were explicitly excluded from the refactor:
 Historical removal entries are preserved in:
 - `docs/archive/REFACTOR_PLAN_2026-02-28_pre-template-rewrite.md`
 
-No new removals were required for `R6B`, `R11B`, or `R11C`. All changes were additive (extraction, metadata addition, documentation updates).
+Append any new removal entries for `R6B`, `R11B`, or `R11C` below.
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
