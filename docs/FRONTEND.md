@@ -16,7 +16,7 @@ AI agents and contributors must follow it when touching `apps/web/`.
 | typescript | 5.6.3 | |
 | eslint | 9.x | Flat config (`eslint.config.mjs`) |
 | eslint-config-next | 16.1.6 | Provides core-web-vitals + typescript presets |
-| vitest | 2.1.9 | Unit/component tests |
+| vitest | 4.0.18 | Unit/component tests (vite 7.x, esbuild 0.27.x) |
 
 Node requirement: **>= 20.9.0** (current: 23.x).
 
@@ -114,8 +114,7 @@ Fix these incrementally. Do not suppress them with `eslint-disable` comments.
 
 ---
 
-## Remaining audit items
+## Audit status
 
-5 moderate vulnerabilities in the `esbuild` → `vite` → `vitest` chain.
-These require upgrading to `vitest@3` (breaking change, tracked separately).
-No action needed for application code.
+**0 vulnerabilities** as of the vitest 4.x upgrade (Feb 2026).
+All esbuild/vite/vitest chain advisories are cleared.
