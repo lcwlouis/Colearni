@@ -60,16 +60,19 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
                 nextSessions = [created];
             }
             setSessions(nextSessions);
+            let resolvedId: string | null = null;
             setActiveSessionId((prev) => {
                 const target = preferredId ?? prev;
                 if (target && nextSessions.some((item) => item.public_id === target)) {
-                    if (pathname === "/tutor") syncUrl(target);
+                    resolvedId = target;
                     return target;
                 }
-                const fallback = nextSessions[0]?.public_id ?? null;
-                if (fallback && pathname === "/tutor") syncUrl(fallback);
-                return fallback;
+                resolvedId = nextSessions[0]?.public_id ?? null;
+                return resolvedId;
             });
+            if (resolvedId && pathname === "/tutor") {
+                syncUrl(resolvedId);
+            }
         } catch (error: unknown) {
             setSessionsError(errorText(error, "Failed to load chat sessions"));
             setSessions([]);
