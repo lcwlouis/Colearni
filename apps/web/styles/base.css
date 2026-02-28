@@ -206,6 +206,7 @@ pre {
 /* ===== Markdown ===== */
 .markdown-content {
   line-height: 1.65;
+  min-width: 0;
 }
 
 .markdown-content p {

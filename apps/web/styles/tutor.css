@@ -553,7 +553,7 @@
   min-width: 0;
   display: grid;
   gap: 0.5rem;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .chat-role {
@@ -574,6 +574,7 @@
 .chat-response {
   display: grid;
   gap: 0.55rem;
+  min-width: 0;
 }
 
 .chat-refusal-callout {
