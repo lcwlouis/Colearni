@@ -223,7 +223,16 @@ export default function KBPage() {
         setInfo("Document deleted.");
       } else {
         await apiClient.reprocessKBDocument(wsId, pendingAction.documentId);
-        setInfo("Reprocess request queued. Use Refresh to check current status.");
+        // Optimistically update the doc to "extracting" and start polling
+        setDocuments((prev) =>
+          prev.map((d) =>
+            d.document_id === pendingAction.documentId
+              ? { ...d, graph_status: "extracting" as const, error_message: null }
+              : d,
+          ),
+        );
+        setInfo("Reprocess started. Status will update automatically.");
+        startPolling();
       }
       setPendingAction(null);
     } catch (err: unknown) {
@@ -231,7 +240,7 @@ export default function KBPage() {
     } finally {
       setProcessingDocId(null);
     }
-  }, [pendingAction, wsId]);
+  }, [pendingAction, wsId, startPolling]);
 
   if (auth.isLoading) return <p>Loading…</p>;
 
