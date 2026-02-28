@@ -372,9 +372,9 @@ Exit criteria:
 
 Start with the highest-priority remaining slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
 
-1. `CB1` Width Containment Audit — reopened: `.chat-content { overflow: hidden }` is clipping at the wrong layer; hint-card path lacks `min-width: 0`
-2. `CB2` Codeblock Scroll Ownership — reopened: verify scroll ownership holds after CB1 fix
-3. `CB3` Regression Coverage and Verification — reopened: update tests/smoke checklist after CB1+CB2
+1. ~~`CB1` Width Containment Audit~~ ✅ done (reopened and re-fixed: removed outer clipping, added hint-card containment)
+2. ~~`CB2` Codeblock Scroll Ownership~~ ✅ done (reopened and verified: explicit width + block code)
+3. ~~`CB3` Regression Coverage and Verification~~ ✅ done (reopened: updated smoke checklist with hint-card path)
 
 Re-read this file after every 2 completed slices and restate which slices remain.
 
@@ -485,8 +485,9 @@ Perform these steps in a browser after deploying or running the dev server:
 2. **Desktop viewport (≥1200px):** Confirm the chat bubble stays within its 48rem max-width. No page-level horizontal scrollbar should appear.
 3. **Narrow viewport (375px, e.g. iPhone SE):** Confirm the same containment holds. The codeblock should show a local horizontal scrollbar inside the `pre` frame.
 4. Confirm the codeblock border/background is not visually clipped or overflowing its parent.
-5. Confirm ordinary markdown paragraphs, inline code (`like this`), hints, and citations still render normally.
-6. Confirm the local scrollbar inside the codeblock is functional and scrolls the long line.
+5. **Hint-card path:** Inject or trigger a response with a collapsible hint containing the same long fenced codeblock. Expand the hint. Confirm the nested codeblock is **not cropped** and scrolls locally, identical to the main body behavior.
+6. Confirm ordinary markdown paragraphs, inline code (`like this`), hints, and citations still render normally.
+7. Confirm the local scrollbar inside the codeblock is functional and scrolls the long line.
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
