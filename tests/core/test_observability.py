@@ -484,3 +484,81 @@ def test_ai_only_exporter_blocks_non_ai_spans() -> None:
         assert len(forwarded) == 0, f"Expected 0 forwarded spans, got {len(forwarded)}"
     finally:
         set_tracer_provider_for_testing(None)
+
+
+# ---------------------------------------------------------------------------
+# OBS-6 Regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_set_span_summary_always_emits(otel_exporter) -> None:
+    """set_span_summary sets input.value/output.value unconditionally (not content-gated)."""
+    import json as _json
+
+    from core.observability import INPUT_VALUE, OUTPUT_VALUE, set_span_summary
+
+    with start_span("practice.quiz.generate") as span:
+        set_span_summary(span, input_summary="Python basics", output_summary="5 items")
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].attributes.get(INPUT_VALUE) == "Python basics"
+    assert spans[0].attributes.get(OUTPUT_VALUE) == "5 items"
+
+
+def test_retrieval_documents_include_rank_and_document_id(otel_exporter) -> None:
+    """Retrieval documents summary must include rank and document_id (OBS-4)."""
+    import json
+
+    from core.observability import SPAN_KIND_RETRIEVER
+
+    with start_span("retrieval.vector.search", kind=SPAN_KIND_RETRIEVER) as span:
+        span.set_attribute("retrieval.results_count", 2)
+        span.set_attribute(
+            "retrieval.documents",
+            json.dumps([
+                {"rank": 1, "chunk_id": "c1", "document_id": "doc-uuid-1", "score": 0.95},
+                {"rank": 2, "chunk_id": "c2", "document_id": "doc-uuid-2", "score": 0.88},
+            ]),
+        )
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    docs = json.loads(spans[0].attributes.get("retrieval.documents"))
+    assert docs[0]["rank"] == 1
+    assert docs[0]["document_id"] == "doc-uuid-1"
+    assert docs[1]["rank"] == 2
+
+
+def test_no_exported_span_has_unknown_kind(otel_exporter) -> None:
+    """Every span that uses kind= at creation must have a recognized AI kind (not 'unknown')."""
+    from core.observability import SPAN_KIND_CHAIN, SPAN_KIND_LLM, SPAN_KIND_RETRIEVER
+
+    for name, kind in [
+        ("chat.respond", SPAN_KIND_CHAIN),
+        ("llm.chat.respond", SPAN_KIND_LLM),
+        ("retrieval.vector.search", SPAN_KIND_RETRIEVER),
+    ]:
+        with start_span(name, kind=kind):
+            pass
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 3
+    for s in spans:
+        kind_val = s.attributes.get("openinference.span.kind")
+        assert kind_val is not None, f"Span {s.name} missing kind"
+        assert kind_val != "unknown", f"Span {s.name} has unknown kind"
+
+
+def test_graph_chunk_span_includes_extraction_counts(otel_exporter) -> None:
+    """graph.resolver.chunk spans must expose concepts_extracted and edges_extracted (OBS-5)."""
+    from core.observability import SPAN_KIND_CHAIN
+
+    with start_span("graph.resolver.chunk", kind=SPAN_KIND_CHAIN) as span:
+        span.set_attribute("graph.concepts_extracted", 4)
+        span.set_attribute("graph.edges_extracted", 2)
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].attributes.get("graph.concepts_extracted") == 4
+    assert spans[0].attributes.get("graph.edges_extracted") == 2

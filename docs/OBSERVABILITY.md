@@ -105,13 +105,23 @@ graph.gardener.run (CHAIN)              ← offline graph consolidation
 | `graph.resolver.run` | CHAIN | `domain/graph/pipeline.py` |
 | `graph.resolver.chunk` | CHAIN | `domain/graph/pipeline.py` |
 | `graph.gardener.run` | CHAIN | `domain/graph/gardener.py` |
-| `grading.level_up` | CHAIN | `domain/learning/level_up.py` |
-| `grading.practice` | CHAIN | `domain/learning/level_up.py` |
+| `grading.level_up` | CHAIN | `domain/learning/quiz_flow.py` |
+| `grading.practice` | CHAIN | `domain/learning/quiz_flow.py` |
 | `llm.chat.respond` | LLM | `adapters/llm/providers.py` |
+| `llm.chat.stream` | LLM | `adapters/llm/providers.py` |
 | `llm.chat.social` | LLM | `adapters/llm/providers.py` |
 | `llm.graph.extract` | LLM | `adapters/llm/providers.py` |
 | `llm.graph.disambiguate` | LLM | `adapters/llm/providers.py` |
+| `llm.practice.flashcards.generate` | LLM | `adapters/llm/providers.py` |
+| `llm.practice.flashcards.generate_stateful` | LLM | `adapters/llm/providers.py` |
 | `llm.practice.quiz.generate` | LLM | `adapters/llm/providers.py` |
+| `llm.grading.level_up.submit` | LLM | `adapters/llm/providers.py` |
+| `llm.grading.practice.submit` | LLM | `adapters/llm/providers.py` |
+
+> **AI-only export**: The OTLP exporter is wrapped in `_AIOnlySpanExporter` which
+> silently drops any span that lacks an `openinference.span.kind` attribute.  This
+> prevents generic HTTP, database, or middleware spans from polluting Phoenix even if
+> an instrumentation library adds them automatically.
 
 > **Note on `create_span`**: The streaming path uses `create_span()` instead
 > of `start_span()` because Python generators cannot use context managers that
@@ -136,8 +146,14 @@ graph.gardener.run (CHAIN)              ← offline graph consolidation
 | Condition | What is recorded |
 |---|---|
 | Always | Preview (first 256 chars), message length, token counts |
-| `APP_OBSERVABILITY_RECORD_CONTENT=true` | Full message bodies on LLM spans |
+| Always (metadata spans) | `input.value` / `output.value` with compact non-sensitive summaries via `set_span_summary` |
+| `APP_OBSERVABILITY_RECORD_CONTENT=true` | Full message bodies on LLM spans; full query/response text on chat spans |
 | `APP_OBSERVABILITY_RECORD_CONTENT=false` | Preview and length only, no full bodies |
+
+> **`set_span_summary` vs `set_input_output`**: Domain chain spans (graph, practice, grading,
+> ingestion) use `set_span_summary()` to unconditionally populate Phoenix list view columns
+> with compact metadata (e.g. `"concept=Python, 5 flashcards"`).  Chat spans that carry actual
+> user queries use `set_input_output()` which is gated by `APP_OBSERVABILITY_RECORD_CONTENT`.
 
 ### Prompt Metadata on LLM Spans
 
@@ -155,10 +171,12 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 | Attribute | Available on |
 |---|---|
 | `session.id` | `chat.respond`, `chat.stream` |
-| `user.id` | `chat.respond`, `chat.stream` |
+| `user.id` | `chat.respond`, `chat.stream`, `grading.*` |
 | `concept.id` | `chat.respond`, `chat.stream`, practice spans |
 | `workspace_id` | All domain spans |
 | `document_id` | `ingestion.post_ingest` |
+| `quiz_id` | `grading.level_up`, `grading.practice` |
+| `run_id` | `graph.resolver.run`, `graph.gardener.run`, `grading.*` |
 
 ### OpenInference Attributes on Domain Spans
 
@@ -177,7 +195,7 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 | `retrieval.query` | Query text (first 256 chars) |
 | `retrieval.top_k` | Requested result count |
 | `retrieval.results_count` | Actual results returned |
-| `retrieval.documents` | JSON summary of top 5 results (chunk_id, score) |
+| `retrieval.documents` | JSON summary of top 5 results: `[{rank, chunk_id, document_id, score, method, ?preview}]` |
 
 **Vector stage (`retrieval.vector.search`)**:
 
@@ -185,7 +203,7 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 |---|---|
 | `retrieval.top_k` | Bounded top-k for vector search |
 | `retrieval.results_count` | Vector hits returned |
-| `retrieval.documents` | JSON summary of top 5 vector results |
+| `retrieval.documents` | JSON summary of top 5 vector results: `[{rank, chunk_id, document_id, score, ?preview}]` |
 
 **FTS stage (`retrieval.fts.search`)**:
 
@@ -193,7 +211,7 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 |---|---|
 | `retrieval.top_k` | Bounded top-k for FTS search |
 | `retrieval.results_count` | FTS hits returned |
-| `retrieval.documents` | JSON summary of top 5 FTS results |
+| `retrieval.documents` | JSON summary of top 5 FTS results: `[{rank, chunk_id, document_id, score, ?preview}]` |
 
 **Fusion stage (`retrieval.hybrid.fuse`)**:
 
@@ -206,7 +224,7 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 | `retrieval.fts_weight` | Weight applied to FTS scores |
 | `retrieval.results_count` | Final fused result count |
 | `retrieval.method_distribution` | JSON count of vector/fts/hybrid methods |
-| `retrieval.documents` | JSON summary of top 5 fused results (chunk_id, score, method) |
+| `retrieval.documents` | JSON summary of top 5 fused results: `[{rank, chunk_id, document_id, score, method, ?preview}]` |
 
 **Graph bias stage (`retrieval.graph.bias`)**:
 
@@ -231,6 +249,13 @@ When a prompt is rendered via `render_with_meta()`, these attributes are set:
 | `graph.raw_concepts_written` | Raw concept rows written |
 | `graph.raw_edges_written` | Raw edge rows written |
 
+**Resolver chunk (`graph.resolver.chunk`)**:
+
+| Attribute | Description |
+|---|---|
+| `graph.concepts_extracted` | Raw concept count extracted from this chunk |
+| `graph.edges_extracted` | Raw edge count extracted from this chunk |
+
 **Gardener (`graph.gardener.run`)**:
 
 | Attribute | Description |
@@ -252,12 +277,12 @@ active span (visible in the Phoenix Events tab).
 | Event Name | Component | Status Values | Source |
 |---|---|---|---|
 | `llm.call` | LLM adapter | `success`, `failure` | `adapters/llm/providers.py` |
-| `grading.level_up.start` | Grading | `info` | `domain/learning/level_up.py` |
-| `grading.level_up.result` | Grading | `success` | `domain/learning/level_up.py` |
-| `grading.level_up.failure` | Grading | `failure` | `domain/learning/level_up.py` |
-| `grading.practice.start` | Grading | `info` | `domain/learning/level_up.py` |
-| `grading.practice.result` | Grading | `success` | `domain/learning/level_up.py` |
-| `grading.practice.failure` | Grading | `failure` | `domain/learning/level_up.py` |
+| `grading.level_up.start` | Grading | `info` | `domain/learning/quiz_flow.py` |
+| `grading.level_up.result` | Grading | `success` | `domain/learning/quiz_flow.py` |
+| `grading.level_up.failure` | Grading | `failure` | `domain/learning/quiz_flow.py` |
+| `grading.practice.start` | Grading | `info` | `domain/learning/quiz_flow.py` |
+| `grading.practice.result` | Grading | `success` | `domain/learning/quiz_flow.py` |
+| `grading.practice.failure` | Grading | `failure` | `domain/learning/quiz_flow.py` |
 | `graph.resolver.budget.usage` | Graph resolver | `info` | `domain/graph/resolver.py` |
 | `graph.resolver.budget.hard_stop` | Graph resolver | `warning` | `domain/graph/resolver.py` |
 | `graph.gardener.budget.usage` | Graph gardener | `info` | `domain/graph/gardener.py` |
@@ -330,9 +355,12 @@ Do not assume zero tokens — the provider simply did not report usage.
 When `APP_OBSERVABILITY_RECORD_CONTENT=false`:
 
 - LLM span `llm.input_messages` and `llm.output_messages` are **not set**
-- Domain span `input.value` and `output.value` contain **preview only** (first 256 chars)
+- Chat domain span `input.value` and `output.value` contain **preview only** (first 256 chars)
+- Graph, practice, grading, and ingestion spans **still show compact metadata summaries**
+  via `set_span_summary` — these are non-sensitive (IDs, counts) and are always emitted
 - Token counts, prompt metadata, and all other attributes remain fully populated
 - Retrieval `retrieval.query` still shows the first 256 characters
+- Retrieval `retrieval.documents` `preview` field is **omitted** in safe mode
 
 This mode is appropriate for shared/production Phoenix instances where prompt
 content should not be persisted.
