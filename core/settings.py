@@ -19,8 +19,17 @@ class Settings(BaseSettings):
     )
 
     env: str = "dev"
+    log_level: str = Field(
+        default="INFO",
+        validation_alias=AliasChoices("APP_LOG_LEVEL", "LOG_LEVEL"),
+    )
     host: str = "0.0.0.0"
     port: int = 8000
+    workers: int = Field(
+        default=4,
+        validation_alias=AliasChoices("APP_WORKERS", "WORKERS"),
+        ge=1,
+    )
     cors_allowed_origins: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("APP_CORS_ALLOWED_ORIGINS", "CORS_ALLOWED_ORIGINS"),
@@ -356,7 +365,7 @@ class Settings(BaseSettings):
 
     # ── Prompt kit / persona ──────────────────────────────────────────
     tutor_persona: str = Field(
-        default="openclaw",
+        default="colearni",
         validation_alias=AliasChoices("APP_TUTOR_PERSONA", "TUTOR_PERSONA"),
     )
     social_intent_enabled: bool = Field(
@@ -364,6 +373,36 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "APP_SOCIAL_INTENT_ENABLED",
             "SOCIAL_INTENT_ENABLED",
+        ),
+    )
+
+    # ── Reasoning controls (per-task toggleable) ──────────────────────
+    llm_reasoning_chat: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_CHAT",
+            "LLM_REASONING_CHAT",
+        ),
+    )
+    llm_reasoning_quiz_grading: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_QUIZ_GRADING",
+            "LLM_REASONING_QUIZ_GRADING",
+        ),
+    )
+    llm_reasoning_graph_generation: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_GRAPH_GENERATION",
+            "LLM_REASONING_GRAPH_GENERATION",
+        ),
+    )
+    llm_reasoning_quiz_generation: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_QUIZ_GENERATION",
+            "LLM_REASONING_QUIZ_GENERATION",
         ),
     )
 

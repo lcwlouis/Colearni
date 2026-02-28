@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from adapters.db.dependencies import get_db_session
 from adapters.llm.factory import build_graph_llm_client
 from adapters.embeddings.factory import build_embedding_provider
@@ -22,6 +24,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/workspaces/{ws_id}/knowledge-base", tags=["knowledge-base"])
+
+_log = logging.getLogger("colearni.api.knowledge_base")
 
 
 @router.get("/documents", response_model=KBDocumentListResponse)
@@ -195,6 +199,7 @@ async def upload_kb_document(
     Embeddings, summary, and graph extraction run in a background task.
     """
     raw_bytes = await file.read()
+    _log.info("upload received ws=%s file=%s size=%d", ws.workspace_id, file.filename, len(raw_bytes))
     if len(raw_bytes) == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
     if len(raw_bytes) > 20 * 1024 * 1024:
@@ -222,6 +227,7 @@ async def upload_kb_document(
 
     # Schedule heavy processing (embeddings, summary, graph) in background
     if result.created:
+        _log.info("upload fast-ingest done doc=%s chunks=%d, scheduling background tasks", result.document_id, result.chunk_count)
         graph_llm = getattr(app_state, "graph_llm_client", None) if app_state else None
         if graph_llm is None:
             try:

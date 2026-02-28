@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import re
+
 from adapters.db.documents import DocumentRow, get_document_by_id
 from adapters.db.mastery import get_mastery_status
 from adapters.embeddings.factory import build_embedding_provider
@@ -10,6 +13,7 @@ from core.contracts import GraphLLMClient
 from core.observability import (
     SPAN_KIND_CHAIN,
     observation_context,
+    record_content_enabled,
     set_input_output,
     set_span_kind,
     start_span,
@@ -39,13 +43,16 @@ from domain.chat.prompt_kit import (
     classify_social_intent,
     get_persona,
 )
-from domain.chat.session_memory import load_assessment_context, load_history_text, persist_turn
+from domain.chat.session_memory import load_assessment_context, load_flashcard_progress, load_history_text, persist_turn
 from domain.chat.tutor_agent import build_tutor_response_text, resolve_tutor_style
+from domain.learning.level_up import get_latest_quiz_summary_for_concept
 from domain.readiness.analyzer import build_readiness_actions
 from domain.retrieval.fts_retriever import PgFtsRetriever
 from domain.retrieval.hybrid_retriever import HybridRetriever
 from domain.retrieval.types import RankedChunk
 from domain.retrieval.vector_retriever import PgVectorRetriever
+
+log = logging.getLogger("domain.chat.respond")
 
 
 def generate_chat_response(
@@ -73,7 +80,23 @@ def generate_chat_response(
         # ── Slice 13: Social intent fast-path ─────────────────────────
         if active_settings.social_intent_enabled and classify_social_intent(request.query):
             persona = get_persona(active_settings.tutor_persona)
-            social_text = build_social_response(request.query, persona=persona)
+            # Use LLM for social responses when available, fall back to templated
+            social_llm = _build_tutor_llm_client(settings=active_settings)
+            if social_llm is not None:
+                social_prompt = (
+                    f"{persona.get('system_prefix', '')}\n\n"
+                    "The user sent a casual/social message. Respond naturally and warmly "
+                    "as the CoLearni tutor (1-2 sentences). Stay in character.\n\n"
+                    f"USER: {request.query}"
+                )
+                try:
+                    social_text = social_llm.generate_tutor_text(prompt=social_prompt).strip()
+                except (RuntimeError, ValueError):
+                    social_text = ""
+                if not social_text:
+                    social_text = build_social_response(request.query, persona=persona)
+            else:
+                social_text = build_social_response(request.query, persona=persona)
             envelope = AssistantResponseEnvelope(
                 kind=AssistantResponseKind.ANSWER,
                 text=social_text,
@@ -190,6 +213,61 @@ def generate_chat_response(
             ),
         )
 
+        # S34: Build quiz context for current concept
+        quiz_context = _build_quiz_context(
+            session=session,
+            workspace_id=request.workspace_id,
+            user_id=request.user_id,
+            concept_id=(
+                concept_resolution.resolved_concept.concept_id
+                if concept_resolution.resolved_concept is not None
+                else None
+            ),
+        )
+
+        # S45: Load flashcard progress snapshot
+        flashcard_progress = load_flashcard_progress(
+            session,
+            workspace_id=request.workspace_id,
+            user_id=request.user_id,
+            concept_id=(
+                concept_resolution.resolved_concept.concept_id
+                if concept_resolution.resolved_concept is not None
+                else None
+            ),
+        )
+
+        # ── F1/F4: Enrich span with assembled chat context ───────────
+        resolved_name = (
+            concept_resolution.resolved_concept.canonical_name
+            if concept_resolution.resolved_concept is not None
+            else None
+        )
+        log.info(
+            "chat.respond ws=%s session=%s concept=%s chunks=%d confidence=%.2f clarify=%s",
+            request.workspace_id,
+            request.session_id,
+            resolved_name,
+            len(ranked_chunks),
+            concept_resolution.confidence,
+            concept_resolution.requires_clarification,
+        )
+        if span is not None and record_content_enabled():
+            span.set_attribute("chat.history_text_len", len(history_text))
+            span.set_attribute("chat.assessment_context_len", len(assessment_context))
+            span.set_attribute("chat.flashcard_progress_len", len(flashcard_progress))
+            span.set_attribute("chat.retrieval_chunk_count", len(ranked_chunks))
+            span.set_attribute("chat.evidence_count", len(evidence))
+            if resolved_name:
+                span.set_attribute("chat.resolved_concept", resolved_name)
+            span.set_attribute("chat.concept_confidence", concept_resolution.confidence)
+            span.set_attribute("chat.requires_clarification", concept_resolution.requires_clarification)
+            if concept_resolution.switch_suggestion is not None:
+                span.set_attribute(
+                    "chat.switch_suggestion",
+                    f"{concept_resolution.switch_suggestion.from_concept_name} -> {concept_resolution.switch_suggestion.to_concept_name}",
+                )
+
         assistant_text = (
             concept_resolution.clarification_prompt
             if concept_resolution.requires_clarification
@@ -205,6 +283,8 @@ def generate_chat_response(
                     workspace_id=request.workspace_id,
                     chunks=ranked_chunks,
                 ),
+                quiz_context=quiz_context,
+                flashcard_progress=flashcard_progress,
             )
         )
 
@@ -214,6 +294,9 @@ def generate_chat_response(
             citations=citations,
         )
         envelope = verify_assistant_draft(draft=draft, grounding_mode=grounding_mode)
+
+        # Filter citations to only those actually referenced in the response text
+        envelope = _filter_used_citations(envelope)
 
         meta = ConversationMeta(
             session_id=request.session_id,
@@ -254,7 +337,8 @@ def generate_chat_response(
                     limit=2,
                 )
             except Exception:
-                pass  # Non-critical: don't fail chat if readiness is unavailable
+                if callable(getattr(session, "rollback", None)):
+                    session.rollback()  # Reset failed transaction state
         envelope = envelope.model_copy(
             update={"actions": actions, "response_mode": "grounded"}
         )
@@ -268,6 +352,11 @@ def generate_chat_response(
             user_id=request.user_id,
             user_text=request.query,
             assistant_payload=envelope.model_dump(mode="json"),
+            concept_name=(
+                concept_resolution.resolved_concept.canonical_name
+                if concept_resolution.resolved_concept is not None
+                else None
+            ),
         )
         return envelope
 
@@ -281,6 +370,8 @@ def _generate_tutor_text(
     history_text: str,
     assessment_context: str,
     document_summaries: str = "",
+    quiz_context: str = "",
+    flashcard_progress: str = "",
 ) -> str:
     """Build a rich tutor prompt via prompt_kit and call the LLM.
 
@@ -288,15 +379,28 @@ def _generate_tutor_text(
     prompt fails or the LLM is unavailable.
     """
     style = resolve_tutor_style(mastery_status=mastery_status)
-    persona = get_persona("openclaw")
+    persona = get_persona("colearni")
+    # Merge quiz context into assessment context
+    combined_assessment = assessment_context
+    if quiz_context:
+        combined_assessment = f"{assessment_context}\n\n{quiz_context}" if assessment_context else quiz_context
     prompt = build_full_tutor_prompt(
         query=query,
         evidence=evidence,
         persona=persona,
         style=style,
-        assessment_context=assessment_context,
+        assessment_context=combined_assessment,
         history_summary=history_text,
         document_summaries=document_summaries,
+        flashcard_progress=flashcard_progress,
+    )
+    log.debug(
+        "tutor prompt assembled: %d chars, history=%d, assessment=%d, docs=%d, flashcards=%d",
+        len(prompt),
+        len(history_text),
+        len(combined_assessment),
+        len(document_summaries),
+        len(flashcard_progress),
     )
     if llm_client is not None:
         try:
@@ -362,6 +466,28 @@ def _build_workspace_citations(evidence: list[EvidenceItem]) -> list[Citation]:
             )
         )
     return citations
+
+
+_EVIDENCE_REF_RE = re.compile(r"\be(\d+)\b", re.IGNORECASE)
+
+
+def _filter_used_citations(envelope: AssistantResponseEnvelope) -> AssistantResponseEnvelope:
+    """Keep only citations/evidence whose IDs are mentioned in the response text."""
+    if not envelope.citations or not envelope.evidence:
+        return envelope
+    referenced_ids = set(_EVIDENCE_REF_RE.findall(envelope.text))
+    if not referenced_ids:
+        # LLM did not use explicit e1/e2 markers — keep all citations
+        return envelope
+    used_evidence_ids = {f"e{n}" for n in referenced_ids}
+    filtered_evidence = [e for e in envelope.evidence if e.evidence_id in used_evidence_ids]
+    filtered_citations = [c for c in envelope.citations if c.evidence_id in used_evidence_ids]
+    if not filtered_citations:
+        # Safety: if filter removes everything, keep originals
+        return envelope
+    return envelope.model_copy(
+        update={"evidence": filtered_evidence, "citations": filtered_citations}
+    )
 
 
 def _resolve_mastery_status(
@@ -484,6 +610,8 @@ def _workspace_has_no_chunks(session: Session, workspace_id: int) -> bool:
         )
         return row is None
     except Exception:
+        if callable(getattr(session, "rollback", None)):
+            session.rollback()
         return False
 
 
@@ -503,6 +631,42 @@ def _build_document_summaries_context(
         if doc and doc.summary:
             summaries.append(f"- {doc.title}: {doc.summary}")
     return "\n".join(summaries)
+
+
+def _build_quiz_context(
+    *,
+    session: Session,
+    workspace_id: int,
+    user_id: int | None,
+    concept_id: int | None,
+) -> str:
+    """Build a short quiz status context string for the tutor prompt."""
+    if user_id is None or concept_id is None:
+        return ""
+    try:
+        summary = get_latest_quiz_summary_for_concept(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            concept_id=concept_id,
+        )
+    except Exception:
+        if callable(getattr(session, "rollback", None)):
+            session.rollback()
+        return ""
+    if summary is None or not summary.get("attempted"):
+        return ""
+    score = summary.get("score")
+    passed = summary.get("passed")
+    feedback = summary.get("overall_feedback", "")
+    parts = [f"LATEST QUIZ FOR ACTIVE CONCEPT (quiz_id={summary['quiz_id']}):"]
+    if score is not None:
+        parts.append(f"- Score: {score:.0%}")
+    if passed is not None:
+        parts.append(f"- Result: {'PASSED' if passed else 'NOT YET PASSED'}")
+    if feedback:
+        parts.append(f"- Feedback: {feedback}")
+    return "\n".join(parts)
 
 
 __all__ = ["generate_chat_response"]

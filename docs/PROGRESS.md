@@ -617,3 +617,27 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Fix: Replaced the dead-end system message with an automatic follow-up API call. When the user clicks "Keep current", the handler sets `switchDecisionRef.current = "reject"` (via ref for synchronous availability) and immediately calls `onSubmitChat("Which concept should we focus on?")`. This triggers the backend's concept resolution with `switch_decision == "reject"`, which returns the clarification prompt directly. Added `switchDecisionRef` to avoid stale closure issues with React state batching.
 - Files: `apps/web/app/tutor/page.tsx`
 
+#### F1 — Chat History Observability (Completed)
+- Root cause: The `chat.respond` CHAIN span only recorded the raw user query and final output text. Rich context (history, assessment, flashcards, evidence, concept resolution) assembled into the LLM prompt was invisible in traces and logs.
+- Fix: Added span attributes for all chat context components: `chat.history_text_len`, `chat.assessment_context_len`, `chat.flashcard_progress_len`, `chat.retrieval_chunk_count`, `chat.evidence_count`, `chat.resolved_concept`, `chat.concept_confidence`, `chat.requires_clarification`, `chat.switch_suggestion`. Added `log.info` call with structured key=value format. Added `log.debug` in `_generate_tutor_text` with full prompt length breakdown.
+- Files: `domain/chat/respond.py`
+
+#### F2 — LangChain Evaluation (Completed)
+- Assessment: After thorough investigation, **LangChain migration is NOT recommended** for this codebase. Reasons:
+  1. Current approach works well: Custom `_call_with_observability()` in providers.py already records OpenInference spans with input messages, response, token usage, and model name. F1 closes the remaining gap.
+  2. Minimal surface area: Only 3 LLM capabilities — LangChain's agent/chain abstractions add overhead without proportional benefit.
+  3. Dependency weight: LangChain adds ~50+ transitive dependencies; current approach uses only `openai` + `litellm`.
+  4. JSON schema mode: Native `response_format` support works cleanly; LangChain adds an indirection layer.
+  5. Phoenix compatibility: OTel + OpenInference conventions already produce full traces in Phoenix.
+- Recommendation: Continue with current approach. F1+F4 improvements close the observability gap.
+
+#### F3 — Ingestion Pipeline Debug (Completed)
+- Root cause: `run_post_ingest_tasks()` had minimal logging — only `log.exception` for failures. No visibility into which stage was running, how many chunks were processed, or whether summary/graph extraction succeeded.
+- Fix: Added structured `log.info` calls at every stage boundary: START, chunk load count, embedding START/DONE, summary generated with length, graph START/DONE, overall DONE. Each log line includes workspace_id and document_id. Added upload logging in the KB route.
+- Files: `core/ingestion.py`, `apps/api/routes/knowledge_base.py`
+
+#### F4 — Backend Logging (Completed)
+- Root cause: No request-level logging, no configurable log level, no structured log format, zero Python logging in chat pipeline.
+- Fix: Added `APP_LOG_LEVEL` setting (default INFO). Configured `logging.basicConfig()` in `create_app()` with structured format. Added request/response logging in `CorrelationIdMiddleware` (method, path, status, elapsed ms, request ID). Added module-level loggers in respond.py and knowledge_base.py.
+- Files: `core/settings.py`, `apps/api/main.py`, `apps/api/middleware.py`, `domain/chat/respond.py`, `apps/api/routes/knowledge_base.py`
+
