@@ -16,8 +16,11 @@ from core.observability import (
     set_llm_span_attributes,
     start_span,
 )
+from core.prompting import PromptRegistry
 
 log = logging.getLogger("adapters.llm.providers")
+
+_registry = PromptRegistry()
 
 _RAW_GRAPH_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -108,10 +111,16 @@ class _BaseGraphLLMClient(ABC):
         self._reasoning_enabled = reasoning_enabled
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
+        try:
+            prompt = _registry.render(
+                "graph_extract_chunk_v1", {"chunk_text": chunk_text}
+            )
+        except Exception:
+            prompt = f"Extract concept+edge JSON from this chunk.\n\nCHUNK:\n{chunk_text}"
         return self._chat_json(
             schema_name="graph_raw_extraction",
             schema=_RAW_GRAPH_SCHEMA,
-            prompt=f"Extract concept+edge JSON from this chunk.\n\nCHUNK:\n{chunk_text}",
+            prompt=prompt,
         )
 
     def disambiguate(
@@ -121,15 +130,24 @@ class _BaseGraphLLMClient(ABC):
         context_snippet: str | None,
         candidates: Sequence[Mapping[str, object]],
     ) -> Mapping[str, Any]:
-        return self._chat_json(
-            schema_name="graph_disambiguation",
-            schema=_DISAMBIGUATION_SCHEMA,
-            prompt=(
+        candidates_json = json.dumps(list(candidates), ensure_ascii=True)
+        try:
+            prompt = _registry.render("graph_disambiguate_v1", {
+                "raw_name": raw_name,
+                "context_snippet": context_snippet or "",
+                "candidates_json": candidates_json,
+            })
+        except Exception:
+            prompt = (
                 "Choose MERGE_INTO or CREATE_NEW.\n"
                 f"RAW_NAME: {raw_name}\n"
                 f"CONTEXT: {context_snippet or ''}\n"
-                f"CANDIDATES_JSON: {json.dumps(list(candidates), ensure_ascii=True)}"
-            ),
+                f"CANDIDATES_JSON: {candidates_json}"
+            )
+        return self._chat_json(
+            schema_name="graph_disambiguation",
+            schema=_DISAMBIGUATION_SCHEMA,
+            prompt=prompt,
         )
 
     def generate_tutor_text(self, *, prompt: str) -> str:
