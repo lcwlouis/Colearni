@@ -1,4 +1,4 @@
-export type UploadQueuePhase = "queued" | "uploading" | "uploaded" | "failed";
+export type UploadQueuePhase = "queued" | "uploading" | "uploaded" | "processing" | "done" | "failed";
 
 export interface UploadQueueSeed {
   localId: string;
@@ -10,14 +10,19 @@ export interface UploadQueueItem {
   fileName: string;
   phase: UploadQueuePhase;
   chunkCount: number | null;
+  documentId: number | null;
   error: string | null;
 }
 
 export type UploadQueueAction =
   | { type: "enqueue"; items: UploadQueueSeed[] }
   | { type: "mark_uploading"; localId: string }
-  | { type: "mark_uploaded"; localId: string; chunkCount: number }
-  | { type: "mark_failed"; localId: string; error: string };
+  | { type: "mark_uploaded"; localId: string; chunkCount: number; documentId: number }
+  | { type: "mark_processing"; localId: string }
+  | { type: "mark_done"; localId: string }
+  | { type: "mark_failed"; localId: string; error: string }
+  | { type: "dismiss"; localId: string }
+  | { type: "dismiss_done" };
 
 export function uploadQueueReducer(
   state: UploadQueueItem[],
@@ -29,6 +34,7 @@ export function uploadQueueReducer(
       fileName: item.fileName,
       phase: "queued" as const,
       chunkCount: null,
+      documentId: null,
       error: null,
     }));
     return [...state, ...next];
@@ -43,7 +49,21 @@ export function uploadQueueReducer(
   if (action.type === "mark_uploaded") {
     return state.map((item) =>
       item.localId === action.localId
-        ? { ...item, phase: "uploaded", chunkCount: action.chunkCount, error: null }
+        ? { ...item, phase: "uploaded", chunkCount: action.chunkCount, documentId: action.documentId, error: null }
+        : item,
+    );
+  }
+  if (action.type === "mark_processing") {
+    return state.map((item) =>
+      item.localId === action.localId
+        ? { ...item, phase: "processing", error: null }
+        : item,
+    );
+  }
+  if (action.type === "mark_done") {
+    return state.map((item) =>
+      item.localId === action.localId
+        ? { ...item, phase: "done", error: null }
         : item,
     );
   }
@@ -53,6 +73,12 @@ export function uploadQueueReducer(
         ? { ...item, phase: "failed", error: action.error }
         : item,
     );
+  }
+  if (action.type === "dismiss") {
+    return state.filter((item) => item.localId !== action.localId);
+  }
+  if (action.type === "dismiss_done") {
+    return state.filter((item) => item.phase !== "done");
   }
   return state;
 }

@@ -16,6 +16,7 @@ describe("uploadQueueReducer", () => {
         fileName: "a.md",
         phase: "queued",
         chunkCount: null,
+        documentId: null,
         error: null,
       },
       {
@@ -23,6 +24,7 @@ describe("uploadQueueReducer", () => {
         fileName: "b.pdf",
         phase: "queued",
         chunkCount: null,
+        documentId: null,
         error: null,
       },
     ]);
@@ -40,12 +42,23 @@ describe("uploadQueueReducer", () => {
       type: "mark_uploaded",
       localId: "x",
       chunkCount: 3,
+      documentId: 42,
     });
     expect(state[0]).toMatchObject({
       phase: "uploaded",
       chunkCount: 3,
+      documentId: 42,
       error: null,
     });
+
+    state = uploadQueueReducer(state, { type: "mark_processing", localId: "x" });
+    expect(state[0]?.phase).toBe("processing");
+
+    state = uploadQueueReducer(state, { type: "mark_done", localId: "x" });
+    expect(state[0]?.phase).toBe("done");
+
+    state = uploadQueueReducer(state, { type: "dismiss_done" });
+    expect(state).toEqual([]);
   });
 
   it("records upload failures", () => {

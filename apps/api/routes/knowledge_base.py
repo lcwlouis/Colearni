@@ -11,11 +11,13 @@ from core.ingestion import (
     IngestionValidationError,
     IngestionGraphProviderError,
     IngestionGraphUnavailableError,
-    ingest_text_document,
+    ingest_text_document_fast,
+    run_post_ingest_tasks,
 )
 from core.schemas import KBDocumentListResponse, KBDocumentSummary
 from core.settings import Settings
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File, Form, status
+from domain.graph.orphan_pruner import prune_orphan_graph_nodes
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile, File, Form, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -88,6 +90,10 @@ def delete_kb_document(
     document_id: int,
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
+    prune_orphan_graph: bool = Query(
+        default=False,
+        description="Remove canonical graph nodes/edges with no remaining provenance after deletion.",
+    ),
 ) -> Response:
     """Delete a document and its chunks from the knowledge base."""
     doc = (
@@ -134,6 +140,8 @@ def delete_kb_document(
         text("DELETE FROM documents WHERE id = :did AND workspace_id = :wid"),
         {"did": document_id, "wid": ws.workspace_id},
     )
+    if prune_orphan_graph:
+        prune_orphan_graph_nodes(db, workspace_id=ws.workspace_id)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -172,15 +180,20 @@ def reprocess_kb_document(
     }
 
 
-@router.post("/documents/upload", status_code=status.HTTP_201_CREATED)
+@router.post("/documents/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_kb_document(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> dict[str, object]:
-    """Upload a document (txt, md, pdf) to the workspace knowledge base."""
+    """Upload a document (txt, md, pdf) to the workspace knowledge base.
+
+    Uses the fast-path ingest (parse + chunks only) and returns immediately.
+    Embeddings, summary, and graph extraction run in a background task.
+    """
     raw_bytes = await file.read()
     if len(raw_bytes) == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
@@ -189,27 +202,9 @@ async def upload_kb_document(
 
     app_state = getattr(request.app, "state", None)
     settings: Settings | None = getattr(app_state, "settings", None) if app_state else None
-    graph_llm = getattr(app_state, "graph_llm_client", None) if app_state else None
-    if graph_llm is None:
-        try:
-            graph_llm = build_graph_llm_client(settings=settings)
-        except (ValueError, RuntimeError):
-            graph_llm = None
-    graph_embed = getattr(app_state, "graph_embedding_provider", None) if app_state else None
-    if graph_embed is None:
-        try:
-            graph_embed = build_embedding_provider(settings=settings)
-        except (ValueError, RuntimeError):
-            graph_embed = None
-    chunk_embed = getattr(app_state, "chunk_embedding_provider", None) if app_state else None
-    if chunk_embed is None:
-        try:
-            chunk_embed = build_embedding_provider(settings=settings)
-        except (ValueError, RuntimeError):
-            chunk_embed = None
 
     try:
-        result = ingest_text_document(
+        result = ingest_text_document_fast(
             db,
             request=IngestionRequest(
                 workspace_id=ws.workspace_id,
@@ -220,17 +215,41 @@ async def upload_kb_document(
                 title=title,
                 source_uri=None,
             ),
+            settings=settings,
+        )
+    except IngestionValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    # Schedule heavy processing (embeddings, summary, graph) in background
+    if result.created:
+        graph_llm = getattr(app_state, "graph_llm_client", None) if app_state else None
+        if graph_llm is None:
+            try:
+                graph_llm = build_graph_llm_client(settings=settings)
+            except (ValueError, RuntimeError):
+                graph_llm = None
+        graph_embed = getattr(app_state, "graph_embedding_provider", None) if app_state else None
+        if graph_embed is None:
+            try:
+                graph_embed = build_embedding_provider(settings=settings)
+            except (ValueError, RuntimeError):
+                graph_embed = None
+        chunk_embed = getattr(app_state, "chunk_embedding_provider", None) if app_state else None
+        if chunk_embed is None:
+            try:
+                chunk_embed = build_embedding_provider(settings=settings)
+            except (ValueError, RuntimeError):
+                chunk_embed = None
+
+        background_tasks.add_task(
+            run_post_ingest_tasks,
+            workspace_id=ws.workspace_id,
+            document_id=result.document_id,
             graph_llm_client=graph_llm,
             graph_embedding_provider=graph_embed,
             chunk_embedding_provider=chunk_embed,
             settings=settings,
         )
-    except IngestionValidationError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except IngestionGraphUnavailableError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    except IngestionGraphProviderError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return {
         "document_id": result.document_id,

@@ -11,6 +11,11 @@ import {
 
 type PendingAction = { type: "delete" | "reprocess"; documentId: number } | null;
 
+/** Polling interval (ms) for background-ingestion status checks. */
+const POLL_INTERVAL_MS = 4000;
+/** Auto-dismiss completed queue items after this delay (ms). */
+const AUTO_CLEAR_DELAY_MS = 5000;
+
 export default function KBPage() {
   const auth = useRequireAuth();
   const wsId = auth.activeWorkspaceId ?? "";
@@ -24,6 +29,8 @@ export default function KBPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [processingDocId, setProcessingDocId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchDocuments = useCallback(async () => {
     if (!wsId) return;
@@ -32,12 +39,44 @@ export default function KBPage() {
     try {
       const res = await apiClient.listKBDocuments(wsId);
       setDocuments(res.documents);
+      return res.documents;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load documents.");
+      return null;
     } finally {
       setLoading(false);
     }
   }, [wsId]);
+
+  /** Stop any active background polling. */
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  /** Start polling for background-ingestion completion. */
+  const startPolling = useCallback(() => {
+    stopPolling();
+    pollTimerRef.current = setInterval(async () => {
+      if (!wsId) return;
+      try {
+        const res = await apiClient.listKBDocuments(wsId);
+        setDocuments(res.documents);
+      } catch {
+        // swallow polling errors — next tick will retry
+      }
+    }, POLL_INTERVAL_MS);
+  }, [wsId, stopPolling]);
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      stopPolling();
+      if (autoClearTimerRef.current) clearTimeout(autoClearTimerRef.current);
+    };
+  }, [stopPolling]);
 
   useEffect(() => {
     fetchDocuments();
@@ -88,7 +127,10 @@ export default function KBPage() {
           type: "mark_uploaded",
           localId: uploadSeed.localId,
           chunkCount: result.chunk_count,
+          documentId: result.document_id,
         });
+        // Transition to processing — background tasks are running
+        dispatchUploadQueue({ type: "mark_processing", localId: uploadSeed.localId });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Failed to upload document.";
         errors.push(`${file.name}: ${message}`);
@@ -100,20 +142,57 @@ export default function KBPage() {
       }
     }
 
+    // Refresh document list immediately to show newly-inserted docs
     await fetchDocuments();
     setUploading(false);
 
+    if (uploadedCount > 0) {
+      // Start polling for background ingestion status updates
+      startPolling();
+    }
+
     if (uploadedCount === filesToUpload.length) {
-      setInfo(`Uploaded ${uploadedCount} document${uploadedCount === 1 ? "" : "s"}.`);
+      setInfo(`Uploaded ${uploadedCount} document${uploadedCount === 1 ? "" : "s"}. Background processing in progress…`);
       return;
     }
     if (uploadedCount > 0) {
-      setInfo(`Uploaded ${uploadedCount} of ${filesToUpload.length} documents.`);
+      setInfo(`Uploaded ${uploadedCount} of ${filesToUpload.length} documents. Background processing in progress…`);
       setError(errors.join(" | "));
       return;
     }
     setError(errors.join(" | ") || "Failed to upload documents.");
-  }, [selectedFiles, wsId, fetchDocuments]);
+  }, [selectedFiles, wsId, fetchDocuments, startPolling]);
+
+  // ── B2: Auto-clear queue when background processing completes ──────
+  useEffect(() => {
+    const processingItems = uploadQueue.filter((q) => q.phase === "processing");
+    if (processingItems.length === 0) {
+      // No items processing — stop polling
+      stopPolling();
+      return;
+    }
+    // Check each processing item against the documents list
+    let allDone = true;
+    for (const qItem of processingItems) {
+      if (!qItem.documentId) continue;
+      const doc = documents.find((d) => d.document_id === qItem.documentId);
+      if (doc && doc.ingestion_status === "ingested") {
+        // Background ingestion is complete for this doc
+        dispatchUploadQueue({ type: "mark_done", localId: qItem.localId });
+      } else {
+        allDone = false;
+      }
+    }
+    if (allDone) {
+      stopPolling();
+      // Schedule auto-dismiss of completed items
+      if (autoClearTimerRef.current) clearTimeout(autoClearTimerRef.current);
+      autoClearTimerRef.current = setTimeout(() => {
+        dispatchUploadQueue({ type: "dismiss_done" });
+        autoClearTimerRef.current = null;
+      }, AUTO_CLEAR_DELAY_MS);
+    }
+  }, [uploadQueue, documents, stopPolling]);
 
   const handleConfirmAction = useCallback(async () => {
     if (!pendingAction || !wsId) return;
@@ -140,10 +219,10 @@ export default function KBPage() {
   if (auth.isLoading) return <p>Loading…</p>;
 
   return (
-    <div className="kb-page" style={{ height: "100%", overflowY: "auto", background: "var(--bg)" }}>
+    <div className="kb-page">
       <div className="kb-header">
         <div>
-          <h1 className="kb-title">Knowledge Base</h1>
+          <h1 className="kb-title">Sources</h1>
           <p className="kb-subtitle">Upload documents, confirm ingestion, and verify graph extraction.</p>
         </div>
         <div className="kb-upload-controls">
@@ -156,7 +235,7 @@ export default function KBPage() {
             className="hidden"
             style={{ display: "none" }}
             id="kb-upload"
-            aria-label="Choose knowledge base file"
+            aria-label="Choose source file"
           />
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -205,18 +284,32 @@ export default function KBPage() {
             {uploadQueue.map((item) => (
               <li key={item.localId}>
                 <span className="kb-upload-file">{item.fileName}</span>
-                <span className={`kb-badge ${item.phase === "uploaded" ? "ok" : item.phase === "failed" ? "failed" : "pending"}`}>
-                  {item.phase}
+                <span className={`kb-badge ${item.phase === "uploaded" || item.phase === "done" ? "ok" : item.phase === "failed" ? "failed" : "pending"}`}>
+                  {item.phase === "processing" ? "processing" : item.phase === "done" ? "done" : item.phase}
                 </span>
                 <span className="kb-meta">
                   {item.phase === "uploading"
-                    ? "Ingesting document and graph..."
+                    ? "Uploading..."
                     : item.phase === "uploaded"
-                      ? `Ingested ${item.chunkCount ?? 0} chunk${item.chunkCount === 1 ? "" : "s"}.`
-                      : item.phase === "failed"
-                        ? item.error ?? "Upload failed."
-                        : "Waiting to upload..."}
+                      ? `Saved ${item.chunkCount ?? 0} chunk${item.chunkCount === 1 ? "" : "s"}. Background processing will continue.`
+                      : item.phase === "processing"
+                        ? `${item.chunkCount ?? 0} chunk${item.chunkCount === 1 ? "" : "s"} saved. Embeddings & graph building…`
+                        : item.phase === "done"
+                          ? `Complete — ${item.chunkCount ?? 0} chunk${item.chunkCount === 1 ? "" : "s"} ingested.`
+                          : item.phase === "failed"
+                            ? item.error ?? "Upload failed."
+                            : "Waiting to upload..."}
                 </span>
+                {item.phase === "failed" && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    style={{ fontSize: "0.78rem", padding: "0.15rem 0.5rem" }}
+                    onClick={() => dispatchUploadQueue({ type: "dismiss", localId: item.localId })}
+                  >
+                    Dismiss
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -234,41 +327,46 @@ export default function KBPage() {
           <table className="kb-table">
             <thead>
               <tr>
-                <th className="px-4 py-3">Title</th>
-                <th className="px-4 py-3">Ingestion</th>
-                <th className="px-4 py-3">Graph</th>
-                <th className="px-4 py-3">Chunks</th>
-                <th className="px-4 py-3">Uploaded</th>
-                <th className="px-4 py-3">Actions</th>
+                <th>Title</th>
+                <th>Description</th>
+                <th>Ingestion</th>
+                <th>Graph</th>
+                <th>Chunks</th>
+                <th>Uploaded</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {documents.map((doc) => (
                 <tr key={doc.document_id}>
-                  <td className="px-4 py-3">
-                    <div>
-                      {doc.title || doc.source_uri || `Document #${doc.document_id}`}
-                      {doc.summary && (
-                        <p className="kb-doc-summary">{doc.summary}</p>
-                      )}
-                    </div>
+                  <td>
+                    {doc.title || doc.source_uri || `Document #${doc.document_id}`}
                   </td>
-                  <td className="px-4 py-3">
+                  <td>
+                    {doc.summary ? (
+                      <p className="kb-doc-summary" title={doc.summary}>
+                        {doc.summary.length > 80 ? doc.summary.slice(0, 80) + '…' : doc.summary}
+                      </p>
+                    ) : (
+                      <span className="kb-meta">—</span>
+                    )}
+                  </td>
+                  <td>
                     <span className={`kb-badge ${doc.ingestion_status === "ingested" ? "ok" : "pending"}`}>
                       {doc.ingestion_status}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td>
                     <span className={`kb-badge ${doc.graph_status === "extracted" ? "ok" : doc.graph_status === "disabled" ? "disabled" : "pending"}`}>
                       {doc.graph_status}
                     </span>
                     <span className="kb-meta">{doc.graph_concept_count} concepts</span>
                   </td>
-                  <td className="px-4 py-3">{doc.chunk_count}</td>
-                  <td className="px-4 py-3">
+                  <td>{doc.chunk_count}</td>
+                  <td>
                     {new Date(doc.created_at).toLocaleDateString()}
                   </td>
-                  <td className="px-4 py-3">
+                  <td>
                     {pendingAction?.documentId === doc.document_id ? (
                       <div className="kb-inline-confirm">
                         <span>
