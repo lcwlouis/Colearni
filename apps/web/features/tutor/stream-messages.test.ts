@@ -4,6 +4,8 @@ import type { TimelineMessage } from "./types";
 import {
   appendStreamingAssistantDelta,
   removeStreamingAssistant,
+  setStreamingReasoningSummary,
+  setStreamingAnswerParts,
 } from "./stream-messages";
 
 describe("stream-messages", () => {
@@ -98,5 +100,55 @@ describe("stream-messages", () => {
       { id: "user-1", role: "user", text: "Hello" },
       { id: "user-2", role: "user", text: "Another" },
     ]);
+  });
+
+  // U5: reasoning summary tests
+  it("setStreamingReasoningSummary attaches summary to existing message", () => {
+    const messages: TimelineMessage[] = [
+      { id: "a-1", role: "assistant", text: "Streaming..." },
+    ];
+
+    const next = setStreamingReasoningSummary(messages, "a-1", "Reasoned for 512 tokens");
+    expect(next[0].reasoningSummary).toBe("Reasoned for 512 tokens");
+    expect(next[0].text).toBe("Streaming...");
+  });
+
+  it("setStreamingReasoningSummary is no-op for missing id", () => {
+    const messages: TimelineMessage[] = [
+      { id: "a-1", role: "assistant", text: "Text" },
+    ];
+
+    const next = setStreamingReasoningSummary(messages, "nonexistent", "summary");
+    expect(next).toBe(messages);
+  });
+
+  // U7: answer parts tests
+  it("setStreamingAnswerParts updates message body and stores parts", () => {
+    const messages: TimelineMessage[] = [
+      { id: "a-1", role: "assistant", text: "Full raw text with hint" },
+    ];
+
+    const next = setStreamingAnswerParts(messages, "a-1", { body: "Just the body", hint: "The hint" });
+    expect(next[0].text).toBe("Just the body");
+    expect(next[0].answerParts).toEqual({ body: "Just the body", hint: "The hint" });
+  });
+
+  it("setStreamingAnswerParts is no-op for missing id", () => {
+    const messages: TimelineMessage[] = [
+      { id: "a-1", role: "assistant", text: "Text" },
+    ];
+
+    const next = setStreamingAnswerParts(messages, "nonexistent", { body: "Body", hint: null });
+    expect(next).toBe(messages);
+  });
+
+  // U5: reasoning summary is only on streaming messages, not persisted
+  it("removeStreamingAssistant drops reasoningSummary with the message", () => {
+    const messages: TimelineMessage[] = [
+      { id: "a-1", role: "assistant", text: "Streaming...", reasoningSummary: "Reasoned for 256 tokens" },
+    ];
+
+    const next = removeStreamingAssistant(messages, "a-1");
+    expect(next).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import type { AssistantResponseEnvelope, ActionCTA } from "@/lib/api/types";
+import type { AssistantResponseEnvelope, ActionCTA, AnswerParts } from "@/lib/api/types";
 import { MarkdownContent } from "@/components/markdown-content";
 import { useState } from "react";
 
@@ -14,17 +14,15 @@ const ctaLabel: Record<string, string> = {
 };
 
 /**
- * Split response text into main content and hint sections.
- * Detects patterns like "**Hint:**", "**💡 Hint:**", "Hint:", etc.
+ * Derive structured answer parts from the envelope.
+ * Prefers backend-provided `answer_parts`; falls back to full text with no hint.
  */
-function splitHints(text: string): { main: string; hints: string[] } {
-  const hintPattern = /(?:^|\n)\s*(?:\*{0,2}💡?\s*)?(?:\*{0,2})(?:Hint|HINT)(?:\*{0,2})\s*:\s*/gm;
-  const parts = text.split(hintPattern);
-  if (parts.length <= 1) return { main: text, hints: [] };
-  return { main: parts[0].trimEnd(), hints: parts.slice(1).map((h) => h.trim()).filter(Boolean) };
+function getAnswerParts(response: AssistantResponseEnvelope): AnswerParts {
+  if (response.answer_parts) return response.answer_parts;
+  return { body: response.text, hint: null };
 }
 
-function CollapsibleHint({ hint, index }: { hint: string; index: number }) {
+export function CollapsibleHint({ hint, index }: { hint: string; index: number }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="chat-hint-section">
@@ -44,14 +42,12 @@ export function ChatResponse({ response, onCtaClick }: { response: AssistantResp
   const evidenceById = new Map(response.evidence.map((item) => [item.evidence_id, item]));
   const isSocial = response.response_mode === "social";
   const actions = response.actions ?? [];
-  const { main, hints } = splitHints(response.text);
+  const { body: main, hint } = getAnswerParts(response);
 
   return (
     <div className={`chat-response ${response.kind === "refusal" ? "refusal" : "answer"}`}>
       <MarkdownContent content={main} />
-      {hints.map((hint, i) => (
-        <CollapsibleHint key={i} hint={hint} index={i} />
-      ))}
+      {hint ? <CollapsibleHint hint={hint} index={0} /> : null}
       {response.kind === "refusal" ? (
         <div className="chat-refusal-callout" role="status">
           <p className="chat-refusal-title">

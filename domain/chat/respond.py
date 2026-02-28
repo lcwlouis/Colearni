@@ -46,6 +46,7 @@ from domain.chat.retrieval_context import (
 )
 from domain.chat.session_memory import load_assessment_context, load_flashcard_progress, load_history_text, persist_turn
 from domain.chat.social_turns import try_social_response
+from domain.chat.answer_parts import split_answer_parts
 from domain.readiness.analyzer import build_readiness_actions
 
 from core.schemas import ChatRespondRequest  # noqa: E402
@@ -318,7 +319,12 @@ def generate_chat_response(
                 if callable(getattr(session, "rollback", None)):
                     session.rollback()
         envelope = envelope.model_copy(
-            update={"actions": actions, "response_mode": "grounded", "generation_trace": generation_trace}
+            update={
+                "actions": actions,
+                "response_mode": "grounded",
+                "generation_trace": generation_trace,
+                "answer_parts": split_answer_parts(envelope.text),
+            }
         )
 
         set_input_output(span, output_value=envelope.text)

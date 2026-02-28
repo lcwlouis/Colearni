@@ -24,6 +24,7 @@ def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             json_temperature=active_settings.graph_llm_json_temperature,
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
+            reasoning_effort=active_settings.llm_reasoning_effort_chat,
         )
 
     if active_settings.graph_llm_provider == "litellm":
@@ -35,6 +36,7 @@ def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             json_temperature=active_settings.graph_llm_json_temperature,
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
+            reasoning_effort=active_settings.llm_reasoning_effort_chat,
         )
 
     raise ValueError(f"Unsupported graph_llm_provider: {active_settings.graph_llm_provider}")

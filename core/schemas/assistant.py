@@ -159,6 +159,17 @@ class ConversationMeta(BaseModel):
     concept_switch_suggestion: ConceptSwitchSuggestion | None = None
 
 
+class AnswerParts(BaseModel):
+    """Structured decomposition of an assistant answer.
+
+    Replaces frontend regex-based hint extraction with a backend-controlled
+    contract.  ``hint`` is ``None`` when the model did not include a hint.
+    """
+
+    body: str
+    hint: str | None = None
+
+
 class AssistantResponseEnvelope(BaseModel):
     """Verified assistant response payload returned to clients."""
 
@@ -172,6 +183,7 @@ class AssistantResponseEnvelope(BaseModel):
     response_mode: str = Field(default="grounded")
     actions: list[dict[str, object]] = Field(default_factory=list)
     generation_trace: GenerationTrace | None = None
+    answer_parts: AnswerParts | None = None
 
     @field_validator("text")
     @classmethod
@@ -223,11 +235,20 @@ class GenerationTrace(BaseModel):
     Only operational fields are included — no prompt text, no chain-of-thought,
     no retrieved evidence body copies.
 
-    Reasoning metadata (S2):
-    - ``reasoning_requested``: caller asked for reasoning (e.g. reasoning_effort).
+    Explicit reasoning control (U4):
+    - ``reasoning_requested``: the *app* asked for explicit reasoning params.
     - ``reasoning_supported``: the model is known to support reasoning params.
-    - ``reasoning_used``: reasoning params were actually sent to the provider.
-    - ``reasoning_tokens``: token count consumed by internal reasoning (if reported).
+    - ``reasoning_used``: explicit reasoning params were actually sent to the provider.
+    - ``reasoning_effort``: the effort level requested (``"low"``/``"medium"``/``"high"``),
+      or ``None`` if reasoning was not explicitly requested.
+    - ``reasoning_effort_source``: where the effort value came from
+      (``"settings"`` for env config, ``"override"`` for per-call override, ``None``
+      if not applicable).  Reserved: a future first-layer model may set ``"override"``.
+
+    Provider-reported reasoning metadata:
+    - ``reasoning_tokens``: token count consumed by provider-internal reasoning
+      (if reported).  This may be non-zero even when ``reasoning_requested`` is
+      ``False`` — it reflects the provider's behaviour, not the app's request.
     """
 
     provider: str | None = None
@@ -240,6 +261,8 @@ class GenerationTrace(BaseModel):
     reasoning_requested: bool | None = None
     reasoning_supported: bool | None = None
     reasoning_used: bool | None = None
+    reasoning_effort: str | None = None
+    reasoning_effort_source: str | None = None
 
 
 class ReadinessTopicState(BaseModel):

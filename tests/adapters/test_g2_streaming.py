@@ -121,14 +121,18 @@ class MockStreamingClient(_BaseGraphLLMClient):
         chunks: list[dict[str, Any]],
         blocking_response: dict[str, Any] | None = None,
         reasoning_enabled: bool = False,
+        reasoning_effort: str | None = None,
+        model: str = "mock-model",
     ) -> None:
         super().__init__(
-            model="mock-model",
+            model=model,
             timeout_seconds=10.0,
             provider="mock",
             reasoning_enabled=reasoning_enabled,
+            reasoning_effort=reasoning_effort,
         )
         self._chunks = chunks
+        self._last_effort_override: str | None = None
         self._blocking_response = blocking_response or {
             "choices": [{"message": {"content": "blocking text"}}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
@@ -148,7 +152,9 @@ class MockStreamingClient(_BaseGraphLLMClient):
         *,
         messages: list[dict[str, str]],
         temperature: float,
+        effort_override: str | None = None,
     ) -> Iterator[Mapping[str, Any]]:
+        self._last_effort_override = effort_override
         yield from self._chunks
 
 
@@ -355,3 +361,182 @@ class TestStreamingLLMSpan:
 
         llm_spans = self._llm_spans(otel_exporter)
         assert llm_spans[0].name == "llm.chat.respond"
+
+
+class TestBuildReasoningKwargs:
+    """U4: adapter-level effort propagation verification."""
+
+    _SIMPLE_CHUNKS = [
+        {"choices": [{"delta": {"content": "ok"}}]},
+        {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+    ]
+
+    def test_reasoning_disabled_returns_empty(self) -> None:
+        client = MockStreamingClient(chunks=self._SIMPLE_CHUNKS, reasoning_enabled=False)
+        assert client._build_reasoning_kwargs() == {}
+
+    def test_unsupported_model_returns_empty(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            model="gpt-4o",
+        )
+        assert client._build_reasoning_kwargs() == {}
+
+    def test_supported_model_default_effort(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            model="o3-mini",
+        )
+        assert client._build_reasoning_kwargs() == {"reasoning_effort": "medium"}
+
+    def test_configured_effort_propagates(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="high",
+            model="o3-mini",
+        )
+        assert client._build_reasoning_kwargs() == {"reasoning_effort": "high"}
+
+    def test_effort_override_takes_precedence(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="low",
+            model="o3-mini",
+        )
+        result = client._build_reasoning_kwargs(effort_override="high")
+        assert result == {"reasoning_effort": "high"}
+
+    def test_effort_override_ignored_when_disabled(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=False,
+            model="o3-mini",
+        )
+        assert client._build_reasoning_kwargs(effort_override="high") == {}
+
+
+class TestOverrideSeamTraceSemantics:
+    """U4: per-call override seam produces correct trace fields."""
+
+    _SIMPLE_CHUNKS = [
+        {"choices": [{"delta": {"content": "ok"}}]},
+        {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+    ]
+
+    def test_settings_effort_source(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="medium",
+            model="o3-mini",
+        )
+        stream = client.generate_tutor_text_stream(prompt="test")
+        list(stream)  # consume
+        assert stream.trace.reasoning_effort == "medium"
+        assert stream.trace.reasoning_effort_source == "settings"
+
+    def test_override_effort_source(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="low",
+            model="o3-mini",
+        )
+        stream = client.generate_tutor_text_stream(
+            prompt="test",
+            reasoning_effort_override="high",
+        )
+        list(stream)  # consume
+        assert stream.trace.reasoning_effort == "high"
+        assert stream.trace.reasoning_effort_source == "override"
+
+    def test_override_reaches_sdk_stream_call(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="low",
+            model="o3-mini",
+        )
+        stream = client.generate_tutor_text_stream(
+            prompt="test",
+            reasoning_effort_override="high",
+        )
+        list(stream)  # consume — triggers _sdk_stream_call
+        assert client._last_effort_override == "high"
+
+    def test_no_override_passes_none(self) -> None:
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="medium",
+            model="o3-mini",
+        )
+        stream = client.generate_tutor_text_stream(prompt="test")
+        list(stream)  # consume
+        assert client._last_effort_override is None
+
+
+class TestNoneEffortSemantics:
+    """U4: effort='none' disables explicit reasoning params entirely."""
+
+    _SIMPLE_CHUNKS = [
+        {"choices": [{"delta": {"content": "ok"}}]},
+        {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+    ]
+
+    def test_none_effort_returns_empty_kwargs(self) -> None:
+        """_build_reasoning_kwargs returns {} when effort resolves to 'none'."""
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="none",
+            model="o3-mini",
+        )
+        assert client._build_reasoning_kwargs() == {}
+
+    def test_none_effort_override_returns_empty_kwargs(self) -> None:
+        """Override of 'none' also returns {} even with configured effort."""
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="high",
+            model="o3-mini",
+        )
+        assert client._build_reasoning_kwargs(effort_override="none") == {}
+
+    def test_none_effort_trace_shows_not_used(self) -> None:
+        """When effort='none', trace records reasoning_used=False."""
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="none",
+            model="o3-mini",
+        )
+        stream = client.generate_tutor_text_stream(prompt="test")
+        list(stream)
+        assert stream.trace.reasoning_used is False
+        assert stream.trace.reasoning_effort is None
+        assert stream.trace.reasoning_effort_source is None
+        # But reasoning_requested still True (the app asked for it)
+        assert stream.trace.reasoning_requested is True
+
+    def test_none_override_trace_shows_not_used(self) -> None:
+        """Override of 'none' also sets reasoning_used=False."""
+        client = MockStreamingClient(
+            chunks=self._SIMPLE_CHUNKS,
+            reasoning_enabled=True,
+            reasoning_effort="high",
+            model="o3-mini",
+        )
+        stream = client.generate_tutor_text_stream(
+            prompt="test",
+            reasoning_effort_override="none",
+        )
+        list(stream)
+        assert stream.trace.reasoning_used is False
+        assert stream.trace.reasoning_effort is None
+        assert stream.trace.reasoning_effort_source is None

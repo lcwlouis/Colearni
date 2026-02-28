@@ -202,6 +202,11 @@ class _BaseGraphLLMClient(ABC):
         else:
             effort = self._reasoning_effort if used else None
             effort_source = "settings" if effort is not None else None
+        # "none" means disable explicit reasoning — no params sent to provider
+        if effort == "none":
+            used = False
+            effort = None
+            effort_source = None
         stream_obj = TutorTextStream(
             self._iter_nothing(),  # placeholder, replaced below
             provider=self._provider,
@@ -246,6 +251,8 @@ class _BaseGraphLLMClient(ABC):
             )
             return {}
         effort = effort_override or self._reasoning_effort or "medium"
+        if effort == "none":
+            return {}
         return {"reasoning_effort": effort}
 
     def _stream_with_usage(
@@ -440,6 +447,11 @@ class _BaseGraphLLMClient(ABC):
         else:
             effort = self._reasoning_effort if used else None
             effort_source = "settings" if effort is not None else None
+        # "none" means disable explicit reasoning — no params sent to provider
+        if effort == "none":
+            used = False
+            effort = None
+            effort_source = None
         trace = GenerationTrace(
             provider=self._provider,
             model=self._model,

@@ -8,7 +8,12 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from core.schemas.assistant import AssistantResponseEnvelope, GenerationTrace, GroundingMode
+from core.schemas.assistant import (
+    AnswerParts,
+    AssistantResponseEnvelope,
+    GenerationTrace,
+    GroundingMode,
+)
 
 ConceptSwitchDecision = Literal["accept", "reject"]
 
@@ -139,6 +144,28 @@ class ChatStreamErrorEvent(BaseModel):
     phase: ChatPhase | None = None
 
 
+class ChatStreamReasoningSummaryEvent(BaseModel):
+    """Ephemeral reasoning summary sent during a live turn.
+
+    Stream-only — never persisted in chat history or the final envelope.
+    Only emitted when the reasoning-summary feature is enabled.
+    """
+
+    event: Literal["reasoning_summary"] = "reasoning_summary"
+    summary: str
+
+
+class ChatStreamAnswerPartEvent(BaseModel):
+    """Structured answer-part event emitted after text generation completes.
+
+    Replaces frontend regex-based hint extraction with a backend-controlled
+    contract.
+    """
+
+    event: Literal["answer_parts"] = "answer_parts"
+    parts: AnswerParts
+
+
 ChatStreamEvent = Annotated[
     Union[
         ChatStreamStatusEvent,
@@ -146,6 +173,8 @@ ChatStreamEvent = Annotated[
         ChatStreamTraceEvent,
         ChatStreamFinalEvent,
         ChatStreamErrorEvent,
+        ChatStreamReasoningSummaryEvent,
+        ChatStreamAnswerPartEvent,
     ],
     Field(discriminator="event"),
 ]

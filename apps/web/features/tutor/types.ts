@@ -1,4 +1,4 @@
-import type { AssistantResponseEnvelope, ChatMessageRecord } from "@/lib/api/types";
+import type { AnswerParts, AssistantResponseEnvelope, ChatMessageRecord } from "@/lib/api/types";
 import { ApiError } from "@/lib/api/client";
 
 export type TimelineMessage = {
@@ -6,6 +6,10 @@ export type TimelineMessage = {
   role: "user" | "assistant" | "system";
   text: string;
   response?: AssistantResponseEnvelope;
+  /** Ephemeral reasoning summary — only populated during live streaming turns. */
+  reasoningSummary?: string;
+  /** Structured answer parts — populated during live streaming turns (U7). */
+  answerParts?: AnswerParts;
 };
 
 /** Lifecycle phases for the chat request indicator (E2). */

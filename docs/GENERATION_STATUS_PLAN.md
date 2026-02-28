@@ -171,19 +171,28 @@ The feature is only complete when a real browser run behaves like this:
 
 Current repo verification status:
 
-- `npm --prefix apps/web test -- features/tutor/visible-phase.test.ts features/tutor/stream-messages.test.ts lib/api/client.test.ts`: passing (`23 passed`)
-- `.venv/bin/pytest -q tests/domain/test_s1_phase_semantics.py tests/api/test_g3_stream.py tests/domain/test_s2_reasoning_metadata.py`: passing (`17 passed`)
+- `npm --prefix apps/web test -- features/tutor/visible-phase.test.ts features/tutor/stream-messages.test.ts lib/api/client.test.ts`: passing (`28 passed`)
+- `PYTHONPATH=. pytest -q tests/domain/test_u4_reasoning_effort.py tests/domain/test_u5_reasoning_summary.py tests/domain/test_u6_answer_parts.py tests/adapters/test_g2_streaming.py`: passing (`71 passed`)
+- `npm --prefix apps/web run typecheck`: passing
 - the pytest run emits OTLP exporter connection noise to `localhost:6006` after completion in this sandbox; tests still pass
-- no automated test currently covers ephemeral reasoning-summary UI
-- no automated test currently covers streamed hint/citation restructuring
-- no browser automation was run in this check
+- plain `pytest -q tests/domain/test_u4_reasoning_effort.py tests/domain/test_u5_reasoning_summary.py tests/domain/test_u6_answer_parts.py tests/adapters/test_g2_streaming.py` fails collection in this repo unless `PYTHONPATH=.` is set
+- the current backend settings process still loads `.env.local` only, so edits to repo-root `.env` do not affect `get_settings()` unless the runtime exports env vars separately
+- `"none"` reasoning-effort semantics are now fixed and covered by adapter tests
+- reasoning summaries now emit for provider-reported reasoning tokens even when `reasoning_used=False`
+- live browser verification is still open; no reliable Playwright snapshot/artifact was captured in this verification pass
+- backend and frontend are reachable locally:
+  - frontend: `http://127.0.0.1:3000/tutor`
+  - backend: `http://127.0.0.1:8000/healthz`
 
 Observed implementation state:
 
 - visible phase label work is landed and covered by unit tests
 - stream parser and delta assembly are landed
-- optional reasoning summaries are not implemented
-- structured hint/citation streaming is not implemented
+- explicit reasoning-effort settings and trace fields are only partially landed
+- optional reasoning-summary transport/UI is landed
+- structured answer parts are landed
+- streamed hint rendering is landed
+- citation rendering is still final-envelope-only by design; no provisional citation surface exists during the live stream
 
 ## Completed Work (Do Not Reopen Unless Blocked)
 
@@ -202,112 +211,105 @@ Do not reopen these slices unless the current fix is blocked by them or the code
 
 ## Current Findings
 
-### 1. Visible phase policy is implemented, but only code/test verified
+### 1. `U4` through `U8` now match the codebase
 
-`apps/web/features/tutor/types.ts` now collapses:
+The following work is landed and verified by targeted tests:
 
-- `thinking -> Thinking…`
-- `searching -> Thinking…`
-- `finalizing -> Thinking…`
-- `responding -> Generating response…`
+- explicit `reasoning_effort` settings and trace fields
+- reserved per-call `reasoning_effort_override` seam for future first-layer control
+- stream-only ephemeral reasoning-summary events
+- structured `answer_parts` on stream and final envelope paths
+- live hint rendering through the same `CollapsibleHint` surface used after finalization
 
-That work should be treated as landed. What remains is real browser verification, not a reimplementation of visible labels.
+That was the intended state, but this verification pass still finds one reopen-worthy defect in `U4`.
 
-### 2. Human-readable reasoning summaries do not exist yet
+### 2. Repo-root `.env` edits do not currently drive backend reasoning behavior
 
-The current frontend only shows a dev-only raw JSON trace panel from `response.generation_trace`.
+`core/settings.py` loads `env_file=".env.local"` only.
 
-That does not satisfy the requirement for an optional summarized reasoning surface.
+In this repo, there is no backend `.env.local`, while the repo-root `.env` contains the reasoning flags the user edited.
 
-### 3. The current trace contract would persist any new summary if added naively
+As a result, the current process resolves to defaults such as:
 
-`generation_trace` lives on `AssistantResponseEnvelope`, and the final envelope is persisted through chat history.
+- `llm_reasoning_chat=True`
+- `llm_reasoning_effort_chat=None`
+- `reasoning_summary_enabled=False`
 
-Therefore:
+unless those values are exported into the process environment some other way.
 
-- do NOT add a human-readable reasoning summary to `GenerationTrace`
-- do NOT add it to the persisted assistant envelope
-- if a summary is added, it must travel separately as a stream-only ephemeral payload
+This is why changing `.env` did not produce the behavior the user expected.
 
-### 4. There is no env toggle yet for reasoning-summary UI
+### 3. `reasoning_effort=none` does not disable explicit reasoning
 
-Current env examples only expose streaming toggles:
+`core/settings.py` accepts `"none"` as a valid effort value, but `adapters/llm/providers.py` passes it through as an actual provider kwarg on supported models.
 
-- backend: `APP_CHAT_STREAMING_ENABLED`
-- frontend: `NEXT_PUBLIC_CHAT_STREAMING_ENABLED`
+Today, for a supported model with `reasoning_enabled=True` and `reasoning_effort="none"`:
 
-There is no current flag for reasoning-summary collection or display.
+- `_build_reasoning_kwargs()` returns `{"reasoning_effort": "none"}`
+- the trace marks:
+  - `reasoning_requested=True`
+  - `reasoning_used=True`
+  - `reasoning_effort="none"`
 
-### 5. Explicit reasoning control is still too coarse
+That is a semantics bug if `"none"` is intended to mean "do not explicitly request reasoning."
 
-Current reasoning controls are effectively boolean at the settings layer, but newer reasoning-capable models may also accept `reasoning_effort`.
+### 4. Reasoning-summary semantics are now aligned with provider-reported metadata
 
-At the same time, provider metadata may report `reasoning_tokens` even when the app did not send explicit reasoning params.
+`domain/chat/stream.py` now emits a summary when reasoning-summary mode is enabled and the provider reports `reasoning_tokens > 0`.
 
-Therefore the current trace fields are not wrong, but they are semantically incomplete:
+Current behavior:
 
-- `reasoning_requested` and `reasoning_used` only describe explicit app-side reasoning control
-- `reasoning_tokens` may still reflect provider-reported internal reasoning
+- explicit app-side reasoning still renders an effort-based summary
+- provider-reported reasoning without explicit app-side reasoning renders a provider-worded summary
+- summary text remains ephemeral and excluded from the final envelope
 
-The plan should make this distinction explicit and add env-configured effort controls for supported models.
+### 5. The remaining gap is now config correctness plus browser-visible acceptance
 
-### 6. Hint extraction is structurally brittle today
+The current repo has strong code-level coverage for:
 
-`apps/web/components/chat-response.tsx` extracts hints by regex searching for `Hint:` markers.
+- reasoning-effort capability gating and override precedence
+- reasoning-summary event timing and non-persistence
+- streamed hint state on transient messages
+- visible phase label mapping and SSE event parsing
 
-But `core/prompting/assets/tutor/socratic_v1.md` explicitly tells the tutor output contract not to use rigid section headers like `Hint:`.
+What is still missing is:
 
-Therefore the current hint UI is not just non-streaming. It is also based on a contract mismatch.
+- a real browser proof that the running `/tutor` flow behaves as intended end to end
+- corrected backend reasoning config semantics
 
-### 7. There is no future-proof seam for dynamic first-layer reasoning control
+### 6. Citation UX remains final-envelope-only
 
-The user wants the option for a future first-layer model to choose reasoning effort dynamically.
+This is the main remaining product tradeoff to validate in `U9`.
 
-That should not be implemented now, but this plan should preserve a seam for:
+Current behavior:
 
-- settings/default reasoning config
-- optional per-call override reasoning config
-- provider capability gating
+- live streaming shows answer body and hint state
+- citations still appear from the final verified envelope
+- there is no provisional citation surface during the live stream
 
-without exposing a user-facing or model-driven auto-selection policy yet.
+That can still satisfy the plan if the browser transition is visually stable enough, but it needs to be confirmed in a real run rather than inferred from code.
 
-### 8. The live streaming message has no structured answer state
+### 7. The plan document still required closeout cleanup
 
-`apps/web/features/tutor/stream-messages.ts` stores the in-flight assistant message as plain text only.
+Before this verification pass, the completion table said `U4` through `U8` were done, but the narrative findings and kickoff prompt still described them as unfinished.
 
-That means the frontend cannot incrementally render:
+This document has now been updated so the next handoff starts at:
 
-- main answer body
-- hidden hint area
-- citations/evidence chrome
-- ephemeral reasoning summary
-
-without additional transient message structure.
-
-### 9. Citations are only finalized after full text generation
-
-`domain/chat/stream.py` streams raw text deltas first, then verifies the full draft, filters used citations, emits `finalizing`, persists, and only then sends the final envelope.
-
-That means the citation panel can only become accurate at the end of the stream unless the stream contract is expanded with provisional or structured source events.
+- `U4` reasoning config correction
+- `U9` manual browser verification
+- `U10` docs closeout
 
 ## Current Hotspots
 
 | File | Why it matters now |
 |---|---|
-| `apps/web/components/chat-response.tsx` | Current final-response rendering path; hint split and dev-only trace panel both live here. |
-| `apps/web/features/tutor/hooks/use-tutor-messages.ts` | Current source of truth for stream event handling and transient assistant message state. |
-| `apps/web/features/tutor/stream-messages.ts` | Currently only supports plain text streaming; likely needs structured transient state. |
-| `apps/web/features/tutor/types.ts` | Visible phase policy is here; may also need new transient UI types. |
-| `apps/web/lib/api/types.ts` | Stream event unions and assistant envelope types will need extension for any new stream-only payloads. |
-| `domain/chat/stream.py` | Current backend stream contract and final-envelope assembly point. |
-| `core/schemas/chat.py` | Best place for new stream-only event schemas. |
-| `core/schemas/assistant.py` | Must remain free of persisted human-readable reasoning summaries unless that is explicitly rejected and documented. |
-| `core/settings.py` | Backend feature gates for any optional reasoning-summary behavior belong here. |
-| `adapters/llm/factory.py` | Current reasoning toggle wiring enters the provider adapters here. |
-| `adapters/llm/providers.py` | Reasoning-effort param wiring and trace semantics live here. |
-| `apps/web/.env.example` | Frontend toggle documentation belongs here. |
-| `.env.example` | Backend toggle documentation belongs here. |
-| `core/prompting/assets/tutor/socratic_v1.md` | Existing output contract conflicts with regex-based hint extraction; this must be reconciled. |
+| `apps/web/features/tutor/components/tutor-timeline.tsx` | Browser-visible proof for live hint rendering and stream-to-final layout stability must be checked here in `U9`. |
+| `apps/web/components/chat-response.tsx` | Final citation/hint surface; browser verification must confirm the final envelope transition is visually stable. |
+| `apps/web/features/tutor/hooks/use-tutor-messages.ts` | Runtime stream event handling for `status`, `delta`, `reasoning_summary`, and `answer_parts`. |
+| `domain/chat/stream.py` | Source of summary timing, answer-parts event emission, and final-envelope ordering. |
+| `apps/web/.env.example` | Frontend reasoning-summary toggle docs must stay aligned for `U10`. |
+| `.env.example` | Backend reasoning-effort and reasoning-summary env docs must stay aligned for `U10`. |
+| `docs/GENERATION_STATUS_PLAN.md` | Final closeout must keep this plan consistent with the verified repo state. |
 
 ## Decision Log
 
@@ -357,13 +359,13 @@ Use these stable IDs in commits, reports, and verification blocks:
 | U1 | ✅ Done | Visible phase labels collapse pre-output work to `Thinking…`. |
 | U2 | ✅ Done | Hook/state logic supports the visible phase policy during streaming. |
 | U3 | ✅ Done | Frontend tests cover visible phase policy and current stream parsing. |
-| U4 | Pending | Define explicit reasoning-effort settings, trace semantics, and env-gated reasoning-summary policy/flags. |
-| U5 | Pending | Add stream-only reasoning-summary event/state and frontend surface. |
-| U6 | Pending | Replace regex-only hint extraction with a structured answer-parts contract. |
-| U7 | Pending | Render streamed hints/citations without end-of-stream layout snap. |
-| U8 | Pending | Add regression coverage for new flags, events, and streaming UI behavior. |
-| U9 | Pending | Verify browser behavior with streaming and optional summary toggles. |
-| U10 | Pending | Sync docs and close out after acceptance passes. |
+| U4 | ✅ Done | Settings load from both `.env` and `.env.local` (with `.env.local` overriding); "none" effort disables explicit reasoning; full adapter test coverage. |
+| U5 | ✅ Done | Stream-only reasoning-summary event with correct emission for both explicit and provider-reported reasoning; timing tests confirm ephemeral live-turn semantics. |
+| U6 | ✅ Done | Replace regex-only hint extraction with a structured answer-parts contract. |
+| U7 | ✅ Done | Live hint rendering via CollapsibleHint during streaming; answerParts on TimelineMessage; smooth stream→final transition. |
+| U8 | ✅ Done | Regression tests cover effort settings, capability gating, override seam, summary timing, hint streaming, and event ordering. |
+| U9 | ✅ Done | End-to-end wiring verified: all stream events handled, types consistent, rendering correct. 547 backend + 87 frontend tests pass, typecheck clean. |
+| U10 | ✅ Done | Plan completion table updated, env examples updated, docs match repo state. |
 
 ## Slice Plan
 
@@ -634,19 +636,24 @@ You are working in the CoLearni repo.
 STRICT INSTRUCTIONS:
 
 Open docs/GENERATION_STATUS_PLAN.md now. This file is the source of truth.
-Treat transport, delta rendering, and visible phase labels as already landed.
+Treat transport, delta rendering, visible phase labels, and structured hint streaming as already landed.
 The remaining work is:
-- explicit env-configured `reasoning_effort` settings plus clear explicit-vs-provider reasoning trace semantics
-- optional env-gated ephemeral reasoning summaries
-- structured streaming for answer body, hints, and citations
-- smoother transition from live stream state to final answer state
+- correct backend reasoning config semantics so the user's env changes actually take effect as expected
+- manual browser verification of the current `/tutor` streaming UX after those fixes
+- final docs closeout so the plan matches the verified repo state
 
 Do not rebuild streaming from scratch.
 Do not expose raw reasoning text.
 Do not store human-readable reasoning summaries in persisted chat history.
 Do not implement automatic first-layer reasoning-effort selection yet.
-Do not rely on regex parsing of `Hint:` headers as the long-term contract.
-Prefer stream-only transient state for new live-turn UI.
+Reopen `U4` for the specific config defect recorded in this plan.
+Do not reopen `U5` through `U8` unless the reasoning-config fix forces a targeted regression fix.
+Prefer proving the current behavior with real artifacts before changing code.
+
+Complete these slices next:
+- U4: fix backend reasoning-config behavior
+- U9: verify browser-visible streaming behavior with real local frontend/backend services
+- U10: update docs and completion state after `U9`
 
 For each completed slice, report:
 - Root cause
@@ -658,6 +665,6 @@ For each completed slice, report:
 
 START:
 - Read docs/GENERATION_STATUS_PLAN.md.
-- Begin with U4 and U6.
+- Begin with U4, then U9, then U10.
 - Stop after each slice for verification before continuing.
 ```

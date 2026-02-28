@@ -1,4 +1,4 @@
-import { ChatResponse } from "@/components/chat-response";
+import { ChatResponse, CollapsibleHint } from "@/components/chat-response";
 import { MarkdownContent } from "@/components/markdown-content";
 import type { GraphConceptSummary, OnboardingStatusResponse } from "@/lib/api/types";
 import type { ChatPhase, TimelineMessage } from "../types";
@@ -76,7 +76,17 @@ export function TutorTimeline({
             {message.role === "assistant" && message.response ? (
               <ChatResponse response={message.response} />
             ) : (
-              <MarkdownContent content={message.text} />
+              <>
+                {message.reasoningSummary ? (
+                  <p className="chat-reasoning-summary" style={{ fontSize: "0.75rem", opacity: 0.7, marginBottom: "0.25rem" }}>
+                    ⚡ {message.reasoningSummary}
+                  </p>
+                ) : null}
+                <MarkdownContent content={message.text} />
+                {message.answerParts?.hint ? (
+                  <CollapsibleHint hint={message.answerParts.hint} index={0} />
+                ) : null}
+              </>
             )}
           </div>
         </article>

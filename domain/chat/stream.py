@@ -309,17 +309,24 @@ def _stream_inner(
         generation_trace = text_stream.trace
         if generation_trace is not None:
             yield ChatStreamTraceEvent(trace=generation_trace)
-            # U5: emit ephemeral reasoning summary when enabled and reasoning was used
+            # U5: emit ephemeral reasoning summary when enabled and provider
+            # reported reasoning tokens — regardless of whether the app
+            # explicitly requested reasoning params.
             if (
                 settings.reasoning_summary_enabled
-                and generation_trace.reasoning_used
                 and generation_trace.reasoning_tokens
                 and generation_trace.reasoning_tokens > 0
             ):
-                summary = (
-                    f"Reasoned for {generation_trace.reasoning_tokens} tokens "
-                    f"at {generation_trace.reasoning_effort or 'default'} effort"
-                )
+                effort_label = generation_trace.reasoning_effort or "default"
+                if generation_trace.reasoning_used:
+                    summary = (
+                        f"Reasoned for {generation_trace.reasoning_tokens} tokens "
+                        f"at {effort_label} effort"
+                    )
+                else:
+                    summary = (
+                        f"Provider reasoning: {generation_trace.reasoning_tokens} tokens"
+                    )
                 yield ChatStreamReasoningSummaryEvent(summary=summary)
     else:
         # Fallback to blocking generation (no streaming support)

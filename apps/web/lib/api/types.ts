@@ -51,6 +51,11 @@ export interface ConversationMeta {
   concept_switch_suggestion: ConceptSwitchSuggestion | null;
 }
 
+export interface AnswerParts {
+  body: string;
+  hint: string | null;
+}
+
 export interface AssistantResponseEnvelope {
   kind: "answer" | "refusal";
   text: string;
@@ -62,6 +67,7 @@ export interface AssistantResponseEnvelope {
   response_mode?: "grounded" | "social";
   actions?: ActionCTA[];
   generation_trace?: GenerationTrace | null;
+  answer_parts?: AnswerParts | null;
 }
 
 export interface ChatRespondRequest {
@@ -453,10 +459,17 @@ export interface GenerationTrace {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   total_tokens: number | null;
+  /** Provider-reported reasoning tokens — may be non-zero even when reasoning was not explicitly requested. */
   reasoning_tokens: number | null;
+  /** Whether the app explicitly requested reasoning params. */
   reasoning_requested: boolean | null;
   reasoning_supported: boolean | null;
+  /** Whether explicit reasoning params were actually sent to the provider. */
   reasoning_used: boolean | null;
+  /** Effort level requested: "low" | "medium" | "high" | null. */
+  reasoning_effort: string | null;
+  /** Where the effort value came from: "settings" | "override" | null. */
+  reasoning_effort_source: string | null;
 }
 
 export type StreamChatPhase =
@@ -491,9 +504,23 @@ export interface ChatStreamErrorEvent {
   phase: StreamChatPhase | null;
 }
 
+/** Ephemeral reasoning summary — stream-only, never persisted. */
+export interface ChatStreamReasoningSummaryEvent {
+  event: "reasoning_summary";
+  summary: string;
+}
+
+/** Structured answer-parts event replacing frontend regex-based hint extraction. */
+export interface ChatStreamAnswerPartEvent {
+  event: "answer_parts";
+  parts: AnswerParts;
+}
+
 export type ChatStreamEvent =
   | ChatStreamStatusEvent
   | ChatStreamDeltaEvent
   | ChatStreamTraceEvent
   | ChatStreamFinalEvent
-  | ChatStreamErrorEvent;
+  | ChatStreamErrorEvent
+  | ChatStreamReasoningSummaryEvent
+  | ChatStreamAnswerPartEvent;

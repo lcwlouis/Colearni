@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from core.schemas.assistant import (  # noqa: F401
     ActionCTA,
+    AnswerParts,
     AssessmentCard,
     AssistantDraft,
     AssistantResponseEnvelope,
@@ -42,10 +43,12 @@ from core.schemas.chat import (  # noqa: F401
     ChatRespondRequest,
     ChatSessionListResponse,
     ChatSessionSummary,
+    ChatStreamAnswerPartEvent,
     ChatStreamDeltaEvent,
     ChatStreamErrorEvent,
     ChatStreamEvent,
     ChatStreamFinalEvent,
+    ChatStreamReasoningSummaryEvent,
     ChatStreamStatusEvent,
     ChatStreamTraceEvent,
     ConceptSwitchDecision,
@@ -101,6 +104,7 @@ from core.schemas.research import (  # noqa: F401
 
 __all__ = [
     "ActionCTA",
+    "AnswerParts",
     "AssessmentCard",
     "AssistantDraft",
     "AssistantResponseEnvelope",
@@ -114,10 +118,12 @@ __all__ = [
     "ChatRespondRequest",
     "ChatSessionListResponse",
     "ChatSessionSummary",
+    "ChatStreamAnswerPartEvent",
     "ChatStreamDeltaEvent",
     "ChatStreamErrorEvent",
     "ChatStreamEvent",
     "ChatStreamFinalEvent",
+    "ChatStreamReasoningSummaryEvent",
     "ChatStreamStatusEvent",
     "ChatStreamTraceEvent",
     "Citation",

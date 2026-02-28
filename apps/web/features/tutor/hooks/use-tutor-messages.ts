@@ -12,11 +12,17 @@ import { errorText, mapMessage } from "../types";
 import {
   appendStreamingAssistantDelta,
   removeStreamingAssistant,
+  setStreamingReasoningSummary,
+  setStreamingAnswerParts,
 } from "../stream-messages";
 
 const STREAMING_ENABLED =
   typeof process !== "undefined" &&
   process.env?.NEXT_PUBLIC_CHAT_STREAMING_ENABLED === "true";
+
+const REASONING_SUMMARY_ENABLED =
+  typeof process !== "undefined" &&
+  process.env?.NEXT_PUBLIC_REASONING_SUMMARY_ENABLED === "true";
 
 // F0: diagnostic log for streaming config
 if (typeof window !== "undefined") {
@@ -156,6 +162,18 @@ export function useTutorMessages({
             setChatPhase("responding");
             setMessages((prev) =>
               appendStreamingAssistantDelta(prev, streamAssistantId, event.text),
+            );
+          } else if (event.event === "reasoning_summary") {
+            // U5: ephemeral reasoning summary — only render when enabled
+            if (REASONING_SUMMARY_ENABLED) {
+              setMessages((prev) =>
+                setStreamingReasoningSummary(prev, streamAssistantId, event.summary),
+              );
+            }
+          } else if (event.event === "answer_parts") {
+            // U7: structured answer parts — update streamed message body
+            setMessages((prev) =>
+              setStreamingAnswerParts(prev, streamAssistantId, event.parts),
             );
           } else if (event.event === "final") {
             console.info("[tutor-stream] final event received");

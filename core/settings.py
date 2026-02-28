@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     """Minimal app settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env.local",
+        env_file=(".env", ".env.local"),
         env_prefix="APP_",
         case_sensitive=False,
         extra="ignore",
@@ -384,6 +384,43 @@ class Settings(BaseSettings):
             "LLM_REASONING_CHAT",
         ),
     )
+    llm_reasoning_effort_chat: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_EFFORT_CHAT",
+            "LLM_REASONING_EFFORT_CHAT",
+        ),
+    )
+    llm_reasoning_effort_quiz_grading: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_EFFORT_QUIZ_GRADING",
+            "LLM_REASONING_EFFORT_QUIZ_GRADING",
+        ),
+    )
+    llm_reasoning_effort_graph_generation: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_EFFORT_GRAPH_GENERATION",
+            "LLM_REASONING_EFFORT_GRAPH_GENERATION",
+        ),
+    )
+    llm_reasoning_effort_quiz_generation: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_LLM_REASONING_EFFORT_QUIZ_GENERATION",
+            "LLM_REASONING_EFFORT_QUIZ_GENERATION",
+        ),
+    )
+
+    # ── Reasoning summary (optional, ephemeral, never persisted) ──────
+    reasoning_summary_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "APP_REASONING_SUMMARY_ENABLED",
+            "REASONING_SUMMARY_ENABLED",
+        ),
+    )
 
     # ── Chat streaming ────────────────────────────────────────────────
     chat_streaming_enabled: bool = Field(
@@ -415,6 +452,28 @@ class Settings(BaseSettings):
             "LLM_REASONING_QUIZ_GENERATION",
         ),
     )
+
+    @field_validator(
+        "llm_reasoning_effort_chat",
+        "llm_reasoning_effort_quiz_grading",
+        "llm_reasoning_effort_graph_generation",
+        "llm_reasoning_effort_quiz_generation",
+        mode="before",
+    )
+    @classmethod
+    def validate_reasoning_effort(cls, value: str | None) -> str | None:
+        """Normalize and validate reasoning effort levels."""
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        allowed = {"none", "low", "medium", "high"}
+        if normalized not in allowed:
+            raise ValueError(
+                f"reasoning_effort must be one of: {', '.join(sorted(allowed))}; got '{value}'"
+            )
+        return normalized
 
     @field_validator("cors_allowed_origins", "cors_allowed_methods", mode="before")
     @classmethod
