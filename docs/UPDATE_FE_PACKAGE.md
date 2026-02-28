@@ -88,6 +88,9 @@ These areas are considered complete enough for this phase:
 
 - `FEPKG-BASE-01` mapped the audit report to the current installed tree: `next@14.2.5`, `vitest@2.1.8 -> vite@5.4.21 -> esbuild@0.21.5`, `eslint-config-next@14.2.5 -> @next/eslint-plugin-next@14.2.5 -> glob@10.3.10`, and `@typescript-eslint/typescript-estree@7.2.0 -> minimatch@9.0.3`
 - `FEPKG-BASE-02` captured the pre-upgrade verification baseline: `pytest -q`, `npm --prefix apps/web test`, `npm --prefix apps/web run typecheck`, `npm --prefix apps/web run lint`, and `npm --prefix apps/web run build`
+- `FEPKG-01` bumped `next` 14.2.5→14.2.35, `eslint-config-next` 14.2.5→14.2.35, `vitest` 2.1.8→2.1.9. Cleared 2 critical + 1 high `next` advisories and the `minimatch` transitive advisory. Residual: 2 high `next` advisories (need `next@16`), 5 moderate `esbuild`/`vite` advisories (need `vitest@3`), 2 high `glob` advisories (FEPKG-02 scope). Note: `apps/web/package-lock.json` is `.gitignored` per repo policy; the lockfile was regenerated locally but is not tracked in git.
+- `FEPKG-02` added a scoped `overrides` entry to force `glob@10.5.0` under `@next/eslint-plugin-next` (upstream pins `glob@10.3.10`, vulnerable range `10.2.0-10.4.5`). Glob and minimatch advisories fully cleared. Remaining 6 advisories are breaking-change residuals: 5 moderate `esbuild`/`vite` (need `vitest@3`), 1 high `next` (2 CVEs needing `next@16`).
+- `FEPKG-03` verified no compatibility fixes needed for `next.config.mjs`, `vitest.config.ts`, or `README.md`. Full verification matrix green. Final state: 6 vulnerabilities (5 moderate, 1 high), all requiring breaking-change major upgrades outside scope.
 
 These slices are not execution targets anymore unless a remaining slice directly depends on them.
 
@@ -95,9 +98,7 @@ These slices are not execution targets anymore unless a remaining slice directly
 
 Use these stable IDs in commits, reports, and verification blocks:
 
-- `FEPKG-01` direct package bump and lockfile refresh
-- `FEPKG-02` transitive advisory cleanup and override minimization
-- `FEPKG-03` compatibility fixes, smoke verification, and closeout
+All slices complete. No remaining execution targets.
 
 ## Decision Log For Remaining Work
 
@@ -164,7 +165,7 @@ Verification
 Current repo verification status:
 
 - `pytest -q`: passing
-- `npm --prefix apps/web test`: passing (`54` tests across `9` Vitest files); emits a Vite CJS Node API deprecation warning on `vitest@2.1.8`
+- `npm --prefix apps/web test`: passing (`58` tests across `9` Vitest files) on `vitest@2.1.9`
 - `npm --prefix apps/web run typecheck`: passing
 
 Additional frontend baseline:
@@ -172,12 +173,16 @@ Additional frontend baseline:
 - `npm --prefix apps/web run lint`: passing with `3` existing `react-hooks/exhaustive-deps` warnings
 - `npm --prefix apps/web run build`: passing; static routes `/`, `/_not-found`, `/graph`, `/kb`, `/login`, and `/tutor` build successfully with the same `3` warnings
 
+Post-FEPKG-03 final audit: 6 vulnerabilities (5 moderate, 1 high). All residuals require breaking-change major upgrades:
+- 5 moderate: `esbuild@0.21.5` → needs `vitest@3` (pulls `vite@6+`, `esbuild@0.25+`)
+- 1 high: `next@14.2.35` → 2 CVEs (GHSA-9g9p-9gw9-jx7f, GHSA-h25m-26qc-wcjf) need `next@16`
+
 Current remaining hotspots:
 
 | File | Lines | Why it still matters |
 |---|---:|---|
-| `apps/web/package.json` | `46` | Pins the direct dependency versions that force the audit remediation work. |
-| `apps/web/package-lock.json` | `8397` | Encodes the vulnerable transitive tree and will carry most of the upgrade diff. |
+| `apps/web/package.json` | `46` | Updated direct pins (`next@14.2.35`, `eslint-config-next@14.2.35`, `vitest@2.1.9`); still drives transitive advisory work. |
+| `apps/web/package-lock.json` | n/a | `.gitignored` per repo policy; regenerated locally after each slice. |
 | `apps/web/next.config.mjs` | `14` | Holds the `/api/:path*` rewrite and `experimental.proxyTimeout` config that must still validate after the Next update. |
 | `apps/web/vitest.config.ts` | `17` | Owns the Vitest/Vite configuration that may need a compatibility tweak if the test runner chain changes. |
 | `apps/web/components/concept-graph.tsx` | `446` | Contains two existing hook warnings surfaced by both lint and build; these are baseline, not part of the security fix. |
@@ -426,7 +431,28 @@ Do not do the following during the remaining package-upgrade work:
 
 ## Removal Ledger
 
-No entries yet.
+### Override Entry - FEPKG-02
+
+Removed artifact
+- `glob@10.3.10` pinned by `@next/eslint-plugin-next@14.2.35` (replaced via `overrides` with `glob@10.5.0`)
+
+Reason for removal
+- `glob@10.3.10` falls in the vulnerable range `10.2.0-10.4.5` (GHSA-5j98-mcp5-4vw2: CLI command injection via `-c/--cmd`). Upstream `@next/eslint-plugin-next@14.2.35` hard-pins this version.
+
+Replacement
+- `glob@10.5.0` via scoped npm `overrides` entry in `apps/web/package.json`
+
+Reverse path
+- Remove the `"overrides"` block from `apps/web/package.json` and run `npm install` to revert to upstream-pinned `glob@10.3.10`
+
+Compatibility impact
+- Internal only. The override is narrowly scoped to `@next/eslint-plugin-next`. No public API or user-facing contract changes. `glob@10.5.0` is within the same major line as `10.3.10`.
+
+Verification
+- `npm --prefix apps/web ls glob` shows `glob@10.5.0 overridden` under `@next/eslint-plugin-next`
+- `npm audit` no longer reports the glob advisory
+- `npm --prefix apps/web run lint` passes with baseline warnings
+- `npm --prefix apps/web run build` passes
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 ```text
