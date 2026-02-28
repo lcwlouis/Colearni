@@ -11,16 +11,18 @@ from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.ingestion import (
     IngestionRequest,
     IngestionValidationError,
-    IngestionGraphProviderError,
-    IngestionGraphUnavailableError,
     ingest_text_document_fast,
     run_post_ingest_tasks,
 )
-from core.schemas import KBDocumentListResponse, KBDocumentSummary
+from core.schemas import KBDocumentListResponse
 from core.settings import Settings
-from domain.graph.orphan_pruner import prune_orphan_graph_nodes
+from domain.knowledge_base.service import (
+    DocumentNotFoundError,
+    delete_document,
+    list_documents,
+    reset_document_for_reprocess,
+)
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile, File, Form, status
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/workspaces/{ws_id}/knowledge-base", tags=["knowledge-base"])
@@ -37,61 +39,7 @@ def list_kb_documents(
     """List documents in the workspace knowledge base with chunk counts."""
     app_settings: Settings | None = getattr(request.app.state, "settings", None)
     graph_enabled = bool(app_settings.ingest_build_graph) if app_settings else False
-    rows = (
-        db.execute(
-            text(
-                """
-                SELECT
-                    d.id,
-                    d.public_id,
-                    d.title,
-                    d.summary,
-                    d.source_uri,
-                    d.created_at,
-                    d.ingestion_status,
-                    d.graph_status,
-                    d.error_message,
-                    COUNT(DISTINCT c.id) AS chunk_count,
-                    COUNT(DISTINCT CASE WHEN p.target_type = 'concept' THEN p.target_id END) AS graph_concept_count
-                FROM documents d
-                LEFT JOIN chunks c ON c.document_id = d.id AND c.workspace_id = d.workspace_id
-                LEFT JOIN provenance p ON p.chunk_id = c.id AND p.workspace_id = d.workspace_id
-                WHERE d.workspace_id = :workspace_id
-                GROUP BY d.id
-                ORDER BY d.created_at DESC
-                """
-            ),
-            {"workspace_id": ws.workspace_id},
-        )
-        .mappings()
-        .all()
-    )
-
-    # Compute effective statuses: use persisted status, with a graph_enabled override
-    def _effective_graph_status(row_status: str) -> str:
-        if not graph_enabled:
-            return "disabled"
-        return row_status or "pending"
-
-    return KBDocumentListResponse(
-        workspace_id=ws.workspace_id,
-        documents=[
-            KBDocumentSummary(
-                document_id=int(row["id"]),
-                public_id=str(row["public_id"]),
-                title=str(row["title"]) if row["title"] else None,
-                summary=str(row["summary"]) if row["summary"] else None,
-                source_uri=str(row["source_uri"]) if row["source_uri"] else None,
-                chunk_count=int(row["chunk_count"]),
-                ingestion_status=row["ingestion_status"] or "pending",
-                graph_status=_effective_graph_status(row["graph_status"]),
-                graph_concept_count=int(row["graph_concept_count"]),
-                created_at=row["created_at"],
-                error_message=str(row["error_message"]) if row.get("error_message") else None,
-            )
-            for row in rows
-        ],
-    )
+    return list_documents(db, workspace_id=ws.workspace_id, graph_enabled=graph_enabled)
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -105,53 +53,18 @@ def delete_kb_document(
     ),
 ) -> Response:
     """Delete a document and its chunks from the knowledge base."""
-    doc = (
-        db.execute(
-            text(
-                """
-                SELECT id FROM documents
-                WHERE id = :document_id AND workspace_id = :workspace_id
-                LIMIT 1
-                """
-            ),
-            {"document_id": document_id, "workspace_id": ws.workspace_id},
+    try:
+        delete_document(
+            db,
+            document_id=document_id,
+            workspace_id=ws.workspace_id,
+            prune_orphan_graph=prune_orphan_graph,
         )
-        .mappings()
-        .first()
-    )
-    if doc is None:
+    except DocumentNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found in workspace.",
         )
-
-    # Delete graph raw rows that reference chunks belonging to this document
-    db.execute(
-        text("DELETE FROM edges_raw WHERE workspace_id = :wid AND chunk_id IN "
-             "(SELECT id FROM chunks WHERE document_id = :did AND workspace_id = :wid)"),
-        {"wid": ws.workspace_id, "did": document_id},
-    )
-    db.execute(
-        text("DELETE FROM concepts_raw WHERE workspace_id = :wid AND chunk_id IN "
-             "(SELECT id FROM chunks WHERE document_id = :did AND workspace_id = :wid)"),
-        {"wid": ws.workspace_id, "did": document_id},
-    )
-    db.execute(
-        text("DELETE FROM provenance WHERE workspace_id = :wid AND chunk_id IN "
-             "(SELECT id FROM chunks WHERE document_id = :did AND workspace_id = :wid)"),
-        {"wid": ws.workspace_id, "did": document_id},
-    )
-    db.execute(
-        text("DELETE FROM chunks WHERE document_id = :did AND workspace_id = :wid"),
-        {"did": document_id, "wid": ws.workspace_id},
-    )
-    db.execute(
-        text("DELETE FROM documents WHERE id = :did AND workspace_id = :wid"),
-        {"did": document_id, "wid": ws.workspace_id},
-    )
-    if prune_orphan_graph:
-        prune_orphan_graph_nodes(db, workspace_id=ws.workspace_id)
-    db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -164,37 +77,17 @@ def reprocess_kb_document(
     db: Session = Depends(get_db_session),
 ) -> dict[str, object]:
     """Re-run post-ingest tasks (embeddings, summary, graph) for a document."""
-    from adapters.db.documents import update_document_status
-
-    doc = (
-        db.execute(
-            text(
-                """
-                SELECT id, title FROM documents
-                WHERE id = :document_id AND workspace_id = :workspace_id
-                LIMIT 1
-                """
-            ),
-            {"document_id": document_id, "workspace_id": ws.workspace_id},
+    try:
+        reset_document_for_reprocess(
+            db,
+            document_id=document_id,
+            workspace_id=ws.workspace_id,
         )
-        .mappings()
-        .first()
-    )
-    if doc is None:
+    except DocumentNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found in workspace.",
         )
-
-    # Reset statuses
-    update_document_status(
-        db,
-        workspace_id=ws.workspace_id,
-        document_id=document_id,
-        graph_status="pending",
-        error_message="",
-    )
-    db.commit()
 
     # Schedule background re-processing
     app_state = getattr(request.app, "state", None)
