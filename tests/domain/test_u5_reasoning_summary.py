@@ -102,7 +102,7 @@ class TestReasoningSummaryStreamTiming:
                 yield " world"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None):
+            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -143,7 +143,7 @@ class TestReasoningSummaryStreamTiming:
                 yield "Hello"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None):
+            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -178,7 +178,7 @@ class TestReasoningSummaryStreamTiming:
                 yield "Hello"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None):
+            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -217,7 +217,7 @@ class TestReasoningSummaryStreamTiming:
                 yield "Hello"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None):
+            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())

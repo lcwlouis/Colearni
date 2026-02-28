@@ -295,7 +295,7 @@ def _stream_inner(
             flashcard_progress=flashcard_progress,
         )
         text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
-            prompt=prompt, prompt_meta=prompt_meta,
+            prompt=prompt, prompt_meta=prompt_meta, operation="chat.stream",
         )
         text_parts: list[str] = []
         for delta in text_stream:

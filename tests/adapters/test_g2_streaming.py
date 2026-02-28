@@ -362,6 +362,17 @@ class TestStreamingLLMSpan:
         llm_spans = self._llm_spans(otel_exporter)
         assert llm_spans[0].name == "llm.chat.respond"
 
+    def test_explicit_operation_overrides_context(self, otel_exporter) -> None:
+        """Explicit operation= kwarg takes precedence over observation_context operation."""
+        chunks = [{"choices": [{"delta": {"content": "y"}}]}, {"choices": [{"delta": {}}]}]
+        client = MockStreamingClient(chunks=chunks)
+        # observation_context sets "chat.respond" but we pass operation="chat.stream" explicitly
+        with observation_context(operation="chat.respond"):
+            list(client.generate_tutor_text_stream(prompt="test", operation="chat.stream"))
+
+        llm_spans = self._llm_spans(otel_exporter)
+        assert llm_spans[0].name == "llm.chat.stream"
+
 
 class TestBuildReasoningKwargs:
     """U4: adapter-level effort propagation verification."""

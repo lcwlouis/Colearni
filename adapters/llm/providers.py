@@ -184,12 +184,16 @@ class _BaseGraphLLMClient(ABC):
         prompt: str,
         prompt_meta: Any | None = None,
         reasoning_effort_override: str | None = None,
+        operation: str | None = None,
     ) -> TutorTextStream:
         """Stream tutor text, yielding deltas. Trace available after iteration.
 
         ``reasoning_effort_override`` is a reserved seam for future first-layer
         per-call effort selection.  When set, it overrides the settings-level
         effort and the trace records ``reasoning_effort_source="override"``.
+
+        ``operation`` names the LLM span for Phoenix.  Defaults to the
+        active observation context's ``operation`` field, then ``llm.stream``.
         """
         messages = [
             {"role": "system", "content": "You are a grounded tutor. Follow style instructions exactly and stay concise."},
@@ -225,6 +229,7 @@ class _BaseGraphLLMClient(ABC):
             prompt_meta=prompt_meta,
             rendered_length=len(prompt) if prompt_meta else None,
             effort_override=reasoning_effort_override if used else None,
+            operation=operation,
         )
         return stream_obj
 
@@ -265,6 +270,7 @@ class _BaseGraphLLMClient(ABC):
         prompt_meta: Any | None = None,
         rendered_length: int | None = None,
         effort_override: str | None = None,
+        operation: str | None = None,
     ) -> Iterator[str]:
         """Stream text deltas inside an LLM span and capture final usage.
 
@@ -273,17 +279,20 @@ class _BaseGraphLLMClient(ABC):
         tracer.start_as_current_span which attaches a ContextVar token; if the
         generator resumes in a different thread context the subsequent detach
         raises ``ValueError: Token was created in a different Context``.
+
+        ``operation`` explicitly names the span.  When omitted the active
+        observation context is consulted, then falls back to ``"llm.stream"``.
         """
         context = get_observation_context()
-        operation = str(context.get("operation") or "llm.stream")
-        span_name = f"llm.{operation}" if not operation.startswith("llm.") else operation
+        op = operation or str(context.get("operation") or "llm.stream")
+        span_name = f"llm.{op}" if not op.startswith("llm.") else op
         collected_text: list[str] = []
 
         span = create_span(
             span_name,
             kind=SPAN_KIND_LLM,
             component="llm",
-            operation=operation,
+            operation=op,
             provider=self._provider,
             model=self._model,
         )

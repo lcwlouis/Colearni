@@ -114,5 +114,6 @@ class StreamingLLMClient(Protocol):
         prompt: str,
         prompt_meta: Any | None = None,
         reasoning_effort_override: str | None = None,
+        operation: str | None = None,
     ) -> TutorTextStream:
         """Stream tutor-facing response text, yielding text deltas."""

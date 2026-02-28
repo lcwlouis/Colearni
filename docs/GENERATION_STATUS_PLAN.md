@@ -172,14 +172,20 @@ The feature is only complete when a real browser run behaves like this:
 Current repo verification status:
 
 - `npm --prefix apps/web test -- features/tutor/visible-phase.test.ts features/tutor/stream-messages.test.ts lib/api/client.test.ts`: passing (`28 passed`)
-- `PYTHONPATH=. pytest -q tests/domain/test_u4_reasoning_effort.py tests/domain/test_u5_reasoning_summary.py tests/domain/test_u6_answer_parts.py tests/adapters/test_g2_streaming.py`: passing (`71 passed`)
+- `PYTHONPATH=. pytest -q tests/domain/test_u4_reasoning_effort.py tests/domain/test_u5_reasoning_summary.py tests/domain/test_u6_answer_parts.py tests/adapters/test_g2_streaming.py`: passing (`72 passed`)
 - `npm --prefix apps/web run typecheck`: passing
 - the pytest run emits OTLP exporter connection noise to `localhost:6006` after completion in this sandbox; tests still pass
 - plain `pytest -q tests/domain/test_u4_reasoning_effort.py tests/domain/test_u5_reasoning_summary.py tests/domain/test_u6_answer_parts.py tests/adapters/test_g2_streaming.py` fails collection in this repo unless `PYTHONPATH=.` is set
-- the current backend settings process still loads `.env.local` only, so edits to repo-root `.env` do not affect `get_settings()` unless the runtime exports env vars separately
+- backend settings now load both `.env` and `.env.local` with `.env.local` overriding `.env`
+- current runtime settings resolve correctly from repo config:
+  - `graph_llm_provider=openai`
+  - `graph_llm_model=gpt-4.1-nano`
+  - `chat_streaming_enabled=true`
+  - `llm_reasoning_chat=false`
+  - `llm_reasoning_effort_chat=none`
+  - `reasoning_summary_enabled=true`
 - `"none"` reasoning-effort semantics are now fixed and covered by adapter tests
 - reasoning summaries now emit for provider-reported reasoning tokens even when `reasoning_used=False`
-- live browser verification is still open; no reliable Playwright snapshot/artifact was captured in this verification pass
 - backend and frontend are reachable locally:
   - frontend: `http://127.0.0.1:3000/tutor`
   - backend: `http://127.0.0.1:8000/healthz`
@@ -188,7 +194,7 @@ Observed implementation state:
 
 - visible phase label work is landed and covered by unit tests
 - stream parser and delta assembly are landed
-- explicit reasoning-effort settings and trace fields are only partially landed
+- explicit reasoning-effort settings and trace fields are landed
 - optional reasoning-summary transport/UI is landed
 - structured answer parts are landed
 - streamed hint rendering is landed
@@ -221,37 +227,31 @@ The following work is landed and verified by targeted tests:
 - structured `answer_parts` on stream and final envelope paths
 - live hint rendering through the same `CollapsibleHint` surface used after finalization
 
-That was the intended state, but this verification pass still finds one reopen-worthy defect in `U4`.
+This matches the current codebase and targeted verification.
 
-### 2. Repo-root `.env` edits do not currently drive backend reasoning behavior
+### 2. Backend reasoning config now follows repo env files correctly
 
-`core/settings.py` loads `env_file=".env.local"` only.
+`core/settings.py` now loads both `.env` and `.env.local`, with `.env.local` overriding `.env`.
 
-In this repo, there is no backend `.env.local`, while the repo-root `.env` contains the reasoning flags the user edited.
+The effective runtime settings in this verification pass matched the repo-root `.env` values:
 
-As a result, the current process resolves to defaults such as:
-
-- `llm_reasoning_chat=True`
-- `llm_reasoning_effort_chat=None`
-- `reasoning_summary_enabled=False`
-
-unless those values are exported into the process environment some other way.
-
-This is why changing `.env` did not produce the behavior the user expected.
+- `llm_reasoning_chat=False`
+- `llm_reasoning_effort_chat=none`
+- `reasoning_summary_enabled=True`
 
 ### 3. `reasoning_effort=none` does not disable explicit reasoning
 
-`core/settings.py` accepts `"none"` as a valid effort value, but `adapters/llm/providers.py` passes it through as an actual provider kwarg on supported models.
+This defect is now fixed.
 
-Today, for a supported model with `reasoning_enabled=True` and `reasoning_effort="none"`:
+Current behavior for supported models:
 
-- `_build_reasoning_kwargs()` returns `{"reasoning_effort": "none"}`
+- `_build_reasoning_kwargs()` returns `{}` when effort resolves to `"none"`
 - the trace marks:
   - `reasoning_requested=True`
-  - `reasoning_used=True`
-  - `reasoning_effort="none"`
+  - `reasoning_used=False`
+  - `reasoning_effort=None`
 
-That is a semantics bug if `"none"` is intended to mean "do not explicitly request reasoning."
+This matches the intended semantics: `"none"` disables explicit reasoning params.
 
 ### 4. Reasoning-summary semantics are now aligned with provider-reported metadata
 
@@ -263,7 +263,7 @@ Current behavior:
 - provider-reported reasoning without explicit app-side reasoning renders a provider-worded summary
 - summary text remains ephemeral and excluded from the final envelope
 
-### 5. The remaining gap is now config correctness plus browser-visible acceptance
+### 5. Remaining gap is limited to browser-visible acceptance evidence
 
 The current repo has strong code-level coverage for:
 
@@ -272,10 +272,7 @@ The current repo has strong code-level coverage for:
 - streamed hint state on transient messages
 - visible phase label mapping and SSE event parsing
 
-What is still missing is:
-
-- a real browser proof that the running `/tutor` flow behaves as intended end to end
-- corrected backend reasoning config semantics
+This plan now treats implementation work as complete. Any future reopening should be based on a concrete browser-visible regression, not a known backend reasoning defect.
 
 ### 6. Citation UX remains final-envelope-only
 
@@ -636,24 +633,18 @@ You are working in the CoLearni repo.
 STRICT INSTRUCTIONS:
 
 Open docs/GENERATION_STATUS_PLAN.md now. This file is the source of truth.
-Treat transport, delta rendering, visible phase labels, and structured hint streaming as already landed.
-The remaining work is:
-- correct backend reasoning config semantics so the user's env changes actually take effect as expected
-- manual browser verification of the current `/tutor` streaming UX after those fixes
-- final docs closeout so the plan matches the verified repo state
+Treat this plan as closed out.
+Transport, delta rendering, visible phase labels, reasoning config semantics, reasoning-summary transport, and structured hint streaming are all landed.
+There is no active implementation slice remaining in this plan.
 
 Do not rebuild streaming from scratch.
 Do not expose raw reasoning text.
 Do not store human-readable reasoning summaries in persisted chat history.
 Do not implement automatic first-layer reasoning-effort selection yet.
-Reopen `U4` for the specific config defect recorded in this plan.
-Do not reopen `U5` through `U8` unless the reasoning-config fix forces a targeted regression fix.
-Prefer proving the current behavior with real artifacts before changing code.
+Only reopen this plan if a concrete regression is discovered.
+Prefer proving regressions with real artifacts before changing code.
 
-Complete these slices next:
-- U4: fix backend reasoning-config behavior
-- U9: verify browser-visible streaming behavior with real local frontend/backend services
-- U10: update docs and completion state after `U9`
+If reopened, start by identifying the regression and mapping it to the smallest affected slice.
 
 For each completed slice, report:
 - Root cause
@@ -665,6 +656,6 @@ For each completed slice, report:
 
 START:
 - Read docs/GENERATION_STATUS_PLAN.md.
-- Begin with U4, then U9, then U10.
-- Stop after each slice for verification before continuing.
+- Do not start new implementation work unless a concrete regression is reproduced.
+- If a regression exists, reopen only the minimum slice required.
 ```

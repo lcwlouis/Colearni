@@ -126,7 +126,7 @@ class TestRespondingPhaseSemantics:
                 return iter(self._deltas)
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt: str, prompt_meta=None) -> FakeStream:
+            def generate_tutor_text_stream(self, prompt: str, prompt_meta=None, **kwargs) -> FakeStream:
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -194,7 +194,7 @@ class TestRespondingPhaseSemantics:
                 return iter(["", "", ""])
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt: str, prompt_meta=None) -> EmptyStream:
+            def generate_tutor_text_stream(self, prompt: str, prompt_meta=None, **kwargs) -> EmptyStream:
                 return EmptyStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
