@@ -11,13 +11,31 @@ export type TimelineMessage = {
 /** Lifecycle phases for the chat request indicator (E2). */
 export type ChatPhase = "idle" | "thinking" | "searching" | "responding" | "finalizing";
 
+/**
+ * User-facing phase labels (U1 visible phase policy).
+ *
+ * Only two distinct visible states:
+ * - Pre-output work (thinking/searching/finalizing) → "Thinking…"
+ * - Visible text arriving (responding) → "Generating response…"
+ *
+ * `searching` and `finalizing` remain valid internal/backend phases but are
+ * collapsed under "Thinking…" at the UI boundary.
+ */
 export const PHASE_LABELS: Record<ChatPhase, string> = {
   idle: "",
   thinking: "Thinking…",
-  searching: "Searching knowledge base…",
+  searching: "Thinking…",
   responding: "Generating response…",
-  finalizing: "Finalizing…",
+  finalizing: "Thinking…",
 };
+
+/**
+ * Pure helper for visible phase label derivation (U1).
+ * Extracted for direct unit testing of the visible phase policy.
+ */
+export function visiblePhaseLabel(phase: ChatPhase): string {
+  return PHASE_LABELS[phase];
+}
 
 export function errorText(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message;

@@ -144,13 +144,16 @@ export function useTutorMessages({
           }
           if (event.event === "status") {
             console.info("[tutor-stream] phase -> %s", event.phase);
-            setChatPhase(event.phase as ChatPhase);
+            // U2: never regress from "responding" to a pre-output phase
+            setChatPhase((prev) => {
+              if (prev === "responding" && event.phase !== "responding") {
+                return prev;
+              }
+              return event.phase as ChatPhase;
+            });
           } else if (event.event === "delta") {
-            // S3: safety net — if backend hasn't emitted 'responding' yet
-            // but we received text, auto-transition to responding
-            setChatPhase((prev) =>
-              prev !== "responding" && prev !== "finalizing" ? "responding" : prev,
-            );
+            // S3/U2: safety net — auto-transition to responding on first delta
+            setChatPhase("responding");
             setMessages((prev) =>
               appendStreamingAssistantDelta(prev, streamAssistantId, event.text),
             );
