@@ -11,8 +11,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from adapters.embeddings.factory import build_embedding_provider
 from adapters.llm.factory import build_graph_llm_client
 from core.ingestion import (
@@ -22,6 +20,7 @@ from core.ingestion import (
     run_post_ingest_tasks,
 )
 from core.settings import Settings
+from sqlalchemy.orm import Session
 
 _log = logging.getLogger("colearni.domain.knowledge_base.upload_flow")
 

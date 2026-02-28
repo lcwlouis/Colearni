@@ -21,31 +21,64 @@ from core.observability import (
     set_span_kind,
     start_span,
 )
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from domain.chat.session_memory import load_chat_context_for_quiz
 from domain.learning.quiz_generation import (
     QuizValidationError as _QVE,
-    auto_items as _auto_items,
+)
+from domain.learning.quiz_generation import (
     attach_generation_context as _attach_generation_context,
+)
+from domain.learning.quiz_generation import (
+    auto_items as _auto_items,
+)
+from domain.learning.quiz_generation import (
     ensure_diversity as _ensure_diversity,
+)
+from domain.learning.quiz_generation import (
     normalize_items as _normalize_items,
-    normalize_short_payload as _normalize_short,
+)
+from domain.learning.quiz_generation import (
     normalize_mcq_payload as _normalize_mcq,
+)
+from domain.learning.quiz_generation import (
+    normalize_short_payload as _normalize_short,
+)
+from domain.learning.quiz_generation import (
     parse_json as _parse_json,
+)
+from domain.learning.quiz_generation import (
     safe_mcq_choices as _safe_mcq_choices,
+)
+from domain.learning.quiz_generation import (
     validate_question_count as _validate_question_count,
 )
 from domain.learning.quiz_grading import (
     QuizGradingError as _QGE,
+)
+from domain.learning.quiz_grading import (
     build_overall_feedback as _build_overall_feedback,
+)
+from domain.learning.quiz_grading import (
     compose_feedback_items as _compose_feedback_items,
+)
+from domain.learning.quiz_grading import (
     grade_mcq_items as _grade_mcq_items,
+)
+from domain.learning.quiz_grading import (
     grade_short_items_without_llm as _grade_short_items_without_llm,
+)
+from domain.learning.quiz_grading import (
     grading_prompt as _grading_prompt,
+)
+from domain.learning.quiz_grading import (
     parse_grading as _parse_grading,
+)
+from domain.learning.quiz_grading import (
     validate_answers as _validate_answers,
 )
-from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 MIN_ITEMS = 5
 MAX_ITEMS = 12

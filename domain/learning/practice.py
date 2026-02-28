@@ -9,18 +9,32 @@ from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_ki
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from domain.learning.quiz_flow import (
-    QuizGradingError as _QuizGradingError,
-    QuizNotFoundError as _QuizNotFoundError,
-    QuizUnavailableError as _QuizUnavailableError,
-    QuizValidationError as _QuizValidationError,
-    create_quiz as _create_quiz,
-    submit_quiz as _submit_quiz,
-)
 from domain.learning.practice_novelty import (
     fingerprint_text,
+)
+from domain.learning.practice_novelty import (
     load_existing_fingerprints as _load_existing_fingerprints,
+)
+from domain.learning.practice_novelty import (
     record_item_fingerprints as _record_item_fingerprints,
+)
+from domain.learning.quiz_flow import (
+    QuizGradingError as _QuizGradingError,
+)
+from domain.learning.quiz_flow import (
+    QuizNotFoundError as _QuizNotFoundError,
+)
+from domain.learning.quiz_flow import (
+    QuizUnavailableError as _QuizUnavailableError,
+)
+from domain.learning.quiz_flow import (
+    QuizValidationError as _QuizValidationError,
+)
+from domain.learning.quiz_flow import (
+    create_quiz as _create_quiz,
+)
+from domain.learning.quiz_flow import (
+    submit_quiz as _submit_quiz,
 )
 from domain.learning.quiz_generation import (
     QuizValidationError,
