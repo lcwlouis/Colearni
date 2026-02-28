@@ -11,6 +11,12 @@ import logging
 from collections.abc import Iterator
 
 from core.contracts import TutorTextStream
+from core.observability import (
+    SPAN_KIND_CHAIN,
+    create_span,
+    set_input_output,
+    set_span_kind,
+)
 from core.schemas import (
     AssistantDraft,
     AssistantResponseEnvelope,
@@ -75,16 +81,47 @@ def generate_chat_response_stream(
     active_settings = settings or get_settings()
     grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
 
+    # Manual span lifecycle – context managers cannot wrap generators that
+    # cross async boundaries (Starlette runs sync generators in threadpool).
+    span = create_span(
+        "chat.stream",
+        component="chat",
+        operation="chat.stream",
+        workspace_id=request.workspace_id,
+    )
+    if span is not None:
+        set_span_kind(span, SPAN_KIND_CHAIN)
+        set_input_output(span, input_value=request.query)
+        if request.session_id is not None:
+            span.set_attribute("session.id", request.session_id)
+        if request.user_id is not None:
+            span.set_attribute("user.id", request.user_id)
+
     try:
-        yield from _stream_inner(
+        final_text: str | None = None
+        for event in _stream_inner(
             session,
             request=request,
             settings=active_settings,
             grounding_mode=grounding_mode,
-        )
+        ):
+            if isinstance(event, ChatStreamFinalEvent) and event.envelope:
+                final_text = event.envelope.text
+            yield event
+        if span is not None:
+            set_input_output(span, output_value=final_text)
+            from opentelemetry import trace as _trace
+            span.set_status(_trace.StatusCode.OK)
     except Exception as exc:
         log.exception("stream error: %s", exc)
+        if span is not None:
+            from opentelemetry import trace as _trace
+            span.set_status(_trace.StatusCode.ERROR, str(exc))
+            span.record_exception(exc)
         yield ChatStreamErrorEvent(message=str(exc))
+    finally:
+        if span is not None:
+            span.end()
 
 
 def _stream_inner(

@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 from adapters.embeddings.factory import build_embedding_provider
+from core.observability import (
+    SPAN_KIND_RETRIEVER,
+    set_span_kind,
+    start_span,
+)
 from core.settings import Settings
 from domain.retrieval.fts_retriever import PgFtsRetriever
 from domain.retrieval.hybrid_retriever import HybridRetriever
@@ -21,26 +28,41 @@ def retrieve_ranked_chunks(
     settings: Settings,
 ) -> list[RankedChunk]:
     """Build a hybrid retriever and return ranked chunks."""
-    provider = build_embedding_provider(settings=settings)
-    vector_retriever = PgVectorRetriever(
-        session=session,
-        embedding_provider=provider,
-        retrieval_max_top_k=settings.retrieval_max_top_k,
-    )
-    fts_retriever = PgFtsRetriever(
-        session=session,
-        retrieval_max_top_k=settings.retrieval_max_top_k,
-    )
-    retriever = HybridRetriever(
-        vector_retriever=vector_retriever,
-        fts_retriever=fts_retriever,
-        retrieval_max_top_k=settings.retrieval_max_top_k,
-    )
-    return retriever.retrieve(
-        query=query,
+    with start_span(
+        "retrieval.hybrid",
         workspace_id=workspace_id,
-        top_k=top_k,
-    )
+        **{"retrieval.query": query[:256], "retrieval.top_k": top_k},
+    ) as span:
+        set_span_kind(span, SPAN_KIND_RETRIEVER)
+        provider = build_embedding_provider(settings=settings)
+        vector_retriever = PgVectorRetriever(
+            session=session,
+            embedding_provider=provider,
+            retrieval_max_top_k=settings.retrieval_max_top_k,
+        )
+        fts_retriever = PgFtsRetriever(
+            session=session,
+            retrieval_max_top_k=settings.retrieval_max_top_k,
+        )
+        retriever = HybridRetriever(
+            vector_retriever=vector_retriever,
+            fts_retriever=fts_retriever,
+            retrieval_max_top_k=settings.retrieval_max_top_k,
+        )
+        results = retriever.retrieve(
+            query=query,
+            workspace_id=workspace_id,
+            top_k=top_k,
+        )
+        if span is not None:
+            span.set_attribute("retrieval.results_count", len(results))
+            if results:
+                doc_summary = json.dumps(
+                    [{"chunk_id": r.chunk_id, "score": round(r.score, 3)} for r in results[:5]],
+                    default=str,
+                )
+                span.set_attribute("retrieval.documents", doc_summary[:1024])
+        return results
 
 
 def apply_concept_bias(

@@ -74,6 +74,14 @@ def generate_chat_response(
     ) as span:
         set_span_kind(span, SPAN_KIND_CHAIN)
         set_input_output(span, input_value=request.query)
+        # Correlation fields for Phoenix filtering
+        if span is not None:
+            if request.session_id is not None:
+                span.set_attribute("session.id", request.session_id)
+            if request.user_id is not None:
+                span.set_attribute("user.id", request.user_id)
+            if request.concept_id is not None:
+                span.set_attribute("concept.id", request.concept_id)
         active_settings = settings or get_settings()
         grounding_mode = request.grounding_mode or active_settings.default_grounding_mode
 

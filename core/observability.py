@@ -196,6 +196,26 @@ def start_span(name: str, **attributes: Any):
             span.set_status(trace.StatusCode.OK)
 
 
+def create_span(name: str, **attributes: Any):
+    """Create a span without context management (safe for generators/streams).
+
+    Unlike ``start_span``, this does **not** use a context manager and will
+    not attach/detach OTel context.  The caller is responsible for calling
+    ``span.end()`` when finished.
+
+    Returns ``None`` when observability is disabled.
+    """
+    if not _OBSERVABILITY_ENABLED:
+        return None
+
+    tracer = (_TRACER_PROVIDER or trace.get_tracer_provider()).get_tracer("colearni.observability")
+    combined = dict(get_observation_context())
+    combined.update(attributes)
+    span = tracer.start_span(name)
+    _set_span_attributes(span, combined)
+    return span
+
+
 def get_observation_context() -> dict[str, Any]:
     """Return a copy of the active observation context values."""
     return dict(_OBSERVATION_CONTEXT.get())
@@ -528,4 +548,5 @@ __all__ = [
     "set_tracer_provider_for_testing",
     "set_usage_source",
     "start_span",
+    "create_span",
 ]

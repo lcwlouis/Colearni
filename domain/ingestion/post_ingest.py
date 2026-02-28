@@ -11,6 +11,12 @@ from domain.embeddings.pipeline import NewChunkInput, populate_new_chunk_embeddi
 from domain.graph.pipeline import build_graph_for_chunks
 
 from core.contracts import EmbeddingProvider, GraphLLMClient
+from core.observability import (
+    SPAN_KIND_CHAIN,
+    observation_context,
+    set_span_kind,
+    start_span,
+)
 from core.prompting import PromptRegistry
 from core.settings import Settings, get_settings
 
@@ -67,7 +73,20 @@ def run_post_ingest_tasks(
     active_settings = settings or get_settings()
     db = new_session()
     try:
-        # Mark graph as extracting
+        with observation_context(
+            component="ingestion",
+            operation="post_ingest",
+            workspace_id=workspace_id,
+        ), start_span(
+            "ingestion.post_ingest",
+            component="ingestion",
+            operation="post_ingest",
+            workspace_id=workspace_id,
+            document_id=document_id,
+        ) as span:
+            set_span_kind(span, SPAN_KIND_CHAIN)
+
+            # Mark graph as extracting
         if active_settings.ingest_build_graph and graph_llm_client is not None:
             update_document_status(
                 db, workspace_id=workspace_id, document_id=document_id,
