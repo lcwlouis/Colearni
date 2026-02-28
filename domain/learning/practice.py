@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any
 
 from core.contracts import GraphLLMClient
 from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_kind, start_span
+from core.prompting import PromptRegistry
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -71,6 +73,9 @@ class PracticeUnavailableError(RuntimeError):
     pass
 
 
+log = logging.getLogger("domain.learning.practice")
+_registry = PromptRegistry()
+
 
 def generate_practice_flashcards(
     session: Session,
@@ -88,13 +93,7 @@ def generate_practice_flashcards(
         )
 
     context = _context(session, workspace_id=workspace_id, concept_id=concept_id)
-    prompt = (
-        "Return JSON flashcards only. "
-        "Schema: {\"flashcards\":[{\"front\":\"...\",\"back\":\"...\","
-        "\"hint\":\"...\"}]}\n"
-        f"CARD_COUNT: {card_count}\n"
-        f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
-    )
+    prompt = _build_flashcard_prompt(card_count=card_count, context=context)
     with observation_context(
         component="practice",
         operation="practice.flashcards.generate",
@@ -160,14 +159,8 @@ def create_practice_quiz(
     if llm_client is None:
         items = _fallback_practice_items(context=context, question_count=overfetch)
     else:
-        prompt = (
-            "Return JSON practice quiz only. "
-            "Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\",\"prompt\":\"...\","
-            "\"payload\":{...}}]}\n"
-            "Include at least one short_answer and one mcq.\n"
-            f"QUESTION_COUNT: {overfetch}\n"
-            f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}\n"
-            f"IMPORTANT: Generate completely novel and creative questions. Random seed: {uuid.uuid4()}"
+        prompt = _build_practice_quiz_prompt(
+            question_count=overfetch, context=context,
         )
         with observation_context(
             component="practice",
@@ -480,13 +473,7 @@ def generate_stateful_flashcards(
     # Ask for extra cards to compensate for dedup
     request_count = card_count + min(len(existing_fps), card_count)
 
-    prompt = (
-        "Return JSON flashcards only. "
-        "Schema: {\"flashcards\":[{\"front\":\"...\",\"back\":\"...\","
-        "\"hint\":\"...\"}]}\n"
-        f"CARD_COUNT: {request_count}\n"
-        f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
-    )
+    prompt = _build_flashcard_prompt(card_count=request_count, context=context)
     with observation_context(
         component="practice",
         operation="practice.flashcards.generate_stateful",
@@ -716,3 +703,42 @@ def rate_flashcard(
         "interval_days": schedule.get("interval_days", 1.0),
         "due_at": schedule.get("due_at"),
     }
+
+
+def _build_practice_quiz_prompt(*, question_count: int, context: dict[str, Any]) -> str:
+    """Build the practice quiz generation prompt from asset or inline fallback."""
+    try:
+        return _registry.render("practice_practice_quiz_generate_v1", {
+            "question_count": str(question_count),
+            "context_json": json.dumps(context, ensure_ascii=True),
+            "novelty_seed": str(uuid.uuid4()),
+        })
+    except Exception:
+        log.debug("asset render failed for practice_quiz_generate_v1, using inline fallback")
+        return (
+            "Return JSON practice quiz only. "
+            "Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\",\"prompt\":\"...\","
+            "\"payload\":{...}}]}\n"
+            "Include at least one short_answer and one mcq.\n"
+            f"QUESTION_COUNT: {question_count}\n"
+            f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}\n"
+            f"IMPORTANT: Generate completely novel and creative questions. Random seed: {uuid.uuid4()}"
+        )
+
+
+def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> str:
+    """Build the flashcard generation prompt from asset or inline fallback."""
+    try:
+        return _registry.render("practice_practice_flashcards_generate_v1", {
+            "card_count": str(card_count),
+            "context_json": json.dumps(context, ensure_ascii=True),
+        })
+    except Exception:
+        log.debug("asset render failed for practice_flashcards_generate_v1, using inline fallback")
+        return (
+            "Return JSON flashcards only. "
+            "Schema: {\"flashcards\":[{\"front\":\"...\",\"back\":\"...\","
+            "\"hint\":\"...\"}]}\n"
+            f"CARD_COUNT: {card_count}\n"
+            f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
+        )
