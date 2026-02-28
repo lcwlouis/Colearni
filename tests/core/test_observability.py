@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import threading
+
+import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+
 from core.observability import (
     configure_observability,
     emit_event,
@@ -9,8 +16,50 @@ from core.observability import (
     record_content_enabled,
     set_event_sink,
     set_llm_span_attributes,
+    set_tracer_provider_for_testing,
+    start_span,
 )
 from core.settings import get_settings
+
+
+class _InMemoryExporter(SpanExporter):
+    """Minimal in-memory span exporter for test assertions."""
+
+    def __init__(self):
+        self._spans: list = []
+        self._lock = threading.Lock()
+
+    def export(self, spans):
+        with self._lock:
+            self._spans.extend(spans)
+        return SpanExportResult.SUCCESS
+
+    def get_finished_spans(self):
+        with self._lock:
+            return list(self._spans)
+
+    def shutdown(self):
+        pass
+
+
+@pytest.fixture()
+def otel_exporter():
+    """Provide an in-memory OTel exporter for span assertions."""
+    exporter = _InMemoryExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    set_tracer_provider_for_testing(provider)
+
+    settings = get_settings().model_copy(
+        update={
+            "observability_enabled": True,
+            "observability_otlp_endpoint": None,
+            "observability_service_name": "colearni-test",
+        }
+    )
+    configure_observability(settings)
+    yield exporter
+    set_tracer_provider_for_testing(None)
 
 
 def test_emit_event_is_noop_when_observability_is_disabled() -> None:
@@ -153,3 +202,61 @@ def test_set_llm_span_attributes_on_none_span() -> None:
         response_message="hi",
         token_usage={"token_prompt": 5, "token_completion": 3, "token_total": 8},
     )
+
+
+# ---- OBS-1: Trace foundation tests ----
+
+
+def test_start_span_sets_ok_status_on_success(otel_exporter) -> None:
+    """start_span marks span OK when body completes without error."""
+    with start_span("test.success"):
+        pass
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].name == "test.success"
+    assert spans[0].status.status_code == trace.StatusCode.OK
+
+
+def test_start_span_sets_error_status_on_exception(otel_exporter) -> None:
+    """start_span marks span ERROR and records exception on failure."""
+    with pytest.raises(ValueError, match="boom"):
+        with start_span("test.failure"):
+            raise ValueError("boom")
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.status.status_code == trace.StatusCode.ERROR
+    assert "boom" in (span.status.description or "")
+    # Exception should be recorded as a span event
+    event_names = [e.name for e in span.events]
+    assert "exception" in event_names
+
+
+def test_emit_event_attaches_to_active_span(otel_exporter) -> None:
+    """emit_event writes a span event on the active span."""
+    with start_span("test.parent"):
+        emit_event("domain.action", status="ok", component="test")
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    event_names = [e.name for e in span.events]
+    assert "domain.action" in event_names
+    # Verify event attributes contain the status
+    domain_events = [e for e in span.events if e.name == "domain.action"]
+    assert domain_events[0].attributes["status"] == "ok"
+
+
+def test_emit_event_works_without_active_span(otel_exporter) -> None:
+    """emit_event still logs and returns payload when no span is active."""
+    events: list[dict[str, object]] = []
+    set_event_sink(events)
+
+    result = emit_event("standalone.event", status="info")
+
+    assert result is not None
+    assert result["event_name"] == "standalone.event"
+    assert len(events) == 1
+    set_event_sink(None)

@@ -18,6 +18,7 @@ _OBSERVABILITY_ENABLED = False
 _RECORD_CONTENT = True
 _CONFIG_SIGNATURE: tuple[str, str | None] | None = None
 _EVENT_SINK: list[dict[str, Any]] | None = None
+_TRACER_PROVIDER: Any = None
 
 _OBSERVATION_CONTEXT: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
     "colearni_observation_context",
@@ -104,7 +105,7 @@ _MAX_VALUE_CHARS = 4096
 
 def configure_observability(settings: Any) -> None:
     """Initialize observability wiring from settings in an idempotent way."""
-    global _OBSERVABILITY_ENABLED, _CONFIG_SIGNATURE, _RECORD_CONTENT
+    global _OBSERVABILITY_ENABLED, _CONFIG_SIGNATURE, _RECORD_CONTENT, _TRACER_PROVIDER
 
     enabled = bool(getattr(settings, "observability_enabled", False))
     _OBSERVABILITY_ENABLED = enabled
@@ -137,6 +138,7 @@ def configure_observability(settings: Any) -> None:
         exporter = _build_otlp_http_exporter(endpoint)
         if exporter is not None:
             tracer_provider.add_span_processor(BatchSpanProcessor(exporter))
+        _TRACER_PROVIDER = tracer_provider
         try:
             trace.set_tracer_provider(tracer_provider)
         except Exception:
@@ -163,17 +165,28 @@ def observation_context(**fields: Any):
 
 @contextlib.contextmanager
 def start_span(name: str, **attributes: Any):
-    """Start a trace span when observability is enabled."""
+    """Start a trace span when observability is enabled.
+
+    Sets span status to OK on normal exit, or ERROR with a recorded
+    exception on failure.
+    """
     if not _OBSERVABILITY_ENABLED:
         yield None
         return
 
-    tracer = trace.get_tracer("colearni.observability")
+    tracer = (_TRACER_PROVIDER or trace.get_tracer_provider()).get_tracer("colearni.observability")
     combined = dict(get_observation_context())
     combined.update(attributes)
     with tracer.start_as_current_span(name) as span:
         _set_span_attributes(span, combined)
-        yield span
+        try:
+            yield span
+        except Exception as exc:
+            span.set_status(trace.StatusCode.ERROR, str(exc))
+            span.record_exception(exc)
+            raise
+        else:
+            span.set_status(trace.StatusCode.OK)
 
 
 def get_observation_context() -> dict[str, Any]:
@@ -263,7 +276,12 @@ def set_input_output(
 
 
 def emit_event(event_name: str, *, status: str, **fields: Any) -> dict[str, Any] | None:
-    """Emit a structured observability event with null-safe common fields."""
+    """Emit a structured observability event with null-safe common fields.
+
+    In addition to logging, the sanitized payload is attached to the
+    current active span (if any) via ``span.add_event`` so that Phoenix
+    shows domain events in its Events tab.
+    """
     if not _OBSERVABILITY_ENABLED:
         return None
 
@@ -275,6 +293,15 @@ def emit_event(event_name: str, *, status: str, **fields: Any) -> dict[str, Any]
     sanitized = _sanitize_mapping(payload)
 
     _LOGGER.info("observability_event %s", json.dumps(sanitized, sort_keys=True))
+
+    # Attach to active OTel span so Phoenix Events tab shows domain events
+    active_span = trace.get_current_span()
+    if active_span is not None and active_span.is_recording():
+        span_attrs = {
+            k: v for k, v in sanitized.items() if isinstance(v, (str, bool, int, float))
+        }
+        active_span.add_event(event_name, attributes=span_attrs)
+
     if _EVENT_SINK is not None:
         _EVENT_SINK.append(dict(sanitized))
     return sanitized
@@ -310,6 +337,12 @@ def set_event_sink(events: list[dict[str, Any]] | None) -> None:
     """Set an in-memory sink for tests to capture emitted events."""
     global _EVENT_SINK
     _EVENT_SINK = events
+
+
+def set_tracer_provider_for_testing(provider: Any) -> None:
+    """Override the tracer provider for test isolation."""
+    global _TRACER_PROVIDER
+    _TRACER_PROVIDER = provider
 
 
 def _build_otlp_http_exporter(endpoint: str | None):
@@ -422,5 +455,6 @@ __all__ = [
     "set_input_output",
     "set_llm_span_attributes",
     "set_span_kind",
+    "set_tracer_provider_for_testing",
     "start_span",
 ]

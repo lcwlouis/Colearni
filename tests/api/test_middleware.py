@@ -1,11 +1,47 @@
 """Tests for FastAPI middlewares."""
 
+import threading
+
 import pytest
 from apps.api.main import create_app
-from core.observability import set_event_sink
+from core.observability import set_event_sink, set_tracer_provider_for_testing
 from core.settings import Settings
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
+
+
+class _InMemoryExporter(SpanExporter):
+    """Minimal in-memory span exporter for test assertions."""
+
+    def __init__(self):
+        self._spans: list = []
+        self._lock = threading.Lock()
+
+    def export(self, spans):
+        with self._lock:
+            self._spans.extend(spans)
+        return SpanExportResult.SUCCESS
+
+    def get_finished_spans(self):
+        with self._lock:
+            return list(self._spans)
+
+    def shutdown(self):
+        pass
+
+
+@pytest.fixture
+def otel_exporter():
+    """Provide an in-memory OTel exporter for span assertions."""
+    exporter = _InMemoryExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    set_tracer_provider_for_testing(provider)
+    yield exporter
+    set_tracer_provider_for_testing(None)
 
 
 @pytest.fixture
@@ -89,3 +125,49 @@ def test_observability_context_includes_request_id(client: TestClient) -> None:
     
     assert len(sink) == 1
     assert sink[0].get("request_id") == custom_id
+
+
+# ---- OBS-1: HTTP root span tests ----
+
+
+def test_http_request_root_span_created(otel_exporter) -> None:
+    """Middleware creates an http.request root span with method, route, status."""
+    settings = Settings(
+        APP_CORS_ALLOWED_ORIGINS=["*"],
+        APP_CORS_ALLOWED_METHODS=["*"],
+        APP_OBSERVABILITY_ENABLED=True,
+    )
+    app = create_app(settings=settings)
+    client = TestClient(app)
+
+    response = client.get("/healthz")
+    assert response.status_code == 200
+
+    spans = otel_exporter.get_finished_spans()
+    http_spans = [s for s in spans if s.name == "http.request"]
+    assert len(http_spans) >= 1
+    span = http_spans[0]
+    assert span.attributes.get("http.method") == "GET"
+    assert span.attributes.get("http.route") == "/healthz"
+    assert span.attributes.get("http.status_code") == 200
+    assert span.status.status_code == trace.StatusCode.OK
+
+
+def test_http_request_span_carries_request_id(otel_exporter) -> None:
+    """Middleware root span includes the propagated request_id."""
+    settings = Settings(
+        APP_CORS_ALLOWED_ORIGINS=["*"],
+        APP_CORS_ALLOWED_METHODS=["*"],
+        APP_OBSERVABILITY_ENABLED=True,
+    )
+    app = create_app(settings=settings)
+    client = TestClient(app)
+
+    custom_id = "span-rid-test-42"
+    response = client.get("/healthz", headers={"X-Request-ID": custom_id})
+    assert response.status_code == 200
+
+    spans = otel_exporter.get_finished_spans()
+    http_spans = [s for s in spans if s.name == "http.request"]
+    assert len(http_spans) >= 1
+    assert http_spans[0].attributes.get("request_id") == custom_id
