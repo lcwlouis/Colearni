@@ -597,3 +597,18 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Fix: Initialize from `localStorage.getItem('sidebar-collapsed')` via lazy initializer. Added `useEffect` to persist changes to localStorage on every toggle.
 - Files: `apps/web/components/global-sidebar.tsx`
 
+#### F-note — Graph Panels Layout Direction Fix (Completed)
+- Root cause: The `@media (min-width: 768px)` responsive rule incorrectly overrode `.graph-panels` to single column on ALL desktop screens, causing top/bottom stacking instead of the intended left/right layout.
+- Fix: Removed `.graph-panels` and `.graph-explorer` overrides from the `min-width: 768px` block. Added a `@media (max-width: 767px)` block instead for mobile-only stacking.
+- Files: `apps/web/app/globals.css`
+
+#### B1 — Sources Row Alignment (Completed)
+- Root cause: Table cells used `vertical-align: top`, causing misalignment when cells had different content heights (badges vs plain text). Column widths were slightly unbalanced with description at 22% and chunks at 7%.
+- Fix: Changed `vertical-align: top` to `vertical-align: middle` for consistent row centering. Rebalanced columns (description 20%, chunks 8%, uploaded 12%). Added scoped `.kb-table .button-row` styles with consistent font size and padding for action buttons.
+- Files: `apps/web/app/globals.css`
+
+#### B3 — Empty Sources State (Completed)
+- Root cause: Empty state was a plain `<p className="status empty">` with no visual hierarchy, no icon, and no CTA button.
+- Fix: Replaced with a rich `.kb-empty-state` card featuring a dashed border, document-plus SVG icon, heading, descriptive paragraph, and a CTA button that directly opens the file picker. Added corresponding CSS classes.
+- Files: `apps/web/app/kb/page.tsx`, `apps/web/app/globals.css`
+

@@ -1143,22 +1143,22 @@ pre {
 .kb-table th,
 .kb-table td {
   padding: 0.55rem 0.75rem;
-  vertical-align: top;
+  vertical-align: middle;
   font-size: 0.85rem;
 }
 
 .kb-table th:nth-child(1),
 .kb-table td:nth-child(1) { width: 18%; } /* Title */
 .kb-table th:nth-child(2),
-.kb-table td:nth-child(2) { width: 22%; } /* Description */
+.kb-table td:nth-child(2) { width: 20%; } /* Description */
 .kb-table th:nth-child(3),
 .kb-table td:nth-child(3) { width: 10%; } /* Ingestion */
 .kb-table th:nth-child(4),
 .kb-table td:nth-child(4) { width: 14%; } /* Graph */
 .kb-table th:nth-child(5),
-.kb-table td:nth-child(5) { width: 7%; }  /* Chunks */
+.kb-table td:nth-child(5) { width: 8%; }  /* Chunks */
 .kb-table th:nth-child(6),
-.kb-table td:nth-child(6) { width: 11%; } /* Uploaded */
+.kb-table td:nth-child(6) { width: 12%; } /* Uploaded */
 .kb-table th:nth-child(7),
 .kb-table td:nth-child(7) { width: 18%; } /* Actions */
 
@@ -1216,9 +1216,56 @@ pre {
   gap: 0.45rem;
 }
 
+/* B1: Consistent action button sizing in KB table */
+.kb-table .button-row {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+.kb-table .button-row button {
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+  white-space: nowrap;
+}
+
 .kb-danger-btn {
   background: var(--danger);
   border-color: var(--danger);
+}
+
+/* B3: Rich empty state for sources page */
+.kb-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 2rem;
+  border: 2px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  text-align: center;
+}
+
+.kb-empty-icon {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+.kb-empty-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.kb-empty-desc {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  max-width: 28rem;
+  line-height: 1.5;
 }
 
 .switch-modal h3 {
@@ -2066,6 +2113,16 @@ pre {
 }
 
 /* ===== Responsive ===== */
+@media (max-width: 767px) {
+  .graph-explorer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .graph-panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (min-width: 768px) {
   .topbar {
     flex-direction: row;
@@ -2104,14 +2161,6 @@ pre {
   .graph-drawer,
   .quiz-drawer {
     grid-column: 1 / -1;
-  }
-
-  .graph-explorer {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .graph-panels {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .kb-page {
