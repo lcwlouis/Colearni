@@ -94,10 +94,10 @@ def _request() -> IngestionRequest:
 
 def _patch_new_document_flow(monkeypatch: Any, *, chunks: list[str]) -> None:
     monkeypatch.setattr(
-        "core.ingestion.get_document_by_content_hash",
+        "domain.ingestion.service.get_document_by_content_hash",
         lambda db, workspace_id, content_hash: None,  # noqa: ARG005
     )
-    monkeypatch.setattr("core.ingestion.chunk_text_deterministic", lambda text: chunks)  # noqa: ARG005
+    monkeypatch.setattr("domain.ingestion.service.chunk_text_deterministic", lambda text: chunks)  # noqa: ARG005
 
     def _fake_insert_document(
         db: object,  # noqa: ARG001
@@ -118,9 +118,9 @@ def _patch_new_document_flow(monkeypatch: Any, *, chunks: list[str]) -> None:
             content_hash=content_hash,
         )
 
-    monkeypatch.setattr("core.ingestion.insert_document", _fake_insert_document)
+    monkeypatch.setattr("domain.ingestion.service.insert_document", _fake_insert_document)
     monkeypatch.setattr(
-        "core.ingestion.insert_chunks_bulk",
+        "domain.ingestion.service.insert_chunks_bulk",
         lambda db, **kwargs: len(kwargs["chunk_texts"]),  # noqa: ARG005
     )
 
@@ -154,17 +154,17 @@ def test_ingest_populates_chunk_embeddings_when_enabled(monkeypatch: Any) -> Non
         return [101, 102]
 
     monkeypatch.setattr(
-        "core.ingestion.populate_new_chunk_embeddings",
+        "domain.ingestion.service.populate_new_chunk_embeddings",
         _fake_populate_new_chunk_embeddings,
     )
     monkeypatch.setattr(
-        "core.ingestion.insert_chunks_bulk",
+        "domain.ingestion.service.insert_chunks_bulk",
         lambda *args, **kwargs: (_ for _ in ()).throw(  # noqa: ARG005
             AssertionError("legacy bulk insert path should not run when enabled")
         ),
     )
     monkeypatch.setattr(
-        "core.ingestion.build_embedding_provider",
+        "domain.ingestion.service.build_embedding_provider",
         lambda settings: (_ for _ in ()).throw(  # noqa: ARG005
             AssertionError("provider factory should not be called when provider is injected")
         ),
@@ -211,9 +211,9 @@ def test_ingest_uses_legacy_chunk_bulk_insert_when_embeddings_disabled(
         captured["chunk_texts"] = list(chunk_texts)
         return len(chunk_texts)
 
-    monkeypatch.setattr("core.ingestion.insert_chunks_bulk", _fake_insert_chunks_bulk)
+    monkeypatch.setattr("domain.ingestion.service.insert_chunks_bulk", _fake_insert_chunks_bulk)
     monkeypatch.setattr(
-        "core.ingestion.populate_new_chunk_embeddings",
+        "domain.ingestion.service.populate_new_chunk_embeddings",
         lambda *args, **kwargs: (_ for _ in ()).throw(  # noqa: ARG005
             AssertionError("embedding path should not run when disabled")
         ),
@@ -252,13 +252,13 @@ def test_ingest_raises_when_embeddings_enabled_and_provider_is_unavailable(
     )
 
     monkeypatch.setattr(
-        "core.ingestion.build_embedding_provider",
+        "domain.ingestion.service.build_embedding_provider",
         lambda settings: (_ for _ in ()).throw(  # noqa: ARG005
             ValueError("missing openai api key")
         ),
     )
     monkeypatch.setattr(
-        "core.ingestion.insert_chunks_bulk",
+        "domain.ingestion.service.insert_chunks_bulk",
         lambda *args, **kwargs: (_ for _ in ()).throw(  # noqa: ARG005
             AssertionError("legacy insert path should not run")
         ),
@@ -290,7 +290,7 @@ def test_ingest_graph_enabled_calls_builder_with_settings_and_provider_fallback(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "core.ingestion.list_chunks_for_document",
+        "domain.ingestion.service.list_chunks_for_document",
         lambda db, **kwargs: [  # noqa: ARG005
             ChunkRow(id=501, document_id=41, chunk_index=0, text="chunk")
         ],
@@ -307,7 +307,7 @@ def test_ingest_graph_enabled_calls_builder_with_settings_and_provider_fallback(
             llm_disambiguations=0,
         )
 
-    monkeypatch.setattr("core.ingestion.build_graph_for_chunks", _fake_graph_build)
+    monkeypatch.setattr("domain.ingestion.service.build_graph_for_chunks", _fake_graph_build)
 
     result = ingest_text_document(
         session,  # type: ignore[arg-type]
@@ -347,7 +347,7 @@ def test_ingest_graph_disabled_skips_builder_even_when_client_is_present(
     session = _FakeSession()
     settings = get_settings().model_copy(update={"ingest_build_graph": False, "ingest_populate_embeddings": False})
     monkeypatch.setattr(
-        "core.ingestion.build_graph_for_chunks",
+        "domain.ingestion.service.build_graph_for_chunks",
         lambda *args, **kwargs: (_ for _ in ()).throw(  # noqa: ARG005
             AssertionError("graph builder should not run when disabled")
         ),

@@ -88,7 +88,7 @@ def test_ingest_extractable_pdf_reuses_chunk_store_pipeline(monkeypatch: Any) ->
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "core.ingestion.get_document_by_content_hash",
+        "domain.ingestion.service.get_document_by_content_hash",
         lambda db, workspace_id, content_hash: None,  # noqa: ARG005
     )
 
@@ -96,7 +96,7 @@ def test_ingest_extractable_pdf_reuses_chunk_store_pipeline(monkeypatch: Any) ->
         captured["normalized_text"] = normalized_text
         return ["chunk-one", "chunk-two"]
 
-    monkeypatch.setattr("core.ingestion.chunk_text_deterministic", _fake_chunker)
+    monkeypatch.setattr("domain.ingestion.service.chunk_text_deterministic", _fake_chunker)
 
     def _fake_insert_document(
         db: object,  # noqa: ARG001
@@ -118,7 +118,7 @@ def test_ingest_extractable_pdf_reuses_chunk_store_pipeline(monkeypatch: Any) ->
             content_hash=content_hash,
         )
 
-    monkeypatch.setattr("core.ingestion.insert_document", _fake_insert_document)
+    monkeypatch.setattr("domain.ingestion.service.insert_document", _fake_insert_document)
 
     def _fake_insert_chunks_bulk(
         db: object,
@@ -132,7 +132,7 @@ def test_ingest_extractable_pdf_reuses_chunk_store_pipeline(monkeypatch: Any) ->
         captured["chunk_texts"] = list(chunk_texts)
         return len(chunk_texts)
 
-    monkeypatch.setattr("core.ingestion.insert_chunks_bulk", _fake_insert_chunks_bulk)
+    monkeypatch.setattr("domain.ingestion.service.insert_chunks_bulk", _fake_insert_chunks_bulk)
 
     result = ingest_text_document(
         session,  # type: ignore[arg-type]
@@ -156,7 +156,7 @@ def test_ingest_non_extractable_pdf_fails_with_clear_message(monkeypatch: Any) -
     session = _FakeSession()
 
     monkeypatch.setattr(
-        "core.ingestion.get_document_by_content_hash",
+        "domain.ingestion.service.get_document_by_content_hash",
         lambda *args, **kwargs: (_ for _ in ()).throw(  # noqa: ARG005
             AssertionError("should fail before DB duplicate checks")
         ),
