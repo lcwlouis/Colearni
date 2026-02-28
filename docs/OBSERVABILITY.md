@@ -45,7 +45,7 @@ docker compose --profile observability down
 | `APP_OBSERVABILITY_ENABLED` | `false` | Master toggle. When `false`, all `emit_event` and `start_span` calls are no-ops. |
 | `APP_OBSERVABILITY_OTLP_ENDPOINT` | *(empty)* | OTLP HTTP receiver base URL. Set to `http://localhost:6006` for local Phoenix. `/v1/traces` is appended automatically. |
 | `APP_OBSERVABILITY_SERVICE_NAME` | `colearni-backend` | Value of the `service.name` OTel resource attribute. |
-| `APP_OBSERVABILITY_RECORD_CONTENT` | `true` | When `true`, LLM input/output messages are recorded on spans. Set to `false` to omit message content (metadata and token counts still recorded). |
+| `APP_OBSERVABILITY_RECORD_CONTENT` | `true` | When `true`, full LLM input/output messages are recorded on spans. When `false`, only preview (first 256 chars) and length are recorded — token counts and metadata are always present. |
 
 ---
 
@@ -53,27 +53,55 @@ docker compose --profile observability down
 
 ### Span Hierarchy
 
-Traces form a tree: **http.request → domain span → llm.call**.
+Traces form a tree rooted at the HTTP middleware span.
 
 ```
-http.request (CHAIN)             ← middleware root span
-  └─ chat.respond (CHAIN)        ← domain orchestrator
-       └─ llm.call (LLM)         ← LLM adapter call
+http.request (CHAIN)                    ← middleware root span
+  └─ chat.respond (CHAIN)              ← blocking chat orchestrator
+  │    ├─ retrieval.hybrid (RETRIEVER)  ← hybrid retrieval
+  │    └─ llm.chat.respond (LLM)       ← LLM adapter call
+  └─ chat.stream (CHAIN)               ← streaming chat orchestrator
+       ├─ retrieval.hybrid (RETRIEVER)
+       └─ llm.chat.respond (LLM)
 ```
 
-### Spans (`start_span`)
+Background tasks create their own root spans:
+
+```
+ingestion.post_ingest (CHAIN)           ← post-ingest background task
+  ├─ llm.graph.extract (LLM)
+  └─ graph.resolver.run (CHAIN)
+       └─ graph.resolver.chunk (child)
+
+graph.gardener.run (CHAIN)              ← offline graph consolidation
+  └─ llm.graph.disambiguate (LLM)
+```
+
+### Spans (`start_span` / `create_span`)
 
 | Span Name | Kind | Source |
 |---|---|---|
 | `http.request` | CHAIN | `apps/api/middleware.py` |
 | `chat.respond` | CHAIN | `domain/chat/respond.py` |
+| `chat.stream` | CHAIN | `domain/chat/stream.py` |
+| `retrieval.hybrid` | RETRIEVER | `domain/chat/retrieval_context.py` |
+| `ingestion.post_ingest` | CHAIN | `domain/ingestion/post_ingest.py` |
 | `practice.flashcards.generate` | CHAIN | `domain/learning/practice.py` |
 | `practice.quiz.generate` | CHAIN | `domain/learning/practice.py` |
 | `graph.resolver.run` | CHAIN | `domain/graph/pipeline.py` |
+| `graph.resolver.chunk` | (child) | `domain/graph/pipeline.py` |
 | `graph.gardener.run` | CHAIN | `domain/graph/gardener.py` |
 | `grading.level_up` | CHAIN | `domain/learning/level_up.py` |
 | `grading.practice` | CHAIN | `domain/learning/level_up.py` |
-| `llm.call` | LLM | `adapters/llm/providers.py` |
+| `llm.chat.respond` | LLM | `adapters/llm/providers.py` |
+| `llm.chat.social` | LLM | `adapters/llm/providers.py` |
+| `llm.graph.extract` | LLM | `adapters/llm/providers.py` |
+| `llm.graph.disambiguate` | LLM | `adapters/llm/providers.py` |
+| `llm.practice.quiz.generate` | LLM | `adapters/llm/providers.py` |
+
+> **Note on `create_span`**: The streaming path uses `create_span()` instead
+> of `start_span()` because Python generators cannot use context managers that
+> cross async boundaries (Starlette runs sync generators in a thread pool).
 
 ### OpenInference Attributes on LLM Spans
 
@@ -87,16 +115,85 @@ http.request (CHAIN)             ← middleware root span
 | `llm.token_count.prompt` | Input token count |
 | `llm.token_count.completion` | Output token count |
 | `llm.token_count.total` | Total token count |
+| `llm.usage_source` | `provider_reported`, `estimated`, or `missing` |
+
+### Content Capture Policy
+
+| Condition | What is recorded |
+|---|---|
+| Always | Preview (first 256 chars), message length, token counts |
+| `APP_OBSERVABILITY_RECORD_CONTENT=true` | Full message bodies on LLM spans |
+| `APP_OBSERVABILITY_RECORD_CONTENT=false` | Preview and length only, no full bodies |
+
+### Prompt Metadata on LLM Spans
+
+When a prompt is rendered via `render_with_meta()`, these attributes are set:
+
+| Attribute | Description |
+|---|---|
+| `prompt.id` | Prompt asset identifier (e.g. `tutor_chat_respond_v1`) |
+| `prompt.version` | Prompt version number |
+| `prompt.task_type` | Task family (e.g. `chat`, `graph`, `practice`) |
+| `prompt.rendered_length` | Length of the rendered prompt in characters |
+
+### Correlation Fields on Domain Spans
+
+| Attribute | Available on |
+|---|---|
+| `session.id` | `chat.respond`, `chat.stream` |
+| `user.id` | `chat.respond`, `chat.stream` |
+| `concept.id` | `chat.respond` |
+| `workspace_id` | All domain spans |
+| `document_id` | `ingestion.post_ingest` |
 
 ### OpenInference Attributes on Domain Spans
 
 | Attribute | Description |
 |---|---|
-| `openinference.span.kind` | `CHAIN` — displays chain icon in Phoenix |
-| `input.value` | User query or input (when content recording is on) |
-| `output.value` | Response text or JSON summary (when content recording is on) |
+| `openinference.span.kind` | `CHAIN`, `RETRIEVER` |
+| `input.value` | User query or input summary |
+| `output.value` | Response text or JSON summary |
+
+### Retrieval Span Attributes
+
+| Attribute | Description |
+|---|---|
+| `retrieval.query` | Query text (first 256 chars) |
+| `retrieval.top_k` | Requested result count |
+| `retrieval.results_count` | Actual results returned |
+| `retrieval.documents` | JSON summary of top 5 results (chunk_id, score) |
+
+### Graph Span Output Summaries
+
+**Resolver (`graph.resolver.run`)**:
+
+| Attribute | Description |
+|---|---|
+| `graph.chunk_count` | Number of chunks to process |
+| `graph.chunks_processed` | Chunks actually processed |
+| `graph.canonical_created` | New canonical concepts created |
+| `graph.canonical_merged` | Concepts merged into existing |
+| `graph.llm_disambiguations` | LLM calls for disambiguation |
+| `graph.raw_concepts_written` | Raw concept rows written |
+| `graph.raw_edges_written` | Raw edge rows written |
+
+**Gardener (`graph.gardener.run`)**:
+
+| Attribute | Description |
+|---|---|
+| `graph.seed_nodes` | Number of dirty seed concepts selected |
+| `graph.clusters_total` | Total clusters found |
+| `graph.clusters_processed` | Clusters processed by LLM |
+| `graph.clusters_skipped` | Clusters skipped (low confidence, etc.) |
+| `graph.merges_applied` | Successful concept merges |
+| `graph.llm_calls` | LLM calls made |
+| `graph.stopped_by_cluster_budget` | Whether cluster budget was exhausted |
+| `graph.stopped_by_llm_budget` | Whether LLM budget was exhausted |
 
 ### Structured Events (`emit_event`)
+
+Events are emitted both as structured logs and as OTel span events on the
+active span (visible in the Phoenix Events tab).
 
 | Event Name | Component | Status Values | Source |
 |---|---|---|---|
@@ -108,7 +205,54 @@ http.request (CHAIN)             ← middleware root span
 | `grading.practice.result` | Grading | `success` | `domain/learning/level_up.py` |
 | `grading.practice.failure` | Grading | `failure` | `domain/learning/level_up.py` |
 | `graph.resolver.budget.usage` | Graph resolver | `info` | `domain/graph/resolver.py` |
+| `graph.resolver.budget.hard_stop` | Graph resolver | `warning` | `domain/graph/resolver.py` |
 | `graph.gardener.budget.usage` | Graph gardener | `info` | `domain/graph/gardener.py` |
+| `graph.gardener.budget.hard_stop` | Graph gardener | `warning` | `domain/graph/gardener.py` |
+| `graph.gardener.cluster.skip` | Graph gardener | `info` | `domain/graph/gardener.py` |
+
+---
+
+## Phoenix Operator Guide
+
+### Suggested Filters
+
+| What to find | Phoenix filter |
+|---|---|
+| All chat requests | Span name contains `chat.respond` or `chat.stream` |
+| Streaming only | Span name = `chat.stream` |
+| LLM calls | Span kind = `LLM` |
+| Token usage | Attribute `llm.token_count.total` exists |
+| Budget stops | Event name contains `hard_stop` |
+| Graph extraction | Span name = `graph.resolver.run` |
+| Gardener runs | Span name = `graph.gardener.run` |
+| Retrieval | Span kind = `RETRIEVER` |
+| Specific user | Attribute `user.id` = `<value>` |
+| Specific workspace | Attribute `workspace_id` = `<value>` |
+
+### Understanding Token Usage Sources
+
+The `llm.usage_source` attribute indicates where token counts come from:
+
+| Value | Meaning |
+|---|---|
+| `provider_reported` | Token counts returned by the LLM API (authoritative) |
+| `estimated` | Token counts estimated locally (less reliable) |
+| `missing` | No token data available for this call |
+
+When `llm.usage_source` is `missing`, the token count fields will be null.
+Do not assume zero tokens — the provider simply did not report usage.
+
+### Safe Mode (Content Omitted)
+
+When `APP_OBSERVABILITY_RECORD_CONTENT=false`:
+
+- LLM span `llm.input_messages` and `llm.output_messages` are **not set**
+- Domain span `input.value` and `output.value` contain **preview only** (first 256 chars)
+- Token counts, prompt metadata, and all other attributes remain fully populated
+- Retrieval `retrieval.query` still shows the first 256 characters
+
+This mode is appropriate for shared/production Phoenix instances where prompt
+content should not be persisted.
 
 ---
 
@@ -123,6 +267,19 @@ http.request (CHAIN)             ← middleware root span
 - Token counts are **per LLM call**, not per request or per quiz.
 - Aggregate token counts in the Phoenix UI using span grouping.
 - The `extract_token_usage` helper normalises both OpenAI (`prompt_tokens`) and Anthropic (`input_tokens`) key names.
+- Usage source is always labeled via `llm.usage_source` — never silently estimated.
+
+---
+
+## Span Status
+
+All spans created via `start_span()` automatically set OTel status:
+
+- **OK** on normal completion
+- **ERROR** with recorded exception on failure
+
+Streaming spans via `create_span()` set status manually in the generator
+lifecycle (OK on final event yield, ERROR on exception).
 
 ---
 
@@ -147,13 +304,31 @@ http.request (CHAIN)             ← middleware root span
    make dev
    # trigger chat or practice operations
    # open http://localhost:6006 → filter by service "colearni-backend"
-   # verify: nested spans, LLM kind icons, input/output messages, token counts
+   # verify: nested spans with http.request root, LLM kind icons,
+   #         input/output messages, token counts, prompt metadata
    ```
 
 4. **Content recording off**
    ```bash
    APP_OBSERVABILITY_RECORD_CONTENT=false make dev
    # verify: spans appear but llm.input_messages / output.value are absent
+   # verify: preview/length attributes are still present
+   ```
+
+5. **Streaming chat traced**
+   ```bash
+   # trigger streaming chat with APP_CHAT_STREAMING_ENABLED=true
+   # verify: chat.stream root span appears with input/output
+   # verify: child LLM span and retrieval span are nested under it
+   ```
+
+6. **Graph traces have summaries**
+   ```bash
+   # trigger document ingest
+   # verify: graph.resolver.run span shows chunk_count, canonical_created, etc.
+   # trigger gardener run
+   # verify: graph.gardener.run span shows seed_nodes, merges, budget flags
+   # verify: cluster skip events appear in Events tab
    ```
 
 ---
@@ -244,5 +419,6 @@ When `APP_OBSERVABILITY_ENABLED=false` (the default):
 
 - `emit_event()` returns `None` immediately — no JSON serialization, no logging.
 - `start_span()` yields `None` — no tracer is allocated, no span context is created.
+- `create_span()` returns `None` — safe for streaming generators.
 - `configure_observability()` skips all OTel SDK initialization.
 - **No network connections** are made to any collector or Phoenix instance.
