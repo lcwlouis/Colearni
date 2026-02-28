@@ -4,6 +4,8 @@ Provides generic create/submit quiz flows used by both level-up
 and practice quiz types.  Level-up-specific and practice-specific
 behaviour is handled by their respective modules which wrap these
 shared functions.
+
+DB reads and writes are delegated to :mod:`domain.learning.quiz_persistence`.
 """
 
 from __future__ import annotations
@@ -21,7 +23,6 @@ from core.observability import (
     set_span_kind,
     start_span,
 )
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from domain.chat.session_memory import load_chat_context_for_quiz
@@ -79,6 +80,42 @@ from domain.learning.quiz_grading import (
 from domain.learning.quiz_grading import (
     validate_answers as _validate_answers,
 )
+from domain.learning.quiz_persistence import (
+    check_session_scope as _check_session_scope,
+)
+from domain.learning.quiz_persistence import (
+    insert_attempt as _insert_attempt,
+)
+from domain.learning.quiz_persistence import (
+    insert_quiz_items as _insert_quiz_items,
+)
+from domain.learning.quiz_persistence import (
+    insert_quiz_row as _insert_quiz_row,
+)
+from domain.learning.quiz_persistence import (
+    load_existing_graded_attempt as _load_existing_graded_attempt,
+)
+from domain.learning.quiz_persistence import (
+    load_generation_context as _load_generation_context,
+)
+from domain.learning.quiz_persistence import (
+    load_quiz_for_grading as _load_quiz_for_grading,
+)
+from domain.learning.quiz_persistence import (
+    load_quiz_items as _load_quiz_items,
+)
+from domain.learning.quiz_persistence import (
+    lookup_active_concept as _lookup_active_concept,
+)
+from domain.learning.quiz_persistence import (
+    lookup_mastery as _lookup_mastery,
+)
+from domain.learning.quiz_persistence import (
+    mark_quiz_graded as _mark_quiz_graded,
+)
+from domain.learning.quiz_persistence import (
+    upsert_mastery as _upsert_mastery,
+)
 
 MIN_ITEMS = 5
 MAX_ITEMS = 12
@@ -123,27 +160,16 @@ def create_quiz(
     context_source: str | None = None,
 ) -> dict[str, Any]:
     if session_id is not None:
-        _validate_session_scope(
+        if not _check_session_scope(
             session,
             workspace_id=workspace_id,
             user_id=user_id,
             session_id=session_id,
-        )
+        ):
+            raise QuizValidationError("session_id is not valid for workspace/user scope.")
 
-    concept = (
-        session.execute(
-            text(
-                """
-                SELECT canonical_name, description
-                FROM concepts_canon
-                WHERE id = :concept_id AND workspace_id = :workspace_id AND is_active = TRUE
-                LIMIT 1
-                """
-            ),
-            {"concept_id": concept_id, "workspace_id": workspace_id},
-        )
-        .mappings()
-        .first()
+    concept = _lookup_active_concept(
+        session, workspace_id=workspace_id, concept_id=concept_id
     )
     if concept is None:
         raise QuizNotFoundError("Concept not found in workspace.")
@@ -170,70 +196,20 @@ def create_quiz(
         context_source=resolved_context_source,
     )
 
-    quiz = (
-        session.execute(
-            text(
-                """
-                INSERT INTO quizzes (
-                    workspace_id,
-                    user_id,
-                    session_id,
-                    concept_id,
-                    quiz_type,
-                    status
-                )
-                VALUES (:workspace_id, :user_id, :session_id, :concept_id, :quiz_type, 'ready')
-                RETURNING id, status
-                """
-            ),
-            {
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-                "session_id": session_id,
-                "concept_id": concept_id,
-                "quiz_type": quiz_type,
-            },
-        )
-        .mappings()
-        .one()
+    quiz = _insert_quiz_row(
+        session,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        session_id=session_id,
+        concept_id=concept_id,
+        quiz_type=quiz_type,
     )
     quiz_id = int(quiz["id"])
 
-    session.execute(
-        text(
-            """
-            INSERT INTO quiz_items (quiz_id, position, item_type, prompt, payload)
-            VALUES (:quiz_id, :position, :item_type, :prompt, CAST(:payload AS jsonb))
-            """
-        ),
-        [
-            {
-                "quiz_id": quiz_id,
-                "position": idx,
-                "item_type": item["item_type"],
-                "prompt": item["prompt"],
-                "payload": json.dumps(item["payload"], ensure_ascii=True),
-            }
-            for idx, item in enumerate(normalized_items, start=1)
-        ],
-    )
+    _insert_quiz_items(session, quiz_id=quiz_id, items=normalized_items)
     session.commit()
 
-    rows = (
-        session.execute(
-            text(
-                """
-                SELECT id AS item_id, position, item_type, prompt, payload
-                FROM quiz_items
-                WHERE quiz_id = :quiz_id
-                ORDER BY position
-                """
-            ),
-            {"quiz_id": quiz_id},
-        )
-        .mappings()
-        .all()
-    )
+    rows = _load_quiz_items(session, quiz_id=quiz_id)
     return {
         "quiz_id": quiz_id,
         "workspace_id": workspace_id,
@@ -291,22 +267,11 @@ def submit_quiz(
     ) as span:
         set_span_kind(span, SPAN_KIND_CHAIN)
         try:
-            quiz = (
-                session.execute(
-                    text(
-                        """
-                        SELECT id, user_id, concept_id
-                        FROM quizzes
-                        WHERE id = :quiz_id
-                          AND workspace_id = :workspace_id
-                          AND quiz_type = :quiz_type
-                        FOR UPDATE
-                        """
-                    ),
-                    {"quiz_id": quiz_id, "workspace_id": workspace_id, "quiz_type": quiz_type},
-                )
-                .mappings()
-                .first()
+            quiz = _load_quiz_for_grading(
+                session,
+                quiz_id=quiz_id,
+                workspace_id=workspace_id,
+                quiz_type=quiz_type,
             )
             if quiz is None:
                 raise QuizNotFoundError("Quiz not found in workspace.")
@@ -314,21 +279,7 @@ def submit_quiz(
                 raise QuizValidationError("Quiz does not belong to user.")
 
             stage = "load_items"
-            item_rows = (
-                session.execute(
-                    text(
-                        """
-                        SELECT id AS item_id, item_type, prompt, payload
-                        FROM quiz_items
-                        WHERE quiz_id = :quiz_id
-                        ORDER BY position
-                        """
-                    ),
-                    {"quiz_id": quiz_id},
-                )
-                .mappings()
-                .all()
-            )
+            item_rows = _load_quiz_items(session, quiz_id=quiz_id)
             item_refs = [
                 {
                     "item_id": int(row["item_id"]),
@@ -352,21 +303,8 @@ def submit_quiz(
             )
 
             stage = "check_replay"
-            existing = (
-                session.execute(
-                    text(
-                        """
-                        SELECT id, score, passed, grading
-                        FROM quiz_attempts
-                        WHERE quiz_id = :quiz_id AND user_id = :user_id AND graded_at IS NOT NULL
-                        ORDER BY id
-                        LIMIT 1
-                        """
-                    ),
-                    {"quiz_id": quiz_id, "user_id": user_id},
-                )
-                .mappings()
-                .first()
+            existing = _load_existing_graded_attempt(
+                session, quiz_id=quiz_id, user_id=user_id
             )
             if existing is not None:
                 grading = existing["grading"] if isinstance(existing["grading"], dict) else {}
@@ -387,26 +325,11 @@ def submit_quiz(
                     "retry_hint": retry_hint,
                 }
                 if update_mastery:
-                    mastery = (
-                        session.execute(
-                            text(
-                                """
-                                SELECT status, score
-                                FROM mastery
-                                WHERE workspace_id = :workspace_id
-                                  AND user_id = :user_id
-                                  AND concept_id = :concept_id
-                                LIMIT 1
-                                """
-                            ),
-                            {
-                                "workspace_id": workspace_id,
-                                "user_id": user_id,
-                                "concept_id": int(quiz["concept_id"]),
-                            },
-                        )
-                        .mappings()
-                        .first()
+                    mastery = _lookup_mastery(
+                        session,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        concept_id=int(quiz["concept_id"]),
                     )
                     payload["mastery_status"] = (
                         str(mastery["status"])
@@ -504,71 +427,25 @@ def submit_quiz(
             }
 
             stage = "persist_attempt"
-            session.execute(
-                text(
-                    """
-                    INSERT INTO quiz_attempts (
-                        quiz_id,
-                        user_id,
-                        answers,
-                        grading,
-                        score,
-                        passed,
-                        graded_at
-                    )
-                    VALUES (
-                        :quiz_id,
-                        :user_id,
-                        CAST(:answers AS jsonb),
-                        CAST(:grading AS jsonb),
-                        :score,
-                        :passed,
-                        now()
-                    )
-                    """
-                ),
-                {
-                    "quiz_id": quiz_id,
-                    "user_id": user_id,
-                    "answers": json.dumps({"answers": answers}, ensure_ascii=True),
-                    "grading": json.dumps(grading_payload, ensure_ascii=True),
-                    "score": mastery_score,
-                    "passed": passed,
-                },
+            attempt_id = _insert_attempt(
+                session,
+                quiz_id=quiz_id,
+                user_id=user_id,
+                answers=answers,
+                grading_payload=grading_payload,
+                score=mastery_score,
+                passed=passed,
             )
-            attempt_id = int(
-                session.execute(text("SELECT currval('quiz_attempts_id_seq')")).scalar_one()
-            )
-            session.execute(
-                text(
-                    "UPDATE quizzes "
-                    "SET status = 'graded', updated_at = now() "
-                    "WHERE id = :quiz_id"
-                ),
-                {"quiz_id": quiz_id},
-            )
+            _mark_quiz_graded(session, quiz_id=quiz_id)
             if update_mastery:
                 stage = "update_mastery"
-                session.execute(
-                    text(
-                        """
-                        INSERT INTO mastery (workspace_id, user_id, concept_id, score, status)
-                        VALUES (:workspace_id, :user_id, :concept_id, :score, :status)
-                        ON CONFLICT (user_id, concept_id)
-                        DO UPDATE SET
-                            workspace_id = EXCLUDED.workspace_id,
-                            score = EXCLUDED.score,
-                            status = EXCLUDED.status,
-                            updated_at = now()
-                        """
-                    ),
-                    {
-                        "workspace_id": workspace_id,
-                        "user_id": user_id,
-                        "concept_id": int(quiz["concept_id"]),
-                        "score": mastery_score,
-                        "status": mastery_status,
-                    },
+                _upsert_mastery(
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    concept_id=int(quiz["concept_id"]),
+                    score=mastery_score,
+                    status=mastery_status,
                 )
             stage = "commit"
             session.commit()
@@ -687,7 +564,11 @@ def _generate_items_with_retries(
     max_items: int,
     session_id: int | None = None,
 ) -> list[dict[str, Any]] | None:
-    context = _generation_context(session, workspace_id=workspace_id, concept_id=concept_id)
+    context = _load_generation_context(
+        session, workspace_id=workspace_id, concept_id=concept_id
+    )
+    if context is None:
+        raise QuizNotFoundError("Concept not found in workspace.")
     concept_name = context["concept_name"]
     concept_desc = context.get("concept_description", "")
     adjacent = context.get("adjacent_concepts", [])
@@ -759,115 +640,3 @@ def _generate_items_with_retries(
                 "Regenerate from scratch with fully valid JSON."
             )
     return None
-
-
-def _generation_context(
-    session: Session,
-    *,
-    workspace_id: int,
-    concept_id: int,
-) -> dict[str, Any]:
-    concept = (
-        session.execute(
-            text(
-                """
-                SELECT canonical_name, description
-                FROM concepts_canon
-                WHERE id = :concept_id
-                  AND workspace_id = :workspace_id
-                  AND is_active = TRUE
-                LIMIT 1
-                """
-            ),
-            {"workspace_id": workspace_id, "concept_id": concept_id},
-        )
-        .mappings()
-        .first()
-    )
-    if concept is None:
-        raise QuizNotFoundError("Concept not found in workspace.")
-
-    rows = (
-        session.execute(
-            text(
-                """
-                SELECT src.canonical_name AS src_name, tgt.canonical_name AS tgt_name
-                FROM edges_canon e
-                JOIN concepts_canon src ON src.id = e.src_id
-                JOIN concepts_canon tgt ON tgt.id = e.tgt_id
-                WHERE e.workspace_id = :workspace_id
-                  AND ((e.src_id = :concept_id AND tgt.is_active = TRUE)
-                       OR (e.tgt_id = :concept_id AND src.is_active = TRUE))
-                ORDER BY e.weight DESC, e.id ASC
-                LIMIT 8
-                """
-            ),
-            {"workspace_id": workspace_id, "concept_id": concept_id},
-        )
-        .mappings()
-        .all()
-    )
-
-    concept_name = str(concept["canonical_name"])
-    adjacent = [
-        str(row["tgt_name"]) if str(row["src_name"]) == concept_name else str(row["src_name"])
-        for row in rows
-    ]
-    chunk_rows = (
-        session.execute(
-            text(
-                """
-                SELECT ch.text
-                FROM provenance p
-                JOIN chunks ch ON ch.id = p.chunk_id AND ch.workspace_id = p.workspace_id
-                WHERE p.workspace_id = :workspace_id
-                  AND p.target_type = 'concept'
-                  AND p.target_id = :concept_id
-                ORDER BY p.chunk_id ASC
-                LIMIT 3
-                """
-            ),
-            {"workspace_id": workspace_id, "concept_id": concept_id},
-        )
-        .mappings()
-        .all()
-    )
-    chunk_excerpts = [str(r["text"])[:300] for r in chunk_rows]
-    return {
-        "concept_name": concept_name,
-        "concept_description": str(concept["description"] or ""),
-        "adjacent_concepts": adjacent,
-        "chunk_excerpts": chunk_excerpts,
-    }
-
-
-def _validate_session_scope(
-    session: Session,
-    *,
-    workspace_id: int,
-    user_id: int,
-    session_id: int,
-) -> None:
-    row = (
-        session.execute(
-            text(
-                """
-                SELECT id
-                FROM chat_sessions
-                WHERE id = :session_id
-                  AND workspace_id = :workspace_id
-                  AND user_id = :user_id
-                LIMIT 1
-                """
-            ),
-            {
-                "session_id": session_id,
-                "workspace_id": workspace_id,
-                "user_id": user_id,
-            },
-        )
-        .mappings()
-        .first()
-    )
-    if row is None:
-        raise QuizValidationError("session_id is not valid for workspace/user scope.")
