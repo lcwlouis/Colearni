@@ -1,6 +1,7 @@
 # Prompt Inventory — Colearni
 
 > Source-of-truth catalog of all LLM prompts used across the codebase.
+> Proposed versioned prompt templates for future file-based prompt management live in `docs/prompt_templates/`.
 > Last updated: Session 11
 
 ## Overview
