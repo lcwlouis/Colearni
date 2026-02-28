@@ -133,3 +133,97 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Auth Shell ---- */
+
+.auth-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  width: 100%;
+  max-width: 26rem;
+  padding: 3rem 1.5rem;
+  gap: 2rem;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.auth-brand-logo {
+  border-radius: 6px;
+}
+
+.auth-brand-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+/* ---- Login Card ---- */
+
+.login-card {
+  width: 100%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 2rem 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+.login-card-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.35rem;
+  text-align: center;
+}
+
+.login-card-subtitle {
+  font-size: 0.95rem;
+  color: var(--muted);
+  text-align: center;
+  margin: 0 0 1.25rem;
+}
+
+.login-card-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.login-card-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.login-card-sent-to {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.login-card-dev-notice {
+  font-size: 0.8rem;
+  color: var(--accent);
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  background: var(--accent-light);
+  border-radius: 0.4rem;
+}
+
+.login-card-back {
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.login-card-error {
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+  color: var(--danger);
+  text-align: center;
+}
