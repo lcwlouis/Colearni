@@ -656,3 +656,13 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Commands: `npx next build` (passes), `npx vitest run` (41/41), `python -m pytest tests/` (100%)
 - Verification: Toggle sidebar collapsed/expanded — collapsed shows compact icon stack; expanded retains rich UI. Workspace popover opens on click, lists workspaces, supports switch/new/rename. Tooltips appear on hover. Theme toggle and logout match nav icon sizing. Page refresh preserves collapsed state (D3).
 
+#### G0-G4 — Refactor Audit (Completed)
+- Created `docs/REFACTOR.md` with:
+  1. **G1 — Oversized file inventory (Top 15):** Identified `globals.css` (2424), `level_up.py` (1612), `graph_repository.py` (1099), and 12 more files ranked by severity.
+  2. **G2 — Refactor plan:** 10 PRs across 4 phases (CSS extraction → backend splits → frontend splits → cleanup). Each PR has files, description, and safety checks.
+  3. **G3 — CSS strategy:** Proposed splitting `globals.css` into 7 domain files (`sidebar.css`, `chat.css`, `graph.css`, `kb.css`, `components.css`, `utilities.css`, trimmed `globals.css`). Includes migration approach and convention.
+  4. **G4 — Mobile readiness checklist:** 30+ items across sidebar (drawer overlay), graph (touch), chat (sticky composer), KB (card layout), and general (touch targets, safe areas). Priority-ordered implementation plan.
+  5. **Quick wins vs. deeper changes** section for prioritization.
+- Files: `docs/REFACTOR.md` (new)
+- Commands: `npx next build` (passes), `npx vitest run` (41/41), `python -m pytest tests/` (100%)
+- No functional changes — documentation only.
