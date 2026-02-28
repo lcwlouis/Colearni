@@ -193,6 +193,12 @@ def test_openapi_required_fields_cover_contract() -> None:
     for name, fields in REQUIRED_FIELDS.items():
         assert fields.issubset(set(schemas[name]["required"]))
 
+
+def test_legacy_upload_route_marked_deprecated_in_openapi() -> None:
+    spec = app.openapi()
+    upload_op = spec["paths"]["/documents/upload"]["post"]
+    assert upload_op.get("deprecated") is True
+
 @pytest.fixture
 def client() -> Any:
     app.dependency_overrides[get_db_session] = _override_db

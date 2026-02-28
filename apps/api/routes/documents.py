@@ -2,7 +2,7 @@
 
 .. deprecated::
     This route (``/api/documents/upload``) is superseded by
-    ``/api/workspaces/{ws_id}/kb/documents/upload`` in ``knowledge_base.py``.
+    ``/api/workspaces/{ws_id}/knowledge-base/documents/upload`` in ``knowledge_base.py``.
     It remains for backward compatibility and will be removed in a future release.
 """
 
@@ -50,6 +50,7 @@ class UploadPayload:
     "/upload",
     response_model=DocumentUploadResponse,
     status_code=status.HTTP_201_CREATED,
+    deprecated=True,
 )
 async def upload_document(
     request: Request,
@@ -62,7 +63,7 @@ async def upload_document(
 ) -> DocumentUploadResponse | JSONResponse:
     """Upload .md/.txt/.pdf content via multipart or raw body.
 
-    .. deprecated:: Use ``POST /api/workspaces/{ws_id}/kb/documents/upload`` instead.
+    .. deprecated:: Use ``POST /api/workspaces/{ws_id}/knowledge-base/documents/upload`` instead.
     """
     payload = await _read_upload_payload(request)
     ingestion_request = IngestionRequest(
