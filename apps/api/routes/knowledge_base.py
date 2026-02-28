@@ -12,13 +12,11 @@ from domain.knowledge_base.service import (
     DocumentNotFoundError,
     delete_document,
     list_documents,
-    reset_document_for_reprocess,
+    reprocess_document,
 )
 from domain.knowledge_base.upload_flow import (
     execute_upload,
-    resolve_post_ingest_context,
     resolve_settings,
-    schedule_post_ingest,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
@@ -76,26 +74,18 @@ def reprocess_kb_document(
 ) -> dict[str, object]:
     """Re-run post-ingest tasks (embeddings, summary, graph) for a document."""
     try:
-        reset_document_for_reprocess(
+        reprocess_document(
             db,
+            background_tasks,
             document_id=document_id,
             workspace_id=ws.workspace_id,
+            app_state=request.app.state,
         )
     except DocumentNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found in workspace.",
         )
-
-    # Schedule background re-processing
-    settings = resolve_settings(request.app.state)
-    context = resolve_post_ingest_context(
-        request.app.state,
-        workspace_id=ws.workspace_id,
-        document_id=document_id,
-        settings=settings,
-    )
-    schedule_post_ingest(background_tasks, context)
 
     return {
         "document_id": document_id,

@@ -11,6 +11,11 @@ from adapters.db import knowledge_base as kb_db
 from adapters.db.documents import update_document_status
 from core.schemas.knowledge_base import KBDocumentListResponse, KBDocumentSummary
 from domain.graph.orphan_pruner import prune_orphan_graph_nodes
+from domain.knowledge_base.upload_flow import (
+    resolve_post_ingest_context,
+    resolve_settings,
+    schedule_post_ingest,
+)
 
 _log = logging.getLogger("colearni.domain.knowledge_base")
 
@@ -94,3 +99,29 @@ def reset_document_for_reprocess(
         error_message="",
     )
     db.commit()
+
+
+def reprocess_document(
+    db: Session,
+    background_tasks: Any,
+    *,
+    document_id: int,
+    workspace_id: int,
+    app_state: Any,
+) -> None:
+    """Reset a document's status and schedule background reprocessing.
+
+    Combines state reset, provider resolution, and background-task scheduling
+    into a single domain call.
+
+    Raises DocumentNotFoundError if the document is missing.
+    """
+    reset_document_for_reprocess(db, document_id=document_id, workspace_id=workspace_id)
+    settings = resolve_settings(app_state)
+    context = resolve_post_ingest_context(
+        app_state,
+        workspace_id=workspace_id,
+        document_id=document_id,
+        settings=settings,
+    )
+    schedule_post_ingest(background_tasks, context)
