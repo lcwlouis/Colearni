@@ -111,7 +111,6 @@ export function useGraphPage() {
       const conceptId = state.selectedDetail?.concept.concept_id;
       if (!conceptId) return;
       setLuckyLoading(true);
-      dispatch({ type: "clear_lucky" });
       apiClient
         .getLuckyPick(wsId, { concept_id: conceptId, mode, k_hops: 2 })
         .then((pick) => dispatch({ type: "lucky_success", pick }))

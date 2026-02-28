@@ -65,6 +65,7 @@ export function ConceptGraph({
   const onBackgroundClickRef = useRef(onBackgroundClick);
   const nodeGroupsRef = useRef<{ node: GNode; g: SVGGElement; circle: SVGCircleElement }[]>([]);
   const [size, setSize] = useState({ w: propWidth ?? 600, h: propHeight ?? 380 });
+  const [themeKey, setThemeKey] = useState(0);
 
   // Auto-size from container using ResizeObserver
   useEffect(() => {
@@ -85,6 +86,13 @@ export function ConceptGraph({
   // Keep callback refs in sync without triggering draw
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
   useEffect(() => { onBackgroundClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
+
+  // Theme change observer — redraw when data-theme changes
+  useEffect(() => {
+    const observer = new MutationObserver(() => setThemeKey((k) => k + 1));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   const width = propWidth ?? size.w;
   const height = propHeight ?? size.h;
@@ -220,8 +228,8 @@ export function ConceptGraph({
       );
       circle.setAttribute("r", String(nodeRadius));
       circle.setAttribute("fill", MASTERY_COLORS[n.mastery ?? ""] ?? "#0f5f9c");
-      circle.setAttribute("stroke", n.id === selectedId ? "#0f5f9c" : bgColor);
-      circle.setAttribute("stroke-width", n.id === selectedId ? "3" : "2");
+      circle.setAttribute("stroke", bgColor);
+      circle.setAttribute("stroke-width", "2");
 
       // Dim non-focused nodes
       const isFocused = !hasFocus || focusedSet.has(n.id);
@@ -375,7 +383,7 @@ export function ConceptGraph({
     const simTimeout = isHugeGraph ? 1500 : isLargeGraph ? 2000 : 3000;
     sim.alpha(1).restart();
     setTimeout(() => sim.stop(), simTimeout);
-  }, [nodes, edges, selectedId, width, height, focusNodeId]);
+  }, [nodes, edges, width, height, focusNodeId, themeKey]);
 
   useEffect(() => {
     draw();
@@ -422,6 +430,18 @@ export function ConceptGraph({
       }
     }
   }, [searchHighlight]);
+
+  // ── In-place selection highlight (no simulation rebuild) ──
+  useEffect(() => {
+    const groups = nodeGroupsRef.current;
+    if (groups.length === 0) return;
+    const cs = getComputedStyle(document.documentElement);
+    const bgColor = cs.getPropertyValue('--bg').trim() || '#fff';
+    for (const { node, circle } of groups) {
+      circle.setAttribute("stroke", node.id === selectedId ? "#0f5f9c" : bgColor);
+      circle.setAttribute("stroke-width", node.id === selectedId ? "3" : "2");
+    }
+  }, [selectedId]);
 
   if (nodes.length === 0) {
     return <p className="status empty">No graph data yet.</p>;
