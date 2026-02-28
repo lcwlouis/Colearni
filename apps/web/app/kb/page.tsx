@@ -167,8 +167,11 @@ export default function KBPage() {
   useEffect(() => {
     const processingItems = uploadQueue.filter((q) => q.phase === "processing");
     if (processingItems.length === 0) {
-      // No items processing — stop polling
-      stopPolling();
+      // No items processing — stop polling only if no docs are still extracting
+      const anyExtracting = documents.some((d) => d.graph_status === "extracting" || d.graph_status === "pending");
+      if (!anyExtracting) {
+        stopPolling();
+      }
       return;
     }
     // Check each processing item against the documents list
@@ -184,7 +187,11 @@ export default function KBPage() {
       }
     }
     if (allDone) {
-      stopPolling();
+      // Keep polling if any documents are still extracting graph
+      const anyExtracting = documents.some((d) => d.graph_status === "extracting" || d.graph_status === "pending");
+      if (!anyExtracting) {
+        stopPolling();
+      }
       // Schedule auto-dismiss of completed items
       if (autoClearTimerRef.current) clearTimeout(autoClearTimerRef.current);
       autoClearTimerRef.current = setTimeout(() => {
@@ -193,6 +200,14 @@ export default function KBPage() {
       }, AUTO_CLEAR_DELAY_MS);
     }
   }, [uploadQueue, documents, stopPolling]);
+
+  // B4: Auto-poll when documents are in extracting state
+  useEffect(() => {
+    const anyExtracting = documents.some((d) => d.graph_status === "extracting" || (d.graph_status === "pending" && d.ingestion_status === "ingested"));
+    if (anyExtracting && !pollTimerRef.current) {
+      startPolling();
+    }
+  }, [documents, startPolling]);
 
   const handleConfirmAction = useCallback(async () => {
     if (!pendingAction || !wsId) return;
@@ -364,6 +379,8 @@ export default function KBPage() {
                       <p className="kb-doc-summary" title={doc.summary}>
                         {doc.summary.length > 80 ? doc.summary.slice(0, 80) + '…' : doc.summary}
                       </p>
+                    ) : doc.graph_status === "extracting" ? (
+                      <span className="kb-meta kb-extracting">Extracting…</span>
                     ) : (
                       <span className="kb-meta">—</span>
                     )}
@@ -374,8 +391,10 @@ export default function KBPage() {
                     </span>
                   </td>
                   <td>
-                    <span className={`kb-badge ${doc.graph_status === "extracted" ? "ok" : doc.graph_status === "disabled" ? "disabled" : "pending"}`}>
-                      {doc.graph_status}
+                    <span className={`kb-badge ${doc.graph_status === "extracted" ? "ok" : doc.graph_status === "failed" ? "failed" : doc.graph_status === "extracting" ? "extracting" : doc.graph_status === "disabled" ? "disabled" : "pending"}`}
+                      title={doc.graph_status === "failed" && doc.error_message ? doc.error_message : undefined}
+                    >
+                      {doc.graph_status === "extracting" ? "Extracting…" : doc.graph_status}
                     </span>
                     <span className="kb-meta">{doc.graph_concept_count} concepts</span>
                   </td>

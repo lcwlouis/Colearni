@@ -11,7 +11,7 @@ from adapters.db.chunks import (
     insert_chunks_bulk,
     list_chunks_for_document,
 )
-from adapters.db.documents import get_document_by_content_hash, insert_document, update_document_summary
+from adapters.db.documents import get_document_by_content_hash, insert_document, update_document_summary, update_document_status
 from adapters.embeddings.factory import build_embedding_provider
 from adapters.parsers.chunker import chunk_text_deterministic
 from adapters.parsers.text import UnsupportedTextDocumentError, parse_text_payload
@@ -318,6 +318,13 @@ def ingest_text_document_fast(
         document_id=document.id,
         chunk_texts=chunks,
     )
+    # Mark document as ingested now that chunks are persisted
+    update_document_status(
+        db,
+        workspace_id=request.workspace_id,
+        document_id=document.id,
+        ingestion_status="ingested",
+    )
     db.commit()
     return IngestionResult(
         document_id=document.id,
@@ -352,12 +359,20 @@ def run_post_ingest_tasks(
     active_settings = settings or get_settings()
     db = new_session()
     try:
+        # Mark graph as extracting
+        if active_settings.ingest_build_graph and graph_llm_client is not None:
+            update_document_status(
+                db, workspace_id=workspace_id, document_id=document_id,
+                graph_status="extracting",
+            )
+            db.commit()
+
         chunks_rows = list_chunks_for_document(
             db,
             workspace_id=workspace_id,
             document_id=document_id,
         )
-        chunk_texts = [c.body for c in chunks_rows]
+        chunk_texts = [c.text for c in chunks_rows]
         log.info("post_ingest loaded %d chunks for doc=%s", len(chunk_texts), document_id)
 
         # 1) Populate embeddings
@@ -417,15 +432,36 @@ def run_post_ingest_tasks(
                     settings=active_settings,
                     embedding_provider=effective_graph_embedding_provider,
                 )
+                update_document_status(
+                    db, workspace_id=workspace_id, document_id=document_id,
+                    graph_status="extracted",
+                )
                 log.info("post_ingest graph DONE doc=%s", document_id)
-            except Exception:
+            except Exception as exc:
                 log.exception("Background graph extraction failed doc=%s", document_id)
+                update_document_status(
+                    db, workspace_id=workspace_id, document_id=document_id,
+                    graph_status="failed",
+                    error_message=f"Graph extraction failed: {exc}",
+                )
 
         db.commit()
         log.info("post_ingest_tasks DONE ws=%s doc=%s", workspace_id, document_id)
-    except Exception:
+    except Exception as exc:
         log.exception("Post-ingest background task failed ws=%s doc=%s", workspace_id, document_id)
         db.rollback()
+        # Attempt to record failure status
+        try:
+            db2 = new_session()
+            update_document_status(
+                db2, workspace_id=workspace_id, document_id=document_id,
+                graph_status="failed",
+                error_message=f"Post-ingest task failed: {exc}",
+            )
+            db2.commit()
+            db2.close()
+        except Exception:
+            log.exception("Failed to record error status doc=%s", document_id)
     finally:
         db.close()
 

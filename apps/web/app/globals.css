@@ -1378,6 +1378,29 @@ pre {
   color: var(--muted);
 }
 
+.kb-badge.extracting {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #b45309;
+  animation: kb-pulse 1.5s ease-in-out infinite;
+}
+
+[data-theme="dark"] .kb-badge.extracting {
+  background: #2a2510;
+  border-color: #7c6320;
+  color: #fcd34d;
+}
+
+@keyframes kb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.kb-extracting {
+  animation: kb-pulse 1.5s ease-in-out infinite;
+  font-style: italic;
+}
+
 .kb-meta {
   margin-left: 0.5rem;
   color: var(--muted);

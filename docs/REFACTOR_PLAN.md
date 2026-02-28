@@ -1,6 +1,31 @@
-# CoLearni Refactor Plan
+# CoLearni Refactor Plan (READ THIS OFTEN)
 
 Last updated: 2026-02-28
+
+## Non-Negotiable Run Rules
+
+1. You MUST re-open and re-read this file:
+   - at the start of the run
+   - after every 2 refactor slices
+   - after any context compaction / summarization / “I may lose context” moment
+   - before claiming any slice complete
+2. Do not overclaim. A slice is ONLY complete if:
+   - code or docs for that slice are changed
+   - behavior is verified
+   - the slice-specific verification gates in this file are met
+3. Work in SMALL PR-sized chunks:
+   - one slice or sub-slice at a time
+   - prefer commit message format: `chore(refactor): <slice-id> <short description>`
+4. For each slice, you MUST produce a `Verification Block` with:
+   - Root cause
+   - Files changed
+   - What changed
+   - Commands run
+   - Manual verification steps
+   - Observed outcome
+5. Keep an ordered list of outstanding slices and follow the execution order strictly.
+6. If implementation uncovers a behavior change risk, STOP and update this plan before widening scope.
+7. This is a maintainability refactor plan. Do not mix in unrelated feature work.
 
 ## Purpose
 
@@ -59,6 +84,23 @@ These constraints apply to every refactor slice:
 6. Keep FastAPI routes thin by the end of the route refactor slices.
 7. Do not mix schema redesign with module moves in the same PR.
 8. Prefer facade modules and staged re-exports while imports are being migrated.
+
+## Refactor Slice IDs
+
+Use these stable IDs in commits, reports, and verification blocks:
+
+- `R0` Baseline and Guardrails
+- `R1` Schema Decomposition
+- `R2` Thin Routes Pass I - Workspaces and Research
+- `R3` Thin Routes Pass II - Knowledge Base and Upload Surface Unification
+- `R4` Ingestion Split
+- `R5` Chat Orchestration Split
+- `R6` Quiz and Practice Split
+- `R7` Graph Repository Split
+- `R8` Tutor Page Split
+- `R9` Graph Page, KB Page, and Sidebar Split
+- `R10` CSS Decomposition
+- `R11` Cleanup and Facade Removal
 
 ## Current-State Findings
 
@@ -344,7 +386,7 @@ The work should be executed in the order below.
 
 Each slice should end with green tests before the next slice starts.
 
-### Slice 0: Baseline and Guardrails
+### R0. Slice 0: Baseline and Guardrails
 
 Purpose:
 
@@ -377,7 +419,7 @@ Exit criteria:
 - typecheck is green
 - generated artifacts no longer create noise in routine diffs
 
-### Slice 1: Schema Decomposition
+### R1. Slice 1: Schema Decomposition
 
 Purpose:
 
@@ -422,7 +464,7 @@ Exit criteria:
 - schema files are feature-scoped
 - no payload contract changes
 
-### Slice 2: Thin Routes Pass I - Workspaces and Research
+### R2. Slice 2: Thin Routes Pass I - Workspaces and Research
 
 Purpose:
 
@@ -468,7 +510,7 @@ Exit criteria:
 
 - `apps/api/routes/workspaces.py` and `apps/api/routes/research.py` contain no direct SQL
 
-### Slice 3: Thin Routes Pass II - Knowledge Base and Upload Surface Unification
+### R3. Slice 3: Thin Routes Pass II - Knowledge Base and Upload Surface Unification
 
 Purpose:
 
@@ -519,7 +561,7 @@ Exit criteria:
 - only one real upload implementation exists
 - route-level SQL is removed from KB handlers
 
-### Slice 4: Ingestion Split
+### R4. Slice 4: Ingestion Split
 
 Purpose:
 
@@ -568,7 +610,7 @@ Exit criteria:
 
 - `core/ingestion.py` is a facade, not the implementation center
 
-### Slice 5: Chat Orchestration Split
+### R5. Slice 5: Chat Orchestration Split
 
 Purpose:
 
@@ -622,7 +664,7 @@ Exit criteria:
 - `generate_chat_response()` is orchestration only
 - retriever creation and evidence shaping are no longer embedded inline
 
-### Slice 6: Quiz and Practice Split
+### R6. Slice 6: Quiz and Practice Split
 
 Purpose:
 
@@ -672,7 +714,7 @@ Exit criteria:
 
 - practice no longer depends on level-up through aliased exceptions and hidden helper reuse
 
-### Slice 7: Graph Repository Split
+### R7. Slice 7: Graph Repository Split
 
 Purpose:
 
@@ -714,7 +756,7 @@ Exit criteria:
 - graph data access is split by concern
 - resolver and gardener imports remain stable through a facade layer
 
-### Slice 8: Tutor Page Split
+### R8. Slice 8: Tutor Page Split
 
 Purpose:
 
@@ -757,7 +799,7 @@ Exit criteria:
 
 - `apps/web/app/tutor/page.tsx` becomes a container, not a behavior monolith
 
-### Slice 9: Graph Page, KB Page, and Sidebar Split
+### R9. Slice 9: Graph Page, KB Page, and Sidebar Split
 
 Purpose:
 
@@ -802,7 +844,7 @@ Exit criteria:
 
 - the three largest frontend containers are feature-composed rather than single-file implementations
 
-### Slice 10: CSS Decomposition
+### R10. Slice 10: CSS Decomposition
 
 Purpose:
 
@@ -843,7 +885,7 @@ Exit criteria:
 
 - `globals.css` becomes a thin aggregator or minimal shell file
 
-### Slice 11: Cleanup and Facade Removal
+### R11. Slice 11: Cleanup and Facade Removal
 
 Purpose:
 
@@ -907,6 +949,75 @@ Mitigation:
 - every facade added in a slice must have a removal target in Slice 11
 - track removal explicitly in PR descriptions
 
+## Execution Order (Update After Each Run)
+
+Start with the highest-priority maintainability slices and proceed sequentially. Do not skip ahead unless the current slice is fully verified or explicitly blocked.
+
+1. `R0` Baseline and Guardrails
+   - This is mandatory before all other refactor work.
+   - The repo must be typecheck-clean before deeper module moves.
+
+2. `R1` Schema Decomposition
+   - Do not start route or domain splits until schema ownership is clearer.
+
+3. `R2` Thin Routes Pass I - Workspaces and Research
+   - Start with the simpler route refactors first.
+
+4. `R3` Thin Routes Pass II - Knowledge Base and Upload Surface Unification
+   - Resolve duplicate upload surfaces before deeper ingestion refactors.
+
+5. `R4` Ingestion Split
+   - Refactor orchestration after route unification so there is one ingestion service path.
+
+6. `R5` Chat Orchestration Split
+   - Stabilize tutor orchestration before touching page-level tutor decomposition.
+
+7. `R6` Quiz and Practice Split
+   - Extract shared quiz primitives after chat and ingestion seams are cleaner.
+
+8. `R7` Graph Repository Split
+   - Split graph data access after the earlier service patterns are established.
+
+9. `R8` Tutor Page Split
+   - Break up the largest frontend page first.
+
+10. `R9` Graph Page, KB Page, and Sidebar Split
+   - Finish major frontend decomposition after the tutor page pattern is proven.
+
+11. `R10` CSS Decomposition
+   - CSS split comes after page/component ownership is stable.
+
+12. `R11` Cleanup and Facade Removal
+   - Only after all other slices are green.
+
+Re-read this file after every 2 completed slices and restate which slices remain.
+
+## Verification Block Template
+
+For every completed slice, include this exact structure in the working report or PR note:
+
+```text
+Verification Block - <slice-id>
+
+Root cause
+- <what made this area hard to maintain?>
+
+Files changed
+- <file list>
+
+What changed
+- <short description of the refactor moves>
+
+Commands run
+- <tests / typecheck / lint commands>
+
+Manual verification steps
+- <UI/API/dev verification steps>
+
+Observed outcome
+- <what was actually observed>
+```
+
 ## Verification Matrix
 
 Run these commands at the end of every slice unless the slice is docs-only:
@@ -956,3 +1067,34 @@ At the end of the full refactor plan execution, the repo should have:
 When implementation starts, also maintain `docs/REFACTOR.md` as the running audit log required by `docs/RUN_VERIFY_FIXES.md`.
 
 Use this file, `docs/REFACTOR_PLAN.md`, as the stable roadmap and use `docs/REFACTOR.md` as the live execution journal.
+
+## Kickoff Prompt
+
+Use this prompt to start or resume the refactor run:
+
+```text
+You are working in the CoLearni repo.
+
+STRICT INSTRUCTIONS:
+
+Open and read docs/REFACTOR_PLAN.md now. This file is the source of truth.
+You MUST implement refactor slices in the EXACT execution order listed there.
+You MUST NOT claim a slice is complete until you produce a Verification Block with:
+Root cause
+Files changed
+What changed
+Commands run
+Manual verification steps
+Observed outcome
+After every 2 slices OR if your context is compacted/summarized, re-open docs/REFACTOR_PLAN.md and restate which slices remain.
+Work in small commits: chore(refactor): <slice-id> <short desc>.
+If you discover a mismatch between current repo behavior and the assumptions in docs/REFACTOR_PLAN.md, STOP and update the plan before moving on.
+
+START:
+
+Read docs/REFACTOR_PLAN.md.
+Begin with slice R0 (Baseline and Guardrails) exactly as described.
+Do not proceed beyond R0 until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+Make sure you re-read docs/REFACTOR_PLAN.md before every move to the next slice. It can be dynamically updated. Check the latest version and continue.
+```

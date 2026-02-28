@@ -48,6 +48,9 @@ def list_kb_documents(
                     d.summary,
                     d.source_uri,
                     d.created_at,
+                    d.ingestion_status,
+                    d.graph_status,
+                    d.error_message,
                     COUNT(DISTINCT c.id) AS chunk_count,
                     COUNT(DISTINCT CASE WHEN p.target_type = 'concept' THEN p.target_id END) AS graph_concept_count
                 FROM documents d
@@ -63,6 +66,13 @@ def list_kb_documents(
         .mappings()
         .all()
     )
+
+    # Compute effective statuses: use persisted status, with a graph_enabled override
+    def _effective_graph_status(row_status: str) -> str:
+        if not graph_enabled:
+            return "disabled"
+        return row_status or "pending"
+
     return KBDocumentListResponse(
         workspace_id=ws.workspace_id,
         documents=[
@@ -73,16 +83,11 @@ def list_kb_documents(
                 summary=str(row["summary"]) if row["summary"] else None,
                 source_uri=str(row["source_uri"]) if row["source_uri"] else None,
                 chunk_count=int(row["chunk_count"]),
-                ingestion_status="ingested" if int(row["chunk_count"]) > 0 else "pending",
-                graph_status=(
-                    "disabled"
-                    if not graph_enabled
-                    else "extracted"
-                    if int(row["chunk_count"]) > 0
-                    else "pending"
-                ),
+                ingestion_status=row["ingestion_status"] or "pending",
+                graph_status=_effective_graph_status(row["graph_status"]),
                 graph_concept_count=int(row["graph_concept_count"]),
                 created_at=row["created_at"],
+                error_message=str(row["error_message"]) if row.get("error_message") else None,
             )
             for row in rows
         ],
@@ -153,10 +158,14 @@ def delete_kb_document(
 @router.post("/documents/{document_id}/reprocess", status_code=status.HTTP_202_ACCEPTED)
 def reprocess_kb_document(
     document_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> dict[str, object]:
-    """Re-chunk and re-embed a document (async stub — returns 202)."""
+    """Re-run post-ingest tasks (embeddings, summary, graph) for a document."""
+    from adapters.db.documents import update_document_status
+
     doc = (
         db.execute(
             text(
@@ -176,6 +185,49 @@ def reprocess_kb_document(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found in workspace.",
         )
+
+    # Reset statuses
+    update_document_status(
+        db,
+        workspace_id=ws.workspace_id,
+        document_id=document_id,
+        graph_status="pending",
+        error_message="",
+    )
+    db.commit()
+
+    # Schedule background re-processing
+    app_state = getattr(request.app, "state", None)
+    settings: Settings | None = getattr(app_state, "settings", None) if app_state else None
+    graph_llm = getattr(app_state, "graph_llm_client", None) if app_state else None
+    if graph_llm is None:
+        try:
+            graph_llm = build_graph_llm_client(settings=settings)
+        except (ValueError, RuntimeError):
+            graph_llm = None
+    graph_embed = getattr(app_state, "graph_embedding_provider", None) if app_state else None
+    if graph_embed is None:
+        try:
+            graph_embed = build_embedding_provider(settings=settings)
+        except (ValueError, RuntimeError):
+            graph_embed = None
+    chunk_embed = getattr(app_state, "chunk_embedding_provider", None) if app_state else None
+    if chunk_embed is None:
+        try:
+            chunk_embed = build_embedding_provider(settings=settings)
+        except (ValueError, RuntimeError):
+            chunk_embed = None
+
+    background_tasks.add_task(
+        run_post_ingest_tasks,
+        workspace_id=ws.workspace_id,
+        document_id=document_id,
+        graph_llm_client=graph_llm,
+        graph_embedding_provider=graph_embed,
+        chunk_embedding_provider=chunk_embed,
+        settings=settings,
+    )
+
     return {
         "document_id": document_id,
         "workspace_id": ws.workspace_id,

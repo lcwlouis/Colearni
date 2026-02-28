@@ -349,9 +349,10 @@ export interface KBDocumentSummary {
   source_uri: string | null;
   chunk_count: number;
   ingestion_status: "pending" | "ingested";
-  graph_status: "disabled" | "pending" | "extracted";
+  graph_status: "disabled" | "pending" | "extracting" | "extracted" | "failed";
   graph_concept_count: number;
   created_at: string;
+  error_message: string | null;
 }
 
 export interface KBDocumentListResponse {

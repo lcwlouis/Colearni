@@ -19,6 +19,12 @@ class DocumentRow:
     mime_type: str | None
     content_hash: str
     summary: str | None = None
+    ingestion_status: str = "pending"
+    graph_status: str = "pending"
+    error_message: str | None = None
+
+
+_DOC_SELECT_COLS = "id, workspace_id, title, source_uri, mime_type, content_hash, summary, ingestion_status, graph_status, error_message"
 
 
 def get_document_by_content_hash(
@@ -30,8 +36,8 @@ def get_document_by_content_hash(
     """Fetch an existing document by workspace + content hash."""
     row = db.execute(
         text(
-            """
-            SELECT id, workspace_id, title, source_uri, mime_type, content_hash, summary
+            f"""
+            SELECT {_DOC_SELECT_COLS}
             FROM documents
             WHERE workspace_id = :workspace_id AND content_hash = :content_hash
             """
@@ -50,8 +56,8 @@ def get_document_by_id(
     """Fetch a document by id, scoped to workspace."""
     row = db.execute(
         text(
-            """
-            SELECT id, workspace_id, title, source_uri, mime_type, content_hash, summary
+            f"""
+            SELECT {_DOC_SELECT_COLS}
             FROM documents
             WHERE workspace_id = :workspace_id AND id = :document_id
             """
@@ -91,7 +97,7 @@ def insert_document(
                 :mime_type,
                 :content_hash
             )
-            RETURNING id, workspace_id, title, source_uri, mime_type, content_hash, summary
+            RETURNING id, workspace_id, title, source_uri, mime_type, content_hash, summary, ingestion_status, graph_status, error_message
             """
         ),
         {
@@ -117,6 +123,9 @@ def _to_document_row(row: dict[str, object] | None) -> DocumentRow | None:
         mime_type=row["mime_type"] if row["mime_type"] is None else str(row["mime_type"]),
         content_hash=str(row["content_hash"]),
         summary=str(row["summary"]) if row.get("summary") else None,
+        ingestion_status=str(row.get("ingestion_status") or "pending"),
+        graph_status=str(row.get("graph_status") or "pending"),
+        error_message=str(row["error_message"]) if row.get("error_message") else None,
     )
 
 
@@ -141,4 +150,44 @@ def update_document_summary(
             "workspace_id": workspace_id,
             "summary": summary,
         },
+    )
+
+
+def update_document_status(
+    db: Session,
+    *,
+    workspace_id: int,
+    document_id: int,
+    ingestion_status: str | None = None,
+    graph_status: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Update ingestion/graph status fields on a document."""
+    sets: list[str] = ["updated_at = now()"]
+    params: dict[str, object] = {
+        "document_id": document_id,
+        "workspace_id": workspace_id,
+    }
+    if ingestion_status is not None:
+        sets.append("ingestion_status = :ingestion_status")
+        params["ingestion_status"] = ingestion_status
+        if ingestion_status == "ingested":
+            sets.append("ingested_at = now()")
+    if graph_status is not None:
+        sets.append("graph_status = :graph_status")
+        params["graph_status"] = graph_status
+        if graph_status == "extracted":
+            sets.append("graph_extracted_at = now()")
+    if error_message is not None:
+        sets.append("error_message = :error_message")
+        params["error_message"] = error_message
+    db.execute(
+        text(
+            f"""
+            UPDATE documents
+            SET {', '.join(sets)}
+            WHERE id = :document_id AND workspace_id = :workspace_id
+            """
+        ),
+        params,
     )

@@ -428,9 +428,10 @@ class KBDocumentSummary(BaseModel):
     source_uri: str | None = None
     chunk_count: int = Field(ge=0)
     ingestion_status: Literal["pending", "ingested"]
-    graph_status: Literal["disabled", "pending", "extracted"]
+    graph_status: Literal["disabled", "pending", "extracting", "extracted", "failed"]
     graph_concept_count: int = Field(ge=0)
     created_at: datetime
+    error_message: str | None = None
 
 
 class KBDocumentListResponse(BaseModel):
