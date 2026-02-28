@@ -290,13 +290,42 @@ def run_graph_gardener(
             )
             if decision is None:
                 clusters_skipped += 1
+                emit_event(
+                    "graph.gardener.cluster.skip",
+                    status="info",
+                    component="graph",
+                    operation="graph.gardener.run",
+                    workspace_id=workspace_id,
+                    cluster_size=len(cluster),
+                    reason="llm_returned_none",
+                )
                 continue
             if decision.confidence < config.cluster_llm_confidence_floor:
                 clusters_skipped += 1
+                emit_event(
+                    "graph.gardener.cluster.skip",
+                    status="info",
+                    component="graph",
+                    operation="graph.gardener.run",
+                    workspace_id=workspace_id,
+                    cluster_size=len(cluster),
+                    reason="low_confidence",
+                    confidence=decision.confidence,
+                    threshold=config.cluster_llm_confidence_floor,
+                )
                 continue
             target_id = decision.merge_into_id
             if target_id is None or target_id not in cluster:
                 clusters_skipped += 1
+                emit_event(
+                    "graph.gardener.cluster.skip",
+                    status="info",
+                    component="graph",
+                    operation="graph.gardener.run",
+                    workspace_id=workspace_id,
+                    cluster_size=len(cluster),
+                    reason="invalid_target",
+                )
                 continue
 
             merge_away_ids = sorted(cluster_seed_ids - {target_id})
@@ -336,7 +365,7 @@ def run_graph_gardener(
             max_llm_calls_per_run=budgets.max_llm_calls_per_run,
             max_clusters_per_run=budgets.max_clusters_per_run,
         )
-        return GardenerRunResult(
+        result = GardenerRunResult(
             seed_nodes_selected=len(seeds),
             clusters_total=len(clusters),
             clusters_processed=budgets.clusters_processed,
@@ -346,6 +375,16 @@ def run_graph_gardener(
             stopped_by_cluster_budget=stopped_by_cluster_budget,
             stopped_by_llm_budget=stopped_by_llm_budget,
         )
+        if span is not None:
+            span.set_attribute("graph.seed_nodes", len(seeds))
+            span.set_attribute("graph.clusters_total", len(clusters))
+            span.set_attribute("graph.clusters_processed", budgets.clusters_processed)
+            span.set_attribute("graph.clusters_skipped", clusters_skipped)
+            span.set_attribute("graph.merges_applied", merges_applied)
+            span.set_attribute("graph.llm_calls", budgets.llm_calls)
+            span.set_attribute("graph.stopped_by_cluster_budget", stopped_by_cluster_budget)
+            span.set_attribute("graph.stopped_by_llm_budget", stopped_by_llm_budget)
+        return result
 
 
 def _candidate_blocking(

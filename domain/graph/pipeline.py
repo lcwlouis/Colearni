@@ -66,7 +66,10 @@ def build_graph_for_chunks(
         canonical_edges_upserted = 0
 
         for chunk in chunks:
-            with observation_context(chunk_id=chunk.id):
+            with observation_context(chunk_id=chunk.id), start_span(
+                "graph.resolver.chunk",
+                chunk_id=chunk.id,
+            ):
                 budgets.reset_chunk()
                 extraction = extract_raw_graph_from_chunk(
                     llm_client=llm_client,
@@ -131,7 +134,7 @@ def build_graph_for_chunks(
                     if edge_id is not None:
                         canonical_edges_upserted += 1
 
-        return GraphBuildResult(
+        result = GraphBuildResult(
             raw_concepts_written=raw_concepts_written,
             raw_edges_written=raw_edges_written,
             canonical_created=canonical_created,
@@ -139,6 +142,14 @@ def build_graph_for_chunks(
             canonical_edges_upserted=canonical_edges_upserted,
             llm_disambiguations=budgets.llm_calls_document,
         )
+        if span is not None:
+            span.set_attribute("graph.chunks_processed", len(chunks))
+            span.set_attribute("graph.canonical_created", canonical_created)
+            span.set_attribute("graph.canonical_merged", canonical_merged)
+            span.set_attribute("graph.llm_disambiguations", budgets.llm_calls_document)
+            span.set_attribute("graph.raw_concepts_written", raw_concepts_written)
+            span.set_attribute("graph.raw_edges_written", raw_edges_written)
+        return result
 
 
 def _resolve_edge_endpoint(
