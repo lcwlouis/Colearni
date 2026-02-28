@@ -99,6 +99,8 @@ def generate_chat_response_stream(
             span.set_attribute("session.id", request.session_id)
         if request.user_id is not None:
             span.set_attribute("user.id", request.user_id)
+        if request.concept_id is not None:
+            span.set_attribute("concept.id", request.concept_id)
 
     try:
         final_text: str | None = None
@@ -309,7 +311,7 @@ def _stream_inner(
             yield ChatStreamTraceEvent(trace=generation_trace)
             # U5: emit ephemeral reasoning summary when enabled and reasoning was used
             if (
-                active_settings.reasoning_summary_enabled
+                settings.reasoning_summary_enabled
                 and generation_trace.reasoning_used
                 and generation_trace.reasoning_tokens
                 and generation_trace.reasoning_tokens > 0

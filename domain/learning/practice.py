@@ -105,6 +105,8 @@ def generate_practice_flashcards(
         workspace_id=workspace_id,
     ) as span:
         set_span_kind(span, SPAN_KIND_CHAIN)
+        if span is not None:
+            span.set_attribute("concept.id", concept_id)
         payload = _parse_json(
             llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta),
             "Flashcard generation response is not valid JSON.",
@@ -173,6 +175,8 @@ def create_practice_quiz(
             workspace_id=workspace_id,
         ) as span:
             set_span_kind(span, SPAN_KIND_CHAIN)
+            if span is not None and concept_id is not None:
+                span.set_attribute("concept.id", concept_id)
             items = _generate_practice_items_with_retries(
                 llm_client=llm_client,
                 prompt=prompt,
@@ -489,6 +493,8 @@ def generate_stateful_flashcards(
         workspace_id=workspace_id,
     ) as span:
         set_span_kind(span, SPAN_KIND_CHAIN)
+        if span is not None and concept_id is not None:
+            span.set_attribute("concept.id", concept_id)
         payload = _parse_json(
             llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta),
             "Flashcard generation response is not valid JSON.",
