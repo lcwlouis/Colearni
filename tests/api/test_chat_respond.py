@@ -31,7 +31,8 @@ class DummyTutorLLMClient:
     """Tutor LLM client double used by chat API tests."""
 
     def generate_tutor_text(self, *, prompt: str) -> str:
-        if "STYLE: direct" in prompt.lower() or "TEACHING STYLE: Direct" in prompt:
+        lower = prompt.lower()
+        if "direct" in lower and ("mastery is unlocked" in lower or "style: direct" in lower):
             return "DIRECT: concise explanation"
         return "SOCRATIC: guiding question first"
 

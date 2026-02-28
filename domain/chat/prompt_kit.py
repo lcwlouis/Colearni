@@ -1,20 +1,26 @@
 """Prompt kit – versioned prompt templates, persona, and social-intent classifier.
 
-Slice 13: This module provides:
+Slice 13 + P2: This module provides:
   1. Persona definitions (CoLearni default + pluggable).
   2. A lightweight social-intent classifier that detects greetings / chitchat
      and routes them to a "social" response path (no retrieval needed).
   3. Versioned prompt builder that composes the final tutor system prompt
-     from persona + style + assessment history + evidence blocks.
+     from file-based prompt assets (P2) with inline fallback.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Literal
 
+from core.prompting import PromptRegistry
 from core.schemas import EvidenceItem
+
+log = logging.getLogger("domain.chat.prompt_kit")
+
+_registry = PromptRegistry()
 
 # ── Persona Definitions ──────────────────────────────────────────────
 
@@ -80,6 +86,12 @@ def build_social_response(query: str, *, persona: dict[str, str]) -> str:
 
 PROMPT_VERSION = "v1"
 
+# Map style to prompt asset ID
+_TUTOR_ASSET_IDS: dict[str, str] = {
+    "socratic": "tutor_socratic_v1",
+    "direct": "tutor_direct_v1",
+}
+
 
 def build_system_prompt(
     *,
@@ -92,14 +104,42 @@ def build_system_prompt(
 ) -> str:
     """Compose the full system prompt for the tutor LLM call.
 
-    Components (in order):
-      1. Persona system prefix
-      2. Teaching style rules
-      3. Document summaries (if available)
-      4. Topic assessment history (if available)
-      5. Flashcard progress snapshot (if available)
-      6. Conversation history (if available)
+    P2: Now loads from file-based prompt assets with inline fallback.
     """
+    asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    try:
+        return _registry.render(asset_id, {
+            "strict_grounded_mode": "true",
+            "mastery_status": "learned" if style == "direct" else "locked",
+            "document_summaries": document_summaries or "(none)",
+            "assessment_context": assessment_context or "(none)",
+            "flashcard_progress": flashcard_progress or "(none)",
+            "history_summary": history_summary or "(none)",
+            "evidence_block": "(see below)",
+            "query": "(see below)",
+        })
+    except Exception:
+        log.debug("asset load failed for %s, using inline fallback", asset_id)
+        return _build_system_prompt_inline(
+            persona=persona,
+            style=style,
+            assessment_context=assessment_context,
+            history_summary=history_summary,
+            document_summaries=document_summaries,
+            flashcard_progress=flashcard_progress,
+        )
+
+
+def _build_system_prompt_inline(
+    *,
+    persona: dict[str, str],
+    style: Literal["socratic", "direct"],
+    assessment_context: str = "",
+    history_summary: str = "",
+    document_summaries: str = "",
+    flashcard_progress: str = "",
+) -> str:
+    """Inline fallback for system prompt assembly (pre-P2 behavior)."""
     lines: list[str] = [
         persona.get("system_prefix", PERSONA_COLEARNI["system_prefix"]),
         "",
@@ -174,17 +214,35 @@ def build_full_tutor_prompt(
     document_summaries: str = "",
     flashcard_progress: str = "",
 ) -> str:
-    """Build the complete prompt: system + evidence + user question."""
-    system = build_system_prompt(
-        persona=persona,
-        style=style,
-        assessment_context=assessment_context,
-        history_summary=history_summary,
-        document_summaries=document_summaries,
-        flashcard_progress=flashcard_progress,
-    )
+    """Build the complete prompt: system + evidence + user question.
+
+    P2: Uses file-based prompt assets with inline fallback.
+    """
     evidence_block = build_evidence_block(evidence)
-    return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}"
+    asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+
+    try:
+        return _registry.render(asset_id, {
+            "strict_grounded_mode": "true",
+            "mastery_status": "learned" if style == "direct" else "locked",
+            "document_summaries": document_summaries or "(none)",
+            "assessment_context": assessment_context or "(none)",
+            "flashcard_progress": flashcard_progress or "(none)",
+            "history_summary": history_summary or "(none)",
+            "evidence_block": evidence_block,
+            "query": query,
+        })
+    except Exception:
+        log.debug("asset render failed for %s, using inline fallback", asset_id)
+        system = _build_system_prompt_inline(
+            persona=persona,
+            style=style,
+            assessment_context=assessment_context,
+            history_summary=history_summary,
+            document_summaries=document_summaries,
+            flashcard_progress=flashcard_progress,
+        )
+        return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}"
 
 
 __all__ = [

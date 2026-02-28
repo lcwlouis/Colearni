@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Literal
 
 from core.contracts import GraphLLMClient
+from core.prompting import PromptRegistry
 from core.schemas import EvidenceItem
 
+log = logging.getLogger("domain.chat.tutor_agent")
+
 TutorStyle = Literal["socratic", "direct"]
+
+_registry = PromptRegistry()
+
+_TUTOR_ASSET_IDS: dict[str, str] = {
+    "socratic": "tutor_socratic_v1",
+    "direct": "tutor_direct_v1",
+}
 
 
 def resolve_tutor_style(*, mastery_status: str | None) -> TutorStyle:
@@ -35,6 +46,36 @@ def build_tutor_response_text(
 
 
 def build_tutor_prompt(*, query: str, evidence: Sequence[EvidenceItem], style: TutorStyle) -> str:
+    """Build a tutor prompt using file-based assets with inline fallback."""
+    lines = [
+        f"- e{index}: {_truncate(' '.join(item.content.split()), limit=240)}"
+        for index, item in enumerate(evidence[:3], start=1)
+    ]
+    evidence_block = "\n".join(lines) if lines else "- (none)"
+
+    asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    try:
+        return _registry.render(asset_id, {
+            "strict_grounded_mode": "true",
+            "mastery_status": "learned" if style == "direct" else "locked",
+            "document_summaries": "(none)",
+            "assessment_context": "(none)",
+            "flashcard_progress": "(none)",
+            "history_summary": "(none)",
+            "evidence_block": evidence_block,
+            "query": query,
+        })
+    except Exception:
+        log.debug("asset render failed for %s, using inline fallback", asset_id)
+        return _build_tutor_prompt_inline(
+            query=query, evidence_block=evidence_block, style=style
+        )
+
+
+def _build_tutor_prompt_inline(
+    *, query: str, evidence_block: str, style: TutorStyle
+) -> str:
+    """Inline fallback for tutor prompt assembly (pre-P2 behavior)."""
     rules = (
         "STYLE: socratic\n"
         "Do not provide the final answer directly.\n"
@@ -46,11 +87,6 @@ def build_tutor_prompt(*, query: str, evidence: Sequence[EvidenceItem], style: T
             "Be concise and grounded in the cited evidence."
         )
     )
-    lines = [
-        f"- e{index}: {_truncate(' '.join(item.content.split()), limit=240)}"
-        for index, item in enumerate(evidence[:3], start=1)
-    ]
-    evidence_block = "\n".join(lines) if lines else "- (none)"
     return f"{rules}\n\nUSER_QUESTION: {query}\n\nEVIDENCE:\n{evidence_block}"
 
 
