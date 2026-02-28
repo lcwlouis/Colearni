@@ -13,6 +13,13 @@ from core.settings import Settings
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.orm import Session
 
+from domain.graph.resolver_apply import merge_aliases, merge_description, merge_map_method
+from domain.graph.resolver_candidates import combine_candidates
+from domain.graph.resolver_decision import (
+    deterministic_lexical_decision,
+    deterministic_vector_decision,
+    emit_resolver_budget_usage,
+)
 from domain.graph.types import (
     CanonicalCandidate,
     ExtractedConcept,
@@ -238,111 +245,31 @@ class OnlineResolver:
         lexical_rows: Sequence[graph_repository.CanonicalCandidateRow],
         vector_rows: Sequence[graph_repository.CanonicalCandidateRow],
     ) -> list[CanonicalCandidate]:
-        by_id: dict[int, CanonicalCandidate] = {}
-
-        for row in lexical_rows:
-            by_id[row.id] = CanonicalCandidate(
-                concept_id=row.id,
-                canonical_name=row.canonical_name,
-                description=row.description,
-                aliases=tuple(row.aliases),
-                lexical_similarity=row.lexical_similarity,
-                vector_similarity=None,
-            )
-
-        for row in vector_rows:
-            existing = by_id.get(row.id)
-            if existing is None:
-                by_id[row.id] = CanonicalCandidate(
-                    concept_id=row.id,
-                    canonical_name=row.canonical_name,
-                    description=row.description,
-                    aliases=tuple(row.aliases),
-                    lexical_similarity=None,
-                    vector_similarity=row.vector_similarity,
-                )
-                continue
-            by_id[row.id] = CanonicalCandidate(
-                concept_id=existing.concept_id,
-                canonical_name=existing.canonical_name,
-                description=existing.description,
-                aliases=existing.aliases,
-                lexical_similarity=existing.lexical_similarity,
-                vector_similarity=row.vector_similarity,
-            )
-
-        ranked_candidates = sorted(
-            by_id.values(),
-            key=lambda candidate: (
-                max(
-                    candidate.lexical_similarity or 0.0,
-                    candidate.vector_similarity or 0.0,
-                ),
-                candidate.lexical_similarity or -1.0,
-                candidate.vector_similarity or -1.0,
-                -candidate.concept_id,
-            ),
-            reverse=True,
+        return combine_candidates(
+            lexical_rows=lexical_rows,
+            vector_rows=vector_rows,
+            candidate_cap=self._config.candidate_cap,
         )
-        return ranked_candidates[: self._config.candidate_cap]
 
     def _deterministic_lexical_decision(
         self,
         candidates: Sequence[CanonicalCandidate],
     ) -> ResolverDecision | None:
-        lexical_ranked = sorted(
-            [candidate for candidate in candidates if candidate.lexical_similarity is not None],
-            key=lambda candidate: candidate.lexical_similarity or -1.0,
-            reverse=True,
+        return deterministic_lexical_decision(
+            candidates,
+            lexical_similarity_threshold=self._config.lexical_similarity_threshold,
+            lexical_margin_threshold=self._config.lexical_margin_threshold,
         )
-        if not lexical_ranked:
-            return None
-
-        best = float(lexical_ranked[0].lexical_similarity or 0.0)
-        second = (
-            float(lexical_ranked[1].lexical_similarity or 0.0)
-            if len(lexical_ranked) > 1
-            else 0.0
-        )
-        margin = best - second
-        if (
-            best >= self._config.lexical_similarity_threshold
-            and margin >= self._config.lexical_margin_threshold
-        ):
-            return ResolverDecision(
-                decision="MERGE_INTO",
-                merge_into_id=lexical_ranked[0].concept_id,
-                confidence=min(1.0, best),
-                method="lexical",
-            )
-        return None
 
     def _deterministic_vector_decision(
         self,
         candidates: Sequence[CanonicalCandidate],
     ) -> ResolverDecision | None:
-        vector_ranked = sorted(
-            [candidate for candidate in candidates if candidate.vector_similarity is not None],
-            key=lambda candidate: candidate.vector_similarity or -1.0,
-            reverse=True,
+        return deterministic_vector_decision(
+            candidates,
+            vector_similarity_threshold=self._config.vector_similarity_threshold,
+            vector_margin_threshold=self._config.vector_margin_threshold,
         )
-        if not vector_ranked:
-            return None
-
-        best = float(vector_ranked[0].vector_similarity or 0.0)
-        second = float(vector_ranked[1].vector_similarity or 0.0) if len(vector_ranked) > 1 else 0.0
-        margin = best - second
-        if (
-            best >= self._config.vector_similarity_threshold
-            and margin >= self._config.vector_margin_threshold
-        ):
-            return ResolverDecision(
-                decision="MERGE_INTO",
-                merge_into_id=vector_ranked[0].concept_id,
-                confidence=min(1.0, best),
-                method="vector",
-            )
-        return None
 
     def _llm_disambiguation_decision(
         self,
@@ -353,7 +280,7 @@ class OnlineResolver:
         candidates: Sequence[CanonicalCandidate],
         budgets: ResolverBudgets,
     ) -> ResolverDecision:
-        _emit_resolver_budget_usage(
+        emit_resolver_budget_usage(
             workspace_id=workspace_id,
             chunk_id=chunk_id,
             budgets=budgets,
@@ -388,7 +315,7 @@ class OnlineResolver:
 
         try:
             budgets.register_llm_call()
-            _emit_resolver_budget_usage(
+            emit_resolver_budget_usage(
                 workspace_id=workspace_id,
                 chunk_id=chunk_id,
                 budgets=budgets,
@@ -481,7 +408,7 @@ class OnlineResolver:
                     alias=name_norm,
                     canon_concept_id=updated.id,
                     confidence=decision.confidence,
-                    method=_merge_map_method(decision.method),
+                    method=merge_map_method(decision.method),
                 )
                 graph_repository.insert_provenance(
                     self._session,
@@ -537,9 +464,9 @@ class OnlineResolver:
         decision: ResolverDecision,
     ) -> graph_repository.CanonicalConceptRow:
         alias_to_add = (decision.alias_to_add or raw_concept.name).strip()
-        merged_aliases = _merge_aliases(canonical.aliases, alias_to_add)
+        merged_aliases = merge_aliases(canonical.aliases, alias_to_add)
         proposed_description = decision.proposed_description or raw_concept.description
-        merged_description = _merge_description(
+        merged_description = merge_description(
             existing=canonical.description,
             proposed=proposed_description,
             max_chars=self._config.concept_description_max_chars,
@@ -611,49 +538,3 @@ class OnlineResolver:
             ),
             True,
         )
-
-
-def _merge_map_method(method: str) -> str:
-    if method in {"exact", "lexical", "vector", "llm", "manual"}:
-        return method
-    return "exact"
-
-
-def _emit_resolver_budget_usage(
-    *,
-    workspace_id: int,
-    chunk_id: int,
-    budgets: ResolverBudgets,
-) -> None:
-    emit_event(
-        "graph.resolver.budget.usage",
-        status="info",
-        component="graph",
-        operation="graph.resolver.resolve_concept",
-        workspace_id=workspace_id,
-        chunk_id=chunk_id,
-        llm_calls_chunk=budgets.llm_calls_chunk,
-        llm_calls_document=budgets.llm_calls_document,
-        max_llm_calls_per_chunk=budgets.max_llm_calls_per_chunk,
-        max_llm_calls_per_document=budgets.max_llm_calls_per_document,
-    )
-
-
-def _merge_aliases(existing_aliases: Sequence[str], alias_to_add: str) -> list[str]:
-    candidate = alias_to_add.strip()
-    if not candidate:
-        return list(existing_aliases)
-    normalized_existing = {normalize_alias(alias) for alias in existing_aliases}
-    if normalize_alias(candidate) in normalized_existing:
-        return list(existing_aliases)
-    return [*existing_aliases, candidate]
-
-
-def _merge_description(*, existing: str, proposed: str | None, max_chars: int) -> str:
-    bounded_existing = truncate_text(existing, max_chars)
-    bounded_proposed = truncate_text(proposed, max_chars)
-    if not bounded_existing:
-        return bounded_proposed
-    if not bounded_proposed:
-        return bounded_existing
-    return bounded_proposed if len(bounded_proposed) > len(bounded_existing) else bounded_existing
