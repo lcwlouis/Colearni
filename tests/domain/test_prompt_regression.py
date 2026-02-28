@@ -56,7 +56,7 @@ class TestPromptIdRegression:
 # ---- Required sections regression ----
 
 REQUIRED_SECTIONS = {
-    "tutor_socratic_v1": ["guiding question", "socratic"],
+    "tutor_socratic_v1": ["guiding question", "study partner"],
     "tutor_direct_v1": ["direct", "mastery"],
     "assessment_levelup_generate_v1": ["mastery", "item_type", "rubric_keywords"],
     "assessment_levelup_grade_v1": ["_generation_context", "score", "critical_misconception"],

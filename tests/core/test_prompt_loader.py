@@ -20,7 +20,7 @@ class TestLoadAsset:
         assert asset.meta.task_type == TaskType.TUTOR
         assert asset.meta.version == 1
         assert asset.meta.output_format == "markdown"
-        assert "Socratic" in asset.template
+        assert "study partner" in asset.template.lower()
 
     def test_load_direct_asset(self) -> None:
         asset = load_asset("tutor_direct_v1", assets_dir=ASSETS_DIR)

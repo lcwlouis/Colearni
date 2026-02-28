@@ -97,7 +97,7 @@ class TestPromptRegistry:
         }
         result = reg.render("tutor_socratic_v1", ctx)
         assert "How does DNA replicate?" in result
-        assert "Socratic" in result
+        assert "study partner" in result.lower()
         assert "e1: DNA is a double helix" in result
 
     def test_render_missing_placeholder_raises(self) -> None:

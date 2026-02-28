@@ -32,7 +32,11 @@ class DummyTutorLLMClient:
 
     def generate_tutor_text(self, *, prompt: str) -> str:
         lower = prompt.lower()
-        if "direct" in lower and ("mastery is unlocked" in lower or "style: direct" in lower):
+        if "direct" in lower and (
+            "mastery is unlocked" in lower
+            or "style: direct" in lower
+            or "proven they understand" in lower
+        ):
             return "DIRECT: concise explanation"
         return "SOCRATIC: guiding question first"
 
