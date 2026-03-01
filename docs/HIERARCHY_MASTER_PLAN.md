@@ -188,6 +188,11 @@ Post-implementation status (2026-03-01):
 - `npm --prefix apps/web run typecheck`: 0 new errors (1 pre-existing unrelated test-file error)
 - DB integration tests (`tests/db/`): skip (no live DB in CI) — migration `20260301_0009_concept_tier.py` is written and correct; must be applied via `alembic upgrade head` before DB tests can pass
 
+Post-audit fix (2026-03-01):
+
+- **Bug found**: `get_bounded_subgraph()`, `get_full_subgraph()`, and `list_concepts()` in `domain/graph/explore.py` did not SELECT `c.tier` or include `tier` in response dicts. Pydantic models `GraphSubgraphNode`, `GraphConceptSummary`, and `GraphConceptDetail` in `core/schemas/graph.py` lacked `tier` field, silently stripping any tier data. **Fixed**: added `c.tier` to all 3 SQL queries, `tier` to all 3 response dicts, and `tier: str | None = None` to all 3 Pydantic models.
+- `PYTHONPATH=. pytest -q --ignore=tests/db`: **873 passed** (excluding 2 pre-existing unrelated failures)
+
 ---
 
 ## Decision Log
