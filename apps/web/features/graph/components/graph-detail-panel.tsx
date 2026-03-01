@@ -1,10 +1,12 @@
 import { AsyncState } from "@/components/async-state";
 import { StatefulFlashcardList } from "@/components/stateful-flashcard-list";
 import { PracticeQuizCard } from "@/components/practice-quiz-card";
+import { ConceptActivityPanel } from "@/components/concept-activity-panel";
 import type {
   JsonObject,
   StatefulFlashcard,
   FlashcardSelfRating,
+  ConceptActivityResponse,
 } from "@/lib/api/types";
 import type { GraphState } from "@/lib/graph/graph-state";
 import type { PracticeState } from "@/lib/practice/practice-state";
@@ -29,6 +31,15 @@ interface GraphDetailPanelProps {
   dispatchPractice: React.Dispatch<import("@/lib/practice/practice-state").PracticeAction>;
   setPracticeMode: (mode: "none" | "flashcards" | "quiz") => void;
   setStatefulCards: (cards: StatefulFlashcard[]) => void;
+  conceptActivity?: {
+    activity: ConceptActivityResponse | null;
+    loading: boolean;
+    error: string | null;
+    refetch: () => void;
+  };
+  onOpenQuiz?: (quizId: number) => void;
+  onRetryQuiz?: (quizId: number) => void;
+  onOpenFlashcardRun?: (runId: string) => void;
 }
 
 export function GraphDetailPanel({
@@ -51,6 +62,10 @@ export function GraphDetailPanel({
   dispatchPractice,
   setPracticeMode,
   setStatefulCards,
+  conceptActivity,
+  onOpenQuiz,
+  onRetryQuiz,
+  onOpenFlashcardRun,
 }: GraphDetailPanelProps) {
   const { phase, selectedDetail, luckyPick, error } = state;
   const pick = luckyPick?.pick as
@@ -212,6 +227,20 @@ export function GraphDetailPanel({
 
             {practiceMode === "flashcards" && statefulError ? (
               <p className="status error">{statefulError}</p>
+            ) : null}
+
+            {conceptActivity ? (
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
+                <ConceptActivityPanel
+                  activity={conceptActivity.activity}
+                  loading={conceptActivity.loading}
+                  error={conceptActivity.error}
+                  onRefresh={conceptActivity.refetch}
+                  onOpenQuiz={onOpenQuiz}
+                  onRetryQuiz={onRetryQuiz}
+                  onOpenFlashcardRun={onOpenFlashcardRun}
+                />
+              </div>
             ) : null}
           </div>
         </>

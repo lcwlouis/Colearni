@@ -6,6 +6,7 @@ import {
   initialPracticeState,
   toPracticeAnswers,
 } from "@/lib/practice/practice-state";
+import { useConceptActivity } from "@/lib/practice/use-concept-activity";
 import { useRequireAuth } from "@/lib/auth";
 import { useDebounce } from "@/lib/hooks/use-debounce";
 import type {
@@ -34,6 +35,10 @@ export function useGraphPage() {
   const [statefulLoading, setStatefulLoading] = useState(false);
   const [statefulError, setStatefulError] = useState<string | null>(null);
   const [ratingInFlight, setRatingInFlight] = useState(false);
+
+  // Practice history for selected concept
+  const selectedConceptId = state.selectedDetail?.concept.concept_id ?? null;
+  const conceptActivity = useConceptActivity(wsId || undefined, selectedConceptId ?? undefined);
 
   // Full graph state
   const [fullGraph, setFullGraph] = useState<{
@@ -265,5 +270,6 @@ export function useGraphPage() {
     handleGraphSelect,
     handleGraphBgClick,
     handleNextQuiz,
+    conceptActivity,
   };
 }

@@ -70,6 +70,7 @@ export default function GraphPage() {
           dispatchPractice={g.dispatchPractice}
           setPracticeMode={g.setPracticeMode}
           setStatefulCards={g.setStatefulCards}
+          conceptActivity={g.conceptActivity}
         />
       </div>
     </div>
