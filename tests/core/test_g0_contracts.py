@@ -60,6 +60,25 @@ class TestGenerationTrace:
         restored = GenerationTrace.model_validate(data)
         assert restored == trace
 
+    def test_learner_profile_fields_default_none(self) -> None:
+        trace = GenerationTrace()
+        assert trace.learner_weak_topic_count is None
+        assert trace.learner_strong_topic_count is None
+        assert trace.learner_frontier_count is None
+        assert trace.learner_review_count is None
+        assert trace.learner_profile_summary is None
+
+    def test_learner_profile_fields_populated(self) -> None:
+        trace = GenerationTrace(
+            learner_weak_topic_count=2,
+            learner_strong_topic_count=1,
+            learner_frontier_count=3,
+            learner_review_count=1,
+            learner_profile_summary="Weak topics: Math, Physics",
+        )
+        assert trace.learner_weak_topic_count == 2
+        assert trace.learner_profile_summary == "Weak topics: Math, Physics"
+
 
 # ── Envelope additive compatibility ──────────────────────────────────
 

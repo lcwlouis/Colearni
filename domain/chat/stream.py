@@ -498,6 +498,11 @@ def _stream_inner(
         "evidence_plan_passes": evidence_plan.retrieval_passes_used,
         "evidence_plan_retrieved_count": evidence_plan.retrieved_chunk_count,
         "evidence_plan_used_count": len(envelope.evidence) if envelope.evidence else 0,
+        "learner_weak_topic_count": len(learner_snapshot.weak_topics),
+        "learner_strong_topic_count": len(learner_snapshot.strong_topics),
+        "learner_frontier_count": len(learner_snapshot.current_frontier),
+        "learner_review_count": len(learner_snapshot.review_queue),
+        "learner_profile_summary": learner_profile_summary or None,
     })
 
     envelope = envelope.model_copy(

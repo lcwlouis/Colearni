@@ -288,6 +288,11 @@ class GenerationTrace(BaseModel):
     evidence_plan_passes: int | None = None
     evidence_plan_retrieved_count: int | None = None
     evidence_plan_used_count: int | None = None
+    learner_weak_topic_count: int | None = None
+    learner_strong_topic_count: int | None = None
+    learner_frontier_count: int | None = None
+    learner_review_count: int | None = None
+    learner_profile_summary: str | None = None
 
 
 class ReadinessTopicState(BaseModel):

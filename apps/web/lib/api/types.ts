@@ -541,6 +541,12 @@ export interface GenerationTrace {
   plan_concept_hint: string | null;
   plan_should_offer_quiz: boolean | null;
   plan_should_start_quiz: boolean | null;
+  /** Learner profile trace (AR4.4) */
+  learner_weak_topic_count: number | null;
+  learner_strong_topic_count: number | null;
+  learner_frontier_count: number | null;
+  learner_review_count: number | null;
+  learner_profile_summary: string | null;
 }
 
 export type StreamChatPhase =
