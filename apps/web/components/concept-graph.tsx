@@ -33,6 +33,7 @@ interface GNode extends SimulationNodeDatum {
   label: string;
   hop: number;
   mastery: string | null;
+  tier?: string | null;
 }
 
 interface GLink extends SimulationLinkDatum<GNode> {
@@ -43,6 +44,20 @@ const MASTERY_COLORS: Record<string, string> = {
   learned: "#2ecc71",
   learning: "#f39c12",
   locked: "#95a5a6",
+};
+
+const TIER_COLORS: Record<string, string> = {
+  umbrella: '#6366f1',
+  topic: '#3b82f6',
+  subtopic: '#14b8a6',
+  granular: '#6b7280',
+};
+
+const TIER_RADIUS_DELTA: Record<string, number> = {
+  umbrella: 6,
+  topic: 3,
+  subtopic: 0,
+  granular: -2,
 };
 
 export function ConceptGraph({
@@ -109,6 +124,7 @@ export function ConceptGraph({
       label: n.canonical_name,
       hop: n.hop_distance,
       mastery: n.mastery_status,
+      tier: n.tier,
     }));
 
     const nodeById = new Map(gNodes.map((n) => [n.id, n]));
@@ -222,12 +238,17 @@ export function ConceptGraph({
       const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
       g.setAttribute("cursor", "grab");
 
+      const tierDelta = n.tier != null ? (TIER_RADIUS_DELTA[n.tier] ?? 0) : 0;
+      const effectiveRadius = nodeRadius + tierDelta;
+      const masteryFill = MASTERY_COLORS[n.mastery ?? ""];
+      const nodeFill = masteryFill ?? (n.tier != null ? (TIER_COLORS[n.tier] ?? "#0f5f9c") : "#0f5f9c");
+
       const circle = document.createElementNS(
         "http://www.w3.org/2000/svg",
         "circle",
       );
-      circle.setAttribute("r", String(nodeRadius));
-      circle.setAttribute("fill", MASTERY_COLORS[n.mastery ?? ""] ?? "#0f5f9c");
+      circle.setAttribute("r", String(effectiveRadius));
+      circle.setAttribute("fill", nodeFill);
       circle.setAttribute("stroke", bgColor);
       circle.setAttribute("stroke-width", "2");
 
@@ -328,7 +349,7 @@ export function ConceptGraph({
         circle.setAttribute("cy", String(node.y ?? 0));
         if (text) {
           text.setAttribute("x", String(node.x ?? 0));
-          text.setAttribute("y", String((node.y ?? 0) + nodeRadius + 14));
+          text.setAttribute("y", String((node.y ?? 0) + parseFloat(circle.getAttribute("r") ?? String(nodeRadius)) + 14));
         }
       }
 

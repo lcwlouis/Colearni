@@ -252,6 +252,7 @@ export interface GraphConceptDetail {
   description: string;
   aliases: string[];
   degree: number;
+  tier?: 'umbrella' | 'topic' | 'subtopic' | 'granular' | null;
 }
 
 export interface GraphConceptDetailResponse {
@@ -281,6 +282,7 @@ export interface GraphSubgraphNode {
   hop_distance: number;
   mastery_status: MasteryStatus | null;
   mastery_score: number | null;
+  tier?: 'umbrella' | 'topic' | 'subtopic' | 'granular' | null;
 }
 
 export interface GraphSubgraphEdge {
