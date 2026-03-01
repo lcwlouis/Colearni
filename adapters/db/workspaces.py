@@ -120,6 +120,36 @@ def update_workspace(
     return dict(row) if row is not None else None
 
 
+def delete_workspace(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+) -> bool:
+    """Delete a workspace owned by user. Raises ValueError if not found/not owned. Returns True."""
+    row = (
+        db.execute(
+            text(
+                """
+                SELECT id FROM workspaces
+                WHERE id = :workspace_id AND owner_user_id = :user_id
+                LIMIT 1
+                """
+            ),
+            {"workspace_id": workspace_id, "user_id": user_id},
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise ValueError("Workspace not found or not owned by user.")
+    db.execute(
+        text("DELETE FROM workspaces WHERE id = :workspace_id AND owner_user_id = :user_id"),
+        {"workspace_id": workspace_id, "user_id": user_id},
+    )
+    return True
+
+
 def merge_workspace_settings(
     db: Session,
     *,

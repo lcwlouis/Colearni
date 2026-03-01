@@ -84,6 +84,21 @@ def update_workspace(
     return _row_to_detail(row)
 
 
+def delete_workspace(
+    db: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+) -> bool:
+    """Delete a workspace owned by user. Raises WorkspaceNotFoundError if not found/not owned."""
+    try:
+        result = ws_db.delete_workspace(db, workspace_id=workspace_id, user_id=user_id)
+    except ValueError:
+        raise WorkspaceNotFoundError
+    db.commit()
+    return result
+
+
 def update_workspace_settings(
     db: Session,
     *,

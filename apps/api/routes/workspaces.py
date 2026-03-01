@@ -6,7 +6,7 @@ from adapters.db.dependencies import get_db_session
 from apps.api.dependencies import WorkspaceContext, get_current_user, get_workspace_context
 from domain.workspaces.service import WorkspaceNotFoundError
 from domain.workspaces import service as ws_service
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -103,6 +103,20 @@ def update_workspace(
     except WorkspaceNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
     return WorkspaceDetail(**result)
+
+
+@router.delete("/{ws_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_workspace_endpoint(
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+) -> Response:
+    """Delete a workspace (owner only). Cascades to all associated data."""
+    try:
+        ws_service.delete_workspace(db, workspace_id=ws.workspace_id, user_id=user.id)
+    except WorkspaceNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/{ws_id}/settings", response_model=WorkspaceDetail)

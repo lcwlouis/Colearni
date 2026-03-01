@@ -273,6 +273,7 @@ export class ApiClient {
   getWorkspace(wsId: string) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}`, { method: "GET" }); }
   updateWorkspace(wsId: string, p: { name: string; description?: string }) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}`, { method: "PATCH", body: JSON.stringify(p) }); }
   updateWorkspaceSettings(wsId: string, settings: Record<string, unknown>) { return this.request<WorkspaceDetail>(`/workspaces/${wsId}/settings`, { method: "PATCH", body: JSON.stringify({ settings }) }); }
+  deleteWorkspace(wsId: string) { return this.request<null>(`/workspaces/${wsId}`, { method: "DELETE" }); }
 
   // ── Knowledge Base (workspace-scoped) ───────────────────────────
   listKBDocuments(wsId: string) { return this.request<KBDocumentListResponse>(`/workspaces/${wsId}/knowledge-base/documents`, { method: "GET" }); }

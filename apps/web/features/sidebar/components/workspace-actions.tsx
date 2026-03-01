@@ -167,6 +167,30 @@ export function WorkspaceActions({
                 >
                   Rename
                 </button>
+                <button
+                  type="button"
+                  className="collapsed-ws-action"
+                  style={{ color: "var(--error, #e53e3e)" }}
+                  onClick={async () => {
+                    setWsMenuOpen(false);
+                    if (!activeWorkspaceId) return;
+                    const ws = workspaces.find(w => w.public_id === activeWorkspaceId);
+                    if (!ws) return;
+                    if (!window.confirm(`Delete workspace "${ws.name}"? This cannot be undone.`)) return;
+                    try {
+                      await apiClient.deleteWorkspace(activeWorkspaceId);
+                      await refreshWorkspaces();
+                      const remaining = workspaces.filter(w => w.public_id !== activeWorkspaceId);
+                      if (remaining.length > 0) {
+                        setActiveWorkspaceId(remaining[0].public_id);
+                      }
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                >
+                  Delete workspace
+                </button>
               </div>
             )}
           </div>
