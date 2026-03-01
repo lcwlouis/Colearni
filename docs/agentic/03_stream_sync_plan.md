@@ -150,8 +150,148 @@ Verification
 
 - phase-level SSE exists
 - UI currently hides much of that detail by design
-- no richer step protocol is confirmed in current runtime
+- richer activity protocol added to schema (AR3.1 complete)
 - browser automation was not run during this planning pass
+
+### Verification Block - AR3.1
+
+```
+Verification Block - AR3.1
+
+Slice: AR3.1 – Expand backend status event schema
+
+Status: COMPLETE
+
+Commit: chore(refactor): AR3.1 expand backend status event schema
+
+Files changed
+- core/schemas/chat.py (added TutorActivity literal, activity and step_label on ChatStreamStatusEvent)
+- core/schemas/__init__.py (export TutorActivity)
+- apps/web/lib/api/types.ts (added TutorActivity type, activity/step_label on ChatStreamStatusEvent)
+- tests/core/test_g0_contracts.py (2 new tests for activity fields and union parsing)
+
+What changed
+- TutorActivity: 8-value Literal type (planning_turn, retrieving_chunks, expanding_graph, checking_mastery, preparing_quiz, grading_quiz, verifying_citations, generating_reply)
+- ChatStreamStatusEvent now has optional activity (TutorActivity | None) and step_label (str | None)
+- TypeScript mirror types added for frontend
+
+Commands run
+- PYTHONPATH=. pytest tests/core/test_g0_contracts.py -v (23 passed)
+- PYTHONPATH=. pytest -q (654 passed)
+- npm --prefix apps/web test (91 passed)
+- npm --prefix apps/web run typecheck (clean)
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- All schema tests pass with new activity fields
+- Backward compatible — activity and step_label default to None
+```
+
+### Verification Block - AR3.2
+
+```
+Verification Block - AR3.2
+
+Slice: AR3.2 – Emit richer progress events from the tutor runtime
+
+Status: COMPLETE
+
+Commit: chore(refactor): AR3.2 emit richer progress events from tutor runtime
+
+Files changed
+- domain/chat/stream.py (emit activity-enriched status events at each step)
+- tests/domain/test_s1_phase_semantics.py (dedup consecutive same-phase for assertions)
+- tests/api/test_g3_stream.py (dedup consecutive same-phase for assertions)
+
+What changed
+- stream.py yields activities: planning_turn, checking_mastery, retrieving_chunks, expanding_graph, generating_reply, verifying_citations
+- Phase ordering preserved (thinking → searching → responding → finalizing)
+- Activity is a sub-label within the same coarse phase
+- Tests updated to dedup consecutive same-phase events
+
+Commands run
+- PYTHONPATH=. pytest tests/api/test_g3_stream.py tests/domain/test_s1_phase_semantics.py -v (9 passed)
+- PYTHONPATH=. pytest -q (654 passed)
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- All 654 backend tests green
+- Activity events visible in stream output
+```
+
+### Verification Block - AR3.3
+
+```
+Verification Block - AR3.3
+
+Slice: AR3.3 – Update frontend state model and timeline UI
+
+Status: COMPLETE
+
+Commit: chore(refactor): AR3.3 update frontend state model and timeline UI
+
+Files changed
+- apps/web/features/tutor/types.ts (added ActivityStep type, ACTIVITY_LABELS map)
+- apps/web/features/tutor/hooks/use-tutor-messages.ts (track activitySteps state)
+- apps/web/features/tutor/hooks/use-tutor-page.ts (expose activitySteps)
+- apps/web/features/tutor/components/tutor-timeline.tsx (render activity rail)
+- apps/web/app/(app)/tutor/page.tsx (pass activitySteps prop)
+
+What changed
+- ActivityStep type: { activity, label, done } tracks agent steps
+- ACTIVITY_LABELS: human-readable label map for 8 activity types
+- Activity rail renders under status indicator with ✓/› markers
+- Steps tracked on status events, reset on final/error/new submission
+
+Commands run
+- npm --prefix apps/web run typecheck (clean)
+- npm --prefix apps/web test (91 passed)
+- PYTHONPATH=. pytest -q (654 passed)
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- Frontend typecheck clean
+- Activity rail renders in timeline component
+```
+
+### Verification Block - AR3.4
+
+```
+Verification Block - AR3.4
+
+Slice: AR3.4 – Add stream-sync tests and fallback checks
+
+Status: COMPLETE
+
+Commit: chore(refactor): AR3.4 add stream-sync tests and fallback checks
+
+Files changed
+- tests/domain/test_s1_phase_semantics.py (3 new tests for activity events and responding safety)
+- apps/web/features/tutor/visible-phase.test.ts (3 new tests for ACTIVITY_LABELS)
+
+What changed
+- Backend tests verify activities emitted at each stream path
+- Backend test confirms no fake "responding" before visible text
+- Frontend tests verify ACTIVITY_LABELS covers all 8 types with human-readable labels
+
+Commands run
+- PYTHONPATH=. pytest tests/domain/test_s1_phase_semantics.py -v (7 passed)
+- npm --prefix apps/web test (94 passed)
+- PYTHONPATH=. pytest -q (657 passed)
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- 657 backend + 94 frontend tests green
+- Stream sync fully tested for activity events
+```
 
 Current hotspots:
 
@@ -386,7 +526,18 @@ Execution loop for this child plan:
    - a summary of all Removal Entries added during that slice
 5. After every 2 completed AR3 slices OR if context is compacted/summarized, re-open docs/AGENTIC_MASTER_PLAN.md and docs/agentic/03_stream_sync_plan.md and restate which AR3 slices remain.
 6. Continue to the next incomplete AR3 slice once the previous slice is verified.
-7. When all AR3 slices are complete, return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
+7. When all AR3 slices are complete, immediately re-open docs/AGENTIC_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
+
+Do NOT stop just because AR3 is complete. AR3 completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+
+START:
+
+Read docs/AGENTIC_MASTER_PLAN.md.
+Read docs/agentic/03_stream_sync_plan.md.
+Begin with the current AR3 slice in execution order exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When AR3 is complete, immediately return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

@@ -382,7 +382,7 @@ Update this table during execution:
 |---|---|---|
 | `AR0/AR1` Conductor | ✅ complete | All 6 slices done (AR0.1, AR1.1–AR1.5); 583 backend / 87 frontend tests passing |
 | `AR2` Evidence planning | ✅ complete | All 4 slices done (AR2.1–AR2.4); 652 backend / 91 frontend tests passing |
-| `AR3` Stream sync | pending | not started |
+| `AR3` Stream sync | ✅ complete | All 4 slices done (AR3.1–AR3.4); 657 backend / 94 frontend tests passing |
 | `AR4` Learner model | pending | not started |
 | `AR5` Research | pending | not started |
 | `AR6` Background/eval | pending | not started |
