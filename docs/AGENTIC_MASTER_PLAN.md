@@ -395,7 +395,7 @@ Update this table during execution:
 | `AR3` Stream sync | ✅ complete | All 4 slices done (AR3.1–AR3.4); 657 backend / 94 frontend tests passing |
 | `AR4` Learner model | ✅ complete | All 4 slices done (AR4.1–AR4.4); 692 backend tests passing |
 | `AR5` Research | ✅ complete | AR5.1–AR5.6 all done; query planning + promotion wired into routes/service (830 tests pass) |
-| `AR6` Background/eval | 🔄 reopened | AR6.1 and AR6.2 landed; AR6.3 trace fields are schema-only and AR6.4 misses runtime integration checks, so AR6.5 and AR6.6 are reopened |
+| `AR6` Background/eval | ✅ complete | AR6.1–AR6.6 all done; bg trace fields populated, runtime integration regression covered (854 tests pass) |
 
 ## Verification Block Template
 

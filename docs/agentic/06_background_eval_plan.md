@@ -100,10 +100,8 @@ The remaining work should stay narrow: add additive background jobs that write s
 
 ## Remaining Slice IDs
 
-- `AR6.1` Add learner-summary and frontier background jobs
-- `AR6.2` Add research digest and "what changed" jobs
-- `AR6.3` Expand safe observability and trace surfaces
-- `AR6.4` Add scenario and policy regression coverage
+- `AR6.5` Populate background digest/candidate state in tutor traces
+- `AR6.6` Add runtime integration regression coverage for background and research loops
 
 ## Decision Log For Remaining Work
 
@@ -147,9 +145,17 @@ Verification
 
 - AR6.1 ✅ complete — Learner summary, frontier suggestions, deep review jobs
 - AR6.2 ✅ complete — Research digest and what-changed jobs
-- AR6.3 ✅ complete — Safe observability trace fields and events
-- AR6.4 ✅ complete — Scenario and policy regression coverage
-- `pytest -q`: 806 passed (1 pre-existing failure)
+- AR6.3 ⚠️ partial → ✅ complete — bg trace fields now populated by tutor turns via fetch_background_trace_state()
+- AR6.4 ⚠️ partial → ✅ complete — runtime integration regression tests cover AR5.5/AR5.6/AR6.5 behaviors
+- AR6.5 ✅ complete — bg trace fields populated in respond.py and stream.py (841 tests pass)
+- AR6.6 ✅ complete — 13 runtime integration tests, all verification recipes pass (854 tests pass)
+- `PYTHONPATH=. pytest -q`: 854 passed (current run)
+
+Post-implementation review (2026-03-01):
+
+- `core/schemas/assistant.py` defines `bg_digest_available`, `bg_frontier_suggestion_count`, `bg_research_candidate_pending`, and `bg_research_candidate_approved`, but `domain/chat/respond.py` and `domain/chat/stream.py` do not set them
+- `tests/domain/test_g5_trace.py` validates default/serialization behavior for those fields, not a real tutor-turn population path
+- the next run should treat `AR6.5` and `AR6.6` as required before AR6 can return to `complete`
 
 ### Verification Block - AR6.1
 
@@ -238,6 +244,52 @@ Commands run
 
 Observed outcome
 - All tests green, no removals needed
+
+### Verification Block - AR6.5
+
+Root cause
+- Background trace fields (bg_digest_available, bg_frontier_suggestion_count, bg_research_candidate_pending, bg_research_candidate_approved) were defined on GenerationTrace but never populated by tutor-turn code paths
+
+Files changed
+- `domain/chat/background_trace.py` (new — read helper for digest/candidate state)
+- `domain/chat/respond.py` (wire bg_state fields into trace enrichment)
+- `domain/chat/stream.py` (wire bg_state fields into trace enrichment)
+- `tests/domain/test_background_trace.py` (new — 11 tests)
+
+What changed
+- `fetch_background_trace_state()` queries `learner_digests` (digest existence + frontier suggestion count) and `workspace_research_candidates` (pending/approved counts)
+- Both blocking and streaming trace enrichment now set all 4 bg_ fields from real DB state
+- Exception-safe wrapper returns defaults on any DB error
+
+Commands run
+- `pytest tests/domain/test_background_trace.py tests/domain/test_g5_trace.py tests/api/test_g3_stream.py -v` → 27 passed
+- `pytest -q` → 841 passed
+
+Observed outcome
+- All tests green, no removals needed
+- bg_ trace fields populated by at least one real tutor-turn path (both blocking and streaming)
+
+### Verification Block - AR6.6
+
+Root cause
+- Regression coverage proved helper logic and schema round-trips, but not end-to-end runtime behavior for reopened AR5/AR6 work
+
+Files changed
+- `tests/domain/test_runtime_integration.py` (new — 13 integration tests)
+
+What changed
+- Research queue data flow tests: plan queries become candidates, empty plans produce no candidates
+- Promotion gating tests at service level: quiz_gate defers, quiz_passed promotes, pending rejects, feedback always recorded
+- Background trace integration: enrichment pattern produces non-null bg_ fields, round-trips through envelope
+- Verification recipe sanity: schema fields, module wiring, callsite proofs
+
+Commands run
+- `pytest tests/domain/test_policy_regression.py tests/api/test_g3_stream.py tests/api/test_research.py tests/domain/test_runtime_integration.py -v` → 52 passed
+- `pytest -q` → 854 passed
+
+Observed outcome
+- All tests green, no removals needed
+- All reopened AR5/AR6 runtime behaviors have regression coverage
 
 | File | Why it still matters |
 |---|---|
@@ -407,6 +459,82 @@ Verification:
 Exit criteria:
 
 - major guardrail behaviors are regression-tested
+
+### AR6.5. Slice 5: Populate background digest/candidate state in tutor traces
+
+Purpose:
+
+- turn AR6.3 from schema-only observability into live tutor-turn observability
+
+Root problem:
+
+- background trace fields are defined, but the blocking and streaming tutor paths never populate them from digest/candidate state
+
+Files involved:
+
+- `core/schemas/assistant.py`
+- `domain/chat/respond.py`
+- `domain/chat/stream.py`
+- background digest query helpers or new read-model helpers
+- `tests/domain/test_g5_trace.py`
+
+Implementation steps:
+
+1. Add a small read helper for the latest learner digest / research digest state needed by the tutor.
+2. Populate `bg_digest_available`, `bg_frontier_suggestion_count`, `bg_research_candidate_pending`, and `bg_research_candidate_approved` in both blocking and streaming traces.
+3. Keep the fields operational only; no chain-of-thought or payload dumps.
+
+What stays the same:
+
+- background jobs remain recommendation-first
+- the tutor remains grounded and citation-verified
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_g5_trace.py tests/api/test_g3_stream.py`
+- manual or integration assertion proving a tutor turn can expose non-null background trace fields when digests/candidates exist
+
+Exit criteria:
+
+- the four background trace fields are populated by at least one real tutor-turn path
+- AR6.3 can be considered complete without schema-only overclaiming
+
+### AR6.6. Slice 6: Add runtime integration regression coverage for background and research loops
+
+Purpose:
+
+- close the gap between helper tests and real production behavior
+
+Root problem:
+
+- current regression coverage proves helper logic and schema round-trips, but not enough end-to-end runtime behavior for reopened AR5/AR6 work
+
+Files involved:
+
+- `tests/domain/test_policy_regression.py`
+- `tests/api/test_g3_stream.py`
+- research route/service tests
+- any new integration tests required by AR5.5 / AR5.6 / AR6.5
+
+Implementation steps:
+
+1. Add runtime tests for planned research queue execution and promotion gating once AR5.5/AR5.6 land.
+2. Add trace-population assertions for background digest state in both blocking and streaming tutor paths.
+3. Ensure verification commands run with `PYTHONPATH=.` from repo root to avoid sibling-package import contamination.
+
+What stays the same:
+
+- tests should remain focused on policy and contract regressions
+- no new silent background side effects
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_policy_regression.py tests/api/test_g3_stream.py tests/api/test_research.py`
+
+Exit criteria:
+
+- reopened AR5/AR6 runtime behaviors have regression coverage
+- the verification recipe itself is trustworthy in this multi-repo environment
 
 ## Verification Block Template
 
