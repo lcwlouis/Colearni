@@ -16,6 +16,7 @@ class GraphConceptDetail(BaseModel):
     canonical_name: str = Field(min_length=1)
     description: str
     aliases: list[str] = Field(default_factory=list)
+    tier: str | None = None
     degree: int = Field(ge=0)
 
 
@@ -28,6 +29,7 @@ class GraphConceptSummary(BaseModel):
     concept_id: int = Field(gt=0)
     canonical_name: str = Field(min_length=1)
     description: str
+    tier: str | None = None
     degree: int = Field(ge=0)
     mastery_status: MasteryStatus | None = None
     mastery_score: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -43,6 +45,7 @@ class GraphSubgraphNode(BaseModel):
     concept_id: int = Field(gt=0)
     canonical_name: str = Field(min_length=1)
     description: str
+    tier: str | None = None
     hop_distance: int = Field(ge=0)
     mastery_status: MasteryStatus | None = None
     mastery_score: float | None = Field(default=None, ge=0.0, le=1.0)

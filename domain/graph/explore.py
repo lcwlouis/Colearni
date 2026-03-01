@@ -114,6 +114,7 @@ def list_concepts(
                     c.id AS concept_id,
                     c.canonical_name,
                     c.description,
+                    c.tier,
                     (
                         SELECT count(*)
                         FROM edges_canon e
@@ -168,6 +169,7 @@ def list_concepts(
                 "concept_id": int(row["concept_id"]),
                 "canonical_name": str(row["canonical_name"]),
                 "description": str(row["description"] or ""),
+                "tier": str(row["tier"]) if row["tier"] is not None else None,
                 "degree": int(row["degree"] or 0),
                 "mastery_status": str(row["mastery_status"]) if row["mastery_status"] else None,
                 "mastery_score": (
@@ -199,6 +201,7 @@ def get_bounded_subgraph(
                     ranked.hop_distance,
                     c.canonical_name,
                     c.description,
+                    c.tier,
                     m.status AS mastery_status,
                     m.score AS mastery_score
                 FROM ranked
@@ -268,6 +271,7 @@ def get_bounded_subgraph(
                 "concept_id": int(r["concept_id"]),
                 "canonical_name": str(r["canonical_name"]),
                 "description": str(r["description"] or ""),
+                "tier": str(r["tier"]) if r["tier"] is not None else None,
                 "hop_distance": int(r["hop_distance"]),
                 "mastery_status": str(r["mastery_status"]) if r["mastery_status"] else None,
                 "mastery_score": (
@@ -325,6 +329,7 @@ def get_full_subgraph(
                     c.id AS concept_id,
                     c.canonical_name,
                     c.description,
+                    c.tier,
                     m.status AS mastery_status,
                     m.score AS mastery_score,
                     (
@@ -406,6 +411,7 @@ def get_full_subgraph(
                 "concept_id": int(r["concept_id"]),
                 "canonical_name": str(r["canonical_name"]),
                 "description": str(r["description"] or ""),
+                "tier": str(r["tier"]) if r["tier"] is not None else None,
                 "hop_distance": 0,
                 "mastery_status": str(r["mastery_status"]) if r["mastery_status"] else None,
                 "mastery_score": (
