@@ -187,6 +187,7 @@ def generate_chat_response(
                 else None
             ),
             concept_name=resolved_name,
+            session=session,
         )
         evidence_plan, ranked_chunks = execute_evidence_plan(
             session,

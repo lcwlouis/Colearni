@@ -111,12 +111,12 @@ def _plan_follow_up_subqueries(
     *,
     base_query: str,
     concept_name: str | None,
+    neighbor_names: list[str] | None = None,
 ) -> list[str]:
     """Generate follow-up subqueries from concept context.
 
     Returns a list of alternative queries that could widen evidence
-    coverage.  Currently uses concept name when it differs from the
-    base query.  AR2.3 will add graph-neighbor-based subqueries.
+    coverage.  Uses concept name and graph-neighbor names.
     """
     subqueries: list[str] = []
     if (
@@ -124,7 +124,60 @@ def _plan_follow_up_subqueries(
         and concept_name.lower().strip() not in base_query.lower()
     ):
         subqueries.append(concept_name)
+    for name in neighbor_names or []:
+        normalized = name.lower().strip()
+        if normalized and normalized not in base_query.lower():
+            subqueries.append(name)
     return subqueries
+
+
+_GRAPH_HOP_BUDGET_DEFAULT = 1
+_GRAPH_MAX_NEIGHBOR_SUBQUERIES = 2
+
+
+def _expand_graph_neighbors(
+    session: object,  # sqlalchemy.orm.Session
+    *,
+    workspace_id: int,
+    concept_id: int,
+    max_hops: int = _GRAPH_HOP_BUDGET_DEFAULT,
+) -> list[str]:
+    """Return canonical names of graph-adjacent concepts.
+
+    Uses get_bounded_subgraph to find neighbors within max_hops, then
+    returns their names (excluding the root concept) for use as
+    subqueries.  Returns empty list on failure or if session lacks
+    execute capability (test stubs).
+    """
+    try:
+        from domain.graph.explore import get_bounded_subgraph
+    except ImportError:
+        return []
+
+    if not hasattr(session, "execute"):
+        return []
+
+    try:
+        subgraph = get_bounded_subgraph(
+            session,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            max_hops=max_hops,
+            max_nodes=10,
+            max_edges=20,
+        )
+    except Exception:
+        log.debug("graph expansion failed for concept_id=%d", concept_id, exc_info=True)
+        return []
+
+    names: list[str] = []
+    for node in subgraph.get("nodes", []):
+        if node.get("concept_id") == concept_id:
+            continue
+        name = node.get("canonical_name")
+        if name:
+            names.append(name)
+    return names[:_GRAPH_MAX_NEIGHBOR_SUBQUERIES]
 
 
 def build_evidence_plan(
@@ -136,12 +189,12 @@ def build_evidence_plan(
     concept_id: int | None = None,
     concept_name: str | None = None,
     max_retrieval_passes: int = 2,
+    session: object | None = None,
 ) -> EvidencePlan:
     """Build an evidence plan from turn context.
 
-    When a concept name is available and differs from the query, a
-    follow-up subquery is planned so the executor can widen coverage
-    in a second pass.
+    When a concept is resolved, the planner discovers graph-adjacent
+    concept names (AR2.3) and uses them as follow-up subqueries.
     """
     if not needs_retrieval:
         return EvidencePlan(
@@ -152,9 +205,25 @@ def build_evidence_plan(
         )
 
     candidate_concept_ids = [concept_id] if concept_id is not None else []
+
+    # ── Graph-neighbor expansion (AR2.3) ──────────────────────────
+    neighbor_names: list[str] = []
+    expand_graph = False
+    graph_hop_budget = 0
+    if concept_id is not None and session is not None:
+        neighbor_names = _expand_graph_neighbors(
+            session,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+        )
+        if neighbor_names:
+            expand_graph = True
+            graph_hop_budget = _GRAPH_HOP_BUDGET_DEFAULT
+
     subqueries = _plan_follow_up_subqueries(
         base_query=base_query,
         concept_name=concept_name,
+        neighbor_names=neighbor_names,
     )
 
     plan = EvidencePlan(
@@ -164,6 +233,9 @@ def build_evidence_plan(
         graph_root_concept_id=concept_id,
         concept_name=concept_name,
         subqueries=subqueries,
+        expand_graph_neighbors=expand_graph,
+        graph_hop_budget=graph_hop_budget,
+        expand_document_summaries=True,
         retrieval_budget=top_k,
         max_retrieval_passes=max_retrieval_passes,
     )

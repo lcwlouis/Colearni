@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call, patch
 from domain.retrieval.evidence_planner import (
     EvidencePlan,
     _coverage_sufficient,
+    _expand_graph_neighbors,
     _merge_chunks,
     _plan_follow_up_subqueries,
     build_evidence_plan,
@@ -74,7 +75,7 @@ class TestEvidencePlanConstruction:
         )
         assert not plan.expand_graph_neighbors
         assert plan.graph_hop_budget == 0
-        assert not plan.expand_document_summaries
+        assert plan.expand_document_summaries  # always on since AR2.3
         assert plan.provenance_linked_chunk_ids == []
 
     def test_subquery_from_concept_name(self):
@@ -231,6 +232,22 @@ class TestFollowUpSubqueries:
         )
         assert subs == []
 
+    def test_neighbor_names_added_as_subqueries(self):
+        subs = _plan_follow_up_subqueries(
+            base_query="how does it work?",
+            concept_name="Photosynthesis",
+            neighbor_names=["Chloroplast", "Light Reactions"],
+        )
+        assert subs == ["Photosynthesis", "Chloroplast", "Light Reactions"]
+
+    def test_neighbor_names_skipped_when_in_query(self):
+        subs = _plan_follow_up_subqueries(
+            base_query="explain chloroplast",
+            concept_name=None,
+            neighbor_names=["Chloroplast", "Thylakoid"],
+        )
+        assert subs == ["Thylakoid"]
+
 
 class TestCoverageSufficient:
     """Verify _coverage_sufficient helper."""
@@ -383,3 +400,85 @@ class TestExecuteMultiPass:
 
         assert result_plan.retrieval_passes_used == 1
         assert mock_retrieve.call_count == 1
+
+
+class TestGraphExpansion:
+    """Verify graph-neighbor expansion (AR2.3)."""
+
+    @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
+    def test_graph_neighbors_become_subqueries(self, mock_expand):
+        mock_expand.return_value = ["Chloroplast", "Light Reactions"]
+        mock_session = MagicMock()
+
+        plan = build_evidence_plan(
+            base_query="how does it work?",
+            workspace_id=1,
+            needs_retrieval=True,
+            concept_id=7,
+            concept_name="Photosynthesis",
+            session=mock_session,
+        )
+
+        assert plan.expand_graph_neighbors
+        assert plan.graph_hop_budget > 0
+        assert "Photosynthesis" in plan.subqueries
+        assert "Chloroplast" in plan.subqueries
+        assert "Light Reactions" in plan.subqueries
+
+    @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
+    def test_no_graph_expansion_without_concept(self, mock_expand):
+        plan = build_evidence_plan(
+            base_query="hello",
+            workspace_id=1,
+            needs_retrieval=True,
+            session=MagicMock(),
+        )
+        assert not plan.expand_graph_neighbors
+        mock_expand.assert_not_called()
+
+    @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
+    def test_no_graph_expansion_without_session(self, mock_expand):
+        plan = build_evidence_plan(
+            base_query="hello",
+            workspace_id=1,
+            needs_retrieval=True,
+            concept_id=7,
+        )
+        assert not plan.expand_graph_neighbors
+        mock_expand.assert_not_called()
+
+    def test_expand_graph_neighbors_returns_names(self):
+        mock_session = MagicMock()
+        with patch("domain.graph.explore.get_bounded_subgraph") as mock_subgraph:
+            mock_subgraph.return_value = {
+                "nodes": [
+                    {"concept_id": 7, "canonical_name": "Root"},
+                    {"concept_id": 8, "canonical_name": "Neighbor1"},
+                    {"concept_id": 9, "canonical_name": "Neighbor2"},
+                    {"concept_id": 10, "canonical_name": "Neighbor3"},
+                ],
+                "edges": [],
+            }
+            names = _expand_graph_neighbors(
+                mock_session,
+                workspace_id=1,
+                concept_id=7,
+            )
+        # Root excluded, max 2 neighbors
+        assert names == ["Neighbor1", "Neighbor2"]
+
+    def test_expand_graph_neighbors_handles_no_session(self):
+        names = _expand_graph_neighbors(
+            object(),  # no execute attribute
+            workspace_id=1,
+            concept_id=7,
+        )
+        assert names == []
+
+    def test_document_summaries_flag_active(self):
+        plan = build_evidence_plan(
+            base_query="q",
+            workspace_id=1,
+            needs_retrieval=True,
+        )
+        assert plan.expand_document_summaries
