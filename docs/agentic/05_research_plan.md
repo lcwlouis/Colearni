@@ -94,10 +94,8 @@ The remaining work should stay narrow: add typed planning on top of the existing
 
 ## Remaining Slice IDs
 
-- `AR5.1` Define research planning types
-- `AR5.2` Add topic/subtopic planner
-- `AR5.3` Add external query planning and candidate queue integration
-- `AR5.4` Add learning-gated candidate promotion
+- `AR5.5` Wire query planning into runtime/API and pending-candidate execution
+- `AR5.6` Wire promotion decisions into research review and trusted-ingest flow
 
 ## Decision Log For Remaining Work
 
@@ -143,9 +141,11 @@ Verification
 
 - AR5.1 ✅ complete — TopicProposal, ResearchQueryPlan, CandidatePromotionDecision defined
 - AR5.2 ✅ complete — Topic/subtopic planner with LLM + fallback, API route added
-- AR5.3 ✅ complete — Query planning and candidate queue integration
-- AR5.4 ✅ complete — Learning-gated candidate promotion
-- `pytest -q`: 752 passed (1 pre-existing failure)
+- AR5.3 ✅ complete — query planning helpers wired into production via execute_topic_plan()
+- AR5.4 ✅ complete — promotion helpers wired into production via promote_reviewed_candidate()
+- AR5.5 ✅ complete — POST /topics/execute route + service, build_query_plan + enqueue_query_results have production callsites
+- AR5.6 ✅ complete — POST /candidates/{id}/promote route + service, all promotion helpers have production callsites
+- `PYTHONPATH=. pytest -q`: 830 passed (current run)
 
 ### Verification Block - AR5.1
 
@@ -254,6 +254,65 @@ Manual verification
 
 Observed outcome
 - All tests green, no removals needed
+
+### Verification Block - AR5.5
+
+Root cause
+- `build_query_plan()` and `enqueue_query_results()` had no production callsite
+
+Files changed
+- `apps/api/routes/research.py` (added POST /topics/execute route)
+- `core/schemas/research.py` (added TopicExecuteRequest, QueryPlanResponse)
+- `core/schemas/__init__.py` (updated exports)
+- `domain/research/service.py` (added execute_topic_plan() service function)
+- `tests/api/test_research.py` (new, 8 tests)
+- `docs/API.md` (added endpoint docs)
+
+What changed
+- `execute_topic_plan()` accepts an approved topic, creates a run, calls `build_query_plan()`, converts queries to candidate-shaped results, calls `enqueue_query_results()` to insert pending candidates
+- POST /topics/execute route wires through the service function
+- Both `build_query_plan()` and `enqueue_query_results()` now have production callsites
+
+Commands run
+- `pytest tests/api/test_research.py tests/domain/test_query_planner.py -v` → 25 passed
+- `pytest -q` → 824 passed
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- All 824 backend tests green
+- API docs sync test passes
+
+### Verification Block - AR5.6
+
+Root cause
+- Promotion helpers (`evaluate_candidate_for_promotion`, `promote_candidate`, `record_promotion_feedback`) had no production callsite
+
+Files changed
+- `apps/api/routes/research.py` (added POST /candidates/{id}/promote route)
+- `core/schemas/research.py` (added CandidatePromoteRequest, CandidatePromotionResponse)
+- `core/schemas/__init__.py` (updated exports)
+- `domain/research/service.py` (added promote_reviewed_candidate() service function)
+- `tests/api/test_research.py` (6 new tests)
+- `docs/API.md` (added endpoint docs)
+
+What changed
+- `promote_reviewed_candidate()` orchestrates the full promotion flow: looks up candidate status, calls `evaluate_candidate_for_promotion()`, if promote action calls `promote_candidate()`, always calls `record_promotion_feedback()`
+- POST /candidates/{id}/promote route wires through the service function
+- All three promotion helpers now have production callsites
+
+Commands run
+- `pytest tests/domain/test_research_promotion.py tests/domain/test_policy_regression.py tests/api/test_research.py -v` → 46 passed
+- `pytest -q` → 830 passed
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- All 830 backend tests green
+- All promotion helpers have production callsites
+- Quiz gating is enforceable at runtime
 
 | File | Why it still matters |
 |---|---|
@@ -419,6 +478,93 @@ Verification:
 Exit criteria:
 
 - external research becomes a guided learning pipeline, not just fetched text
+
+### AR5.5. Slice 5: Wire query planning into runtime/API and pending-candidate execution
+
+Purpose:
+
+- make AR5.3 true in runtime instead of helper-only
+
+Root problem:
+
+- `build_query_plan()` and `enqueue_query_results()` exist, but topic planning stops at proposal generation and the active research runner never consumes planner output
+
+Files involved:
+
+- `apps/api/routes/research.py`
+- `core/schemas/research.py`
+- `domain/research/service.py`
+- `domain/research/query_planner.py`
+- `domain/research/runner.py`
+- `apps/jobs/research_runner.py`
+- research API/domain tests
+
+Implementation steps:
+
+1. Add a planner-owned route or service entry that accepts an approved topic proposal and returns a bounded `ResearchQueryPlan`.
+2. Thread planner output into the existing candidate queue so bounded query execution produces `pending` candidates through production code, not tests only.
+3. Keep provider execution bounded and inspectable, and preserve explicit user approval before ingest.
+4. Record enough metadata to debug which planned queries produced which candidates.
+
+What stays the same:
+
+- manual source registration remains available
+- discovered results still enter the pending queue first
+- no automatic ingest of external results
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_query_planner.py tests/api/test_research.py`
+- manual API check proving a planned topic can yield pending candidates through production routes/services
+
+Exit criteria:
+
+- query planning has at least one production callsite
+- candidate queue insertion is exercised by runtime code, not just unit tests
+- AR5.3 can be considered complete without overclaiming
+
+### AR5.6. Slice 6: Wire promotion decisions into research review and trusted-ingest flow
+
+Purpose:
+
+- make learning-gated promotion a real runtime policy instead of a standalone helper module
+
+Root problem:
+
+- candidate review currently updates candidate status, but does not route through `CandidatePromotionDecision` or tie quiz gates / feedback into the trusted ingest path
+
+Files involved:
+
+- `apps/api/routes/research.py`
+- `domain/research/service.py`
+- `domain/research/promotion.py`
+- `domain/ingestion/post_ingest.py`
+- quiz/practice integration files as needed
+- research and policy regression tests
+
+Implementation steps:
+
+1. Route approved-candidate promotion through `evaluate_candidate_for_promotion()` instead of status updates alone.
+2. Keep quiz gates explicit and preserve user approval before any ingest.
+3. Decide where promotion feedback lives and ensure it is written from a real review flow.
+4. Add integration tests covering approve -> quiz gate -> promote/ingest and approve -> reject/defer paths.
+
+What stays the same:
+
+- externally discovered content remains approval-gated
+- the trusted ingest path stays explicit
+- no background job may bypass promotion policy
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_research_promotion.py tests/domain/test_policy_regression.py tests/api/test_research.py`
+- manual check proving a reviewed candidate flows through promotion policy before trusted ingest
+
+Exit criteria:
+
+- promotion helpers are called by production review/ingest code
+- quiz gating is enforceable in runtime, not just in helper tests
+- AR5 can be marked `complete` again without helper-only overclaiming
 
 ## Verification Block Template
 
