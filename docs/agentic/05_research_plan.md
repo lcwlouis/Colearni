@@ -141,11 +141,119 @@ Verification
 
 ## Current Verification Status
 
-- approval-gated research candidate flow exists
-- automated topic planning and external query planning are not confirmed in current runtime
-- `pytest -q`: not re-run during this planning pass
+- AR5.1 ✅ complete — TopicProposal, ResearchQueryPlan, CandidatePromotionDecision defined
+- AR5.2 ✅ complete — Topic/subtopic planner with LLM + fallback, API route added
+- AR5.3 ✅ complete — Query planning and candidate queue integration
+- AR5.4 ✅ complete — Learning-gated candidate promotion
+- `pytest -q`: 752 passed (1 pre-existing failure)
 
-Current hotspots:
+### Verification Block - AR5.1
+
+Root cause
+- No canonical planning surface for topic, query, and promotion decisions.
+
+Files changed
+- `domain/research/planner.py` (new)
+- `tests/domain/test_research_planner.py` (new)
+
+What changed
+- Defined frozen dataclasses: TopicProposal, ResearchQuery, ResearchQueryPlan, CandidatePromotionDecision.
+- SourceClass and PromotionAction literal types for typed constraints.
+- Helper properties: has_subtopics, query_count, is_bounded, is_promoting.
+- 15 unit tests covering shape, helpers, immutability.
+
+Commands run
+- `pytest tests/domain/test_research_planner.py -v` → 15 passed
+- `pytest tests/ -q` → 707 passed
+
+Manual verification
+- Confirmed frozen dataclass prevents mutation
+- Confirmed is_bounded correctly rejects oversized plans
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR5.2
+
+Root cause
+- Research could not start from a plain-language topic request; required pre-registered URLs.
+
+Files changed
+- `domain/research/topic_planner.py` (new)
+- `tests/domain/test_topic_planner.py` (new)
+- `core/schemas/research.py` (added TopicPlanRequest, TopicProposalResponse)
+- `core/schemas/__init__.py` (updated exports)
+- `apps/api/routes/research.py` (added POST /topics/plan route)
+- `docs/API.md` (added endpoint docs)
+
+What changed
+- `plan_topics()` generates TopicProposal objects from a research goal, using LLM with fallback.
+- JSON parsing with code-fence stripping, validation, and capping.
+- POST /topics/plan route returns reviewable proposals — no content fetched/ingested.
+- 16 new tests covering planner logic, parsing, error paths, fallback.
+
+Commands run
+- `pytest tests/domain/test_topic_planner.py -v` → 16 passed
+- `pytest tests/ -q` → 723 passed
+
+Manual verification
+- Confirmed empty goal returns empty list
+- Confirmed LLM failure gracefully falls back to single proposal
+- Confirmed API docs sync test passes with new endpoint
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR5.3
+
+Root cause
+- No planner-owned route from topics into the candidate queue.
+
+Files changed
+- `domain/research/query_planner.py` (new)
+- `tests/domain/test_query_planner.py` (new)
+
+What changed
+- `build_query_plan()` generates bounded ResearchQueryPlan from TopicProposal via LLM (with fallback).
+- `enqueue_query_results()` inserts results into candidate queue as pending candidates.
+- 17 new tests for query parsing, planning, and queue insertion.
+
+Commands run
+- `pytest tests/domain/test_query_planner.py -v` → 17 passed
+- `pytest tests/ -q` → 740 passed
+
+Manual verification
+- Confirmed plans are bounded (max queries/candidates)
+- Confirmed LLM failure falls back to keyword queries
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR5.4
+
+Root cause
+- Research candidates did not naturally become guided learning opportunities.
+
+Files changed
+- `domain/research/promotion.py` (new)
+- `tests/domain/test_research_promotion.py` (new)
+
+What changed
+- `evaluate_candidate_for_promotion()` decides promote/defer/reject/quiz_gate.
+- `promote_candidate()` marks approved candidates as ingested.
+- `record_promotion_feedback()` records user review notes.
+- 12 new tests for decision logic, DB operations, error paths.
+
+Commands run
+- `pytest tests/domain/test_research_promotion.py -v` → 12 passed
+- `pytest tests/ -q` → 752 passed
+
+Manual verification
+- Confirmed only approved candidates can be promoted
+- Confirmed quiz gate correctly blocks promotion until passed
+
+Observed outcome
+- All tests green, no removals needed
 
 | File | Why it still matters |
 |---|---|
@@ -353,7 +461,18 @@ Execution loop for this child plan:
    - a summary of all Removal Entries added during that slice
 5. After every 2 completed AR5 slices OR if context is compacted/summarized, re-open docs/AGENTIC_MASTER_PLAN.md and docs/agentic/05_research_plan.md and restate which AR5 slices remain.
 6. Continue to the next incomplete AR5 slice once the previous slice is verified.
-7. When all AR5 slices are complete, return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
+7. When all AR5 slices are complete, immediately re-open docs/AGENTIC_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
+
+Do NOT stop just because AR5 is complete. AR5 completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+
+START:
+
+Read docs/AGENTIC_MASTER_PLAN.md.
+Read docs/agentic/05_research_plan.md.
+Begin with the current AR5 slice in execution order exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When AR5 is complete, immediately return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

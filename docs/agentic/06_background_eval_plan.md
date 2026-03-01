@@ -145,12 +145,99 @@ Verification
 
 ## Current Verification Status
 
-- background jobs exist but are not yet broad second-brain copilots
-- prompt and query analyzer tests exist
-- scenario coverage for agentic loops and source accounting is not confirmed
-- `pytest -q`: not re-run during this planning pass
+- AR6.1 ✅ complete — Learner summary, frontier suggestions, deep review jobs
+- AR6.2 ✅ complete — Research digest and what-changed jobs
+- AR6.3 ✅ complete — Safe observability trace fields and events
+- AR6.4 ✅ complete — Scenario and policy regression coverage
+- `pytest -q`: 806 passed (1 pre-existing failure)
 
-Current hotspots:
+### Verification Block - AR6.1
+
+Root cause
+- Background jobs did maintenance, not broader recommendation-first learner guidance.
+
+Files changed
+- `apps/jobs/learner_digest.py` (new)
+- `tests/jobs/test_learner_digest.py` (new)
+- `adapters/db/migrations/versions/20260301_0008_learner_digests.py` (new)
+
+What changed
+- Three generators: learner_summary, frontier_suggestions, deep_review.
+- Outputs stored in new learner_digests table as JSONB.
+- Runner iterates all user-workspace pairs with error isolation.
+- 20 new tests.
+
+Commands run
+- `pytest tests/jobs/test_learner_digest.py -v` → 20 passed
+- `pytest tests/ -q` → 772 passed
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR6.2
+
+Root cause
+- System could not prepare periodic research update digests.
+
+Files changed
+- `apps/jobs/research_digest.py` (new)
+- `tests/jobs/test_research_digest.py` (new)
+
+What changed
+- Two generators: research_digest (candidate status counts), what_changed (run summaries + review counts).
+- Stored in learner_digests table as non-authoritative recommendation material.
+- 11 new tests.
+
+Commands run
+- `pytest tests/jobs/test_research_digest.py -v` → 11 passed
+- `pytest tests/ -q` → 783 passed
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR6.3
+
+Root cause
+- Richer orchestration hard to debug without stronger operational trace data.
+
+Files changed
+- `core/schemas/assistant.py` (4 new bg trace fields)
+- `apps/web/lib/api/types.ts` (synced TS interface: 6 evidence_plan + 4 bg fields)
+- `apps/jobs/learner_digest.py` (emit_event call)
+- `apps/jobs/research_digest.py` (emit_event call)
+- `tests/domain/test_g5_trace.py` (3 new bg trace tests)
+
+What changed
+- 4 background trace fields on GenerationTrace: bg_digest_available, bg_frontier_suggestion_count, bg_research_candidate_pending, bg_research_candidate_approved.
+- TypeScript interface synced with all Python fields.
+- Background jobs emit observability events via emit_event.
+- 3 new tests for bg trace fields.
+
+Commands run
+- `pytest tests/domain/test_g5_trace.py -v` → 11 passed
+- `pytest tests/ -q` → 786 passed
+- `npx tsc --noEmit` → clean
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR6.4
+
+Root cause
+- More loops means more failure modes unless policy behavior is tested directly.
+
+Files changed
+- `tests/domain/test_policy_regression.py` (new)
+
+What changed
+- 20 policy regression tests covering: no uncited claims (5), citation validation integrity (5), no unauthorized research auto-ingest (5), source accounting (3), guardrail parity (2).
+
+Commands run
+- `pytest tests/domain/test_policy_regression.py -v` → 20 passed
+- `pytest tests/ -q` → 806 passed
+
+Observed outcome
+- All tests green, no removals needed
 
 | File | Why it still matters |
 |---|---|
@@ -362,7 +449,18 @@ Execution loop for this child plan:
    - a summary of all Removal Entries added during that slice
 5. After every 2 completed AR6 slices OR if context is compacted/summarized, re-open docs/AGENTIC_MASTER_PLAN.md and docs/agentic/06_background_eval_plan.md and restate which AR6 slices remain.
 6. Continue to the next incomplete AR6 slice once the previous slice is verified.
-7. When all AR6 slices are complete, return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
+7. When all AR6 slices are complete, immediately re-open docs/AGENTIC_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
+
+Do NOT stop just because AR6 is complete. AR6 completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+
+START:
+
+Read docs/AGENTIC_MASTER_PLAN.md.
+Read docs/agentic/06_background_eval_plan.md.
+Begin with the current AR6 slice in execution order exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When AR6 is complete, immediately return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```
