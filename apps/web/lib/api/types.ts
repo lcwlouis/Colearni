@@ -541,12 +541,24 @@ export interface GenerationTrace {
   plan_concept_hint: string | null;
   plan_should_offer_quiz: boolean | null;
   plan_should_start_quiz: boolean | null;
+  /** Evidence planner trace (AR2) */
+  evidence_plan_stop_reason: string | null;
+  evidence_plan_budget: number | null;
+  evidence_plan_chunk_count: number | null;
+  evidence_plan_passes: number | null;
+  evidence_plan_retrieved_count: number | null;
+  evidence_plan_used_count: number | null;
   /** Learner profile trace (AR4.4) */
   learner_weak_topic_count: number | null;
   learner_strong_topic_count: number | null;
   learner_frontier_count: number | null;
   learner_review_count: number | null;
   learner_profile_summary: string | null;
+  /** Background observability trace (AR6.3) */
+  bg_digest_available: boolean | null;
+  bg_frontier_suggestion_count: number | null;
+  bg_research_candidate_pending: number | null;
+  bg_research_candidate_approved: number | null;
 }
 
 export type StreamChatPhase =

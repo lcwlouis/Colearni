@@ -17,6 +17,7 @@ import logging
 from typing import Any
 
 from adapters.db.engine import create_db_engine
+from core.observability import emit_event
 from core.settings import get_settings
 from domain.learner.assembler import assemble_learner_snapshot
 from domain.learner.profile import LearnerProfileSnapshot
@@ -246,6 +247,12 @@ def run_learner_digest() -> None:
                     workspace_id,
                     user_id,
                     len(generators),
+                )
+                emit_event(
+                    "bg_learner_digest",
+                    status="ok",
+                    component="learner_digest",
+                    workspace_id=workspace_id,
                 )
             except Exception:
                 logger.exception(

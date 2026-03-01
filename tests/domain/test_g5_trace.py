@@ -289,3 +289,51 @@ class TestPlannerTraceFields:
         assert enriched.plan_intent == "teach"
         assert enriched.plan_strategy == "direct"
         assert enriched.plan_should_offer_quiz is True
+
+
+class TestBackgroundTraceFields:
+    """AR6.3: Verify background observability trace fields on GenerationTrace."""
+
+    def test_bg_fields_default_to_none(self) -> None:
+        trace = GenerationTrace()
+        assert trace.bg_digest_available is None
+        assert trace.bg_frontier_suggestion_count is None
+        assert trace.bg_research_candidate_pending is None
+        assert trace.bg_research_candidate_approved is None
+
+    def test_bg_fields_set_and_serialize(self) -> None:
+        trace = GenerationTrace(
+            bg_digest_available=True,
+            bg_frontier_suggestion_count=3,
+            bg_research_candidate_pending=5,
+            bg_research_candidate_approved=2,
+        )
+        assert trace.bg_digest_available is True
+        assert trace.bg_frontier_suggestion_count == 3
+
+        payload = trace.model_dump(mode="json")
+        assert payload["bg_digest_available"] is True
+        assert payload["bg_frontier_suggestion_count"] == 3
+        assert payload["bg_research_candidate_pending"] == 5
+        assert payload["bg_research_candidate_approved"] == 2
+
+    def test_bg_fields_round_trip_through_envelope(self) -> None:
+        from core.schemas import Citation
+
+        trace = GenerationTrace(
+            bg_digest_available=True,
+            bg_frontier_suggestion_count=2,
+        )
+        envelope = AssistantResponseEnvelope(
+            kind="answer",
+            text="Test",
+            grounding_mode="hybrid",
+            generation_trace=trace,
+            evidence=[],
+            citations=[Citation(citation_id="c1", evidence_id="e1", label="From your notes")],
+        )
+        payload = envelope.model_dump(mode="json")
+        restored = AssistantResponseEnvelope.model_validate(payload)
+        assert restored.generation_trace is not None
+        assert restored.generation_trace.bg_digest_available is True
+        assert restored.generation_trace.bg_frontier_suggestion_count == 2

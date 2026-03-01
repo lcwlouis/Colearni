@@ -20,6 +20,7 @@ import logging
 from typing import Any
 
 from adapters.db.engine import create_db_engine
+from core.observability import emit_event
 from core.settings import get_settings
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -240,6 +241,12 @@ def run_research_digest() -> None:
                 logger.info(
                     "research_digest: workspace=%d digests=2",
                     workspace_id,
+                )
+                emit_event(
+                    "bg_research_digest",
+                    status="ok",
+                    component="research_digest",
+                    workspace_id=workspace_id,
                 )
             except Exception:
                 logger.exception(

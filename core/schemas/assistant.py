@@ -293,6 +293,11 @@ class GenerationTrace(BaseModel):
     learner_frontier_count: int | None = None
     learner_review_count: int | None = None
     learner_profile_summary: str | None = None
+    # Background/observability trace (AR6.3)
+    bg_digest_available: bool | None = None
+    bg_frontier_suggestion_count: int | None = None
+    bg_research_candidate_pending: int | None = None
+    bg_research_candidate_approved: int | None = None
 
 
 class ReadinessTopicState(BaseModel):
