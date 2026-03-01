@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from domain.graph.extraction import extract_raw_graph_from_chunk
 from domain.graph.resolver import OnlineResolver, ResolverConfig
-from domain.graph.types import ExtractedConcept, GraphBuildResult, ResolverBudgets, normalize_alias
+from domain.graph.types import GraphBuildResult, ResolverBudgets, normalize_alias
 
 if TYPE_CHECKING:
     from adapters.db.chunks import ChunkRow
@@ -164,6 +164,8 @@ def build_graph_for_chunks(
                         resolved_in_chunk=resolved_in_chunk,
                         budgets=budgets,
                     )
+                    if src_id is None or tgt_id is None:
+                        continue  # skip edge if either endpoint is not a known concept
                     edge_id = resolver.upsert_edge(
                         workspace_id=workspace_id,
                         chunk_id=window_chunk_id,
@@ -209,21 +211,6 @@ def _resolve_edge_endpoint(
     chunk_text: str,
     resolved_in_chunk: dict[str, int],
     budgets: ResolverBudgets,
-) -> int:
+) -> int | None:
     alias_norm = normalize_alias(concept_name)
-    existing = resolved_in_chunk.get(alias_norm)
-    if existing is not None:
-        return existing
-
-    resolved = resolver.resolve_concept(
-        workspace_id=workspace_id,
-        chunk_id=chunk_id,
-        raw_concept=ExtractedConcept(
-            name=concept_name,
-            context_snippet=chunk_text,
-            description="",
-        ),
-        budgets=budgets,
-    )
-    resolved_in_chunk[alias_norm] = resolved.concept_id
-    return resolved.concept_id
+    return resolved_in_chunk.get(alias_norm)

@@ -18,9 +18,10 @@ from core.observability import (
 )
 from core.settings import Settings
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from domain.graph.types import CanonicalCandidate, normalize_alias
+from domain.graph.types import CanonicalCandidate, normalize_alias, tier_rank
 
 _GARDENER_REASON = "gardener_cluster_merge"
 
@@ -102,6 +103,7 @@ class _ClusterConcept:
     canonical_name: str
     description: str
     aliases: tuple[str, ...]
+    tier: str | None = None
 
 
 class _GardenerDecisionPayload(BaseModel):
@@ -570,6 +572,17 @@ def _execute_merge(
         confidence=confidence,
         method=method,
     )
+    # Preserve the more general tier on the target concept after merge.
+    src_rank = tier_rank(source.tier)
+    tgt_rank = tier_rank(target.tier)
+    if src_rank > 0 and (tgt_rank == 0 or src_rank < tgt_rank):
+        session.execute(
+            text(
+                "UPDATE concepts_canon SET tier = :tier"
+                " WHERE workspace_id = :workspace_id AND id = :concept_id"
+            ),
+            {"tier": source.tier, "workspace_id": workspace_id, "concept_id": to_concept_id},
+        )
     deactivated = graph_repository.deactivate_canonical_concept(
         session,
         workspace_id=workspace_id,
@@ -590,6 +603,7 @@ def _to_cluster_concept(concept: graph_repository.CanonicalConceptRow) -> _Clust
         canonical_name=concept.canonical_name,
         description=concept.description,
         aliases=tuple(concept.aliases),
+        tier=concept.tier,
     )
 
 
