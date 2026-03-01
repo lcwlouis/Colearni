@@ -47,17 +47,17 @@ def _stub_stream_monkeypatches(monkeypatch: Any) -> None:
         })(),
     )
     monkeypatch.setattr(
-        "domain.chat.stream.retrieve_ranked_chunks",
+        "domain.chat.retrieval_context.retrieve_ranked_chunks",
         lambda s, **kw: [type("C", (), {
             "chunk_id": 1, "text": "hello", "score": 0.9,
             "document_id": 1, "concept_ids": [],
         })()],
     )
-    monkeypatch.setattr("domain.chat.stream.workspace_has_no_chunks", lambda s, workspace_id: False)
+    monkeypatch.setattr("domain.chat.retrieval_context.workspace_has_no_chunks", lambda s, workspace_id: False)
     monkeypatch.setattr("domain.chat.stream.build_workspace_evidence", lambda **kw: [])
     monkeypatch.setattr("domain.chat.stream.build_workspace_citations", lambda ev: [])
     monkeypatch.setattr("domain.chat.stream.resolve_mastery_status", lambda **kw: None)
-    monkeypatch.setattr("domain.chat.stream.apply_concept_bias", lambda s, **kw: [])
+    monkeypatch.setattr("domain.chat.retrieval_context.apply_concept_bias", lambda s, **kw: [])
     monkeypatch.setattr("domain.chat.stream.build_readiness_actions", lambda s, **kw: [])
     monkeypatch.setattr("domain.chat.stream.build_document_summaries_context", lambda **kw: "")
     monkeypatch.setattr("domain.chat.stream.build_quiz_context", lambda **kw: "")

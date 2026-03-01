@@ -36,9 +36,8 @@ CITATION_LABEL_GENERAL_CONTEXT = "General context"
 CitationLabel = Literal[CITATION_LABEL_FROM_NOTES, CITATION_LABEL_GENERAL_CONTEXT]
 RefusalReason = Literal["insufficient_evidence", "invalid_citations"]
 
-# ResponseMode indicates whether the answer came from grounded retrieval or
-# social/chitchat handling.
-ResponseMode = Literal["grounded", "social"]
+# ResponseMode indicates how the answer was produced.
+ResponseMode = Literal["grounded", "social", "clarify", "onboarding"]
 
 
 def _require_non_empty(value: str, field_name: str) -> str:
@@ -197,7 +196,7 @@ class AssistantResponseEnvelope(BaseModel):
 
         if self.kind == AssistantResponseKind.ANSWER:
             # Social and onboarding responses are exempt from citation requirements.
-            if not self.citations and self.response_mode not in ("social", "onboarding"):
+            if not self.citations and self.response_mode not in ("social", "onboarding", "clarify"):
                 raise ValueError("answer responses must include at least one citation")
             if self.refusal_reason is not None:
                 raise ValueError("answer responses must not include refusal_reason")
@@ -223,7 +222,7 @@ class AssessmentCard(BaseModel):
 class ActionCTA(BaseModel):
     """Call-to-action surfaced inside the chat response envelope."""
 
-    action_type: Literal["quiz_cta", "review_cta", "research_cta"]
+    action_type: Literal["quiz_cta", "review_cta", "research_cta", "quiz_offer", "quiz_start"]
     label: str = Field(min_length=1)
     concept_id: int | None = Field(default=None, gt=0)
     concept_name: str | None = None
@@ -249,6 +248,19 @@ class GenerationTrace(BaseModel):
     - ``reasoning_tokens``: token count consumed by provider-internal reasoning
       (if reported).  This may be non-zero even when ``reasoning_requested`` is
       ``False`` — it reflects the provider's behaviour, not the app's request.
+
+    Turn planner trace (AR1.4):
+    - ``plan_intent``: classified query intent (e.g. ``"teach"``, ``"clarify"``).
+    - ``plan_strategy``: resolved teaching strategy (e.g. ``"socratic"``, ``"direct"``).
+    - ``plan_needs_retrieval``: whether the planner decided retrieval was needed.
+    - ``plan_concept_hint``: concept hint from query analysis, if any.
+    - ``plan_should_offer_quiz``: whether the planner suggests offering a quiz.
+    - ``plan_should_start_quiz``: whether the planner wants to auto-start a quiz.
+
+    Evidence plan trace (AR2.1):
+    - ``evidence_plan_stop_reason``: why evidence retrieval stopped.
+    - ``evidence_plan_budget``: retrieval budget used for evidence planning.
+    - ``evidence_plan_chunk_count``: number of chunks retrieved by the evidence planner.
     """
 
     provider: str | None = None
@@ -263,6 +275,15 @@ class GenerationTrace(BaseModel):
     reasoning_used: bool | None = None
     reasoning_effort: str | None = None
     reasoning_effort_source: str | None = None
+    plan_intent: str | None = None
+    plan_strategy: str | None = None
+    plan_needs_retrieval: bool | None = None
+    plan_concept_hint: str | None = None
+    plan_should_offer_quiz: bool | None = None
+    plan_should_start_quiz: bool | None = None
+    evidence_plan_stop_reason: str | None = None
+    evidence_plan_budget: int | None = None
+    evidence_plan_chunk_count: int | None = None
 
 
 class ReadinessTopicState(BaseModel):

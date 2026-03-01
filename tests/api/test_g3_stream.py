@@ -162,11 +162,11 @@ class TestStreamRouteSSE:
             )(),
         )
         monkeypatch.setattr(
-            "domain.chat.stream.retrieve_ranked_chunks",
+            "domain.chat.retrieval_context.retrieve_ranked_chunks",
             lambda session, **kwargs: [],
         )
         monkeypatch.setattr(
-            "domain.chat.stream.workspace_has_no_chunks",
+            "domain.chat.retrieval_context.workspace_has_no_chunks",
             lambda session, workspace_id: True,
         )
         monkeypatch.setattr(

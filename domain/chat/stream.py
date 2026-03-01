@@ -48,26 +48,28 @@ from domain.chat.evidence_builder import (
     build_workspace_evidence,
     filter_used_citations,
 )
+from domain.chat.query_analyzer import run_query_analysis
 from domain.chat.response_service import (
     build_quiz_context,
     build_tutor_llm_client,
     resolve_mastery_status,
 )
-from domain.chat.retrieval_context import (
-    apply_concept_bias,
-    retrieve_ranked_chunks,
-    workspace_has_no_chunks,
+from domain.retrieval.evidence_planner import (
+    build_evidence_plan,
+    execute_evidence_plan,
 )
 from domain.chat.session_memory import (
     load_assessment_context,
     load_flashcard_progress,
     load_history_text,
+    load_quiz_progress_snapshot,
     persist_turn,
 )
 from domain.chat.social_turns import try_social_response
 from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, get_persona
 from domain.chat.tutor_agent import resolve_tutor_style
 from domain.chat.answer_parts import split_answer_parts
+from domain.chat.turn_plan import build_turn_plan
 from domain.readiness.analyzer import build_readiness_actions
 
 log = logging.getLogger("domain.chat.stream")
@@ -163,6 +165,20 @@ def _stream_inner(
     yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING)
 
     history_text = load_history_text(session, session_id=request.session_id)
+
+    # ── Query analysis (AR1.1) ────────────────────────────────────────
+    query_analysis = run_query_analysis(
+        query=request.query,
+        history_summary=history_text,
+        llm_client=social_llm,
+    )
+    log.info(
+        "query_analysis intent=%s mode=%s retrieval=%s",
+        query_analysis.intent,
+        query_analysis.requested_mode,
+        query_analysis.needs_retrieval,
+    )
+
     assessment_context = load_assessment_context(session, session_id=request.session_id)
 
     concept_resolution = resolve_concept_for_turn(
@@ -175,16 +191,52 @@ def _stream_inner(
         switch_decision=request.concept_switch_decision,
     )
 
-    ranked_chunks = retrieve_ranked_chunks(
-        session,
+    resolved_concept_id = (
+        concept_resolution.resolved_concept.concept_id
+        if concept_resolution.resolved_concept is not None
+        else None
+    )
+    resolved_name = (
+        concept_resolution.resolved_concept.canonical_name
+        if concept_resolution.resolved_concept is not None
+        else None
+    )
+
+    mastery_status = resolve_mastery_status(
+        session=session,
+        request=request,
+        resolved_concept_id=resolved_concept_id,
+    )
+
+    # ── Turn plan (AR1.2 / AR1.3) ─────────────────────────────────────
+    turn_plan = build_turn_plan(
+        query_analysis=query_analysis,
+        mastery_status=mastery_status,
+        resolved_concept_name=resolved_name,
+        resolved_concept_id=resolved_concept_id,
+        has_documents=True,
+    )
+
+    # ── Plan-gated retrieval via EvidencePlan (AR2.1) ────────────────
+    evidence_plan = build_evidence_plan(
+        base_query=request.query,
         workspace_id=request.workspace_id,
-        query=request.query,
+        needs_retrieval=turn_plan.needs_retrieval,
         top_k=request.top_k,
+        concept_id=(
+            concept_resolution.resolved_concept.concept_id
+            if concept_resolution.resolved_concept is not None
+            else None
+        ),
+    )
+    evidence_plan, ranked_chunks = execute_evidence_plan(
+        session,
+        plan=evidence_plan,
         settings=settings,
     )
 
-    # ── Empty workspace fast-path ─────────────────────────────────────
-    if not ranked_chunks and workspace_has_no_chunks(session, request.workspace_id):
+    # ── Empty workspace fast-path ─────────────────────────────────
+    if evidence_plan.stop_reason == "empty_workspace":
         yield ChatStreamStatusEvent(phase=ChatPhase.FINALIZING)
         no_docs_text = (
             "It looks like your workspace doesn't have any documents yet! "
@@ -216,14 +268,6 @@ def _stream_inner(
         yield ChatStreamFinalEvent(envelope=empty_env)
         return
 
-    if concept_resolution.resolved_concept is not None:
-        ranked_chunks = apply_concept_bias(
-            session,
-            workspace_id=request.workspace_id,
-            concept_id=concept_resolution.resolved_concept.concept_id,
-            chunks=ranked_chunks,
-        )
-
     evidence = build_workspace_evidence(
         session=session,
         workspace_id=request.workspace_id,
@@ -231,23 +275,30 @@ def _stream_inner(
     )
     citations = build_workspace_citations(evidence)
     tutor_llm_client = build_tutor_llm_client(settings=settings)
-    mastery_status = resolve_mastery_status(
+    quiz_context_text = build_quiz_context(
         session=session,
-        request=request,
-        resolved_concept_id=(
-            concept_resolution.resolved_concept.concept_id
-            if concept_resolution.resolved_concept is not None
-            else None
-        ),
+        workspace_id=request.workspace_id,
+        user_id=request.user_id,
+        concept_id=resolved_concept_id,
+    )
+    quiz_progress_snapshot = load_quiz_progress_snapshot(
+        session,
+        workspace_id=request.workspace_id,
+        user_id=request.user_id,
+        concept_id=resolved_concept_id,
+    )
+    if quiz_progress_snapshot:
+        quiz_context_text = "\n\n".join(
+            part for part in (quiz_context_text, quiz_progress_snapshot) if part
+        )
+    flashcard_progress = load_flashcard_progress(
+        session,
+        workspace_id=request.workspace_id,
+        user_id=request.user_id,
+        concept_id=resolved_concept_id,
     )
 
     # ── Phase: responding (deferred until first visible delta — S1) ─────
-
-    resolved_concept_id = (
-        concept_resolution.resolved_concept.concept_id
-        if concept_resolution.resolved_concept is not None
-        else None
-    )
 
     # Build tutor text — attempt streaming if client supports it
     generation_trace: GenerationTrace | None = None
@@ -259,18 +310,6 @@ def _stream_inner(
             yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
             responded = True
     elif tutor_llm_client is not None and hasattr(tutor_llm_client, "generate_tutor_text_stream"):
-        quiz_context_text = build_quiz_context(
-            session=session,
-            workspace_id=request.workspace_id,
-            user_id=request.user_id,
-            concept_id=resolved_concept_id,
-        )
-        flashcard_progress = load_flashcard_progress(
-            session,
-            workspace_id=request.workspace_id,
-            user_id=request.user_id,
-            concept_id=resolved_concept_id,
-        )
         style = resolve_tutor_style(mastery_status=mastery_status)
         persona = get_persona("colearni")
         combined_assessment = assessment_context
@@ -285,6 +324,7 @@ def _stream_inner(
             evidence=evidence,
             persona=persona,
             style=style,
+            grounding_mode=grounding_mode,
             assessment_context=combined_assessment,
             history_summary=history_text,
             document_summaries=build_document_summaries_context(
@@ -330,23 +370,11 @@ def _stream_inner(
     else:
         # Fallback to blocking generation (no streaming support)
         from domain.chat.response_service import generate_tutor_text
-
-        quiz_context_text = build_quiz_context(
-            session=session,
-            workspace_id=request.workspace_id,
-            user_id=request.user_id,
-            concept_id=resolved_concept_id,
-        )
-        flashcard_progress = load_flashcard_progress(
-            session,
-            workspace_id=request.workspace_id,
-            user_id=request.user_id,
-            concept_id=resolved_concept_id,
-        )
         assistant_text, generation_trace = generate_tutor_text(
             query=request.query,
             evidence=evidence,
             mastery_status=mastery_status,
+            grounding_mode=grounding_mode,
             llm_client=tutor_llm_client,
             history_text=history_text,
             assessment_context=assessment_context,
@@ -372,17 +400,22 @@ def _stream_inner(
 
     # ── Verify + finalize ─────────────────────────────────────────────
     draft = AssistantDraft(text=assistant_text, evidence=evidence, citations=citations)
-    envelope = verify_assistant_draft(draft=draft, grounding_mode=grounding_mode)
+    allow_uncited_hybrid = (
+        grounding_mode == GroundingMode.HYBRID
+        and turn_plan.intent == "clarify"
+        and not turn_plan.needs_retrieval
+    )
+    envelope = verify_assistant_draft(
+        draft=draft,
+        grounding_mode=grounding_mode,
+        allow_uncited_hybrid=allow_uncited_hybrid,
+    )
     envelope = filter_used_citations(envelope)
 
     meta = ConversationMeta(
         session_id=request.session_id,
         resolved_concept_id=resolved_concept_id,
-        resolved_concept_name=(
-            concept_resolution.resolved_concept.canonical_name
-            if concept_resolution.resolved_concept is not None
-            else None
-        ),
+        resolved_concept_name=resolved_name,
         concept_confidence=concept_resolution.confidence,
         requires_clarification=concept_resolution.requires_clarification,
         concept_switch_suggestion=(
@@ -412,10 +445,41 @@ def _stream_inner(
             if callable(getattr(session, "rollback", None)):
                 session.rollback()
 
+    # ── Plan-driven quiz actions ──────────────────────────────────────
+    if turn_plan.should_start_quiz and turn_plan.quiz_concept_id is not None:
+        actions.insert(0, {
+            "action_type": "quiz_start",
+            "label": "Start quiz now",
+            "concept_id": turn_plan.quiz_concept_id,
+            "concept_name": resolved_name,
+        })
+    elif turn_plan.should_offer_quiz and turn_plan.quiz_concept_id is not None:
+        actions.insert(0, {
+            "action_type": "quiz_offer",
+            "label": "Ready for a quiz?",
+            "concept_id": turn_plan.quiz_concept_id,
+            "concept_name": resolved_name,
+        })
+
+    # ── Enrich trace with planner metadata ──────────────────────────
+    if generation_trace is None:
+        generation_trace = GenerationTrace()
+    generation_trace = generation_trace.model_copy(update={
+        "plan_intent": turn_plan.intent,
+        "plan_strategy": turn_plan.teaching_strategy,
+        "plan_needs_retrieval": turn_plan.needs_retrieval,
+        "plan_concept_hint": turn_plan.resolved_concept_hint,
+        "plan_should_offer_quiz": turn_plan.should_offer_quiz,
+        "plan_should_start_quiz": turn_plan.should_start_quiz,
+        "evidence_plan_stop_reason": evidence_plan.stop_reason,
+        "evidence_plan_budget": evidence_plan.retrieval_budget,
+        "evidence_plan_chunk_count": evidence_plan.retrieved_chunk_count,
+    })
+
     envelope = envelope.model_copy(
         update={
             "actions": actions,
-            "response_mode": "grounded",
+            "response_mode": envelope.response_mode,
             "generation_trace": generation_trace,
             "answer_parts": answer_parts,
         }
@@ -431,11 +495,7 @@ def _stream_inner(
         user_id=request.user_id,
         user_text=request.query,
         assistant_payload=envelope.model_dump(mode="json"),
-        concept_name=(
-            concept_resolution.resolved_concept.canonical_name
-            if concept_resolution.resolved_concept is not None
-            else None
-        ),
+        concept_name=resolved_name,
     )
 
     yield ChatStreamFinalEvent(envelope=envelope)

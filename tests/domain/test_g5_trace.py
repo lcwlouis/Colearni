@@ -59,11 +59,11 @@ class TestTraceOnBlockingEnvelope:
             retrieval_method="hybrid",
         )
         monkeypatch.setattr(
-            "domain.chat.respond.retrieve_ranked_chunks",
+            "domain.chat.retrieval_context.retrieve_ranked_chunks",
             lambda session, **kwargs: [fake_chunk],
         )
         monkeypatch.setattr(
-            "domain.chat.respond.workspace_has_no_chunks",
+            "domain.chat.retrieval_context.workspace_has_no_chunks",
             lambda session, workspace_id: False,
         )
         monkeypatch.setattr(
@@ -214,3 +214,78 @@ class TestTracePersistenceRoundTrip:
 
         restored = AssistantResponseEnvelope.model_validate(payload)
         assert restored.generation_trace is None
+
+
+class TestPlannerTraceFields:
+    """AR1.4: Verify planner trace metadata on GenerationTrace."""
+
+    def test_plan_fields_default_to_none(self) -> None:
+        trace = GenerationTrace()
+        assert trace.plan_intent is None
+        assert trace.plan_strategy is None
+        assert trace.plan_needs_retrieval is None
+        assert trace.plan_concept_hint is None
+        assert trace.plan_should_offer_quiz is None
+        assert trace.plan_should_start_quiz is None
+
+    def test_plan_fields_set_and_serialize(self) -> None:
+        trace = GenerationTrace(
+            provider="openai",
+            model="gpt-4o",
+            plan_intent="teach",
+            plan_strategy="socratic",
+            plan_needs_retrieval=True,
+            plan_concept_hint="photosynthesis",
+            plan_should_offer_quiz=False,
+            plan_should_start_quiz=False,
+        )
+        assert trace.plan_intent == "teach"
+        assert trace.plan_strategy == "socratic"
+        assert trace.plan_needs_retrieval is True
+        assert trace.plan_concept_hint == "photosynthesis"
+
+        payload = trace.model_dump(mode="json")
+        assert payload["plan_intent"] == "teach"
+        assert payload["plan_strategy"] == "socratic"
+        assert payload["plan_needs_retrieval"] is True
+        assert payload["plan_concept_hint"] == "photosynthesis"
+        assert payload["plan_should_offer_quiz"] is False
+        assert payload["plan_should_start_quiz"] is False
+
+    def test_plan_fields_round_trip_through_envelope(self) -> None:
+        from core.schemas import Citation
+
+        trace = GenerationTrace(
+            plan_intent="clarify",
+            plan_strategy="clarify",
+            plan_needs_retrieval=False,
+        )
+        envelope = AssistantResponseEnvelope(
+            kind="answer",
+            text="Test",
+            grounding_mode="hybrid",
+            generation_trace=trace,
+            evidence=[],
+            citations=[Citation(citation_id="c1", evidence_id="e1", label="From your notes")],
+        )
+        payload = envelope.model_dump(mode="json")
+        restored = AssistantResponseEnvelope.model_validate(payload)
+        assert restored.generation_trace is not None
+        assert restored.generation_trace.plan_intent == "clarify"
+        assert restored.generation_trace.plan_strategy == "clarify"
+        assert restored.generation_trace.plan_needs_retrieval is False
+
+    def test_model_copy_merges_plan_fields(self) -> None:
+        base = GenerationTrace(provider="openai", model="gpt-4o", timing_ms=100.0)
+        enriched = base.model_copy(update={
+            "plan_intent": "teach",
+            "plan_strategy": "direct",
+            "plan_needs_retrieval": True,
+            "plan_should_offer_quiz": True,
+            "plan_should_start_quiz": False,
+        })
+        assert enriched.provider == "openai"
+        assert enriched.timing_ms == 100.0
+        assert enriched.plan_intent == "teach"
+        assert enriched.plan_strategy == "direct"
+        assert enriched.plan_should_offer_quiz is True

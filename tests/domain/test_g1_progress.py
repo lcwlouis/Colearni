@@ -114,11 +114,11 @@ class TestOrchestrationPhaseOrder:
             )(),
         )
         monkeypatch.setattr(
-            "domain.chat.respond.retrieve_ranked_chunks",
+            "domain.chat.retrieval_context.retrieve_ranked_chunks",
             lambda session, **kwargs: [],
         )
         monkeypatch.setattr(
-            "domain.chat.respond.workspace_has_no_chunks",
+            "domain.chat.retrieval_context.workspace_has_no_chunks",
             lambda session, workspace_id: True,
         )
         monkeypatch.setattr(
@@ -182,11 +182,11 @@ class TestOrchestrationPhaseOrder:
             retrieval_method="hybrid",
         )
         monkeypatch.setattr(
-            "domain.chat.respond.retrieve_ranked_chunks",
+            "domain.chat.retrieval_context.retrieve_ranked_chunks",
             lambda session, **kwargs: [fake_chunk],
         )
         monkeypatch.setattr(
-            "domain.chat.respond.workspace_has_no_chunks",
+            "domain.chat.retrieval_context.workspace_has_no_chunks",
             lambda session, workspace_id: False,
         )
 
