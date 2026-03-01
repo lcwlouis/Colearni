@@ -1,7 +1,7 @@
 import { ChatResponse, CollapsibleHint } from "@/components/chat-response";
 import { MarkdownContent } from "@/components/markdown-content";
-import type { GraphConceptSummary, OnboardingStatusResponse } from "@/lib/api/types";
-import type { ChatPhase, TimelineMessage } from "../types";
+import type { ActionCTA, GraphConceptSummary, OnboardingStatusResponse } from "@/lib/api/types";
+import type { ActivityStep, ChatPhase, TimelineMessage } from "../types";
 import { PHASE_LABELS } from "../types";
 
 interface TutorTimelineProps {
@@ -10,11 +10,13 @@ interface TutorTimelineProps {
   chatPhase: ChatPhase;
   chatError: string | null;
   streamFallback: boolean;
+  activitySteps: ActivityStep[];
   onboarding: OnboardingStatusResponse | null;
   concepts: GraphConceptSummary[];
   setCurrentConcept: (concept: GraphConceptSummary | null) => void;
   setSuggestedConceptId: (id: number | null) => void;
   setQuery: (query: string) => void;
+  onCtaClick?: (cta: ActionCTA) => void;
 }
 
 export function TutorTimeline({
@@ -23,11 +25,13 @@ export function TutorTimeline({
   chatPhase,
   chatError,
   streamFallback,
+  activitySteps,
   onboarding,
   concepts,
   setCurrentConcept,
   setSuggestedConceptId,
   setQuery,
+  onCtaClick,
 }: TutorTimelineProps) {
   return (
     <div className="chat-timeline" aria-live="polite">
@@ -74,7 +78,7 @@ export function TutorTimeline({
               {message.role === "assistant" ? "Tutor" : message.role === "user" ? "You" : "System"}
             </p>
             {message.role === "assistant" && message.response ? (
-              <ChatResponse response={message.response} />
+              <ChatResponse response={message.response} onCtaClick={onCtaClick} />
             ) : (
               <>
                 {message.reasoningSummary ? (
@@ -104,6 +108,18 @@ export function TutorTimeline({
             <span className="chat-status-label">{PHASE_LABELS[chatPhase]}</span>
             {streamFallback ? (
               <span className="chat-fallback-badge" title="Stream unavailable — using fallback mode">⚠ fallback</span>
+            ) : null}
+            {activitySteps.length > 0 ? (
+              <div className="chat-activity-rail" aria-label="Agent activity steps">
+                {activitySteps.map((step, i) => (
+                  <span
+                    key={`${step.activity}-${i}`}
+                    className={`activity-step ${step.done ? "done" : "active"}`}
+                  >
+                    {step.done ? "✓" : "›"} {step.label}
+                  </span>
+                ))}
+              </div>
             ) : null}
           </div>
         </div>

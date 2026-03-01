@@ -7,8 +7,8 @@ import type {
   GraphConceptSummary,
   GroundingMode,
 } from "@/lib/api/types";
-import type { ChatPhase, TimelineMessage } from "../types";
-import { errorText, mapMessage } from "../types";
+import type { ChatPhase, TimelineMessage, ActivityStep } from "../types";
+import { errorText, mapMessage, ACTIVITY_LABELS } from "../types";
 import {
   appendStreamingAssistantDelta,
   removeStreamingAssistant,
@@ -63,6 +63,7 @@ export function useTutorMessages({
   const [chatPhase, setChatPhase] = useState<ChatPhase>("idle");
   const [chatError, setChatError] = useState<string | null>(null);
   const [streamFallback, setStreamFallback] = useState(false);
+  const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([]);
   const [query, setQuery] = useState("");
 
   // E1: track in-flight request so navigation cancels stale callbacks
@@ -127,6 +128,7 @@ export function useTutorMessages({
     setChatPhase("thinking");
     setChatError(null);
     setStreamFallback(false);
+    setActivitySteps([]);
 
     if (STREAMING_ENABLED) {
       // ── Backend-driven phase progression via SSE ───────────────────
@@ -149,7 +151,16 @@ export function useTutorMessages({
             console.info("[tutor-stream] first event received: %s", event.event);
           }
           if (event.event === "status") {
-            console.info("[tutor-stream] phase -> %s", event.phase);
+            console.info("[tutor-stream] phase -> %s activity -> %s", event.phase, event.activity ?? "none");
+            // AR3.3: track activity steps for the agent rail
+            if (event.activity) {
+              const label = event.step_label ?? ACTIVITY_LABELS[event.activity] ?? event.activity;
+              setActivitySteps((prev) => {
+                // Mark the previous in-progress step as done
+                const updated = prev.map((s) => (s.done ? s : { ...s, done: true }));
+                return [...updated, { activity: event.activity!, label, done: false }];
+              });
+            }
             // U2: never regress from "responding" to a pre-output phase
             setChatPhase((prev) => {
               if (prev === "responding" && event.phase !== "responding") {
@@ -195,12 +206,14 @@ export function useTutorMessages({
               void refreshSessions();
               setChatLoading(false);
               setChatPhase("idle");
+              setActivitySteps([]);
             });
           } else if (event.event === "error") {
             setMessages((prev) => removeStreamingAssistant(prev, streamAssistantId));
             setChatError(event.message);
             setChatLoading(false);
             setChatPhase("idle");
+            setActivitySteps([]);
           }
         },
         (error: Error) => {
@@ -296,6 +309,7 @@ export function useTutorMessages({
     chatPhase,
     chatError,
     streamFallback,
+    activitySteps,
     query,
     setQuery,
     onSubmitChat,

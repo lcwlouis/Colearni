@@ -1,4 +1,4 @@
-import type { AnswerParts, AssistantResponseEnvelope, ChatMessageRecord } from "@/lib/api/types";
+import type { AnswerParts, AssistantResponseEnvelope, ChatMessageRecord, TutorActivity } from "@/lib/api/types";
 import { ApiError } from "@/lib/api/client";
 
 export type TimelineMessage = {
@@ -14,6 +14,27 @@ export type TimelineMessage = {
 
 /** Lifecycle phases for the chat request indicator (E2). */
 export type ChatPhase = "idle" | "thinking" | "searching" | "responding" | "finalizing";
+
+/** A completed or in-progress activity step shown in the agent rail (AR3.3). */
+export type ActivityStep = {
+  activity: TutorActivity;
+  label: string;
+  done: boolean;
+};
+
+/**
+ * User-facing labels for each TutorActivity (AR3.3).
+ */
+export const ACTIVITY_LABELS: Record<TutorActivity, string> = {
+  planning_turn: "Analyzing question",
+  retrieving_chunks: "Searching knowledge base",
+  expanding_graph: "Finding related concepts",
+  checking_mastery: "Checking mastery level",
+  preparing_quiz: "Preparing quiz",
+  grading_quiz: "Grading quiz",
+  verifying_citations: "Verifying citations",
+  generating_reply: "Generating response",
+};
 
 /**
  * User-facing phase labels (U1 visible phase policy).

@@ -7,10 +7,29 @@ import { TutorTimeline } from "@/features/tutor/components/tutor-timeline";
 import { TutorGraphDrawer } from "@/features/tutor/components/tutor-graph-drawer";
 import { TutorQuizDrawer } from "@/features/tutor/components/tutor-quiz-drawer";
 import { ConceptSwitchBanner } from "@/features/tutor/components/concept-switch-banner";
-import type { GroundingMode } from "@/lib/api/types";
+import type { ActionCTA, GroundingMode } from "@/lib/api/types";
+import { useCallback } from "react";
 
 export default function TutorPage() {
   const t = useTutorPage();
+
+  const handleCtaClick = useCallback(
+    (cta: ActionCTA) => {
+      if (cta.action_type === "quiz_offer" || cta.action_type === "quiz_start") {
+        if (cta.concept_id) {
+          const matched = t.concepts.find((c) => c.concept_id === cta.concept_id);
+          if (matched) t.setCurrentConcept(matched);
+        }
+        const doOpen = () => {
+          t.openDrawer("quiz");
+          if (cta.action_type === "quiz_start") void t.startLevelUp();
+        };
+        if (t.showGraph) t.closeDrawer("graph", doOpen);
+        else doOpen();
+      }
+    },
+    [t],
+  );
 
   if (t.authLoading || !t.user) {
     return (
@@ -87,11 +106,13 @@ export default function TutorPage() {
           chatPhase={t.chatPhase}
           chatError={t.chatError}
           streamFallback={t.streamFallback}
+          activitySteps={t.activitySteps}
           onboarding={t.onboarding}
           concepts={t.concepts}
           setCurrentConcept={t.setCurrentConcept}
           setSuggestedConceptId={t.setSuggestedConceptId}
           setQuery={t.setQuery}
+          onCtaClick={handleCtaClick}
         />
 
         <div className="chat-composer-dock">
