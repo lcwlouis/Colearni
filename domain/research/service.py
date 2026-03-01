@@ -203,3 +203,73 @@ def execute_topic_plan(
         "queries_planned": plan.query_count,
         "candidates_inserted": inserted,
     }
+
+
+# ── Candidate promotion (AR5.6) ──────────────────────────────────────
+
+
+def promote_reviewed_candidate(
+    db: Session,
+    *,
+    candidate_id: int,
+    workspace_id: int,
+    user_id: int,
+    has_quiz_gate: bool = False,
+    quiz_passed: bool = False,
+) -> dict:
+    """Evaluate and optionally promote an approved candidate.
+
+    Routes through evaluate_candidate_for_promotion() to enforce
+    learning-gated promotion policy. Returns the decision and whether
+    the candidate was actually promoted.
+    """
+    from domain.research.promotion import (
+        evaluate_candidate_for_promotion,
+        promote_candidate,
+        record_promotion_feedback,
+    )
+
+    # Look up current candidate status
+    rows = research_db.list_candidates(
+        db,
+        workspace_id=workspace_id,
+        run_id=None,
+        status_filter=None,
+    )
+    candidate_row = next(
+        (r for r in rows if int(r["id"]) == candidate_id),
+        None,
+    )
+    if candidate_row is None:
+        raise CandidateNotFoundError
+
+    decision = evaluate_candidate_for_promotion(
+        candidate_id=candidate_id,
+        candidate_status=str(candidate_row["status"]),
+        has_quiz_gate=has_quiz_gate,
+        quiz_passed=quiz_passed,
+    )
+
+    promoted = False
+    if decision.action == "promote":
+        promoted = promote_candidate(
+            db,
+            candidate_id=candidate_id,
+            workspace_id=workspace_id,
+            decision=decision,
+        )
+
+    record_promotion_feedback(
+        db,
+        candidate_id=candidate_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        feedback=f"Promotion decision: {decision.action} — {decision.reason}",
+    )
+
+    return {
+        "candidate_id": candidate_id,
+        "action": decision.action,
+        "reason": decision.reason,
+        "promoted": promoted,
+    }

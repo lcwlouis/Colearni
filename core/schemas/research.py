@@ -69,3 +69,17 @@ class TopicProposalResponse(BaseModel):
     source_classes: list[str] = Field(default_factory=list)
     rationale: str = ""
     priority: Literal["high", "medium", "low"] = "medium"
+
+
+class CandidatePromoteRequest(BaseModel):
+    """Request to promote an approved candidate through the promotion policy."""
+    has_quiz_gate: bool = False
+    quiz_passed: bool = False
+
+
+class CandidatePromotionResponse(BaseModel):
+    """Result of running a candidate through the promotion policy."""
+    candidate_id: int = Field(gt=0)
+    action: Literal["promote", "defer", "reject", "quiz_gate"]
+    reason: str = ""
+    promoted: bool = False

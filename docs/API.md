@@ -1858,6 +1858,42 @@ Error responses:
 
 ---
 
+### POST /workspaces/{ws_id}/research/candidates/{candidate_id}/promote
+
+Tag/group: `research`
+
+Purpose: evaluate and optionally promote an approved candidate through the learning-gated promotion policy.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `candidate_id` | path | integer | yes | candidate ID |
+| `ws_id` | path | string | yes | workspace public ID |
+| `has_quiz_gate` | JSON body | boolean | no | default false |
+| `quiz_passed` | JSON body | boolean | no | default false |
+
+Success responses:
+
+- `200 OK` with `CandidatePromotionResponse`
+
+`CandidatePromotionResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `candidate_id` | integer | candidate row ID |
+| `action` | string | `promote`, `defer`, `reject`, or `quiz_gate` |
+| `reason` | string | explanation of the decision |
+| `promoted` | boolean | whether the candidate was actually promoted |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when candidate not found
+
+---
+
 ### POST /workspaces/{ws_id}/research/topics/plan
 
 Tag/group: `research`

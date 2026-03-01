@@ -5,6 +5,8 @@ from __future__ import annotations
 from adapters.db.dependencies import get_db_session
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.schemas import (
+    CandidatePromoteRequest,
+    CandidatePromotionResponse,
     QueryPlanResponse,
     ResearchCandidateReviewRequest,
     ResearchCandidateSummary,
@@ -178,6 +180,38 @@ def execute_topic_plan(
         priority=payload.priority,
     )
     return QueryPlanResponse(**result)
+
+
+# ── Candidate Promotion (AR5.6) ──────────────────────────────────────
+
+
+@router.post("/candidates/{candidate_id}/promote", response_model=CandidatePromotionResponse)
+def promote_candidate(
+    candidate_id: int,
+    payload: CandidatePromoteRequest,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> CandidatePromotionResponse:
+    """Evaluate and optionally promote an approved candidate.
+
+    Routes through learning-gated promotion policy.  Only approved
+    candidates can be promoted; quiz gates are enforced when requested.
+    """
+    try:
+        result = research_service.promote_reviewed_candidate(
+            db,
+            candidate_id=candidate_id,
+            workspace_id=ws.workspace_id,
+            user_id=ws.user.id,
+            has_quiz_gate=payload.has_quiz_gate,
+            quiz_passed=payload.quiz_passed,
+        )
+        return CandidatePromotionResponse(**result)
+    except CandidateNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidate not found.",
+        )
 
 
 __all__ = ["router"]

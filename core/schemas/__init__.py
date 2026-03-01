@@ -108,6 +108,8 @@ from core.schemas.quizzes import (  # noqa: F401
     QuizItemType,
 )
 from core.schemas.research import (  # noqa: F401
+    CandidatePromoteRequest,
+    CandidatePromotionResponse,
     QueryPlanResponse,
     ResearchCandidateReviewRequest,
     ResearchCandidateSummary,
@@ -203,6 +205,8 @@ __all__ = [
     "ResearchRunSummary",
     "ResearchSourceCreate",
     "ResearchSourceSummary",
+    "CandidatePromoteRequest",
+    "CandidatePromotionResponse",
     "QueryPlanResponse",
     "TopicExecuteRequest",
     "TopicPlanRequest",
