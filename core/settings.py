@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.schemas import GroundingMode
@@ -74,6 +74,44 @@ class Settings(BaseSettings):
             "INGEST_BUILD_GRAPH",
         ),
     )
+
+    # ── Ingestion chunking ─────────────────────────────────────────────
+    # All sizes are in characters (≈ 4 chars per token for English prose).
+    # Vector chunks are stored in the DB and used for retrieval (small).
+    # Graph chunks are larger text windows fed to the LLM extractor;
+    # adjacent vector chunks are batched together to reach this size.
+    # Set INGEST_GRAPH_CHUNK_SIZE=0 to use one LLM call per vector chunk.
+    ingest_vector_chunk_size: int = Field(
+        default=1000,
+        validation_alias=AliasChoices(
+            "APP_INGEST_VECTOR_CHUNK_SIZE",
+            "INGEST_VECTOR_CHUNK_SIZE",
+        ),
+        ge=64,
+        description="Max chars per stored vector-retrieval chunk (≈ chunk_size/4 tokens).",
+    )
+    ingest_vector_chunk_overlap: int = Field(
+        default=150,
+        validation_alias=AliasChoices(
+            "APP_INGEST_VECTOR_CHUNK_OVERLAP",
+            "INGEST_VECTOR_CHUNK_OVERLAP",
+        ),
+        ge=0,
+        description="Overlap in chars between adjacent vector chunks.",
+    )
+    ingest_graph_chunk_size: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "APP_INGEST_GRAPH_CHUNK_SIZE",
+            "INGEST_GRAPH_CHUNK_SIZE",
+        ),
+        ge=0,
+        description=(
+            "Max chars per graph-extraction LLM call. Adjacent vector chunks are "
+            "concatenated up to this size. 0 = one LLM call per vector chunk."
+        ),
+    )
+
     embedding_backfill_max_chunks: int = Field(
         default=500,
         validation_alias=AliasChoices(
@@ -452,6 +490,16 @@ class Settings(BaseSettings):
             "LLM_REASONING_QUIZ_GENERATION",
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_vector_chunk_overlap(self) -> "Settings":
+        """Ensure vector chunk overlap is strictly less than chunk size."""
+        if self.ingest_vector_chunk_overlap >= self.ingest_vector_chunk_size:
+            raise ValueError(
+                "INGEST_VECTOR_CHUNK_OVERLAP must be less than INGEST_VECTOR_CHUNK_SIZE; "
+                f"got overlap={self.ingest_vector_chunk_overlap} >= size={self.ingest_vector_chunk_size}"
+            )
+        return self
 
     @field_validator(
         "llm_reasoning_effort_chat",

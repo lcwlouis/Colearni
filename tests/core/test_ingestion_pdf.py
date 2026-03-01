@@ -92,7 +92,7 @@ def test_ingest_extractable_pdf_reuses_chunk_store_pipeline(monkeypatch: Any) ->
         lambda db, workspace_id, content_hash: None,  # noqa: ARG005
     )
 
-    def _fake_chunker(normalized_text: str) -> list[str]:
+    def _fake_chunker(normalized_text: str, **_kwargs: object) -> list[str]:
         captured["normalized_text"] = normalized_text
         return ["chunk-one", "chunk-two"]
 

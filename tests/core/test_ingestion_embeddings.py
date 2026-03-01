@@ -97,7 +97,7 @@ def _patch_new_document_flow(monkeypatch: Any, *, chunks: list[str]) -> None:
         "domain.ingestion.service.get_document_by_content_hash",
         lambda db, workspace_id, content_hash: None,  # noqa: ARG005
     )
-    monkeypatch.setattr("domain.ingestion.service.chunk_text_deterministic", lambda text: chunks)  # noqa: ARG005
+    monkeypatch.setattr("domain.ingestion.service.chunk_text_deterministic", lambda text, **_kw: chunks)  # noqa: ARG005
 
     def _fake_insert_document(
         db: object,  # noqa: ARG001

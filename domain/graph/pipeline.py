@@ -20,6 +20,40 @@ if TYPE_CHECKING:
     from adapters.db.chunks import ChunkRow
 
 
+def _make_graph_windows(
+    chunks: "Sequence[ChunkRow]",
+    graph_chunk_size: int,
+) -> "list[tuple[int, str]]":
+    """Batch adjacent vector chunks into larger text windows for graph extraction.
+
+    If *graph_chunk_size* is 0, each chunk becomes its own window (current behaviour).
+    Returns a list of ``(representative_chunk_id, window_text)`` tuples.
+    The representative chunk id is the first chunk id in each batch.
+    """
+    if graph_chunk_size <= 0:
+        return [(c.id, c.text) for c in chunks]
+
+    windows: list[tuple[int, str]] = []
+    batch_ids: list[int] = []
+    batch_texts: list[str] = []
+    batch_size = 0
+
+    for chunk in chunks:
+        if batch_size + len(chunk.text) > graph_chunk_size and batch_texts:
+            windows.append((batch_ids[0], "\n\n".join(batch_texts)))
+            batch_ids = []
+            batch_texts = []
+            batch_size = 0
+        batch_ids.append(chunk.id)
+        batch_texts.append(chunk.text)
+        batch_size += len(chunk.text)
+
+    if batch_texts:
+        windows.append((batch_ids[0], "\n\n".join(batch_texts)))
+
+    return windows
+
+
 def build_graph_for_chunks(
     session: Session,
     *,
@@ -66,16 +100,17 @@ def build_graph_for_chunks(
         canonical_merged = 0
         canonical_edges_upserted = 0
 
-        for chunk in chunks:
-            with observation_context(chunk_id=chunk.id), start_span(
+        windows = _make_graph_windows(chunks, settings.ingest_graph_chunk_size)
+        for window_chunk_id, window_text in windows:
+            with observation_context(chunk_id=window_chunk_id), start_span(
                 "graph.resolver.chunk",
                 kind=SPAN_KIND_CHAIN,
-                chunk_id=chunk.id,
+                chunk_id=window_chunk_id,
             ) as chunk_span:
                 budgets.reset_chunk()
                 extraction = extract_raw_graph_from_chunk(
                     llm_client=llm_client,
-                    chunk_text=chunk.text,
+                    chunk_text=window_text,
                     concept_description_max_chars=settings.resolver_concept_description_max_chars,
                     edge_description_max_chars=settings.resolver_edge_description_max_chars,
                 )
@@ -86,13 +121,13 @@ def build_graph_for_chunks(
                 raw_concepts_written += graph_repository.insert_raw_concepts(
                     session,
                     workspace_id=workspace_id,
-                    chunk_id=chunk.id,
+                    chunk_id=window_chunk_id,
                     concepts=extraction.concepts,
                 )
                 raw_edges_written += graph_repository.insert_raw_edges(
                     session,
                     workspace_id=workspace_id,
-                    chunk_id=chunk.id,
+                    chunk_id=window_chunk_id,
                     edges=extraction.edges,
                 )
 
@@ -100,7 +135,7 @@ def build_graph_for_chunks(
                 for concept in extraction.concepts:
                     resolved = resolver.resolve_concept(
                         workspace_id=workspace_id,
-                        chunk_id=chunk.id,
+                        chunk_id=window_chunk_id,
                         raw_concept=concept,
                         budgets=budgets,
                     )
@@ -114,24 +149,24 @@ def build_graph_for_chunks(
                     src_id = _resolve_edge_endpoint(
                         resolver=resolver,
                         workspace_id=workspace_id,
-                        chunk_id=chunk.id,
+                        chunk_id=window_chunk_id,
                         concept_name=edge.src_name,
-                        chunk_text=chunk.text,
+                        chunk_text=window_text,
                         resolved_in_chunk=resolved_in_chunk,
                         budgets=budgets,
                     )
                     tgt_id = _resolve_edge_endpoint(
                         resolver=resolver,
                         workspace_id=workspace_id,
-                        chunk_id=chunk.id,
+                        chunk_id=window_chunk_id,
                         concept_name=edge.tgt_name,
-                        chunk_text=chunk.text,
+                        chunk_text=window_text,
                         resolved_in_chunk=resolved_in_chunk,
                         budgets=budgets,
                     )
                     edge_id = resolver.upsert_edge(
                         workspace_id=workspace_id,
-                        chunk_id=chunk.id,
+                        chunk_id=window_chunk_id,
                         raw_edge=edge,
                         src_concept_id=src_id,
                         tgt_concept_id=tgt_id,
@@ -149,6 +184,7 @@ def build_graph_for_chunks(
         )
         if span is not None:
             span.set_attribute("graph.chunks_processed", len(chunks))
+            span.set_attribute("graph.windows_processed", len(windows))
             span.set_attribute("graph.canonical_created", canonical_created)
             span.set_attribute("graph.canonical_merged", canonical_merged)
             span.set_attribute("graph.llm_disambiguations", budgets.llm_calls_document)

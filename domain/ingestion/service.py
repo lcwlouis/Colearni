@@ -179,7 +179,11 @@ def ingest_text_document(
     active_settings = settings or get_settings()
     parsed, content_hash = _parse_and_hash(request)
 
-    chunks = chunk_text_deterministic(parsed.normalized_text)
+    chunks = chunk_text_deterministic(
+        parsed.normalized_text,
+        chunk_size=active_settings.ingest_vector_chunk_size,
+        overlap=active_settings.ingest_vector_chunk_overlap,
+    )
     if not chunks:
         raise IngestionValidationError("Document produced no chunks after normalization.")
 
@@ -287,7 +291,11 @@ def ingest_text_document_fast(
     active_settings = settings or get_settings()
     parsed, content_hash = _parse_and_hash(request)
 
-    chunks = chunk_text_deterministic(parsed.normalized_text)
+    chunks = chunk_text_deterministic(
+        parsed.normalized_text,
+        chunk_size=active_settings.ingest_vector_chunk_size,
+        overlap=active_settings.ingest_vector_chunk_overlap,
+    )
     if not chunks:
         raise IngestionValidationError("Document produced no chunks after normalization.")
 
