@@ -41,9 +41,16 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 - `POST /workspaces/{ws_id}/practice/flashcards`
 - `POST /workspaces/{ws_id}/practice/flashcards/rate`
 - `POST /workspaces/{ws_id}/practice/flashcards/stateful`
+- `GET /workspaces/{ws_id}/practice/flashcards/runs`
+- `GET /workspaces/{ws_id}/practice/flashcards/runs/{run_id}`
 - `POST /workspaces/{ws_id}/practice/quizzes`
+- `GET /workspaces/{ws_id}/practice/quizzes`
+- `GET /workspaces/{ws_id}/practice/quizzes/{quiz_id}`
 - `POST /workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit`
 - `POST /workspaces/{ws_id}/quizzes/level-up`
+- `GET /workspaces/{ws_id}/quizzes/level-up`
+- `GET /workspaces/{ws_id}/quizzes/level-up/{quiz_id}`
+- `POST /workspaces/{ws_id}/quizzes/level-up/{quiz_id}/promote`
 - `POST /workspaces/{ws_id}/quizzes/{quiz_id}/submit`
 - `GET /workspaces/{ws_id}/readiness/snapshot`
 - `GET /workspaces/{ws_id}/research/candidates`
@@ -955,6 +962,81 @@ curl -sS -X POST http://localhost:8000/quizzes/level-up \
 }
 ```
 
+### GET /workspaces/{ws_id}/quizzes/level-up
+
+Tag/group: `quizzes`
+
+Purpose: list recent level-up quizzes for the current user in a workspace, optionally scoped by concept.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `user_id` | query | integer | yes | user scope |
+| `concept_id` | query | integer | no | optional concept scope |
+| `limit` | query | integer | no | bounded recent window |
+
+Success responses:
+
+- `200 OK` with level-up quiz summaries including latest attempt status when present.
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `422 Unprocessable Entity` for validation failures
+
+### GET /workspaces/{ws_id}/quizzes/level-up/{quiz_id}
+
+Tag/group: `quizzes`
+
+Purpose: retrieve one level-up quiz detail, including items and latest attempt summary.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `quiz_id` | path | integer | yes | level-up quiz ID |
+| `user_id` | query | integer | yes | owner scope |
+
+Success responses:
+
+- `200 OK` with level-up quiz detail payload.
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member or quiz not in scope
+- `404 Not Found` when quiz does not exist
+- `422 Unprocessable Entity` for validation failures
+
+### POST /workspaces/{ws_id}/quizzes/level-up/{quiz_id}/promote
+
+Tag/group: `quizzes`
+
+Purpose: copy a level-up quiz into a new practice quiz for reuse without mutating mastery state.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `quiz_id` | path | integer | yes | source level-up quiz ID |
+| `user_id` | JSON body | integer | yes | owner scope |
+
+Success responses:
+
+- `201 Created` with promotion result including new practice `quiz_id`.
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member or source quiz not in scope
+- `404 Not Found` when source quiz does not exist
+- `422 Unprocessable Entity` for validation failures
+
 ### POST /workspaces/{ws_id}/quizzes/{quiz_id}/submit
 
 Tag/group: `quizzes`
@@ -1164,6 +1246,56 @@ Error responses:
 - `404 Not Found` when flashcard not found
 - `422 Unprocessable Entity` for validation failures
 
+### GET /workspaces/{ws_id}/practice/flashcards/runs
+
+Tag/group: `practice`
+
+Purpose: list recent stateful flashcard runs for the current user, optionally filtered by concept.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `user_id` | query | integer | yes | user scope |
+| `concept_id` | query | integer | no | optional concept scope |
+| `limit` | query | integer | no | bounded recent window |
+
+Success responses:
+
+- `200 OK` with flashcard run summaries.
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `422 Unprocessable Entity` for validation failures
+
+### GET /workspaces/{ws_id}/practice/flashcards/runs/{run_id}
+
+Tag/group: `practice`
+
+Purpose: retrieve one stateful flashcard run detail including per-card progress fields.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `run_id` | path | string | yes | run UUID |
+| `user_id` | query | integer | yes | owner scope |
+
+Success responses:
+
+- `200 OK` with run detail including `self_rating`, `passed`, and due metadata when present.
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member or run not in scope
+- `404 Not Found` when run does not exist
+- `422 Unprocessable Entity` for validation failures
+
 ### GET /workspaces/{ws_id}/practice/flashcards/due
 
 Tag/group: `practice`
@@ -1256,6 +1388,56 @@ curl -sS -X POST http://localhost:8000/practice/quizzes \
   ]
 }
 ```
+
+### GET /workspaces/{ws_id}/practice/quizzes
+
+Tag/group: `practice`
+
+Purpose: list recent practice quizzes for the current user, optionally filtered by concept.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `user_id` | query | integer | yes | user scope |
+| `concept_id` | query | integer | no | optional concept scope |
+| `limit` | query | integer | no | bounded recent window |
+
+Success responses:
+
+- `200 OK` with practice quiz summaries including latest attempt when present.
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `422 Unprocessable Entity` for validation failures
+
+### GET /workspaces/{ws_id}/practice/quizzes/{quiz_id}
+
+Tag/group: `practice`
+
+Purpose: retrieve one practice quiz detail including items and latest attempt summary.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `quiz_id` | path | integer | yes | practice quiz ID |
+| `user_id` | query | integer | yes | owner scope |
+
+Success responses:
+
+- `200 OK` with practice quiz detail payload.
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member or quiz not in scope
+- `404 Not Found` when quiz does not exist
+- `422 Unprocessable Entity` for validation failures
 
 ### POST /workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit
 
@@ -1673,6 +1855,31 @@ Error responses:
 - `401 Unauthorized` when not authenticated
 - `403 Forbidden` when not a workspace member
 - `404 Not Found` when candidate not found
+
+---
+
+### POST /workspaces/{ws_id}/research/topics/plan
+
+Tag/group: `research`
+
+Purpose: generate topic proposals from a research goal. Returns reviewable proposals — no external content is fetched or ingested.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `workspace_id` | query | integer | yes | `> 0` |
+| `goal` | JSON body | string | yes | 1–500 chars, the research goal |
+
+Success responses:
+
+- `200 OK` with `list[TopicProposalResponse]`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `422 Unprocessable Entity` when goal is empty or too long
 
 ---
 

@@ -113,6 +113,8 @@ from core.schemas.research import (  # noqa: F401
     ResearchRunSummary,
     ResearchSourceCreate,
     ResearchSourceSummary,
+    TopicPlanRequest,
+    TopicProposalResponse,
 )
 
 __all__ = [
@@ -199,6 +201,8 @@ __all__ = [
     "ResearchRunSummary",
     "ResearchSourceCreate",
     "ResearchSourceSummary",
+    "TopicPlanRequest",
+    "TopicProposalResponse",
     "ResponseMode",
     "StatefulFlashcard",
     "StatefulFlashcardsResponse",

@@ -10,6 +10,8 @@ from core.schemas import (
     ResearchRunSummary,
     ResearchSourceCreate,
     ResearchSourceSummary,
+    TopicPlanRequest,
+    TopicProposalResponse,
 )
 from domain.research.service import CandidateNotFoundError
 from domain.research import service as research_service
@@ -119,6 +121,34 @@ def review_research_candidate(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Candidate not found.",
         )
+
+
+# ── Topic Planning (AR5.2) ───────────────────────────────────────────
+
+
+@router.post("/topics/plan", response_model=list[TopicProposalResponse], status_code=status.HTTP_200_OK)
+def plan_research_topics(
+    payload: TopicPlanRequest,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+) -> list[TopicProposalResponse]:
+    """Generate topic proposals from a research goal.
+
+    Returns reviewable proposals — the user must approve before query
+    planning can begin.  No external content is fetched or ingested.
+    """
+    from domain.research.topic_planner import plan_topics
+
+    proposals = plan_topics(goal=payload.goal)
+    return [
+        TopicProposalResponse(
+            topic=p.topic,
+            subtopics=list(p.subtopics),
+            source_classes=list(p.source_classes),
+            rationale=p.rationale,
+            priority=p.priority,
+        )
+        for p in proposals
+    ]
 
 
 __all__ = ["router"]
