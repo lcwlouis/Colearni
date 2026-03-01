@@ -660,3 +660,25 @@
     transform: scale(1);
   }
 }
+
+/* Wavy text animation for active processing labels */
+.wave-text {
+  display: inline-flex;
+  gap: 0;
+}
+.wave-text .wave-char {
+  display: inline-block;
+  animation: wavePulse 1.4s ease-in-out infinite;
+}
+@keyframes wavePulse {
+  0%, 100% { opacity: 0.4; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+
+.chat-status-label {
+  animation: statusPulse 2s ease-in-out infinite;
+}
+@keyframes statusPulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}

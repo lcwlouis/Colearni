@@ -117,7 +117,7 @@ export function RecentSessions({
                   style={{ textDecoration: "none" }}
                 >
                   <strong style={{ fontWeight: chat.public_id === activeSessionId && pathname === "/tutor" ? 600 : 400, fontSize: "0.85rem" }}>
-                    {toTitleCase(chat.title || `Chat ${chat.session_id}`)}
+                    {toTitleCase(chat.title || "New Chat")}
                   </strong>
                 </Link>
               )}

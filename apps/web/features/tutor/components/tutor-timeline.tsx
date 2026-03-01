@@ -1,4 +1,20 @@
 import { ChatResponse, CollapsibleHint } from "@/components/chat-response";
+
+function WaveLabel({ text }: { text: string }) {
+  return (
+    <span className="wave-text">
+      {text.split("").map((char, i) => (
+        <span
+          key={i}
+          className="wave-char"
+          style={{ animationDelay: `${i * 0.04}s` }}
+        >
+          {char === " " ? "\u00A0" : char}
+        </span>
+      ))}
+    </span>
+  );
+}
 import { MarkdownContent } from "@/components/markdown-content";
 import type { ActionCTA, GraphConceptSummary, OnboardingStatusResponse } from "@/lib/api/types";
 import type { ActivityStep, ChatPhase, TimelineMessage } from "../types";
@@ -116,7 +132,7 @@ export function TutorTimeline({
                     key={`${step.activity}-${i}`}
                     className={`activity-step ${step.done ? "done" : "active"}`}
                   >
-                    {step.done ? "✓" : "›"} {step.label}
+                    {step.done ? "✓" : "›"} {step.done ? step.label : <WaveLabel text={step.label} />}
                   </span>
                 ))}
               </div>
