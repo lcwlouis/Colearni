@@ -143,3 +143,63 @@ def review_candidate(
         raise CandidateNotFoundError
     db.commit()
     return _row_to_candidate(row)
+
+
+# ── Topic / query planning (AR5.5) ───────────────────────────────────
+
+
+def execute_topic_plan(
+    db: Session,
+    *,
+    workspace_id: int,
+    topic: str,
+    subtopics: list[str] | None = None,
+    source_classes: list[str] | None = None,
+    rationale: str = "",
+    priority: str = "medium",
+) -> dict:
+    """Build a query plan from an approved topic and enqueue candidates.
+
+    Returns a dict with run_id, topic, queries_planned, candidates_inserted.
+    """
+    from domain.research.planner import TopicProposal
+    from domain.research.query_planner import build_query_plan, enqueue_query_results
+
+    # Create a research run for this planned execution
+    run_row = research_db.insert_run(db, workspace_id=workspace_id)
+    db.commit()
+    run_id = int(run_row["id"])
+
+    proposal = TopicProposal(
+        topic=topic,
+        subtopics=subtopics or [],
+        source_classes=source_classes or [],
+        rationale=rationale,
+        priority=priority,
+    )
+
+    plan = build_query_plan(proposal=proposal)
+
+    # Convert planned queries into candidate-shaped results
+    results = [
+        {
+            "source_url": f"planned://{q.source_class}/{q.query_text[:200]}",
+            "title": f"[Planned] {q.query_text[:200]}",
+            "snippet": f"Source class: {q.source_class}, from topic: {topic}",
+        }
+        for q in plan.queries
+    ]
+
+    inserted = enqueue_query_results(
+        db,
+        workspace_id=workspace_id,
+        run_id=run_id,
+        results=results,
+    )
+
+    return {
+        "run_id": run_id,
+        "topic": plan.topic,
+        "queries_planned": plan.query_count,
+        "candidates_inserted": inserted,
+    }

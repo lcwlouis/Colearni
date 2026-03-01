@@ -45,6 +45,23 @@ class TopicPlanRequest(BaseModel):
     goal: str = Field(min_length=1, max_length=500)
 
 
+class TopicExecuteRequest(BaseModel):
+    """Request body to execute query planning on an approved topic proposal."""
+    topic: str = Field(min_length=1)
+    subtopics: list[str] = Field(default_factory=list)
+    source_classes: list[str] = Field(default_factory=list)
+    rationale: str = ""
+    priority: Literal["high", "medium", "low"] = "medium"
+
+
+class QueryPlanResponse(BaseModel):
+    """Response from query plan execution."""
+    run_id: int = Field(gt=0)
+    topic: str
+    queries_planned: int = Field(ge=0)
+    candidates_inserted: int = Field(ge=0)
+
+
 class TopicProposalResponse(BaseModel):
     """A single topic proposal returned by the planner."""
     topic: str

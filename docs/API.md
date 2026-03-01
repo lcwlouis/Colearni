@@ -1883,6 +1883,35 @@ Error responses:
 
 ---
 
+### POST /workspaces/{ws_id}/research/topics/execute
+
+Tag/group: `research`
+
+Purpose: build a query plan from an approved topic and enqueue planned candidates. No external content is fetched — candidates represent search intent.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | string | yes | workspace public ID |
+| `topic` | JSON body | string | yes | min 1 char |
+| `subtopics` | JSON body | list[string] | no | subtopic list |
+| `source_classes` | JSON body | list[string] | no | preferred source types |
+| `rationale` | JSON body | string | no | why this topic was chosen |
+| `priority` | JSON body | string | no | "high", "medium", or "low" |
+
+Success responses:
+
+- `201 Created` with `QueryPlanResponse`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `422 Unprocessable Entity` when topic is empty
+
+---
+
 ## Onboarding
 
 ### GET /workspaces/{ws_id}/onboarding/status

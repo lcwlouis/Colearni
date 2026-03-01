@@ -5,11 +5,13 @@ from __future__ import annotations
 from adapters.db.dependencies import get_db_session
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.schemas import (
+    QueryPlanResponse,
     ResearchCandidateReviewRequest,
     ResearchCandidateSummary,
     ResearchRunSummary,
     ResearchSourceCreate,
     ResearchSourceSummary,
+    TopicExecuteRequest,
     TopicPlanRequest,
     TopicProposalResponse,
 )
@@ -149,6 +151,33 @@ def plan_research_topics(
         )
         for p in proposals
     ]
+
+
+# ── Topic Execution (AR5.5) ──────────────────────────────────────────
+
+
+@router.post("/topics/execute", response_model=QueryPlanResponse, status_code=status.HTTP_201_CREATED)
+def execute_topic_plan(
+    payload: TopicExecuteRequest,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> QueryPlanResponse:
+    """Build a query plan from an approved topic and enqueue planned candidates.
+
+    Accepts a reviewed topic proposal, generates bounded queries via
+    the query planner, and inserts them as pending candidates.
+    No external content is fetched — candidates represent search intent.
+    """
+    result = research_service.execute_topic_plan(
+        db,
+        workspace_id=ws.workspace_id,
+        topic=payload.topic,
+        subtopics=payload.subtopics,
+        source_classes=payload.source_classes,
+        rationale=payload.rationale,
+        priority=payload.priority,
+    )
+    return QueryPlanResponse(**result)
 
 
 __all__ = ["router"]
