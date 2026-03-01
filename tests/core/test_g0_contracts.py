@@ -132,6 +132,18 @@ class TestStreamEvents:
         evt = ChatStreamStatusEvent(phase=ChatPhase.THINKING)
         assert evt.event == "status"
         assert evt.phase == ChatPhase.THINKING
+        assert evt.activity is None
+        assert evt.step_label is None
+
+    def test_status_event_with_activity(self) -> None:
+        evt = ChatStreamStatusEvent(
+            phase=ChatPhase.SEARCHING,
+            activity="retrieving_chunks",
+            step_label="Searching knowledge base",
+        )
+        assert evt.phase == ChatPhase.SEARCHING
+        assert evt.activity == "retrieving_chunks"
+        assert evt.step_label == "Searching knowledge base"
 
     def test_delta_event(self) -> None:
         evt = ChatStreamDeltaEvent(text="Hello ")
@@ -175,6 +187,18 @@ class TestStreamEvents:
 
         error = adapter.validate_python({"event": "error", "message": "fail"})
         assert isinstance(error, ChatStreamErrorEvent)
+
+    def test_discriminated_union_with_activity(self) -> None:
+        adapter = TypeAdapter(ChatStreamEvent)
+        parsed = adapter.validate_python({
+            "event": "status",
+            "phase": "searching",
+            "activity": "expanding_graph",
+            "step_label": "Finding related concepts",
+        })
+        assert isinstance(parsed, ChatStreamStatusEvent)
+        assert parsed.activity == "expanding_graph"
+        assert parsed.step_label == "Finding related concepts"
 
 
 # ── Feature flag ─────────────────────────────────────────────────────

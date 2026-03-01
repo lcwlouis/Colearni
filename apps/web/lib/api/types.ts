@@ -64,7 +64,7 @@ export interface AssistantResponseEnvelope {
   citations: Citation[];
   refusal_reason: RefusalReason | null;
   conversation_meta: ConversationMeta | null;
-  response_mode?: "grounded" | "social";
+  response_mode?: "grounded" | "social" | "clarify" | "onboarding";
   actions?: ActionCTA[];
   generation_trace?: GenerationTrace | null;
   answer_parts?: AnswerParts | null;
@@ -164,6 +164,38 @@ export interface PracticeQuizSubmitResponse {
   retry_hint: string | null;
 }
 
+export interface PracticeQuizAttemptSummary {
+  attempt_id: number;
+  score: number;
+  passed: boolean;
+  critical_misconception: boolean;
+  overall_feedback: string;
+  graded_at: string;
+}
+
+export interface PracticeQuizHistoryEntry {
+  quiz_id: number;
+  workspace_id: number;
+  user_id: number;
+  concept_id: number | null;
+  concept_name: string | null;
+  status: string;
+  item_count: number;
+  created_at: string;
+  latest_attempt: PracticeQuizAttemptSummary | null;
+}
+
+export interface PracticeQuizHistoryListResponse {
+  workspace_id: number;
+  user_id: number;
+  concept_id: number | null;
+  quizzes: PracticeQuizHistoryEntry[];
+}
+
+export interface PracticeQuizDetailResponse extends PracticeQuizHistoryEntry {
+  items: QuizItemSummary[];
+}
+
 export interface LevelUpQuizSubmitResponse extends PracticeQuizSubmitResponse {
   mastery_status: MasteryStatus;
   mastery_score: number;
@@ -180,6 +212,38 @@ export interface PracticeFlashcardsResponse {
   concept_id: number;
   concept_name: string;
   flashcards: PracticeFlashcard[];
+}
+
+export interface FlashcardRunSummary {
+  run_id: string;
+  workspace_id: number;
+  user_id: number;
+  concept_id: number;
+  concept_name: string;
+  item_count: number;
+  has_more: boolean;
+  exhausted_reason: string | null;
+  created_at: string;
+}
+
+export interface FlashcardRunListResponse {
+  workspace_id: number;
+  user_id: number;
+  concept_id: number | null;
+  runs: FlashcardRunSummary[];
+}
+
+export interface FlashcardRunDetailResponse {
+  run_id: string;
+  workspace_id: number;
+  user_id: number;
+  concept_id: number;
+  concept_name: string;
+  item_count: number;
+  has_more: boolean;
+  exhausted_reason: string | null;
+  created_at: string;
+  flashcards: StatefulFlashcard[];
 }
 
 export interface GraphConceptDetail {
@@ -285,11 +349,11 @@ export interface SubmitQuizRequest {
 
 // ── WOW Release Types ──────────────────────────────────────────────
 
-export type ResponseMode = "grounded" | "social";
+export type ResponseMode = "grounded" | "social" | "clarify" | "onboarding";
 export type FlashcardSelfRating = "again" | "hard" | "good" | "easy";
 
 export interface ActionCTA {
-  action_type: "quiz_cta" | "review_cta" | "research_cta";
+  action_type: "quiz_cta" | "review_cta" | "research_cta" | "quiz_offer" | "quiz_start";
   label: string;
   concept_id?: number;
   concept_name?: string;
@@ -470,6 +534,13 @@ export interface GenerationTrace {
   reasoning_effort: string | null;
   /** Where the effort value came from: "settings" | "override" | null. */
   reasoning_effort_source: string | null;
+  /** Turn planner trace (AR1.4) */
+  plan_intent: string | null;
+  plan_strategy: string | null;
+  plan_needs_retrieval: boolean | null;
+  plan_concept_hint: string | null;
+  plan_should_offer_quiz: boolean | null;
+  plan_should_start_quiz: boolean | null;
 }
 
 export type StreamChatPhase =
@@ -478,9 +549,21 @@ export type StreamChatPhase =
   | "responding"
   | "finalizing";
 
+export type TutorActivity =
+  | "planning_turn"
+  | "retrieving_chunks"
+  | "expanding_graph"
+  | "checking_mastery"
+  | "preparing_quiz"
+  | "grading_quiz"
+  | "verifying_citations"
+  | "generating_reply";
+
 export interface ChatStreamStatusEvent {
   event: "status";
   phase: StreamChatPhase;
+  activity?: TutorActivity | null;
+  step_label?: string | null;
 }
 
 export interface ChatStreamDeltaEvent {

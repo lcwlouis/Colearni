@@ -108,11 +108,30 @@ class ChatPhase(str, Enum):
     FINALIZING = "finalizing"
 
 
+TutorActivity = Literal[
+    "planning_turn",
+    "retrieving_chunks",
+    "expanding_graph",
+    "checking_mastery",
+    "preparing_quiz",
+    "grading_quiz",
+    "verifying_citations",
+    "generating_reply",
+]
+
+
 class ChatStreamStatusEvent(BaseModel):
-    """Phase transition event sent over SSE."""
+    """Phase transition event sent over SSE.
+
+    ``phase`` remains the coarse lifecycle discriminator.
+    ``activity`` is an optional finer-grained label describing the
+    specific backend work in progress (AR3.1).
+    """
 
     event: Literal["status"] = "status"
     phase: ChatPhase
+    activity: TutorActivity | None = None
+    step_label: str | None = None
 
 
 class ChatStreamDeltaEvent(BaseModel):
