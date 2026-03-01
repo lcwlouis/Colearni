@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from core.schemas import EvidenceItem, EvidenceSourceType
+from core.schemas import EvidenceItem, EvidenceSourceType, GroundingMode
 from domain.chat.prompt_kit import (
     build_full_tutor_prompt,
     build_social_response,
@@ -135,3 +135,26 @@ class TestPromptBuilder:
             history_summary="User asked about cell division. Tutor explained mitosis.",
         )
         assert "cell division" in prompt
+
+    def test_full_prompt_hybrid_sets_strict_flag_false(self) -> None:
+        persona = get_persona("colearni")
+        prompt = build_full_tutor_prompt(
+            query="what do you know?",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            grounding_mode=GroundingMode.HYBRID,
+        )
+        assert "STRICT_GROUNDED_MODE: false" in prompt
+
+    def test_full_prompt_with_learner_profile(self) -> None:
+        persona = get_persona("colearni")
+        prompt = build_full_tutor_prompt(
+            query="What is momentum?",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            learner_profile_summary="Weak topics: Thermodynamics; Strong topics: Mechanics",
+        )
+        assert "Thermodynamics" in prompt
+        assert "Mechanics" in prompt

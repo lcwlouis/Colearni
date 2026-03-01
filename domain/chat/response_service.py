@@ -7,7 +7,7 @@ import logging
 from adapters.db.mastery import get_mastery_status
 from adapters.llm.factory import build_graph_llm_client
 from core.contracts import GraphLLMClient
-from core.schemas import ChatRespondRequest, EvidenceItem
+from core.schemas import ChatRespondRequest, EvidenceItem, GroundingMode
 from core.schemas.assistant import GenerationTrace
 from core.settings import Settings
 from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, get_persona
@@ -23,12 +23,14 @@ def generate_tutor_text(
     query: str,
     evidence: list[EvidenceItem],
     mastery_status: str | None,
+    grounding_mode: GroundingMode,
     llm_client: GraphLLMClient | None,
     history_text: str,
     assessment_context: str,
     document_summaries: str = "",
     quiz_context: str = "",
     flashcard_progress: str = "",
+    learner_profile_summary: str = "",
 ) -> tuple[str, GenerationTrace | None]:
     """Build a rich tutor prompt via prompt_kit and call the LLM.
 
@@ -44,10 +46,12 @@ def generate_tutor_text(
         evidence=evidence,
         persona=persona,
         style=style,
+        grounding_mode=grounding_mode,
         assessment_context=combined_assessment,
         history_summary=history_text,
         document_summaries=document_summaries,
         flashcard_progress=flashcard_progress,
+        learner_profile_summary=learner_profile_summary,
     )
     log.debug(
         "tutor prompt assembled: %d chars, history=%d, assessment=%d, docs=%d, flashcards=%d",
@@ -81,6 +85,7 @@ def generate_tutor_text(
         query=query,
         evidence=evidence,
         mastery_status=mastery_status,
+        grounding_mode=grounding_mode,
         llm_client=None,
     )
     return fallback, None

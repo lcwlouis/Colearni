@@ -8,7 +8,7 @@ from typing import Literal
 
 from core.contracts import GraphLLMClient
 from core.prompting import PromptRegistry
-from core.schemas import EvidenceItem
+from core.schemas import EvidenceItem, GroundingMode
 
 log = logging.getLogger("domain.chat.tutor_agent")
 
@@ -31,10 +31,16 @@ def build_tutor_response_text(
     query: str,
     evidence: Sequence[EvidenceItem],
     mastery_status: str | None,
+    grounding_mode: GroundingMode,
     llm_client: GraphLLMClient | None,
 ) -> str:
     style = resolve_tutor_style(mastery_status=mastery_status)
-    prompt = build_tutor_prompt(query=query, evidence=evidence, style=style)
+    prompt = build_tutor_prompt(
+        query=query,
+        evidence=evidence,
+        style=style,
+        grounding_mode=grounding_mode,
+    )
     if llm_client is not None:
         try:
             text = llm_client.generate_tutor_text(prompt=prompt).strip()
@@ -45,7 +51,13 @@ def build_tutor_response_text(
     return _fallback_text(query=query, evidence=evidence, style=style)
 
 
-def build_tutor_prompt(*, query: str, evidence: Sequence[EvidenceItem], style: TutorStyle) -> str:
+def build_tutor_prompt(
+    *,
+    query: str,
+    evidence: Sequence[EvidenceItem],
+    style: TutorStyle,
+    grounding_mode: GroundingMode,
+) -> str:
     """Build a tutor prompt using file-based assets with inline fallback."""
     lines = [
         f"- e{index}: {_truncate(' '.join(item.content.split()), limit=240)}"
@@ -54,13 +66,15 @@ def build_tutor_prompt(*, query: str, evidence: Sequence[EvidenceItem], style: T
     evidence_block = "\n".join(lines) if lines else "- (none)"
 
     asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
     try:
         return _registry.render(asset_id, {
-            "strict_grounded_mode": "true",
+            "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": "(none)",
             "assessment_context": "(none)",
             "flashcard_progress": "(none)",
+            "learner_profile_summary": "(none)",
             "history_summary": "(none)",
             "evidence_block": evidence_block,
             "query": query,

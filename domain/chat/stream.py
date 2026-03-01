@@ -209,6 +209,17 @@ def _stream_inner(
         resolved_concept_id=resolved_concept_id,
     )
 
+    # ── Learner profile snapshot (AR4.3) ──────────────────────────────
+    from domain.learner.assembler import assemble_learner_snapshot
+
+    learner_snapshot = assemble_learner_snapshot(
+        session,
+        workspace_id=request.workspace_id,
+        user_id=request.user_id,
+        session_id=getattr(request, "session_id", None),
+    )
+    learner_profile_summary = learner_snapshot.summary_text()
+
     # ── Turn plan (AR1.2 / AR1.3) ─────────────────────────────────────
     turn_plan = build_turn_plan(
         query_analysis=query_analysis,
@@ -340,6 +351,7 @@ def _stream_inner(
                 chunks=ranked_chunks,
             ),
             flashcard_progress=flashcard_progress,
+            learner_profile_summary=learner_profile_summary,
         )
         text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
             prompt=prompt, prompt_meta=prompt_meta, operation="chat.stream",
@@ -392,6 +404,7 @@ def _stream_inner(
             ),
             quiz_context=quiz_context_text,
             flashcard_progress=flashcard_progress,
+            learner_profile_summary=learner_profile_summary,
         )
         # S1: emit responding only after blocking generation yields content
         if assistant_text:

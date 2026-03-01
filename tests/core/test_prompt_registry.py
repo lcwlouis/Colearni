@@ -91,6 +91,7 @@ class TestPromptRegistry:
             "document_summaries": "Doc A summary",
             "assessment_context": "Topic: DNA, score: 80%",
             "flashcard_progress": "5/10 mastered",
+            "learner_profile_summary": "(none)",
             "history_summary": "User asked about DNA replication",
             "evidence_block": "e1: DNA is a double helix",
             "query": "How does DNA replicate?",

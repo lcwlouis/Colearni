@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 from core.prompting import PromptRegistry
-from core.schemas import EvidenceItem
+from core.schemas import EvidenceItem, GroundingMode
 
 log = logging.getLogger("domain.chat.prompt_kit")
 
@@ -97,6 +97,7 @@ def build_system_prompt(
     *,
     persona: dict[str, str],
     style: Literal["socratic", "direct"],
+    grounding_mode: GroundingMode = GroundingMode.STRICT,
     assessment_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
@@ -107,9 +108,10 @@ def build_system_prompt(
     P2: Now loads from file-based prompt assets with inline fallback.
     """
     asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
     try:
         return _registry.render(asset_id, {
-            "strict_grounded_mode": "true",
+            "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": document_summaries or "(none)",
             "assessment_context": assessment_context or "(none)",
@@ -209,10 +211,12 @@ def build_full_tutor_prompt(
     evidence: Sequence[EvidenceItem],
     persona: dict[str, str],
     style: Literal["socratic", "direct"],
+    grounding_mode: GroundingMode = GroundingMode.STRICT,
     assessment_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
     flashcard_progress: str = "",
+    learner_profile_summary: str = "",
 ) -> str:
     """Build the complete prompt: system + evidence + user question.
 
@@ -220,14 +224,16 @@ def build_full_tutor_prompt(
     """
     evidence_block = build_evidence_block(evidence)
     asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
 
     try:
         return _registry.render(asset_id, {
-            "strict_grounded_mode": "true",
+            "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": document_summaries or "(none)",
             "assessment_context": assessment_context or "(none)",
             "flashcard_progress": flashcard_progress or "(none)",
+            "learner_profile_summary": learner_profile_summary or "(none)",
             "history_summary": history_summary or "(none)",
             "evidence_block": evidence_block,
             "query": query,
@@ -251,10 +257,12 @@ def build_full_tutor_prompt_with_meta(
     evidence: Sequence[EvidenceItem],
     persona: dict[str, str],
     style: Literal["socratic", "direct"],
+    grounding_mode: GroundingMode = GroundingMode.STRICT,
     assessment_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
     flashcard_progress: str = "",
+    learner_profile_summary: str = "",
 ) -> tuple[str, object]:
     """Build the complete prompt and return (text, PromptMeta | None).
 
@@ -265,14 +273,16 @@ def build_full_tutor_prompt_with_meta(
 
     evidence_block = build_evidence_block(evidence)
     asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
 
     try:
         text, meta = _registry.render_with_meta(asset_id, {
-            "strict_grounded_mode": "true",
+            "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": document_summaries or "(none)",
             "assessment_context": assessment_context or "(none)",
             "flashcard_progress": flashcard_progress or "(none)",
+            "learner_profile_summary": learner_profile_summary or "(none)",
             "history_summary": history_summary or "(none)",
             "evidence_block": evidence_block,
             "query": query,

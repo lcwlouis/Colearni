@@ -28,6 +28,8 @@ ASSESSMENT_CONTEXT:
 {assessment_context}
 FLASHCARD_PROGRESS:
 {flashcard_progress}
+LEARNER_PROFILE:
+{learner_profile_summary}
 CONVERSATION_HISTORY:
 {history_summary}
 EVIDENCE:
