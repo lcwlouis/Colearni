@@ -209,7 +209,11 @@ def create_canonical_concept(
                     ON CONFLICT (workspace_id, canonical_name)
                     DO UPDATE
                     SET updated_at = now(),
-                        tier = COALESCE(concepts_canon.tier, EXCLUDED.tier)
+                        tier = CASE
+                            WHEN concepts_canon.tier IS NULL THEN EXCLUDED.tier
+                            WHEN EXCLUDED.tier IS NULL THEN concepts_canon.tier
+                            ELSE LEAST(concepts_canon.tier, EXCLUDED.tier)
+                        END
                     RETURNING
                         id,
                         workspace_id,
@@ -262,7 +266,11 @@ def create_canonical_concept(
                 ON CONFLICT (workspace_id, canonical_name)
                 DO UPDATE
                 SET updated_at = now(),
-                    tier = COALESCE(concepts_canon.tier, EXCLUDED.tier)
+                    tier = CASE
+                        WHEN concepts_canon.tier IS NULL THEN EXCLUDED.tier
+                        WHEN EXCLUDED.tier IS NULL THEN concepts_canon.tier
+                        ELSE LEAST(concepts_canon.tier, EXCLUDED.tier)
+                    END
                 RETURNING
                     id,
                     workspace_id,

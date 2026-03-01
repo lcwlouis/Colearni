@@ -38,8 +38,12 @@ _RAW_GRAPH_SCHEMA: dict[str, object] = {
                     "name": {"type": "string"},
                     "context_snippet": {"type": ["string", "null"]},
                     "description": {"type": ["string", "null"]},
+                    "tier": {
+                        "type": ["string", "null"],
+                        "enum": ["umbrella", "topic", "subtopic", "granular", None],
+                    },
                 },
-                "required": ["name", "context_snippet", "description"],
+                "required": ["name", "context_snippet", "description", "tier"],
                 "additionalProperties": False,
             },
         },

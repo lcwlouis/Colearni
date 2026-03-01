@@ -58,11 +58,14 @@ def test_disambiguation_schema_is_strict_compatible() -> None:
 
 
 def test_raw_graph_schema_concept_items_match_domain_fields() -> None:
-    """Concept items in the schema must include name, context_snippet, description."""
+    """Concept items in the schema must include name, context_snippet, description, tier."""
     concept_items = _RAW_GRAPH_SCHEMA["properties"]["concepts"]["items"]  # type: ignore[index]
     assert "name" in concept_items["properties"]
     assert "context_snippet" in concept_items["properties"]
     assert "description" in concept_items["properties"]
+    assert "tier" in concept_items["properties"], (
+        "tier must be in the JSON schema so OpenAI strict mode allows the LLM to return it"
+    )
 
 
 def test_raw_graph_schema_edge_items_match_domain_fields() -> None:
