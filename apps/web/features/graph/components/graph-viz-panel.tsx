@@ -1,5 +1,7 @@
 import { AsyncState } from "@/components/async-state";
 import { ConceptGraph } from "@/components/concept-graph";
+import { useState, useCallback } from "react";
+import { apiClient } from "@/lib/api/client";
 import type {
   GraphSubgraphNode,
   GraphSubgraphEdge,
@@ -12,6 +14,7 @@ interface GraphVizPanelProps {
   state: GraphState;
   dispatch: React.Dispatch<import("@/lib/graph/graph-state").GraphAction>;
   debouncedQuery: string;
+  wsId: string;
   fullGraph: {
     nodes: GraphSubgraphNode[];
     edges: GraphSubgraphEdge[];
@@ -38,12 +41,14 @@ interface GraphVizPanelProps {
   filteredTiers: ReadonlySet<string>;
   toggleTierFilter: (tier: string) => void;
   clearTierFilter: () => void;
+  onGardenerSuccess?: () => void;
 }
 
 export function GraphVizPanel({
   state,
   dispatch,
   debouncedQuery,
+  wsId,
   fullGraph,
   maxNodes,
   setMaxNodes,
@@ -65,8 +70,29 @@ export function GraphVizPanel({
   filteredTiers,
   toggleTierFilter,
   clearTierFilter,
+  onGardenerSuccess,
 }: GraphVizPanelProps) {
   const { phase, concepts, selectedDetail, subgraph, error } = state;
+
+  const [gardenerLoading, setGardenerLoading] = useState(false);
+  const [gardenerMessage, setGardenerMessage] = useState<string | null>(null);
+
+  const handleRunGardener = useCallback(async () => {
+    if (!wsId) return;
+    setGardenerLoading(true);
+    setGardenerMessage(null);
+    try {
+      const result = await apiClient.runGardener(wsId);
+      setGardenerMessage(`Merged ${result.merges_applied} concept${result.merges_applied !== 1 ? "s" : ""}`);
+      onGardenerSuccess?.();
+      setTimeout(() => setGardenerMessage(null), 4000);
+    } catch {
+      setGardenerMessage("Gardener failed");
+      setTimeout(() => setGardenerMessage(null), 3000);
+    } finally {
+      setGardenerLoading(false);
+    }
+  }, [wsId, onGardenerSuccess]);
 
   // Derive available tiers from fullGraph nodes (deduplicated, sorted)
   const availableTiers = Array.from(
@@ -165,6 +191,21 @@ export function GraphVizPanel({
               Reset view
             </button>
           )}
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
+            onClick={handleRunGardener}
+            disabled={gardenerLoading}
+            title="Merge duplicate concepts in the graph"
+          >
+            {gardenerLoading ? "Running…" : "🌱 Run Gardener"}
+          </button>
+          {gardenerMessage && (
+            <span style={{ fontSize: "0.75rem", color: "var(--text)", alignSelf: "center" }}>
+              {gardenerMessage}
+            </span>
+          )}
         </div>
       </div>
 
@@ -229,22 +270,11 @@ export function GraphVizPanel({
             </button>
           ))}
         </div>
-      ) : subgraph ? (
-        <ConceptGraph
-          nodes={subgraph.nodes}
-          edges={subgraph.edges}
-          selectedId={selectedDetail?.concept.concept_id}
-          onSelect={handleGraphSelect}
-          onBackgroundClick={handleGraphBgClick}
-          focusNodeId={focusNodeId}
-          searchHighlight={debouncedGraphSearch}
-          onResetViewReady={handleResetViewReady}
-          filteredTiers={filteredTiers}
-        />
       ) : fullGraph && fullGraph.nodes.length > 0 ? (
         <ConceptGraph
           nodes={fullGraph.nodes}
           edges={fullGraph.edges}
+          selectedId={selectedDetail?.concept.concept_id}
           onSelect={handleGraphSelect}
           onBackgroundClick={handleGraphBgClick}
           focusNodeId={focusNodeId}

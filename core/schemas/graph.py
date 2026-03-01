@@ -110,3 +110,9 @@ class GraphLuckyResponse(BaseModel):
         if self.mode == "wildcard" and isinstance(self.pick, GraphLuckyPickAdjacent):
             raise ValueError("wildcard mode requires wildcard pick payload")
         return self
+
+
+class GardenerRunResponse(BaseModel):
+    merges_applied: int
+    clusters_processed: int
+    llm_calls: int

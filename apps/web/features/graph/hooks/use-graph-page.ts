@@ -94,6 +94,14 @@ export function useGraphPage() {
       .catch((e) => console.error("Failed to load full graph overview", e));
   }, [wsId, debouncedQuery, state.selectedDetail, maxNodes, maxEdges]);
 
+  const refreshFullGraph = useCallback(() => {
+    if (!wsId) return;
+    apiClient
+      .getFullGraph(wsId, { max_nodes: maxNodes, max_edges: maxEdges })
+      .then((res) => setFullGraph(res))
+      .catch((e) => console.error("Failed to refresh full graph", e));
+  }, [wsId, maxNodes, maxEdges]);
+
   const selectConcept = useCallback(
     (conceptId: number) => {
       dispatch({ type: "detail_start" });
@@ -242,6 +250,7 @@ export function useGraphPage() {
 
   return {
     auth,
+    wsId,
     state,
     dispatch,
     query,
@@ -259,6 +268,7 @@ export function useGraphPage() {
     statefulError,
     ratingInFlight,
     fullGraph,
+    refreshFullGraph,
     maxNodes,
     setMaxNodes,
     maxEdges,

@@ -57,6 +57,7 @@ from core.schemas.chat import (  # noqa: F401
     TutorActivity,
 )
 from core.schemas.graph import (  # noqa: F401
+    GardenerRunResponse,
     GraphConceptDetail,
     GraphConceptDetailResponse,
     GraphConceptListResponse,
@@ -158,6 +159,7 @@ __all__ = [
     "FlashcardRunListResponse",
     "FlashcardRunSummary",
     "FlashcardSelfRating",
+    "GardenerRunResponse",
     "GenerationTrace",
     "GraphConceptDetail",
     "GraphConceptDetailResponse",

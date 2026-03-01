@@ -13,6 +13,7 @@ import type {
   FlashcardRateResponse,
   ConceptActivityResponse,
   FlashcardsRequest,
+  GardenerRunResponse,
   GraphConceptListResponse,
   GraphConceptDetailResponse,
   GraphLuckyResponse,
@@ -236,6 +237,7 @@ export class ApiClient {
   getConceptSubgraph(wsId: string, conceptId: number, p?: { max_hops?: number; max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/workspaces/${wsId}/graph/concepts/${conceptId}/subgraph`, { method: "GET" }, { max_hops: p?.max_hops, max_nodes: p?.max_nodes, max_edges: p?.max_edges }); }
   getFullGraph(wsId: string, p?: { max_nodes?: number; max_edges?: number }) { return this.request<GraphSubgraphResponse>(`/workspaces/${wsId}/graph/full`, { method: "GET" }, { max_nodes: p?.max_nodes, max_edges: p?.max_edges }); }
   getLuckyPick(wsId: string, p: { concept_id: number; mode: LuckyMode; k_hops?: number }) { return this.request<GraphLuckyResponse>(`/workspaces/${wsId}/graph/lucky`, { method: "GET" }, { concept_id: p.concept_id, mode: p.mode, k_hops: p.k_hops }); }
+  runGardener(wsId: string) { return this.request<GardenerRunResponse>(`/workspaces/${wsId}/graph/gardener/run`, { method: "POST" }); }
 
   // ── Quizzes (workspace-scoped) ──────────────────────────────────
   createLevelUpQuiz(wsId: string, p: CreateLevelUpQuizRequest) { return this.request<QuizCreateResponse>(`/workspaces/${wsId}/quizzes/level-up`, { method: "POST", body: JSON.stringify(p) }); }

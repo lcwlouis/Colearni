@@ -406,6 +406,31 @@ export function ConceptGraph({
     const simTimeout = isHugeGraph ? 1500 : isLargeGraph ? 2000 : 3000;
     sim.alpha(1).restart();
     setTimeout(() => sim.stop(), simTimeout);
+
+    // Auto-fit viewport once simulation cools down
+    sim.on("end", () => {
+      if (!svgRef.current || !zoomRef.current) return;
+      const padding = 40;
+      const allX = gNodes.map((n) => n.x ?? 0);
+      const allY = gNodes.map((n) => n.y ?? 0);
+      if (!allX.length) return;
+      const minX = Math.min(...allX) - padding;
+      const maxX = Math.max(...allX) + padding;
+      const minY = Math.min(...allY) - padding;
+      const maxY = Math.max(...allY) + padding;
+      const nodesWidth = maxX - minX;
+      const nodesHeight = maxY - minY;
+      if (nodesWidth <= 0 || nodesHeight <= 0) return;
+      const scaleX = width / nodesWidth;
+      const scaleY = height / nodesHeight;
+      const scale = Math.min(scaleX, scaleY, 2);
+      const tx = (width - nodesWidth * scale) / 2 - minX * scale;
+      const ty = (height - nodesHeight * scale) / 2 - minY * scale;
+      select(svgRef.current)
+        .transition()
+        .duration(600)
+        .call(zoomRef.current.transform, zoomIdentity.translate(tx, ty).scale(scale));
+    });
   }, [nodes, edges, width, height, focusNodeId, themeKey]);
 
   useEffect(() => {

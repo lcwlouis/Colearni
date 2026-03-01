@@ -30,6 +30,7 @@ export default function GraphPage() {
           state={g.state}
           dispatch={g.dispatch}
           debouncedQuery={g.debouncedQuery}
+          wsId={g.wsId}
           fullGraph={g.fullGraph}
           maxNodes={g.maxNodes}
           setMaxNodes={g.setMaxNodes}
@@ -51,6 +52,7 @@ export default function GraphPage() {
           filteredTiers={g.filteredTiers}
           toggleTierFilter={g.toggleTierFilter}
           clearTierFilter={g.clearTierFilter}
+          onGardenerSuccess={g.refreshFullGraph}
         />
 
         <GraphDetailPanel

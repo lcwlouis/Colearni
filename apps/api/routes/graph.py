@@ -5,13 +5,16 @@ from __future__ import annotations
 from typing import Literal
 
 from adapters.db.dependencies import get_db_session
+from adapters.llm.factory import build_graph_llm_client
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.schemas import (
+    GardenerRunResponse,
     GraphConceptDetailResponse,
     GraphConceptListResponse,
     GraphLuckyResponse,
     GraphSubgraphResponse,
 )
+from core.settings import Settings
 from domain.graph.explore import (
     MAX_EDGES_CAP,
     MAX_HOPS_CAP,
@@ -24,7 +27,8 @@ from domain.graph.explore import (
     list_concepts,
     pick_lucky,
 )
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from domain.graph.gardener import run_graph_gardener
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/workspaces/{ws_id}/graph", tags=["graph"])
@@ -125,3 +129,29 @@ def lucky_pick(
         )
     except (GraphNotFoundError, LuckyNoCandidateError) as exc:
         _not_found(exc)
+
+
+@router.post("/gardener/run", response_model=GardenerRunResponse)
+def run_gardener(
+    request: Request,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> GardenerRunResponse:
+    llm_client = getattr(request.app.state, "graph_llm_client", None)
+    if llm_client is None:
+        settings_state = getattr(request.app.state, "settings", None)
+        settings = settings_state if isinstance(settings_state, Settings) else None
+        llm_client = build_graph_llm_client(settings=settings)
+    settings_state = getattr(request.app.state, "settings", None)
+    settings = settings_state if isinstance(settings_state, Settings) else Settings()
+    result = run_graph_gardener(
+        db,
+        workspace_id=ws.workspace_id,
+        llm_client=llm_client,
+        settings=settings,
+    )
+    return GardenerRunResponse(
+        merges_applied=result.merges_applied,
+        clusters_processed=result.clusters_processed,
+        llm_calls=result.llm_calls,
+    )

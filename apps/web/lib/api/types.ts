@@ -312,6 +312,12 @@ export interface GraphLuckyResponse {
   pick: JsonObject;
 }
 
+export interface GardenerRunResponse {
+  merges_applied: number;
+  clusters_processed: number;
+  llm_calls: number;
+}
+
 export interface QuizItemCreateDraft {
   item_type: QuizItemType;
   prompt: string;
