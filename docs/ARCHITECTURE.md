@@ -22,6 +22,14 @@ API endpoint contracts are documented in [API.md](API.md).
 ---
 
 ## High-level architecture
+
+> **Status note (2026-02-28):** The current implementation uses functional
+> orchestration modules rather than hard agent boundaries.  A guarded
+> conductor with typed turn planning is the next target
+> (see `docs/agentic/01_conductor_plan.md`).  A query analysis seam exists
+> in `domain/chat/query_analyzer.py` but is not yet wired into the runtime.
+> File-based prompt assets are already landed in `core/prompting/`.
+
 ```mermaid
 flowchart TB
   API[FastAPI API] --> COND[Conductor / Router]
@@ -34,11 +42,11 @@ flowchart TB
   GRAPH --> GARD[GraphGardener (offline consolidation)]
   RET --> PG[(Postgres: chunks + embeddings + FTS + graph + mastery)]
   GRAPH --> PG
-  API --> UI[Next.js UI (later)]
+  API --> UI[Next.js Web App]
   COND --> LLM[LLM Provider]
   COND --> OBS[Observability (Events + OTel)]
   OBS --> PHX[Phoenix (optional)]
-````
+```
 
 ---
 
@@ -138,24 +146,27 @@ Practice constraints:
 ```
 apps/
   api/                  # FastAPI routes only (thin)
+  web/                  # Next.js web app (tutor, KB, graph, login)
 core/
-  schemas.py            # Evidence, Citation, Card payload schemas
+  schemas/              # Evidence, Citation, Card payload schemas
   contracts.py          # Tool/LLM interfaces
-  loop.py               # Conductor orchestration (thin)
-  prompting/            # File-based prompt asset system
+  prompting/            # File-based prompt asset system (landed)
     assets/             # Versioned Markdown prompt files by task family
     registry.py         # PromptRegistry – load/cache/render prompt assets
     loader.py           # Asset loading with front-matter parsing
     renderer.py         # Strict placeholder rendering
     models.py           # PromptMeta, PromptAsset, TaskType types
+  verifier.py           # Grounded answer verification (verify_assistant_draft)
 domain/
-  agents/               # TutorAgent, QuizAgent, PracticeAgent, SuggestionAgent
-  learning/             # mastery rules, state machine
-  graph/                # graph policies + interfaces
+  chat/                 # Tutor orchestration (respond, stream, query_analyzer, tutor_agent)
+  learning/             # mastery rules, level-up, practice
+  graph/                # graph extraction, resolver, gardener, exploration
+  readiness/            # readiness analyzer
+  research/             # research service, runner
 adapters/
   db/                   # SQLAlchemy + queries + migrations helpers
   retrieval/            # vector + FTS hybrid retrieval
-  parsers/              # md/txt now; pdf later
+  parsers/              # md/txt/pdf
   llm/                  # provider wrapper, retries, tracing
 tests/
 docs/
@@ -200,4 +211,4 @@ See [OBSERVABILITY.md](OBSERVABILITY.md) for local Phoenix setup and event refer
 * PDF crop/zoom vision ingestion
 * Multi-modal image understanding
 * Multi-tenant auth hardening beyond basic workspace isolation
-* A fully-featured frontend (keep it minimal)
+* Free-form multi-agent runtime (deferred; see `docs/FUTURE_FREEFORM_MULTI_AGENT.md`)

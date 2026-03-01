@@ -101,7 +101,8 @@ The remaining work should stay narrow: keep the current hybrid retriever as stag
 
 ## Remaining Slice IDs
 
-- `AR2.5` Execute real provenance/document-summary expansion inside the evidence planner
+- `AR2.6` Make document-summary expansion affect tutor context, not only trace fields
+- `AR2.7` Promote graph evidence from neighbor-name subqueries to a first-class retrieval surface
 
 ## Decision Log For Remaining Work
 
@@ -150,9 +151,16 @@ Verification
 - AR2.2 multi-pass follow-up retrieval is live.
 - AR2.3 graph-neighbor subquery expansion is live.
 - AR2.4 retrieved-vs-used accounting is live in turn traces.
-- AR2.5 provenance-linked expansion and document-summary expansion are now executed stages (not just flags).
-- `pytest -q`: 816 passed (with `PYTHONPATH=.`, as of session)
+- AR2.5 provenance-linked chunk retrieval is live, document-summary expansion now changes tutor context.
+- AR2.6 planner-expanded document IDs change tutor context in both paths.
+- `pytest -q`: 863 passed (with `PYTHONPATH=.`, current run)
 - `npm --prefix apps/web test`: TS typecheck clean
+
+Post-review update (2026-03-01):
+
+- `execute_evidence_plan()` in `domain/retrieval/evidence_planner.py` now retrieves provenance-linked chunks, but its document-summary stage only records `expanded_document_ids`
+- `build_document_summaries_context()` in `domain/chat/evidence_builder.py` still derives summaries from `ranked_chunks`, so the AR2.5 document-summary stage does not yet change tutor context
+- graph usage is still mostly "neighbor names become follow-up subqueries"; the tutor does not yet consume graph concept detail / edge context as a first-class evidence pack
 
 ### Verification Block - AR2.1
 
@@ -352,6 +360,59 @@ Observed outcome
 - All 816 backend tests green + TS typecheck clean
 ```
 
+### Verification Block - AR2.6
+
+Root cause
+- Planner-expanded document IDs were tracked but ignored by build_document_summaries_context(), which only used chunk-derived IDs
+
+Files changed
+- `domain/chat/evidence_builder.py` (added expanded_document_ids param with merge/dedup/cap logic)
+- `domain/chat/respond.py` (pass expanded_document_ids from evidence_plan)
+- `domain/chat/stream.py` (pass expanded_document_ids from evidence_plan, 2 callsites)
+- `tests/domain/test_evidence_planner.py` (7 new tests, 54 total)
+
+What changed
+- build_document_summaries_context() merges planner-expanded IDs ahead of chunk-derived IDs, deduped, capped at 5
+- All 3 callsites in respond.py and stream.py now pass evidence_plan.expanded_document_ids
+
+Commands run
+- `pytest tests/domain/test_evidence_planner.py tests/api/test_g3_stream.py -v` → 61 passed
+- `pytest -q` → 863 passed
+
+Observed outcome
+- Planner-expanded document IDs now affect tutor prompt assembly in both paths
+- No removals needed
+
+### Verification Block - AR2.7
+
+Root cause
+- Graph neighbor names were used as subqueries but rich subgraph data (descriptions, edge relations) was discarded; tutor had no graph context in prompt
+
+Files changed
+- `domain/retrieval/evidence_planner.py` (_expand_graph_neighbors returns (names, context) tuple; EvidencePlan gains graph_evidence_context field)
+- `domain/chat/response_service.py` (graph_context param added to generate_tutor_text)
+- `domain/chat/prompt_kit.py` (graph_context param threaded to build_full_tutor_prompt_with_meta and _build_system_prompt_inline)
+- `domain/chat/respond.py` (wire evidence_plan.graph_evidence_context)
+- `domain/chat/stream.py` (wire graph_context at 2 callsites)
+- `core/schemas/assistant.py` (evidence_plan_graph_concepts_used trace field)
+- `core/prompting/assets/tutor/direct_v1.md` + `socratic_v1.md` (GRAPH_CONTEXT placeholder)
+- `apps/web/lib/api/types.ts` (sync new trace field)
+- `tests/domain/test_evidence_planner.py` (updated mocks for tuple return, 2 new tests)
+- `tests/core/test_prompt_registry.py` + `tests/domain/test_prompt_regression.py` (add graph_context to render dicts)
+
+What changed
+- _expand_graph_neighbors builds structured context from subgraph nodes and edges
+- Graph context is injected as a first-class section in the tutor prompt (after document summaries)
+- Trace captures count of graph concepts used
+
+Commands run
+- `pytest tests/domain/test_evidence_planner.py tests/api/test_g3_stream.py -q` → 62 passed
+- `pytest tests/ -q` → 863 passed (2 pre-existing deselected)
+
+Observed outcome
+- Graph evidence is now a first-class planner stage visible in both prompt and trace
+- No removals needed
+
 Current hotspots:
 
 | File | Why it still matters |
@@ -375,6 +436,10 @@ There is no explicit planning around contradiction checking, neighbor expansion,
 ### 3. Graph retrieval is underused in the tutor path
 
 The product already has canonical graph traversal in `get_bounded_subgraph()`, but tutor retrieval mostly uses the graph as concept bias rather than as a direct evidence planning surface.
+
+### 4. Document-summary expansion is not yet real retrieval context
+
+The planner now tracks `expanded_document_ids`, but tutor prompt assembly still ignores them and rebuilds summaries from the original chunk list.
 
 ## Implementation Sequencing
 
@@ -591,6 +656,90 @@ Exit criteria:
 - at least one non-test runtime path consumes provenance/document-summary expansion signals
 - plan flags match actual execution stages
 - AR2 can be marked `complete` again without overclaiming
+
+### AR2.6. Slice 6: Make document-summary expansion change tutor context
+
+Purpose:
+
+- ensure planner-expanded document summaries actually reach the tutor prompt
+
+Root problem:
+
+- `expanded_document_ids` are currently tracked in the planner but ignored by `build_document_summaries_context()`, which still derives summaries from the original `ranked_chunks`
+
+Files involved:
+
+- `domain/retrieval/evidence_planner.py`
+- `domain/chat/evidence_builder.py`
+- `domain/chat/respond.py`
+- `domain/chat/stream.py`
+- `tests/domain/test_evidence_planner.py`
+
+Implementation steps:
+
+1. Add a document-summary context builder that can consume explicit planner-selected document ids.
+2. Thread `expanded_document_ids` from the evidence planner into both blocking and streaming prompt assembly.
+3. Keep document-summary budgets explicit and traceable.
+4. Do not weaken chunk-level citation filtering; document summaries remain non-citation support context.
+
+What stays the same:
+
+- chunk retrieval remains the citation-bearing source path
+- provenance-linked chunk retrieval remains bounded
+- final answer verification remains unchanged
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_evidence_planner.py tests/api/test_g3_stream.py`
+- targeted manual/trace check proving planner-expanded document ids change the built document-summary context
+
+Exit criteria:
+
+- planner-expanded document ids affect tutor prompt assembly in both paths
+- AR2 no longer overclaims document-summary expansion
+
+### AR2.7. Slice 7: Promote graph evidence to a first-class retrieval surface
+
+Purpose:
+
+- make graph retrieval more than "neighbor names become subqueries"
+
+Root problem:
+
+- current graph use in the evidence planner is still mostly indirect; graph structure and concept detail are not yet assembled into a bounded evidence pack
+
+Files involved:
+
+- `domain/retrieval/evidence_planner.py`
+- `domain/graph/explore.py`
+- `apps/api/routes/graph.py`
+- `domain/chat/evidence_builder.py`
+- `domain/chat/respond.py`
+- `domain/chat/stream.py`
+- `tests/domain/test_evidence_planner.py`
+
+Implementation steps:
+
+1. Add a bounded graph-evidence stage that can consume concept detail / subgraph metadata for the active concept or planner-selected adjacent concepts.
+2. Keep graph evidence separate from citation-bearing chunk evidence and clearly labeled in trace data.
+3. Prefer graph evidence for planning, coverage, and explanation support rather than for uncited factual claims.
+4. Reuse existing graph exploration helpers before inventing new storage or traversal layers.
+
+What stays the same:
+
+- graph evidence does not bypass citation rules for factual claims
+- hybrid chunk retrieval remains stage 1
+- retrieval budgets stay explicit and bounded
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_evidence_planner.py tests/api/test_g3_stream.py`
+- targeted manual/trace check showing graph evidence stages run without relying only on neighbor-name subqueries
+
+Exit criteria:
+
+- graph evidence is visible as a first-class planner stage
+- tutor retrieval no longer relies on graph data only as subquery text
 
 ## Verification Block Template
 

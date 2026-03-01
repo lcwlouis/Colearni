@@ -153,6 +153,7 @@ class ConversationMeta(BaseModel):
     session_id: int | None = Field(default=None, gt=0)
     resolved_concept_id: int | None = Field(default=None, gt=0)
     resolved_concept_name: str | None = None
+    resolved_concept_tier: str | None = None
     concept_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     requires_clarification: bool = False
     concept_switch_suggestion: ConceptSwitchSuggestion | None = None

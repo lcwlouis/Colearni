@@ -24,6 +24,7 @@ class CanonicalConceptRow:
     embedding: list[float] | None
     is_active: bool
     dirty: bool
+    tier: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,7 @@ def _to_canonical_concept(row: dict[str, object] | None) -> CanonicalConceptRow 
         embedding=_coerce_embedding(row["embedding"]),
         is_active=bool(row["is_active"]),
         dirty=bool(row["dirty"]),
+        tier=str(row["tier"]) if row["tier"] is not None else None,
     )
 
 

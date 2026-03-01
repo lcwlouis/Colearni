@@ -57,8 +57,20 @@ def validate_citations(evidence: list[EvidenceItem], citations: list[Citation]) 
 def verify_assistant_draft(
     draft: AssistantDraft,
     grounding_mode: GroundingMode,
+    *,
+    allow_uncited_hybrid: bool = False,
 ) -> AssistantResponseEnvelope:
     """Convert a draft into a policy-compliant response envelope."""
+    if allow_uncited_hybrid and grounding_mode == GroundingMode.HYBRID and not draft.citations:
+        return AssistantResponseEnvelope(
+            kind=AssistantResponseKind.ANSWER,
+            text=draft.text,
+            grounding_mode=grounding_mode,
+            evidence=draft.evidence,
+            citations=draft.citations,
+            response_mode="clarify",
+        )
+
     if not draft.citations:
         if grounding_mode == GroundingMode.STRICT:
             return _build_insufficient_evidence_refusal(

@@ -140,11 +140,123 @@ Verification
 
 ## Current Verification Status
 
-- learner-related data exists in pieces
-- no unified learner snapshot type is confirmed in current runtime
-- `pytest -q`: not re-run during this planning pass
+- AR4.1 ✅ complete — LearnerProfileSnapshot + TopicStateSnapshot defined
+- AR4.2 ✅ complete — Assembly service from mastery/readiness/session memory
+- AR4.3 ✅ complete — Learner snapshot feeds into tutor planning and prompts
+- AR4.4 ✅ complete — Learner-state traces and UI types exposed
+- `pytest -q`: 692 passed (1 pre-existing failure in test_system_prompt_socratic)
 
-Current hotspots:
+### Verification Block - AR4.1
+
+Root cause
+- No canonical typed surface for learner state; fragments spread across mastery, readiness, session memory.
+
+Files changed
+- `domain/learner/__init__.py` (new)
+- `domain/learner/profile.py` (new)
+- `tests/domain/test_learner_profile.py` (new)
+
+What changed
+- Defined frozen dataclasses: `TopicStateSnapshot` (per-topic state) and `LearnerProfileSnapshot` (aggregated profile).
+- Derived properties: `is_weak`, `is_strong`, `weak_topics`, `strong_topics`, `current_frontier`, `review_queue`, `topic_by_id`, `summary_text`.
+- 16 unit tests for shape, helpers, immutability.
+
+Commands run
+- `pytest tests/domain/test_learner_profile.py -v` → 16 passed
+- `pytest tests/ -q` → 673 passed
+
+Manual verification
+- Confirmed frozen dataclass prevents mutation
+- Confirmed derived properties return correct subsets
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR4.2
+
+Root cause
+- Learner state fragments scattered; no single-call assembly path.
+
+Files changed
+- `domain/learner/assembler.py` (new)
+- `domain/learner/__init__.py` (updated exports)
+- `tests/domain/test_learner_assembler.py` (new)
+
+What changed
+- `assemble_learner_snapshot()` aggregates readiness analysis, concept names, and session context into a LearnerProfileSnapshot.
+- `_mastery_score_to_level()` maps numeric scores to categorical levels.
+- Safe on missing data: readiness failure → empty topics, missing concepts → fallback names, session failure → empty summary.
+- 17 new tests covering assembly, error paths, and derived properties.
+
+Commands run
+- `pytest tests/domain/test_learner_assembler.py -v` → 17 passed
+- `pytest tests/ -q` → 690 passed
+
+Manual verification
+- Verified error tolerance: readiness DB failure returns valid empty snapshot
+- Verified concept name fallback for missing concepts
+
+Observed outcome
+- All tests green, no removals needed
+
+### Verification Block - AR4.3
+
+Root cause
+- Tutor saw mastery and history fragments but not a coherent learner profile.
+
+Files changed
+- `core/prompting/assets/tutor/socratic_v1.md` (added LEARNER_PROFILE variable)
+- `core/prompting/assets/tutor/direct_v1.md` (added LEARNER_PROFILE variable)
+- `domain/chat/prompt_kit.py` (added learner_profile_summary param)
+- `domain/chat/response_service.py` (added learner_profile_summary param)
+- `domain/chat/respond.py` (assembles snapshot, passes summary)
+- `domain/chat/stream.py` (assembles snapshot, passes summary)
+- `domain/chat/tutor_agent.py` (added learner_profile_summary to render call)
+- `tests/core/test_prompt_registry.py` (added template variable)
+- `tests/domain/test_prompt_kit.py` (new test for learner profile in prompt)
+- `tests/domain/test_prompt_regression.py` (added template variable)
+
+What changed
+- `assemble_learner_snapshot()` called in respond.py and stream.py; `summary_text()` threaded through generate_tutor_text → build_full_tutor_prompt_with_meta → template render.
+- New LEARNER_PROFILE input section in both prompt templates.
+- 1 new test verifying learner profile text appears in rendered prompt.
+
+Commands run
+- `pytest tests/ -q` → 690 passed (1 pre-existing failure)
+
+Manual verification
+- Confirmed learner profile summary appears in rendered prompt output
+
+Observed outcome
+- All AR4.3-related tests green, no removals needed
+
+### Verification Block - AR4.4
+
+Root cause
+- Adaptive behavior not debuggable; no trace surface for learner profile state.
+
+Files changed
+- `core/schemas/assistant.py` (added 5 learner trace fields to GenerationTrace)
+- `domain/chat/respond.py` (populate learner trace fields)
+- `domain/chat/stream.py` (populate learner trace fields)
+- `apps/web/lib/api/types.ts` (mirror learner fields in TypeScript GenerationTrace)
+- `tests/core/test_g0_contracts.py` (2 new tests for learner trace fields)
+
+What changed
+- GenerationTrace gains: learner_weak_topic_count, learner_strong_topic_count, learner_frontier_count, learner_review_count, learner_profile_summary.
+- Fields populated from learner snapshot in both respond.py and stream.py.
+- TypeScript interface extended for frontend observability.
+
+Commands run
+- `pytest tests/ -q` → 692 passed (1 pre-existing failure)
+- `npx tsc --noEmit` → clean
+
+Manual verification
+- Confirmed new fields default to None / null
+- Confirmed populated fields carry correct counts
+
+Observed outcome
+- All AR4.4 tests green, no removals needed
 
 | File | Why it still matters |
 |---|---|
@@ -363,7 +475,18 @@ Execution loop for this child plan:
    - a summary of all Removal Entries added during that slice
 6. After every 2 completed AR4 slices OR if context is compacted/summarized, re-open docs/AGENTIC_MASTER_PLAN.md and docs/agentic/04_learner_model_plan.md and restate which AR4 slices remain.
 7. Continue to the next incomplete AR4 slice once the previous slice is verified.
-8. When all AR4 slices are complete, return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
+8. When all AR4 slices are complete, immediately re-open docs/AGENTIC_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
+
+Do NOT stop just because AR4 is complete. AR4 completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+
+START:
+
+Read docs/AGENTIC_MASTER_PLAN.md.
+Read docs/agentic/04_learner_model_plan.md.
+Begin with the current AR4 slice in execution order exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When AR4 is complete, immediately return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

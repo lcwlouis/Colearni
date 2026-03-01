@@ -35,6 +35,9 @@ interface GraphVizPanelProps {
   handleGraphBgClick: () => void;
   selectConcept: (id: number) => void;
   setQuery: (q: string) => void;
+  filteredTiers: ReadonlySet<string>;
+  toggleTierFilter: (tier: string) => void;
+  clearTierFilter: () => void;
 }
 
 export function GraphVizPanel({
@@ -59,8 +62,33 @@ export function GraphVizPanel({
   handleGraphBgClick,
   selectConcept,
   setQuery,
+  filteredTiers,
+  toggleTierFilter,
+  clearTierFilter,
 }: GraphVizPanelProps) {
   const { phase, concepts, selectedDetail, subgraph, error } = state;
+
+  // Derive available tiers from fullGraph nodes (deduplicated, sorted)
+  const availableTiers = Array.from(
+    new Set(
+      (fullGraph?.nodes ?? [])
+        .map((n) => n.tier)
+        .filter((t): t is NonNullable<typeof t> => t != null)
+    )
+  ).sort() as Array<'umbrella' | 'topic' | 'subtopic' | 'granular'>;
+
+  const TIER_CHIP_STYLES: Record<string, { base: React.CSSProperties; active: React.CSSProperties }> = {
+    umbrella: { base: { background: '#f0f0ff', color: '#4338ca', border: '1px solid #c7d2fe' }, active: { background: '#c7d2fe', color: '#3730a3', border: '1px solid #6366f1' } },
+    topic:    { base: { background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe' }, active: { background: '#bfdbfe', color: '#1e3a8a', border: '1px solid #3b82f6' } },
+    subtopic: { base: { background: '#f0fdfa', color: '#0f766e', border: '1px solid #99f6e4' }, active: { background: '#99f6e4', color: '#134e4a', border: '1px solid #14b8a6' } },
+    granular: { base: { background: '#f9fafb', color: '#374151', border: '1px solid #d1d5db' }, active: { background: '#d1d5db', color: '#111827', border: '1px solid #6b7280' } },
+  };
+
+  const chipBase: React.CSSProperties = {
+    display: 'inline-block', padding: '0.15rem 0.6rem', borderRadius: '9999px',
+    fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', userSelect: 'none',
+    letterSpacing: '0.03em', transition: 'background 0.15s',
+  };
 
   return (
     <section className="panel graph-viz-panel">
@@ -139,6 +167,35 @@ export function GraphVizPanel({
           )}
         </div>
       </div>
+
+      {availableTiers.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', padding: '0.4rem 0.75rem 0.1rem' }}>
+          {filteredTiers.size > 0 && (
+            <button
+              type="button"
+              onClick={clearTierFilter}
+              style={{ ...chipBase, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--line)', fontWeight: 400 }}
+            >
+              All
+            </button>
+          )}
+          {availableTiers.map((tier) => {
+            const isActive = filteredTiers.has(tier);
+            const styles = TIER_CHIP_STYLES[tier] ?? TIER_CHIP_STYLES.granular;
+            return (
+              <button
+                key={tier}
+                type="button"
+                onClick={() => toggleTierFilter(tier)}
+                style={{ ...chipBase, ...(isActive ? styles.active : styles.base) }}
+              >
+                {tier.charAt(0).toUpperCase() + tier.slice(1)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <AsyncState
         loading={phase === "loading_list" || phase === "loading_detail"}
         error={phase === "error" && !selectedDetail ? error : null}
@@ -182,6 +239,7 @@ export function GraphVizPanel({
           focusNodeId={focusNodeId}
           searchHighlight={debouncedGraphSearch}
           onResetViewReady={handleResetViewReady}
+          filteredTiers={filteredTiers}
         />
       ) : fullGraph && fullGraph.nodes.length > 0 ? (
         <ConceptGraph
@@ -192,6 +250,7 @@ export function GraphVizPanel({
           focusNodeId={focusNodeId}
           searchHighlight={debouncedGraphSearch}
           onResetViewReady={handleResetViewReady}
+          filteredTiers={filteredTiers}
         />
       ) : null}
     </section>

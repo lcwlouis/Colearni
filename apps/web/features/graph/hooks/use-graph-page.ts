@@ -57,6 +57,17 @@ export function useGraphPage() {
   const [focusNodeId, setFocusNodeId] = useState<number | null>(null);
   const [resetView, setResetView] = useState<(() => void) | null>(null);
 
+  // Tier filter state
+  const [filteredTiers, setFilteredTiers] = useState<Set<string>>(new Set());
+  const toggleTierFilter = useCallback((tier: string) => {
+    setFilteredTiers(prev => {
+      const next = new Set(prev);
+      if (next.has(tier)) next.delete(tier); else next.add(tier);
+      return next;
+    });
+  }, []);
+  const clearTierFilter = useCallback(() => setFilteredTiers(new Set()), []);
+
   const handleResetViewReady = useCallback((fn: () => void) => {
     setResetView(() => fn);
   }, []);
@@ -271,5 +282,8 @@ export function useGraphPage() {
     handleGraphBgClick,
     handleNextQuiz,
     conceptActivity,
+    filteredTiers,
+    toggleTierFilter,
+    clearTierFilter,
   };
 }

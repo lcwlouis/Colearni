@@ -18,6 +18,8 @@ from domain.retrieval.vector_retriever import PgVectorRetriever
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+_ANCESTOR_TIERS = frozenset({"subtopic", "granular"})
+
 
 def retrieve_ranked_chunks(
     session: Session,
@@ -223,3 +225,33 @@ def workspace_has_no_chunks(session: Session, workspace_id: int) -> bool:
         if callable(getattr(session, "rollback", None)):
             session.rollback()
         return False
+
+
+def _build_ancestor_context_line(ancestors: list[dict]) -> str:
+    """Format ancestor chain into a compact context string."""
+    if not ancestors:
+        return ""
+    parts = [a["canonical_name"] for a in ancestors]
+    return "Concept hierarchy (from parent to root): " + " → ".join(parts)
+
+
+def build_ancestor_context(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+    tier: str | None,
+) -> str:
+    """Return ancestor context line for subtopic/granular concepts, else empty string.
+
+    Calls get_ancestor_chain only when tier warrants it; never raises.
+    """
+    if tier not in _ANCESTOR_TIERS:
+        return ""
+    try:
+        from domain.graph.explore import get_ancestor_chain  # avoid circular at module level
+
+        ancestors = get_ancestor_chain(session, workspace_id=workspace_id, concept_id=concept_id)
+        return _build_ancestor_context_line(ancestors)
+    except Exception:
+        return ""

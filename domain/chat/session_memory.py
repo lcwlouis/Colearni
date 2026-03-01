@@ -21,6 +21,7 @@ COMPACTION_KEEP_RECENT = 16
 SUMMARY_SOURCE_LIMIT = 24
 ASSESSMENT_CARD_LIMIT = 5
 FLASHCARD_PROGRESS_LIMIT = 10
+QUIZ_PROGRESS_LIMIT = 8
 
 
 def load_history_text(
@@ -219,6 +220,7 @@ __all__ = [
     "load_assessment_context",
     "load_chat_context_for_quiz",
     "load_flashcard_progress",
+    "load_quiz_progress_snapshot",
     "load_history_text",
     "maybe_compact_session_context",
     "persist_assessment_card",
@@ -339,6 +341,7 @@ def load_flashcard_progress(
                     SELECT
                         fb.concept_id,
                         cc.canonical_name,
+                        fb.front,
                         fp.self_rating,
                         fp.passed,
                         fp.updated_at
@@ -370,7 +373,114 @@ def load_flashcard_progress(
     lines: list[str] = ["FLASHCARD PROGRESS SNAPSHOT:"]
     for row in rows:
         concept_name = str(row.get("canonical_name") or "unknown")
+        front_text = str(row.get("front") or "")
+        if len(front_text) > 80:
+            front_text = front_text[:77] + "..."
         rating = str(row.get("self_rating") or "unrated")
         passed = "passed" if row.get("passed") else "in progress"
-        lines.append(f"- {concept_name}: {rating} ({passed})")
+        updated = row.get("updated_at")
+        date_str = ""
+        if updated is not None:
+            try:
+                date_str = f", reviewed {updated.strftime('%Y-%m-%d')}"
+            except Exception:  # noqa: BLE001
+                pass
+        card_label = f' "{front_text}"' if front_text else ""
+        lines.append(f"- {concept_name}:{card_label} — {rating} ({passed}){date_str}")
+    return "\n".join(lines)
+
+
+def load_quiz_progress_snapshot(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int | None,
+    concept_id: int | None = None,
+) -> str:
+    """Load recent level-up/practice quiz outcomes for tutor prompt context.
+
+    Returns a bounded QUIZ PROGRESS SNAPSHOT section, scoped to concept when provided.
+    """
+    if user_id is None:
+        return ""
+
+    try:
+        params: dict[str, object] = {
+            "workspace_id": workspace_id,
+            "user_id": user_id,
+            "limit": QUIZ_PROGRESS_LIMIT,
+        }
+        concept_filter = ""
+        if concept_id is not None:
+            concept_filter = "AND q.concept_id = :concept_id"
+            params["concept_id"] = concept_id
+
+        rows = (
+            session.execute(
+                text(
+                    f"""
+                    SELECT
+                        q.quiz_type,
+                        q.status,
+                        cc.canonical_name AS concept_name,
+                        q.created_at,
+                        qa.score,
+                        qa.passed,
+                        qa.graded_at,
+                        (SELECT COUNT(*) FROM quiz_items qi WHERE qi.quiz_id = q.id) AS item_count
+                    FROM quizzes q
+                    LEFT JOIN concepts_canon cc
+                      ON cc.id = q.concept_id
+                     AND cc.workspace_id = q.workspace_id
+                    LEFT JOIN LATERAL (
+                        SELECT score, passed, graded_at
+                        FROM quiz_attempts a
+                        WHERE a.quiz_id = q.id
+                          AND a.user_id = :user_id
+                          AND a.graded_at IS NOT NULL
+                        ORDER BY a.id DESC
+                        LIMIT 1
+                    ) qa ON TRUE
+                    WHERE q.workspace_id = :workspace_id
+                      AND q.user_id = :user_id
+                      AND q.quiz_type IN ('level_up', 'practice')
+                      {concept_filter}
+                    ORDER BY COALESCE(qa.graded_at, q.created_at) DESC, q.id DESC
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            )
+            .mappings()
+            .all()
+        )
+    except Exception:
+        if callable(getattr(session, "rollback", None)):
+            session.rollback()
+        return ""
+
+    if not rows:
+        return ""
+
+    lines: list[str] = ["QUIZ PROGRESS SNAPSHOT:"]
+    for row in rows:
+        quiz_type = str(row.get("quiz_type") or "quiz")
+        concept_name = str(row.get("concept_name") or "unknown")
+        item_count = row.get("item_count") or 0
+        items_label = f", {item_count} questions" if item_count else ""
+        # Determine date from graded_at or created_at
+        quiz_date = row.get("graded_at") or row.get("created_at")
+        date_str = ""
+        if quiz_date is not None:
+            try:
+                date_str = f", {quiz_date.strftime('%Y-%m-%d')}"
+            except Exception:  # noqa: BLE001
+                pass
+        if row.get("score") is not None:
+            score = float(row.get("score") or 0.0)
+            passed = "passed" if row.get("passed") else "not passed"
+            lines.append(f"- {quiz_type} {concept_name}: score {score:.0%}, {passed}{items_label}{date_str}")
+        else:
+            status = str(row.get("status") or "ready")
+            lines.append(f"- {quiz_type} {concept_name}: status {status}{items_label}{date_str}")
     return "\n".join(lines)

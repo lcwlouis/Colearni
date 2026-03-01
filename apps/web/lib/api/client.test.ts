@@ -63,6 +63,80 @@ describe("ApiClient", () => {
     expect(calledMethod).toBe("DELETE");
   });
 
+  it("builds practice quiz history query strings", async () => {
+    let calledUrl = "";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      calledUrl = String(input);
+      return new Response(
+        JSON.stringify({ workspace_id: 1, user_id: 2, concept_id: 3, quizzes: [] }),
+        { status: 200 },
+      );
+    });
+    await new ApiClient({ baseUrl: "/api/", fetchImpl }).listPracticeQuizzes("ws-uuid", 3, 10);
+    expect(calledUrl).toBe("/api/workspaces/ws-uuid/practice/quizzes?concept_id=3&limit=10");
+  });
+
+  it("builds practice quiz detail query strings", async () => {
+    let calledUrl = "";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      calledUrl = String(input);
+      return new Response(
+        JSON.stringify({
+          quiz_id: 11,
+          workspace_id: 1,
+          user_id: 2,
+          concept_id: 3,
+          concept_name: "X",
+          status: "ready",
+          item_count: 0,
+          created_at: "2026-03-01T00:00:00Z",
+          latest_attempt: null,
+          items: [],
+        }),
+        { status: 200 },
+      );
+    });
+    await new ApiClient({ baseUrl: "/api/", fetchImpl }).getPracticeQuiz("ws-uuid", 11);
+    expect(calledUrl).toBe("/api/workspaces/ws-uuid/practice/quizzes/11");
+  });
+
+  it("builds flashcard runs history query strings", async () => {
+    let calledUrl = "";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      calledUrl = String(input);
+      return new Response(
+        JSON.stringify({ workspace_id: 1, user_id: 2, concept_id: 3, runs: [] }),
+        { status: 200 },
+      );
+    });
+    await new ApiClient({ baseUrl: "/api/", fetchImpl }).listFlashcardRuns("ws-uuid", 3, 10);
+    expect(calledUrl).toBe("/api/workspaces/ws-uuid/practice/flashcards/runs?concept_id=3&limit=10");
+  });
+
+  it("builds flashcard run detail query strings", async () => {
+    let calledUrl = "";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      calledUrl = String(input);
+      return new Response(
+        JSON.stringify({
+          run_id: "run-1",
+          workspace_id: 1,
+          user_id: 2,
+          concept_id: 3,
+          concept_name: "X",
+          item_count: 0,
+          has_more: false,
+          exhausted_reason: null,
+          created_at: "2026-03-01T00:00:00Z",
+          flashcards: [],
+        }),
+        { status: 200 },
+      );
+    });
+    await new ApiClient({ baseUrl: "/api/", fetchImpl }).getFlashcardRun("ws-uuid", "run-1");
+    expect(calledUrl).toBe("/api/workspaces/ws-uuid/practice/flashcards/runs/run-1");
+  });
+
   it("consumes complete SSE frames while keeping partial remainder", () => {
     const consumed = consumeSseFrames(
       'event: status\ndata: {"event":"status","phase":"thinking"}\n\n' +

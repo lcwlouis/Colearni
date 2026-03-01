@@ -1,4 +1,11 @@
 import { AsyncState } from "@/components/async-state";
+
+const TIER_BADGE_STYLES: Record<string, React.CSSProperties> = {
+  umbrella: { background: '#e0e7ff', color: '#4338ca', borderRadius: '9999px', padding: '0.1rem 0.55rem', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.05em', display: 'inline-block', verticalAlign: 'middle' },
+  topic:    { background: '#dbeafe', color: '#1d4ed8', borderRadius: '9999px', padding: '0.1rem 0.55rem', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.05em', display: 'inline-block', verticalAlign: 'middle' },
+  subtopic: { background: '#ccfbf1', color: '#0f766e', borderRadius: '9999px', padding: '0.1rem 0.55rem', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.05em', display: 'inline-block', verticalAlign: 'middle' },
+  granular: { background: '#f3f4f6', color: '#374151', borderRadius: '9999px', padding: '0.1rem 0.55rem', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.05em', display: 'inline-block', verticalAlign: 'middle' },
+};
 import { StatefulFlashcardList } from "@/components/stateful-flashcard-list";
 import { PracticeQuizCard } from "@/components/practice-quiz-card";
 import { ConceptActivityPanel } from "@/components/concept-activity-panel";
@@ -88,7 +95,14 @@ export function GraphDetailPanel({
 
       {selectedDetail ? (
         <>
-          <h1>{selectedDetail.concept.canonical_name}</h1>
+          <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {selectedDetail.concept.canonical_name}
+            {selectedDetail.concept.tier != null && (
+              <span style={TIER_BADGE_STYLES[selectedDetail.concept.tier]}>
+                {selectedDetail.concept.tier.toUpperCase()}
+              </span>
+            )}
+          </h1>
           <p>{selectedDetail.concept.description}</p>
           {selectedDetail.concept.aliases.length > 0 ? (
             <p className="field-label">

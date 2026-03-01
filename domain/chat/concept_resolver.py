@@ -21,6 +21,7 @@ _SWITCH_CONFIDENCE_THRESHOLD = 0.75
 class ConceptInfo:
     concept_id: int
     canonical_name: str
+    tier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -198,7 +199,7 @@ def _infer_concept(
         session.execute(
             text(
                 """
-                SELECT id AS concept_id, canonical_name, aliases
+                SELECT id AS concept_id, canonical_name, aliases, tier
                 FROM concepts_canon
                 WHERE workspace_id = :workspace_id
                   AND is_active = TRUE
@@ -253,6 +254,7 @@ def _infer_concept(
         concept = ConceptInfo(
             concept_id=int(row["concept_id"]),
             canonical_name=str(row["canonical_name"]),
+            tier=str(row["tier"]) if row.get("tier") is not None else None,
         )
         if suggested_concept is not None and concept.concept_id == suggested_concept.concept_id:
             score += 0.8
@@ -278,7 +280,7 @@ def _concept_by_id(
         session.execute(
             text(
                 """
-                SELECT id AS concept_id, canonical_name
+                SELECT id AS concept_id, canonical_name, tier
                 FROM concepts_canon
                 WHERE workspace_id = :workspace_id
                   AND id = :concept_id
@@ -296,6 +298,7 @@ def _concept_by_id(
     return ConceptInfo(
         concept_id=int(row["concept_id"]),
         canonical_name=str(row["canonical_name"]),
+        tier=str(row["tier"]) if row["tier"] is not None else None,
     )
 
 

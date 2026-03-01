@@ -58,6 +58,8 @@ The current app already has a meaningful vertical slice:
 - Graph explorer and "I’m feeling lucky" graph traversal.
 - Readiness analyzer and quiz CTA actions.
 - A working Next.js web app for KB, tutor, graph, and login.
+- File-based prompt asset system (`core/prompting/`) with versioned assets per task family.
+- Query analysis scaffold (`domain/chat/query_analyzer.py`) — exists and tested but not yet wired into the tutor runtime.
 
 This is already a real product slice, not just scaffolding.
 

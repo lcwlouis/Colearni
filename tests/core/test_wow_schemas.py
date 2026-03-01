@@ -8,6 +8,7 @@ from core.schemas import (
     AssessmentCard,
     AssistantResponseEnvelope,
     AssistantResponseKind,
+    Citation,
     FlashcardRateRequest,
     GroundingMode,
     KBDocumentSummary,
@@ -58,6 +59,18 @@ class TestEnvelopeExtensions:
         assert len(env.actions) == 1
         assert env.actions[0]["action_type"] == "quiz_cta"
 
+    def test_envelope_clarify_mode_allows_no_citations(self) -> None:
+        env = AssistantResponseEnvelope(
+            kind=AssistantResponseKind.ANSWER,
+            text="Can you share which part you want to focus on?",
+            grounding_mode=GroundingMode.HYBRID,
+            evidence=[],
+            citations=[],
+            response_mode="clarify",
+            actions=[],
+        )
+        assert env.response_mode == "clarify"
+
 
 class TestAssessmentCard:
     def test_valid_card(self) -> None:
@@ -83,6 +96,41 @@ class TestActionCTA:
             concept_name="Derivatives",
         )
         assert cta.action_type == "quiz_cta"
+
+    def test_quiz_offer_action(self) -> None:
+        cta = ActionCTA(
+            action_type="quiz_offer",
+            label="Ready for a quiz?",
+            concept_id=5,
+            concept_name="Photosynthesis",
+        )
+        assert cta.action_type == "quiz_offer"
+        assert cta.concept_id == 5
+
+    def test_quiz_start_action(self) -> None:
+        cta = ActionCTA(
+            action_type="quiz_start",
+            label="Start quiz now",
+            concept_id=7,
+            concept_name="Algebra",
+        )
+        assert cta.action_type == "quiz_start"
+        assert cta.concept_name == "Algebra"
+
+    def test_quiz_actions_serialize_in_envelope(self) -> None:
+        env = AssistantResponseEnvelope(
+            kind="answer",
+            text="Great work!",
+            grounding_mode="hybrid",
+            citations=[Citation(citation_id="c1", evidence_id="e1", label="From your notes")],
+            actions=[
+                {"action_type": "quiz_offer", "label": "Ready for a quiz?", "concept_id": 5},
+            ],
+        )
+        payload = env.model_dump(mode="json")
+        assert payload["actions"][0]["action_type"] == "quiz_offer"
+        restored = AssistantResponseEnvelope.model_validate(payload)
+        assert restored.actions[0]["action_type"] == "quiz_offer"
 
 
 class TestKBDocumentSummary:

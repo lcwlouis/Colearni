@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from core.prompting import PromptRegistry
 
@@ -37,8 +37,8 @@ class QueryAnalysis:
     concept_hints: list[str] = field(default_factory=list)
 
 
-# Conservative fallback for vague or unparseable queries
-_FALLBACK = QueryAnalysis(intent="clarify", needs_retrieval=False)
+# Conservative fallback — always retrieve to preserve grounded behavior
+_FALLBACK = QueryAnalysis(intent="clarify", needs_retrieval=True)
 
 
 def build_query_analysis_prompt(*, query: str, history_summary: str = "") -> tuple[str, object]:
@@ -99,8 +99,44 @@ def _str_list(val: object) -> list[str]:
     return [str(v) for v in val if isinstance(v, str)]
 
 
+def run_query_analysis(
+    *,
+    query: str,
+    history_summary: str = "",
+    llm_client: Any | None = None,
+) -> QueryAnalysis:
+    """Run query analysis using the LLM and return a typed result.
+
+    Returns the conservative fallback on LLM unavailability, model errors,
+    or parse failures.  This is the primary entrypoint for wiring query
+    analysis into the tutor runtime.
+    """
+    if llm_client is None:
+        log.debug("query analysis skipped: no LLM client")
+        return _FALLBACK
+
+    prompt_text, prompt_meta = build_query_analysis_prompt(
+        query=query,
+        history_summary=history_summary,
+    )
+
+    try:
+        raw_text = llm_client.generate_tutor_text(
+            prompt=prompt_text, prompt_meta=prompt_meta,
+        )
+    except (RuntimeError, ValueError) as exc:
+        log.warning("query analysis LLM call failed: %s", exc)
+        return _FALLBACK
+    except Exception:
+        log.warning("query analysis LLM call failed unexpectedly", exc_info=True)
+        return _FALLBACK
+
+    return parse_query_analysis(raw_text)
+
+
 __all__ = [
     "QueryAnalysis",
     "build_query_analysis_prompt",
     "parse_query_analysis",
+    "run_query_analysis",
 ]

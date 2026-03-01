@@ -55,6 +55,7 @@ def get_concept_detail(session: Session, *, workspace_id: int, concept_id: int) 
                     c.canonical_name,
                     c.description,
                     c.aliases,
+                    c.tier,
                     (
                         SELECT count(*)
                         FROM edges_canon e
@@ -90,6 +91,7 @@ def get_concept_detail(session: Session, *, workspace_id: int, concept_id: int) 
             "canonical_name": str(row["canonical_name"]),
             "description": str(row["description"] or ""),
             "aliases": [str(alias) for alias in (row["aliases"] or [])],
+            "tier": str(row["tier"]) if row["tier"] is not None else None,
             "degree": int(row["degree"] or 0),
         },
     }
@@ -425,6 +427,90 @@ def get_full_subgraph(
             for r in edge_rows
         ],
     }
+
+
+def get_ancestor_chain(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+    max_depth: int = 3,
+) -> list[dict[str, str]]:
+    """Return the ancestor chain for a concept via hierarchy edges.
+
+    Walks upward through ``belongs_to`` and ``has_subtopic`` edges (reversed)
+    in ``edges_canon`` up to *max_depth* hops. Returns a list of dicts with
+    ``concept_id``, ``canonical_name``, and ``description``, ordered from
+    immediate parent to most distant ancestor.
+
+    Returns an empty list if no hierarchical edges are found or the concept
+    has no ancestors.
+    """
+    rows = (
+        session.execute(
+            text(
+                """
+                WITH RECURSIVE ancestors AS (
+                    SELECT CAST(:concept_id AS bigint) AS concept_id,
+                           CAST(0 AS integer) AS hop_distance
+
+                    UNION ALL
+
+                    SELECT
+                        CASE
+                            WHEN e.relation_type = 'belongs_to' AND e.src_id = ancestors.concept_id
+                                THEN e.tgt_id
+                            WHEN e.relation_type = 'has_subtopic' AND e.tgt_id = ancestors.concept_id
+                                THEN e.src_id
+                        END AS concept_id,
+                        ancestors.hop_distance + 1 AS hop_distance
+                    FROM ancestors
+                    JOIN edges_canon e
+                      ON e.workspace_id = :workspace_id
+                     AND e.relation_type IN ('belongs_to', 'has_subtopic')
+                     AND (
+                           (e.relation_type = 'belongs_to' AND e.src_id = ancestors.concept_id)
+                           OR
+                           (e.relation_type = 'has_subtopic' AND e.tgt_id = ancestors.concept_id)
+                         )
+                    WHERE ancestors.hop_distance < :max_depth
+                ),
+                ranked AS (
+                    SELECT concept_id, min(hop_distance) AS hop_distance
+                    FROM ancestors
+                    WHERE concept_id <> CAST(:concept_id AS bigint)
+                    GROUP BY concept_id
+                )
+                SELECT
+                    ranked.concept_id,
+                    ranked.hop_distance,
+                    c.canonical_name,
+                    c.description,
+                    c.tier
+                FROM ranked
+                JOIN concepts_canon c
+                  ON c.id = ranked.concept_id
+                 AND c.workspace_id = :workspace_id
+                 AND c.is_active = TRUE
+                ORDER BY ranked.hop_distance ASC
+                """
+            ),
+            {"workspace_id": workspace_id, "concept_id": concept_id, "max_depth": max_depth},
+        )
+        .mappings()
+        .all()
+    )
+    if not rows:
+        return []
+    return [
+        {
+            "concept_id": str(row["concept_id"]),
+            "canonical_name": str(row["canonical_name"]),
+            "description": str(row["description"] or ""),
+            "tier": str(row["tier"]) if row["tier"] is not None else None,
+        }
+        for row in rows
+    ]
 
 
 def pick_lucky(

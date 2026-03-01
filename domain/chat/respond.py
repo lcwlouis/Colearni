@@ -26,6 +26,7 @@ from core.verifier import verify_assistant_draft
 from sqlalchemy.orm import Session
 
 from domain.chat.concept_resolver import resolve_concept_for_turn
+from domain.chat.retrieval_context import build_ancestor_context
 from domain.chat.evidence_builder import (
     build_document_summaries_context,
     build_workspace_citations,
@@ -158,6 +159,22 @@ def generate_chat_response(
             concept_resolution.resolved_concept.canonical_name
             if concept_resolution.resolved_concept is not None
             else None
+        )
+        resolved_tier = (
+            concept_resolution.resolved_concept.tier
+            if concept_resolution.resolved_concept is not None
+            else None
+        )
+
+        ancestor_context = (
+            build_ancestor_context(
+                session,
+                workspace_id=request.workspace_id,
+                concept_id=resolved_concept_id,
+                tier=resolved_tier,
+            )
+            if resolved_concept_id is not None
+            else ""
         )
 
         mastery_status = resolve_mastery_status(
@@ -332,7 +349,7 @@ def generate_chat_response(
                     chunks=ranked_chunks,
                     expanded_document_ids=evidence_plan.expanded_document_ids,
                 ),
-                graph_context=evidence_plan.graph_evidence_context,
+                graph_context="\n".join(filter(None, [ancestor_context, evidence_plan.graph_evidence_context])),
                 quiz_context=combined_quiz_context,
                 flashcard_progress=flashcard_progress,
                 learner_profile_summary=learner_profile_summary,
@@ -359,6 +376,7 @@ def generate_chat_response(
             session_id=request.session_id,
             resolved_concept_id=resolved_concept_id,
             resolved_concept_name=resolved_name,
+            resolved_concept_tier=resolved_tier,
             concept_confidence=concept_resolution.confidence,
             requires_clarification=concept_resolution.requires_clarification,
             concept_switch_suggestion=(

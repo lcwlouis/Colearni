@@ -10,6 +10,7 @@ from adapters.db.documents import DocumentRow
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from apps.api.main import app
 from core.schemas import GroundingMode
+from domain.chat.query_analyzer import QueryAnalysis
 from domain.retrieval.hybrid_retriever import HybridRetriever
 from domain.retrieval.types import RankedChunk
 from domain.retrieval.vector_retriever import PgVectorRetriever
@@ -228,6 +229,46 @@ def test_chat_respond_uses_hybrid_retriever_path(monkeypatch: Any) -> None:
 
     assert response.status_code == 200
     assert captured == {"query": "hybrid path", "workspace_id": 7, "top_k": 4}
+
+
+def test_chat_respond_hybrid_clarify_without_retrieval_allows_uncited_answer(
+    monkeypatch: Any,
+) -> None:
+    """Hybrid clarify turns without retrieval should not hard-refuse for missing citations."""
+    monkeypatch.setattr(
+        "domain.chat.retrieval_context.build_embedding_provider",
+        lambda settings: DummyEmbeddingProvider(),
+    )
+    monkeypatch.setattr(
+        HybridRetriever,
+        "retrieve",
+        lambda self, query, workspace_id, top_k: [],  # noqa: ARG005
+    )
+    monkeypatch.setattr(
+        "domain.chat.respond.run_query_analysis",
+        lambda **kwargs: QueryAnalysis(intent="clarify", needs_retrieval=False),
+    )
+    _patch_tutor_llm(monkeypatch)
+    monkeypatch.setattr(app.state.settings, "default_grounding_mode", GroundingMode.HYBRID)
+
+    app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = lambda: _FAKE_WS_CTX
+    try:
+        client = TestClient(app)
+        response = client.post(
+            f"/workspaces/{_TEST_WS}/chat/respond",
+            json={"query": "what do you know?", "grounding_mode": "hybrid"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["grounding_mode"] == "hybrid"
+    assert payload["kind"] == "answer"
+    assert payload["response_mode"] == "clarify"
+    assert payload["refusal_reason"] is None
+    assert payload["citations"] == []
 
 
 @pytest.mark.parametrize(

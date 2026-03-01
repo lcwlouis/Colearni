@@ -1,12 +1,14 @@
-"""Tests for query analyzer – prompt rendering and JSON parsing."""
+"""Tests for query analyzer – prompt rendering, JSON parsing, and runtime wiring."""
 
 from __future__ import annotations
 
 import json
 
 from domain.chat.query_analyzer import (
+    QueryAnalysis,
     build_query_analysis_prompt,
     parse_query_analysis,
+    run_query_analysis,
 )
 
 
@@ -112,7 +114,7 @@ class TestParseQueryAnalysis:
     def test_invalid_json_returns_fallback(self) -> None:
         result = parse_query_analysis("not json at all")
         assert result.intent == "clarify"
-        assert result.needs_retrieval is False
+        assert result.needs_retrieval is True
 
     def test_empty_string_returns_fallback(self) -> None:
         result = parse_query_analysis("")
@@ -149,3 +151,87 @@ class TestParseQueryAnalysis:
         assert result.requested_mode == "unknown"
         assert result.needs_retrieval is True
         assert result.concept_hints == []
+
+
+class _FakeLLM:
+    """Minimal LLM stub for run_query_analysis tests."""
+
+    def __init__(self, response: str | Exception) -> None:
+        self._response = response
+
+    def generate_tutor_text(self, *, prompt: str, prompt_meta: object = None) -> str:
+        if isinstance(self._response, Exception):
+            raise self._response
+        return self._response
+
+
+class TestRunQueryAnalysis:
+    """Tests for the runtime entrypoint that calls the LLM."""
+
+    def test_returns_fallback_when_no_client(self) -> None:
+        result = run_query_analysis(query="hello", llm_client=None)
+        assert result.intent == "clarify"
+        assert result.needs_retrieval is True
+
+    def test_success_learn_intent(self) -> None:
+        payload = json.dumps({
+            "intent": "learn",
+            "requested_mode": "socratic",
+            "needs_retrieval": True,
+            "should_offer_level_up": False,
+            "high_level_keywords": ["biology"],
+            "low_level_keywords": [],
+            "concept_hints": ["mitosis"],
+        })
+        result = run_query_analysis(
+            query="Explain mitosis",
+            llm_client=_FakeLLM(payload),
+        )
+        assert result.intent == "learn"
+        assert result.requested_mode == "socratic"
+        assert result.needs_retrieval is True
+        assert result.concept_hints == ["mitosis"]
+
+    def test_returns_fallback_on_runtime_error(self) -> None:
+        result = run_query_analysis(
+            query="anything",
+            llm_client=_FakeLLM(RuntimeError("timeout")),
+        )
+        assert result.intent == "clarify"
+        assert result.needs_retrieval is True
+
+    def test_returns_fallback_on_value_error(self) -> None:
+        result = run_query_analysis(
+            query="anything",
+            llm_client=_FakeLLM(ValueError("bad")),
+        )
+        assert result.intent == "clarify"
+
+    def test_returns_fallback_on_unexpected_error(self) -> None:
+        result = run_query_analysis(
+            query="anything",
+            llm_client=_FakeLLM(TypeError("surprise")),
+        )
+        assert result.intent == "clarify"
+
+    def test_returns_fallback_on_garbage_response(self) -> None:
+        result = run_query_analysis(
+            query="anything",
+            llm_client=_FakeLLM("this is not json"),
+        )
+        assert result.intent == "clarify"
+        assert result.needs_retrieval is True
+
+    def test_passes_history_summary(self) -> None:
+        """History summary is forwarded through to the prompt builder."""
+        payload = json.dumps({
+            "intent": "learn",
+            "requested_mode": "unknown",
+            "needs_retrieval": True,
+        })
+        result = run_query_analysis(
+            query="continue",
+            history_summary="discussed photosynthesis",
+            llm_client=_FakeLLM(payload),
+        )
+        assert result.intent == "learn"

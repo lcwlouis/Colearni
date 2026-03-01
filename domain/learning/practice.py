@@ -38,6 +38,15 @@ from domain.learning.quiz_flow import (
 from domain.learning.quiz_flow import (
     submit_quiz as _submit_quiz,
 )
+from domain.learning.quiz_persistence import (
+    list_quizzes_with_latest_attempt as _list_quizzes_with_latest_attempt,
+)
+from domain.learning.quiz_persistence import (
+    load_quiz_items as _load_quiz_items,
+)
+from domain.learning.quiz_persistence import (
+    load_quiz_with_latest_attempt as _load_quiz_with_latest_attempt,
+)
 from domain.learning.quiz_generation import (
     QuizValidationError,
     auto_items,
@@ -162,14 +171,16 @@ def create_practice_quiz(
     )
 
     context = _context(session, workspace_id=workspace_id, concept_id=concept_id)
-    # Ask for extra items to compensate for dedup filtering
+    # Ask for extra items to compensate for dedup filtering, while keeping
+    # generation count within practice quiz bounds.
     overfetch = question_count + len(seen_fps) if seen_fps else question_count
+    generation_count = max(MIN_ITEMS, min(MAX_ITEMS, overfetch))
 
     if llm_client is None:
-        items = _fallback_practice_items(context=context, question_count=overfetch)
+        items = _fallback_practice_items(context=context, question_count=generation_count)
     else:
         prompt, prompt_meta = _build_practice_quiz_prompt(
-            question_count=overfetch, context=context,
+            question_count=generation_count, context=context,
         )
         with observation_context(
             component="practice",
@@ -190,7 +201,7 @@ def create_practice_quiz(
                 prompt=prompt,
                 prompt_meta=prompt_meta,
                 context=context,
-                question_count=overfetch,
+                question_count=generation_count,
             )
             if span is not None:
                 set_span_summary(span, output_summary=f"{len(items)} items")
@@ -274,6 +285,76 @@ def submit_practice_quiz(
         raise PracticeUnavailableError(str(exc)) from exc
 
 
+def list_practice_quizzes(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    if concept_id is not None and concept_id <= 0:
+        raise PracticeValidationError("concept_id must be positive when provided.")
+
+    rows = _list_quizzes_with_latest_attempt(
+        session,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        quiz_type="practice",
+        concept_id=concept_id,
+        limit=limit,
+    )
+    return {
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "concept_id": concept_id,
+        "quizzes": [_serialize_quiz_history_row(row) for row in rows],
+    }
+
+
+def get_practice_quiz(
+    session: Session,
+    *,
+    quiz_id: int,
+    workspace_id: int,
+    user_id: int,
+) -> dict[str, Any]:
+    row = _load_quiz_with_latest_attempt(
+        session,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        quiz_id=quiz_id,
+        quiz_type="practice",
+    )
+    if row is None:
+        raise PracticeNotFoundError("Practice quiz not found.")
+
+    items = _load_quiz_items(session, quiz_id=quiz_id)
+    payload = _serialize_quiz_history_row(row)
+    payload["items"] = [
+        {
+            "item_id": int(item["item_id"]),
+            "position": int(item["position"]),
+            "item_type": str(item["item_type"]),
+            "prompt": str(item["prompt"]),
+            "choices": [
+                {"id": str(choice.get("id", "")), "text": str(choice.get("text", ""))}
+                for choice in (
+                    item["payload"].get("choices", [])
+                    if isinstance(item.get("payload"), dict)
+                    else []
+                )
+                if isinstance(choice, dict)
+                and str(choice.get("id", "")).strip()
+                and str(choice.get("text", "")).strip()
+            ]
+            or None,
+        }
+        for item in items
+    ]
+    return payload
+
+
 def _generate_practice_items_with_retries(
     *,
     llm_client: GraphLLMClient,
@@ -333,12 +414,13 @@ def _fallback_practice_items(
     context: dict[str, Any],
     question_count: int,
 ) -> list[dict[str, Any]]:
+    safe_count = max(MIN_ITEMS, min(MAX_ITEMS, question_count))
     return auto_items(
         {
             "canonical_name": context["concept_name"],
             "description": context["concept_description"],
         },
-        question_count,
+        safe_count,
         min_items=MIN_ITEMS,
         max_items=MAX_ITEMS,
     )
@@ -368,6 +450,31 @@ def _coerce_generated_items(raw_items: Any) -> Any:
             normalized_item["payload"] = normalized_payload
         out.append(normalized_item)
     return out
+
+
+def _serialize_quiz_history_row(row: Any) -> dict[str, Any]:
+    grading = row["grading"] if isinstance(row.get("grading"), dict) else {}
+    latest_attempt = None
+    if row.get("attempt_id") is not None and row.get("graded_at") is not None:
+        latest_attempt = {
+            "attempt_id": int(row["attempt_id"]),
+            "score": float(row["score"] or 0.0),
+            "passed": bool(row["passed"]),
+            "critical_misconception": bool(grading.get("critical_misconception", False)),
+            "overall_feedback": str(grading.get("overall_feedback", "")).strip() or "(no feedback)",
+            "graded_at": row["graded_at"],
+        }
+    return {
+        "quiz_id": int(row["quiz_id"]),
+        "workspace_id": int(row["workspace_id"]),
+        "user_id": int(row["user_id"]),
+        "concept_id": int(row["concept_id"]) if row.get("concept_id") is not None else None,
+        "concept_name": str(row["concept_name"]) if row.get("concept_name") else None,
+        "status": str(row["status"]),
+        "item_count": int(row.get("item_count") or 0),
+        "created_at": row["created_at"],
+        "latest_attempt": latest_attempt,
+    }
 
 
 def _coerce_keyword_list(value: Any, *, default: list[str]) -> list[str]:
@@ -729,6 +836,182 @@ def rate_flashcard(
         "passed": passed,
         "interval_days": schedule.get("interval_days", 1.0),
         "due_at": schedule.get("due_at"),
+    }
+
+
+def list_flashcard_runs(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    if concept_id is not None and concept_id <= 0:
+        raise PracticeValidationError("concept_id must be positive when provided.")
+
+    safe_limit = max(1, min(limit, 100))
+    params: dict[str, Any] = {
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "limit": safe_limit,
+    }
+    concept_filter = ""
+    if concept_id is not None:
+        concept_filter = "AND r.concept_id = :concept_id"
+        params["concept_id"] = concept_id
+
+    rows = (
+        session.execute(
+            text(
+                f"""
+                SELECT
+                    r.run_id,
+                    r.workspace_id,
+                    r.user_id,
+                    r.concept_id,
+                    cc.canonical_name AS concept_name,
+                    r.item_count,
+                    r.has_more,
+                    r.exhausted_reason,
+                    r.created_at
+                FROM practice_generation_runs r
+                JOIN concepts_canon cc
+                  ON cc.id = r.concept_id
+                 AND cc.workspace_id = r.workspace_id
+                WHERE r.workspace_id = :workspace_id
+                  AND r.user_id = :user_id
+                  AND r.generation_type = 'flashcard'
+                  {concept_filter}
+                ORDER BY r.id DESC
+                LIMIT :limit
+                """
+            ),
+            params,
+        )
+        .mappings()
+        .all()
+    )
+
+    return {
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "concept_id": concept_id,
+        "runs": [_serialize_flashcard_run_row(row) for row in rows],
+    }
+
+
+def get_flashcard_run(
+    session: Session,
+    *,
+    run_id: str,
+    workspace_id: int,
+    user_id: int,
+) -> dict[str, Any]:
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError as exc:
+        raise PracticeValidationError("run_id must be a valid UUID.") from exc
+
+    run_row = (
+        session.execute(
+            text(
+                """
+                SELECT
+                    r.id,
+                    r.run_id,
+                    r.workspace_id,
+                    r.user_id,
+                    r.concept_id,
+                    cc.canonical_name AS concept_name,
+                    r.item_count,
+                    r.has_more,
+                    r.exhausted_reason,
+                    r.created_at
+                FROM practice_generation_runs r
+                JOIN concepts_canon cc
+                  ON cc.id = r.concept_id
+                 AND cc.workspace_id = r.workspace_id
+                WHERE r.run_id = :run_id
+                  AND r.workspace_id = :workspace_id
+                  AND r.user_id = :user_id
+                  AND r.generation_type = 'flashcard'
+                LIMIT 1
+                """
+            ),
+            {
+                "run_id": run_uuid,
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+            },
+        )
+        .mappings()
+        .first()
+    )
+    if run_row is None:
+        raise PracticeNotFoundError("Flashcard run not found.")
+
+    cards = (
+        session.execute(
+            text(
+                """
+                SELECT
+                    b.flashcard_id,
+                    b.front,
+                    b.back,
+                    b.hint,
+                    p.self_rating,
+                    p.passed,
+                    p.due_at,
+                    p.interval_days
+                FROM practice_flashcard_bank b
+                LEFT JOIN practice_flashcard_progress p
+                  ON p.flashcard_id = b.id
+                 AND p.user_id = :user_id
+                WHERE b.run_id = :run_pk
+                ORDER BY b.id ASC
+                """
+            ),
+            {
+                "run_pk": int(run_row["id"]),
+                "user_id": user_id,
+            },
+        )
+        .mappings()
+        .all()
+    )
+
+    return {
+        **_serialize_flashcard_run_row(run_row),
+        "flashcards": [
+            {
+                "flashcard_id": str(card["flashcard_id"]),
+                "front": str(card["front"]),
+                "back": str(card["back"]),
+                "hint": str(card["hint"]),
+                "self_rating": str(card["self_rating"]) if card["self_rating"] else None,
+                "passed": bool(card["passed"]) if card["passed"] is not None else False,
+                "due_at": card["due_at"],
+                "interval_days": float(card["interval_days"])
+                if card["interval_days"] is not None
+                else None,
+            }
+            for card in cards
+        ],
+    }
+
+
+def _serialize_flashcard_run_row(row: Any) -> dict[str, Any]:
+    return {
+        "run_id": str(row["run_id"]),
+        "workspace_id": int(row["workspace_id"]),
+        "user_id": int(row["user_id"]),
+        "concept_id": int(row["concept_id"]),
+        "concept_name": str(row["concept_name"]),
+        "item_count": int(row.get("item_count") or 0),
+        "has_more": bool(row["has_more"]),
+        "exhausted_reason": str(row["exhausted_reason"]) if row.get("exhausted_reason") else None,
+        "created_at": row["created_at"],
     }
 
 

@@ -94,8 +94,7 @@ The remaining work should stay narrow: add typed planning on top of the existing
 
 ## Remaining Slice IDs
 
-- `AR5.5` Wire query planning into runtime/API and pending-candidate execution
-- `AR5.6` Wire promotion decisions into research review and trusted-ingest flow
+- `AR5.7` Replace synthetic planned candidates with bounded provider-backed discovery execution
 
 ## Decision Log For Remaining Work
 
@@ -146,6 +145,11 @@ Verification
 - AR5.5 ✅ complete — POST /topics/execute route + service, build_query_plan + enqueue_query_results have production callsites
 - AR5.6 ✅ complete — POST /candidates/{id}/promote route + service, all promotion helpers have production callsites
 - `PYTHONPATH=. pytest -q`: 830 passed (current run)
+
+Post-review update (2026-03-01):
+
+- `execute_topic_plan()` in `domain/research/service.py` still converts planned queries into synthetic `planned://...` candidates rather than executing bounded discovery through a runtime-owned provider adapter
+- `tests/api/test_research.py::TestExecuteTopicRoute::test_route_returns_query_plan_response` is brittle: even with the service mocked, the route test still reaches auth DB resolution before the mocked service path
 
 ### Verification Block - AR5.1
 
@@ -321,6 +325,7 @@ Observed outcome
 | `domain/research/runner.py` | Current fetch/discovery engine that will need planned inputs. |
 | `apps/jobs/research_runner.py` | Current background execution seam. |
 | `domain/ingestion/post_ingest.py` | Current ingest pipeline that candidate promotion must respect. |
+| `tests/api/test_research.py` | Current route verification is not isolated from live auth/session DB dependencies. |
 
 ## Remaining Work Overview
 
@@ -331,6 +336,10 @@ The current product does not yet support the original "topic finder" flow from a
 ### 2. Research and learning are still too loosely coupled
 
 Candidates exist, but they are not yet naturally turned into guided learning opportunities.
+
+### 3. Planned execution is still synthetic
+
+`execute_topic_plan()` now has a production callsite, but it still inserts placeholder `planned://...` candidate rows instead of bounded provider-backed discovery results.
 
 ## Implementation Sequencing
 
@@ -565,6 +574,74 @@ Exit criteria:
 - promotion helpers are called by production review/ingest code
 - quiz gating is enforceable in runtime, not just in helper tests
 - AR5 can be marked `complete` again without helper-only overclaiming
+
+### AR5.7. Slice 7: Replace synthetic planned candidates with bounded provider-backed discovery
+
+Purpose:
+
+- make topic-plan execution discover real candidate sources instead of placeholder rows
+
+Root problem:
+
+- `execute_topic_plan()` currently proves wiring only by inserting synthetic `planned://...` candidates, so the runtime does not yet perform bounded provider-backed discovery from planned queries
+
+Files involved:
+
+- `domain/research/service.py`
+- `domain/research/runner.py`
+- new bounded provider adapter module(s) under `domain/research/`
+- `apps/api/routes/research.py`
+- `tests/api/test_research.py`
+- query planner / runtime integration tests as needed
+
+Implementation steps:
+
+1. Add a runtime-owned bounded query execution adapter that accepts planned queries and returns normalized result records with real URLs/titles/snippets.
+2. Make `execute_topic_plan()` call that adapter and enqueue the normalized results, preserving the current pending-candidate flow.
+3. Keep provider budgets explicit: query count, per-query result count, and total inserted candidates.
+4. Preserve a safe fallback path when providers are unavailable, but do not mark AR5 complete while only inserting `planned://...` placeholders.
+5. Stabilize route-level tests so they do not depend on live auth/session DB access just to prove service wiring.
+
+What stays the same:
+
+- all discovered results remain `pending` until explicit review
+- no automatic ingest of discovered material
+- manual source registration and existing runner flows remain available
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_query_planner.py tests/api/test_research.py tests/domain/test_runtime_integration.py`
+- targeted manual/API check proving `/research/topics/execute` can create non-synthetic pending candidates through runtime-owned discovery code
+
+Exit criteria:
+
+- `execute_topic_plan()` no longer inserts `planned://...` placeholders on the happy path
+- route-level verification is isolated from live auth/session DB coupling
+- AR5 can be marked complete without overclaiming runtime discovery
+
+### Verification Block - AR5.7
+
+Root cause
+- execute_topic_plan() only inserted synthetic planned:// candidates; no real provider-backed discovery existed
+
+Files changed
+- `domain/research/discovery_provider.py` (new: bounded query execution against workspace sources)
+- `domain/research/service.py` (execute_topic_plan calls execute_planned_queries instead of building planned:// URLs)
+- `tests/api/test_research.py` (updated mocks for discovery provider, assert real URLs)
+- `tests/domain/test_runtime_integration.py` (updated data flow tests, 4 new discovery provider tests)
+
+What changed
+- execute_planned_queries() searches registered workspace sources against query terms with per-query and total caps
+- execute_topic_plan() no longer produces synthetic planned:// candidates on the happy path
+- Graceful fallback: returns empty list when no sources are registered
+
+Commands run
+- `pytest tests/domain/test_runtime_integration.py tests/api/test_research.py -q` → 31 passed
+- `pytest tests/ -q` → 867 passed (2 pre-existing deselected)
+
+Observed outcome
+- Topic plan execution uses real provider-backed discovery
+- No removals needed
 
 ## Verification Block Template
 

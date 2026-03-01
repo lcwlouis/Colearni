@@ -59,16 +59,25 @@ The system must **never**:
   - `embedding` (optional; recommended for similarity)
   - `is_active` (true unless merged away)
   - `dirty` (bool; queued for gardener)
+  - `tier` (`concept_tier` enum: `umbrella | topic | subtopic | granular`; nullable — unknown if not set) ✅
   - `created_at`, `updated_at`
 
 - `edges_canon`
   - `workspace_id`
   - `src_concept_id`, `tgt_concept_id`
-  - `relation_type`
+  - `relation_type` — free-text; semantic types are domain-specific; **structural hierarchy types** are:
+    - `contains` — umbrella → topic (an umbrella contains this topic)
+    - `has_subtopic` — topic → subtopic (a topic has this subtopic)
+    - `belongs_to` — subtopic/topic → parent (reverse hierarchy link)
   - `description` ✅
   - `keywords[]` ✅
   - `weight` ✅
   - `updated_at`
+
+> **Structural vs. Semantic edges:** `contains`, `has_subtopic`, and `belongs_to` are *structural* hierarchy
+> edges encoding the concept tier tree. All other `relation_type` values are *semantic* knowledge edges
+> (e.g., `influences`, `requires`, `contradicts`). Structural edges should never be weighted the same as
+> semantic edges in retrieval ranking.
 
 - `provenance`
   - `workspace_id`

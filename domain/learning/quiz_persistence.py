@@ -470,3 +470,136 @@ def get_latest_quiz_summary_for_concept(
         "overall_feedback": str(grading.get("overall_feedback", "")).strip()[:200],
         "attempted": row["graded_at"] is not None,
     }
+
+
+def list_quizzes_with_latest_attempt(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    quiz_type: str,
+    concept_id: int | None = None,
+    limit: int = 20,
+) -> list[Any]:
+    """List quizzes with concept info + latest graded attempt summary."""
+    safe_limit = max(1, min(limit, 100))
+    params: dict[str, Any] = {
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "quiz_type": quiz_type,
+        "limit": safe_limit,
+    }
+    concept_filter = ""
+    if concept_id is not None:
+        concept_filter = "AND q.concept_id = :concept_id"
+        params["concept_id"] = concept_id
+
+    return (
+        session.execute(
+            text(
+                f"""
+                SELECT
+                    q.id AS quiz_id,
+                    q.workspace_id,
+                    q.user_id,
+                    q.concept_id,
+                    cc.canonical_name AS concept_name,
+                    q.status,
+                    q.created_at,
+                    COALESCE(qi.item_count, 0) AS item_count,
+                    qa.id AS attempt_id,
+                    qa.score,
+                    qa.passed,
+                    qa.grading,
+                    qa.graded_at
+                FROM quizzes q
+                LEFT JOIN concepts_canon cc ON cc.id = q.concept_id
+                LEFT JOIN LATERAL (
+                    SELECT count(*)::int AS item_count
+                    FROM quiz_items i
+                    WHERE i.quiz_id = q.id
+                ) qi ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT id, score, passed, grading, graded_at
+                    FROM quiz_attempts a
+                    WHERE a.quiz_id = q.id
+                      AND a.user_id = :user_id
+                      AND a.graded_at IS NOT NULL
+                    ORDER BY a.id DESC
+                    LIMIT 1
+                ) qa ON TRUE
+                WHERE q.workspace_id = :workspace_id
+                  AND q.user_id = :user_id
+                  AND q.quiz_type = :quiz_type
+                  {concept_filter}
+                ORDER BY q.id DESC
+                LIMIT :limit
+                """
+            ),
+            params,
+        )
+        .mappings()
+        .all()
+    )
+
+
+def load_quiz_with_latest_attempt(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    quiz_id: int,
+    quiz_type: str,
+) -> Any | None:
+    """Load one quiz row with concept info + latest graded attempt summary."""
+    return (
+        session.execute(
+            text(
+                """
+                SELECT
+                    q.id AS quiz_id,
+                    q.workspace_id,
+                    q.user_id,
+                    q.concept_id,
+                    cc.canonical_name AS concept_name,
+                    q.status,
+                    q.created_at,
+                    COALESCE(qi.item_count, 0) AS item_count,
+                    qa.id AS attempt_id,
+                    qa.score,
+                    qa.passed,
+                    qa.grading,
+                    qa.graded_at
+                FROM quizzes q
+                LEFT JOIN concepts_canon cc ON cc.id = q.concept_id
+                LEFT JOIN LATERAL (
+                    SELECT count(*)::int AS item_count
+                    FROM quiz_items i
+                    WHERE i.quiz_id = q.id
+                ) qi ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT id, score, passed, grading, graded_at
+                    FROM quiz_attempts a
+                    WHERE a.quiz_id = q.id
+                      AND a.user_id = :user_id
+                      AND a.graded_at IS NOT NULL
+                    ORDER BY a.id DESC
+                    LIMIT 1
+                ) qa ON TRUE
+                WHERE q.id = :quiz_id
+                  AND q.workspace_id = :workspace_id
+                  AND q.user_id = :user_id
+                  AND q.quiz_type = :quiz_type
+                LIMIT 1
+                """
+            ),
+            {
+                "quiz_id": quiz_id,
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "quiz_type": quiz_type,
+            },
+        )
+        .mappings()
+        .first()
+    )

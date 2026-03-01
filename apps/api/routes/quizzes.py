@@ -9,6 +9,11 @@ from adapters.db.dependencies import get_db_session
 from adapters.llm.factory import build_graph_llm_client
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.schemas import LevelUpQuizSubmitResponse, QuizCreateResponse
+from core.schemas import (
+    LevelUpPromoteToPracticeResponse,
+    LevelUpQuizDetailResponse,
+    LevelUpQuizHistoryListResponse,
+)
 from core.settings import Settings
 from domain.learning.level_up import (
     LevelUpQuizGradingError,
@@ -16,6 +21,9 @@ from domain.learning.level_up import (
     LevelUpQuizUnavailableError,
     LevelUpQuizValidationError,
     create_level_up_quiz,
+    get_level_up_quiz,
+    list_level_up_quizzes,
+    promote_level_up_quiz_to_practice,
     submit_level_up_quiz,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -91,6 +99,87 @@ def create_quiz_level_up(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Level-up quiz creation failed: {exc}",
+        ) from exc
+
+
+@router.get("/level-up", response_model=LevelUpQuizHistoryListResponse)
+def list_quiz_level_up(
+    concept_id: int | None = None,
+    limit: int = 20,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> LevelUpQuizHistoryListResponse:
+    try:
+        return LevelUpQuizHistoryListResponse.model_validate(
+            list_level_up_quizzes(
+                db,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+                concept_id=concept_id,
+                limit=min(limit, 100),
+            )
+        )
+    except LevelUpQuizValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/level-up/{quiz_id}", response_model=LevelUpQuizDetailResponse)
+def get_quiz_level_up(
+    quiz_id: int,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> LevelUpQuizDetailResponse:
+    try:
+        return LevelUpQuizDetailResponse.model_validate(
+            get_level_up_quiz(
+                db,
+                quiz_id=quiz_id,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+            )
+        )
+    except LevelUpQuizNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LevelUpQuizValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/level-up/{quiz_id}/promote",
+    status_code=status.HTTP_201_CREATED,
+    response_model=LevelUpPromoteToPracticeResponse,
+)
+def promote_level_up_quiz_route(
+    quiz_id: int,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> LevelUpPromoteToPracticeResponse:
+    try:
+        return LevelUpPromoteToPracticeResponse.model_validate(
+            promote_level_up_quiz_to_practice(
+                db,
+                quiz_id=quiz_id,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+            )
+        )
+    except LevelUpQuizNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except LevelUpQuizValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except LevelUpQuizUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
         ) from exc
 
 

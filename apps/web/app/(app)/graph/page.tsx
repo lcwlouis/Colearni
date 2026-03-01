@@ -48,6 +48,9 @@ export default function GraphPage() {
           handleGraphBgClick={g.handleGraphBgClick}
           selectConcept={g.selectConcept}
           setQuery={g.setQuery}
+          filteredTiers={g.filteredTiers}
+          toggleTierFilter={g.toggleTierFilter}
+          clearTierFilter={g.clearTierFilter}
         />
 
         <GraphDetailPanel

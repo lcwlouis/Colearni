@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from core.schemas import EvidenceItem, EvidenceSourceType
+from core.schemas import EvidenceItem, EvidenceSourceType, GroundingMode
 from domain.chat.tutor_agent import (
     build_tutor_prompt,
     build_tutor_response_text,
@@ -47,6 +47,7 @@ def test_build_tutor_response_falls_back_on_provider_failure() -> None:
         query="Explain linear maps",
         evidence=_sample_evidence(),
         mastery_status="learned",
+        grounding_mode=GroundingMode.HYBRID,
         llm_client=FailingTutorClient(),
     )
 
@@ -58,8 +59,10 @@ def test_build_tutor_prompt_includes_socratic_constraints() -> None:
         query="How do I derive this?",
         evidence=_sample_evidence(),
         style="socratic",
+        grounding_mode=GroundingMode.HYBRID,
     )
 
     assert "guiding question" in prompt.lower()
     assert "study partner" in prompt.lower()
     assert "How do I derive this?" in prompt
+    assert "STRICT_GROUNDED_MODE: false" in prompt

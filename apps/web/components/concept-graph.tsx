@@ -26,6 +26,7 @@ type Props = {
   focusNodeId?: number | null;
   searchHighlight?: string;
   onResetViewReady?: (resetFn: () => void) => void;
+  filteredTiers?: ReadonlySet<string>;
 };
 
 interface GNode extends SimulationNodeDatum {
@@ -71,6 +72,7 @@ export function ConceptGraph({
   focusNodeId,
   searchHighlight,
   onResetViewReady,
+  filteredTiers,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -463,6 +465,23 @@ export function ConceptGraph({
       circle.setAttribute("stroke-width", node.id === selectedId ? "3" : "2");
     }
   }, [selectedId]);
+
+  // ── In-place tier filter dimming (no simulation rebuild) ──
+  useEffect(() => {
+    const groups = nodeGroupsRef.current;
+    if (groups.length === 0) return;
+    if (!filteredTiers || filteredTiers.size === 0) {
+      for (const { g } of groups) g.removeAttribute("opacity");
+      return;
+    }
+    for (const { node, g } of groups) {
+      if (node.tier && filteredTiers.has(node.tier)) {
+        g.removeAttribute("opacity");
+      } else {
+        g.setAttribute("opacity", "0.15");
+      }
+    }
+  }, [filteredTiers]);
 
   if (nodes.length === 0) {
     return <p className="status empty">No graph data yet.</p>;

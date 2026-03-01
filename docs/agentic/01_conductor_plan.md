@@ -156,9 +156,11 @@ Verification
 
 ## Current Verification Status
 
-- `pytest -q`: not re-run during this planning pass
-- `tests/domain/test_query_analyzer.py`: exists, but not re-run during this planning pass
-- Runtime wiring of `QueryAnalysis`: not confirmed in the live tutor path
+- `pytest -q`: 555 passed (with `PYTHONPATH=.`, as of 2026-02-28)
+- `npm --prefix apps/web test`: 87 passed (13 test files, as of 2026-02-28)
+- `tests/domain/test_query_analyzer.py`: exists and passes
+- Runtime wiring of `QueryAnalysis`: not yet confirmed in the live tutor path
+- Post-implementation review (2026-03-01): `build_turn_plan()` still receives `has_documents=True` from both live tutor paths in `domain/chat/respond.py` and `domain/chat/stream.py`, so the onboarding branch is not planner-owned yet; `TurnPlan.research_need` also remains hardcoded `False`. Keep this as a follow-up candidate if it starts blocking reopened evidence/research work.
 
 Current hotspots:
 
@@ -434,7 +436,192 @@ Exit criteria:
 - quiz launch is a deliberate part of the tutor orchestration
 - explicit user quiz requests can open/start the existing flow safely
 
-## Verification Block Template
+## Completed Verification Blocks
+
+### Verification Block - AR0.1
+
+Root cause
+- docs understated prompt asset infrastructure and overstated explicit agent boundaries
+
+Files changed
+- `docs/ARCHITECTURE.md`
+- `docs/DRIFT_REPORT.md`
+- `docs/AGENTIC_MASTER_PLAN.md`
+- `docs/agentic/01_conductor_plan.md`
+
+What changed
+- Updated ARCHITECTURE.md: added status note clarifying conductor target and query_analyzer seam; updated repo structure to match reality (schemas/, web app, parsers include pdf); replaced "UI (later)" with "Next.js Web App"; corrected non-goals
+- Updated DRIFT_REPORT.md: added prompt asset system and query_analyzer to current state snapshot
+- Updated verification status in both master plan and conductor plan with actual test counts
+
+Commands run
+- `PYTHONPATH=. pytest -q` → 555 passed
+- `npx vitest run` (apps/web) → 87 passed
+
+Manual verification
+- doc review against current runtime files
+
+Observed outcome
+- docs now accurately reflect current runtime state and conductor target
+
+Removal Entries: none
+
+### Verification Block - AR1.2
+
+Root cause
+- tutor orchestration depended on scattered local variables rather than a stable plan object
+
+Files changed
+- `domain/chat/turn_plan.py` (new)
+- `domain/chat/respond.py`
+- `domain/chat/stream.py`
+- `tests/domain/test_turn_plan.py` (new)
+
+What changed
+- Created `TurnPlan` frozen dataclass with fields: intent, requested_mode, needs_retrieval, resolved_concept_hint, teaching_strategy, research_need, should_offer_quiz, should_start_quiz, quiz_kind, quiz_concept_id, status_steps
+- Created `build_turn_plan()` factory function that assembles plan from query analysis, mastery status, concept resolution, and document state
+- Wired `build_turn_plan()` into both blocking and streaming paths after mastery resolution
+- Added 14 unit tests covering all teaching strategies, quiz hints, concept hints, status steps, immutability
+
+Commands run
+- `PYTHONPATH=. pytest -q` → 576 passed (14 new)
+- `npx vitest run` (apps/web) → 87 passed
+
+Manual verification
+- code review confirms plan is constructed and logged in both paths
+
+Observed outcome
+- tutor orchestration now uses a canonical plan object in both paths
+
+Removal Entries: none
+
+### Verification Block - AR1.1
+
+Tests
+- Backend: 562 passed (`PYTHONPATH=. pytest -q`)
+- Frontend: 87 passed (`npx vitest run` in `apps/web/`)
+
+### Verification Block - AR1.3
+
+Root cause
+- Retrieval always ran regardless of plan intent. Concept resolution and mastery
+  lookups were interleaved with retrieval even though they are DB-only lookups.
+- Query analysis fallback used needs_retrieval=False which broke grounded behavior
+  when the LLM call fails.
+
+Files changed
+- `domain/chat/respond.py` — reordered concept resolution + mastery before retrieval;
+  gated retrieval on `turn_plan.needs_retrieval`; extracted resolved_concept_id /
+  resolved_name variables; added plan attributes to span
+- `domain/chat/stream.py` — same changes for streaming parity
+- `domain/chat/query_analyzer.py` — changed fallback to needs_retrieval=True (safe default)
+- `tests/domain/test_query_analyzer.py` — updated fallback assertions
+
+What changed
+- Concept resolution and mastery status moved before retrieval (they're DB-only)
+- TurnPlan built before retrieval so it can gate the call
+- Retrieval skipped when plan says needs_retrieval=False (empty ranked_chunks)
+- Fallback query analysis always retrieves (safe for grounded tutor)
+- Plan attributes emitted on span for observability
+
+Commands run
+- `PYTHONPATH=. pytest -q` → 576 passed
+- `npx vitest run` (in apps/web) → 87 passed
+
+Observed outcome
+- Plan-gated retrieval works correctly
+- Onboarding detection preserved (fallback retrieves → empty workspace detected)
+- Blocking/streaming parity maintained
+
+### Verification Block - AR1.4
+
+Root cause
+- Planner decisions were invisible — no trace surface for debugging turn planning
+
+Files changed
+- `core/schemas/assistant.py` — added plan_intent, plan_strategy, plan_needs_retrieval,
+  plan_concept_hint, plan_should_offer_quiz, plan_should_start_quiz to GenerationTrace
+- `domain/chat/respond.py` — enrich generation_trace with plan metadata before envelope
+- `domain/chat/stream.py` — same enrichment for streaming parity
+- `apps/web/lib/api/types.ts` — added plan trace fields to GenerationTrace interface
+- `apps/web/components/chat-response.tsx` — show plan_strategy in dev-mode trace summary
+- `tests/domain/test_g5_trace.py` — 4 new tests for planner trace shape, serialization,
+  round-trip, and model_copy merge
+
+What changed
+- GenerationTrace now carries 6 optional plan_* fields from TurnPlan
+- Both blocking and streaming paths enrich the trace before envelope assembly
+- Frontend dev panel shows plan strategy in the trace summary line
+- Plan metadata visible in the full JSON dump in dev mode
+
+Commands run
+- `PYTHONPATH=. pytest -q` → 580 passed
+- `npx vitest run` (in apps/web) → 87 passed
+
+Observed outcome
+- Planner decisions observable in trace without exposing chain-of-thought
+- All existing trace tests still pass
+- Blocking/streaming parity maintained
+
+Files changed
+- `domain/chat/query_analyzer.py`
+- `domain/chat/respond.py`
+- `domain/chat/stream.py`
+- `tests/domain/test_query_analyzer.py`
+
+What changed
+- Added `run_query_analysis()` entrypoint to `query_analyzer.py` that takes an LLM client, builds the prompt, calls the LLM, and parses the JSON result with conservative fallback on any failure
+- Wired `run_query_analysis()` into `generate_chat_response()` (blocking) and `_stream_inner()` (streaming) before retrieval, after social fast-path
+- Both paths use the same analysis seam and log the result
+- Added 7 tests for `run_query_analysis()` covering: no client, success, runtime errors, value errors, unexpected errors, garbage response, history forwarding
+
+Commands run
+- `PYTHONPATH=. pytest -q` → 562 passed (7 new)
+- `npx vitest run` (apps/web) → 87 passed
+
+Manual verification
+- code review confirms blocking and streaming paths share the same analysis seam
+
+Observed outcome
+- runtime can classify turn intent before retrieval in both paths
+
+Removal Entries: none
+
+### Verification Block - AR1.5
+
+Root cause
+- Quiz creation existed but was not a planner-owned tutor action; no distinction
+  between "offer quiz" and "start quiz now" in the action system
+
+Files changed
+- `core/schemas/assistant.py` — expanded ActionCTA.action_type with "quiz_offer" and
+  "quiz_start" literals
+- `domain/chat/respond.py` — emit plan-driven quiz actions before readiness CTAs
+- `domain/chat/stream.py` — same quiz action logic for streaming parity
+- `apps/web/lib/api/types.ts` — added "quiz_offer" | "quiz_start" to ActionCTA type
+- `apps/web/components/chat-response.tsx` — added CTA labels for quiz_offer/quiz_start
+- `apps/web/features/tutor/components/tutor-timeline.tsx` — added onCtaClick prop,
+  wired to ChatResponse
+- `apps/web/app/(app)/tutor/page.tsx` — added handleCtaClick callback that sets concept,
+  opens quiz drawer, and optionally auto-starts level-up for quiz_start
+- `tests/core/test_wow_schemas.py` — 3 new tests for quiz_offer, quiz_start, and
+  envelope serialization round-trip
+
+What changed
+- TurnPlan quiz decisions now produce first-class CTA actions (quiz_offer/quiz_start)
+  inserted at position 0 of the actions list, ahead of readiness CTAs
+- Frontend renders quiz CTA buttons and clicking them opens the existing quiz drawer,
+  sets the concept, and auto-starts quiz creation for "quiz_start"
+- User confirmation preserved via quiz drawer UI for "quiz_offer"
+
+Commands run
+- `PYTHONPATH=. pytest -q` → 583 passed
+- `npx vitest run` (in apps/web) → 87 passed
+
+Observed outcome
+- Quiz launch is a deliberate planner-driven action
+- Existing readiness CTAs and quiz drawer preserved
+- Blocking/streaming parity maintained
 
 ```text
 Verification Block - AR1.x
@@ -475,7 +662,18 @@ Execution loop for this child plan:
    - a summary of all Removal Entries added during that slice
 5. After every 2 completed AR0/AR1 slices OR if context is compacted/summarized, re-open docs/AGENTIC_MASTER_PLAN.md and docs/agentic/01_conductor_plan.md and restate which AR0/AR1 slices remain.
 6. Continue to the next incomplete AR0/AR1 slice once the previous slice is verified.
-7. When all AR0/AR1 slices are complete, return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
+7. When all AR0/AR1 slices are complete, immediately re-open docs/AGENTIC_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
+
+Do NOT stop just because AR0/AR1 is complete. AR0/AR1 completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+
+START:
+
+Read docs/AGENTIC_MASTER_PLAN.md.
+Read docs/agentic/01_conductor_plan.md.
+Begin with the current AR0/AR1 slice in execution order exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When AR0/AR1 is complete, immediately return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

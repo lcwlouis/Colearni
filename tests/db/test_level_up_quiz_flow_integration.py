@@ -621,3 +621,110 @@ def test_level_up_mcq_only_submission_works_without_llm() -> None:
         session.close()
         if bind is not None:
             bind.dispose()
+
+
+def test_level_up_history_and_promote_to_practice_flow() -> None:
+    session = _session_or_skip()
+    workspace_id, ws_pid, user_id, concept_id = _seed(session)
+    mock_user = _make_user_row(session, user_id)
+    grader = DeterministicQuizGrader(score=1.0, critical=False)
+    app, client = _client(session, grader, user=mock_user)
+    try:
+        created = client.post(
+            f"/workspaces/{ws_pid}/quizzes/level-up",
+            json={
+                "concept_id": concept_id,
+                "question_count": 5,
+            },
+        )
+        assert created.status_code == 201
+        level_up_quiz = created.json()
+
+        listed_before = client.get(
+            f"/workspaces/{ws_pid}/quizzes/level-up",
+            params={"concept_id": concept_id},
+        )
+        assert listed_before.status_code == 200
+        first_before = listed_before.json()["quizzes"][0]
+        assert first_before["quiz_id"] == level_up_quiz["quiz_id"]
+        assert first_before["latest_attempt"] is None
+
+        submitted = client.post(
+            f"/workspaces/{ws_pid}/quizzes/{level_up_quiz['quiz_id']}/submit",
+            json={
+                "answers": _correct_mcq_answers(
+                    session,
+                    str(level_up_quiz["quiz_id"]),
+                    level_up_quiz["items"],
+                ),
+            },
+        )
+        assert submitted.status_code == 200
+
+        detail = client.get(
+            f"/workspaces/{ws_pid}/quizzes/level-up/{level_up_quiz['quiz_id']}",
+        )
+        assert detail.status_code == 200
+        detail_payload = detail.json()
+        assert detail_payload["quiz_id"] == level_up_quiz["quiz_id"]
+        assert detail_payload["latest_attempt"] is not None
+        assert len(detail_payload["items"]) == len(level_up_quiz["items"])
+
+        mastery_before = session.execute(
+            text(
+                "SELECT status, score FROM mastery "
+                "WHERE workspace_id = :workspace_id AND user_id = :user_id AND concept_id = :concept_id"
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+            },
+        ).mappings().first()
+        assert mastery_before is not None
+
+        promoted = client.post(
+            f"/workspaces/{ws_pid}/quizzes/level-up/{level_up_quiz['quiz_id']}/promote",
+        )
+        assert promoted.status_code == 201
+        promoted_payload = promoted.json()
+        assert promoted_payload["source_quiz_id"] == level_up_quiz["quiz_id"]
+        practice_quiz = promoted_payload["practice_quiz"]
+        assert len(practice_quiz["items"]) == len(level_up_quiz["items"])
+
+        practice_submitted = client.post(
+            f"/workspaces/{ws_pid}/practice/quizzes/{practice_quiz['quiz_id']}/submit",
+            json={
+                "answers": _correct_mcq_answers(
+                    session,
+                    str(practice_quiz["quiz_id"]),
+                    practice_quiz["items"],
+                ),
+            },
+        )
+        assert practice_submitted.status_code == 200, practice_submitted.text
+        practice_payload = practice_submitted.json()
+        assert "mastery_status" not in practice_payload
+        assert "mastery_score" not in practice_payload
+
+        mastery_after = session.execute(
+            text(
+                "SELECT status, score FROM mastery "
+                "WHERE workspace_id = :workspace_id AND user_id = :user_id AND concept_id = :concept_id"
+            ),
+            {
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "concept_id": concept_id,
+            },
+        ).mappings().first()
+        assert mastery_after is not None
+        assert str(mastery_after["status"]) == str(mastery_before["status"])
+        assert float(mastery_after["score"]) == float(mastery_before["score"])
+    finally:
+        app.dependency_overrides.clear()
+        client.close()
+        bind = session.get_bind()
+        session.close()
+        if bind is not None:
+            bind.dispose()

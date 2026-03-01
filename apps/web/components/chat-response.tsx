@@ -11,6 +11,8 @@ const ctaLabel: Record<string, string> = {
   quiz_cta: "📝 Take a quiz",
   review_cta: "🔄 Review",
   research_cta: "🔍 Research",
+  quiz_offer: "📝 Ready for a quiz?",
+  quiz_start: "🚀 Start quiz now",
 };
 
 /**
@@ -112,6 +114,7 @@ export function ChatResponse({ response, onCtaClick }: { response: AssistantResp
         <details className="chat-trace-panel" style={{ marginTop: "0.5rem", fontSize: "0.75rem", opacity: 0.6 }}>
           <summary style={{ cursor: "pointer" }}>
             ⚡ {response.generation_trace.model ?? "unknown"} · {response.generation_trace.timing_ms ?? "?"}ms · {response.generation_trace.total_tokens ?? "?"} tokens
+            {response.generation_trace.plan_strategy ? ` · 🎯 ${response.generation_trace.plan_strategy}` : null}
           </summary>
           <pre style={{ margin: "0.25rem 0", whiteSpace: "pre-wrap", fontSize: "0.7rem" }}>
             {JSON.stringify(response.generation_trace, null, 2)}
