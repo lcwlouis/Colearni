@@ -93,9 +93,24 @@ def build_document_summaries_context(
     session: Session,
     workspace_id: int,
     chunks: list[RankedChunk],
+    expanded_document_ids: list[int] | None = None,
 ) -> str:
-    """Build a context string of document summaries referenced by retrieved chunks."""
-    doc_ids = list(dict.fromkeys(c.document_id for c in chunks))[:5]
+    """Build a context string of document summaries referenced by retrieved chunks.
+
+    When *expanded_document_ids* is provided (from the evidence planner),
+    those IDs are merged ahead of chunk-derived IDs so planner-selected
+    documents influence tutor context even when they have no matching chunks.
+    """
+    chunk_doc_ids = list(dict.fromkeys(c.document_id for c in chunks))
+    # Merge planner-expanded IDs first, then chunk-derived, dedup, cap at 5
+    if expanded_document_ids:
+        merged: list[int] = list(expanded_document_ids)
+        for did in chunk_doc_ids:
+            if did not in merged:
+                merged.append(did)
+        doc_ids = merged[:5]
+    else:
+        doc_ids = chunk_doc_ids[:5]
     if not doc_ids:
         return ""
     summaries: list[str] = []

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call, patch
 from domain.retrieval.evidence_planner import (
     EvidencePlan,
     _coverage_sufficient,
+    _discover_provenance_chunk_ids,
     _expand_graph_neighbors,
     _merge_chunks,
     _plan_follow_up_subqueries,
@@ -475,6 +476,17 @@ class TestGraphExpansion:
         )
         assert names == []
 
+    def test_expand_graph_neighbors_rolls_back_on_failure(self):
+        session = MagicMock()
+        with patch("domain.graph.explore.get_bounded_subgraph", side_effect=RuntimeError("boom")):
+            names = _expand_graph_neighbors(
+                session,
+                workspace_id=1,
+                concept_id=7,
+            )
+        assert names == []
+        session.rollback.assert_called_once()
+
     def test_document_summaries_flag_active(self):
         plan = build_evidence_plan(
             base_query="q",
@@ -532,6 +544,19 @@ class TestSourceAccounting:
 
 class TestProvenanceExpansion:
     """Verify provenance-linked expansion stage (AR2.5)."""
+
+    def test_discover_provenance_rolls_back_on_failure(self):
+        session = MagicMock()
+        session.execute.side_effect = RuntimeError("boom")
+
+        chunk_ids = _discover_provenance_chunk_ids(
+            session,
+            workspace_id=1,
+            concept_id=5,
+        )
+
+        assert chunk_ids == []
+        session.rollback.assert_called_once()
 
     @patch("domain.retrieval.evidence_planner._discover_provenance_chunk_ids")
     @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
@@ -739,3 +764,158 @@ class TestDocumentSummaryExpansion:
         )
         assert updated.provenance_chunks_added == 3
         assert updated.expanded_document_ids == [10, 20]
+
+
+# ---------------------------------------------------------------------------
+# AR2.6: build_document_summaries_context with expanded_document_ids
+# ---------------------------------------------------------------------------
+
+
+class TestDocumentSummariesExpansion:
+    """AR2.6: Verify planner-expanded doc IDs change tutor context."""
+
+    def _make_chunk(self, chunk_id: int, document_id: int = 1) -> RankedChunk:
+        return RankedChunk(
+            workspace_id=1,
+            document_id=document_id,
+            chunk_id=chunk_id,
+            chunk_index=0,
+            text=f"chunk-{chunk_id}",
+            score=0.5,
+            retrieval_method="hybrid",
+        )
+
+    @patch("domain.chat.evidence_builder.get_document_by_id")
+    def test_expanded_ids_added_to_context(self, mock_get_doc: MagicMock) -> None:
+        """Planner-expanded doc IDs appear in summaries even without matching chunks."""
+        from domain.chat.evidence_builder import build_document_summaries_context
+
+        mock_get_doc.side_effect = lambda session, *, workspace_id, document_id: MagicMock(
+            title=f"Doc {document_id}", summary=f"Summary of doc {document_id}"
+        )
+
+        session = MagicMock()
+        chunks = [self._make_chunk(1, document_id=100)]
+
+        result = build_document_summaries_context(
+            session=session,
+            workspace_id=1,
+            chunks=chunks,
+            expanded_document_ids=[200, 300],
+        )
+
+        assert "Doc 200" in result
+        assert "Doc 300" in result
+        assert "Doc 100" in result
+
+    @patch("domain.chat.evidence_builder.get_document_by_id")
+    def test_expanded_ids_prioritized_over_chunk_ids(self, mock_get_doc: MagicMock) -> None:
+        """Expanded IDs come first in the merged list."""
+        from domain.chat.evidence_builder import build_document_summaries_context
+
+        call_order: list[int] = []
+
+        def track_calls(session, *, workspace_id, document_id):
+            call_order.append(document_id)
+            return MagicMock(title=f"Doc {document_id}", summary=f"Summary {document_id}")
+
+        mock_get_doc.side_effect = track_calls
+
+        session = MagicMock()
+        chunks = [self._make_chunk(1, document_id=50)]
+
+        build_document_summaries_context(
+            session=session,
+            workspace_id=1,
+            chunks=chunks,
+            expanded_document_ids=[10, 20],
+        )
+
+        # Expanded IDs should be queried first
+        assert call_order == [10, 20, 50]
+
+    @patch("domain.chat.evidence_builder.get_document_by_id")
+    def test_dedup_across_expanded_and_chunk_ids(self, mock_get_doc: MagicMock) -> None:
+        """Overlapping IDs are not queried twice."""
+        from domain.chat.evidence_builder import build_document_summaries_context
+
+        call_order: list[int] = []
+
+        def track_calls(session, *, workspace_id, document_id):
+            call_order.append(document_id)
+            return MagicMock(title=f"Doc {document_id}", summary=f"Summary {document_id}")
+
+        mock_get_doc.side_effect = track_calls
+
+        session = MagicMock()
+        chunks = [self._make_chunk(1, document_id=10)]  # same as expanded
+
+        build_document_summaries_context(
+            session=session,
+            workspace_id=1,
+            chunks=chunks,
+            expanded_document_ids=[10, 20],
+        )
+
+        # Doc 10 should appear only once
+        assert call_order == [10, 20]
+
+    @patch("domain.chat.evidence_builder.get_document_by_id")
+    def test_cap_at_five_with_expansion(self, mock_get_doc: MagicMock) -> None:
+        """Total doc IDs capped at 5 even with many expanded + chunk IDs."""
+        from domain.chat.evidence_builder import build_document_summaries_context
+
+        mock_get_doc.side_effect = lambda session, *, workspace_id, document_id: MagicMock(
+            title=f"Doc {document_id}", summary=f"Summary {document_id}"
+        )
+
+        session = MagicMock()
+        chunks = [self._make_chunk(i, document_id=100 + i) for i in range(5)]
+
+        result = build_document_summaries_context(
+            session=session,
+            workspace_id=1,
+            chunks=chunks,
+            expanded_document_ids=[1, 2, 3, 4],
+        )
+
+        # 4 expanded + 1 chunk = 5 (cap)
+        lines = [l for l in result.split("\n") if l.strip()]
+        assert len(lines) == 5
+
+    @patch("domain.chat.evidence_builder.get_document_by_id")
+    def test_no_expanded_ids_preserves_original_behavior(self, mock_get_doc: MagicMock) -> None:
+        """Without expanded_document_ids, behavior is unchanged."""
+        from domain.chat.evidence_builder import build_document_summaries_context
+
+        mock_get_doc.side_effect = lambda session, *, workspace_id, document_id: MagicMock(
+            title=f"Doc {document_id}", summary=f"Summary {document_id}"
+        )
+
+        session = MagicMock()
+        chunks = [self._make_chunk(1, document_id=42)]
+
+        result = build_document_summaries_context(
+            session=session,
+            workspace_id=1,
+            chunks=chunks,
+        )
+
+        assert "Doc 42" in result
+        mock_get_doc.assert_called_once()
+
+    def test_respond_passes_expanded_ids(self) -> None:
+        """respond.py passes expanded_document_ids to build_document_summaries_context."""
+        import importlib
+        import inspect
+
+        source = inspect.getsource(importlib.import_module("domain.chat.respond"))
+        assert "expanded_document_ids=evidence_plan.expanded_document_ids" in source
+
+    def test_stream_passes_expanded_ids(self) -> None:
+        """stream.py passes expanded_document_ids to build_document_summaries_context."""
+        import importlib
+        import inspect
+
+        source = inspect.getsource(importlib.import_module("domain.chat.stream"))
+        assert "expanded_document_ids=evidence_plan.expanded_document_ids" in source

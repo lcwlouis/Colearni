@@ -330,6 +330,7 @@ def generate_chat_response(
                     session=session,
                     workspace_id=request.workspace_id,
                     chunks=ranked_chunks,
+                    expanded_document_ids=evidence_plan.expanded_document_ids,
                 ),
                 quiz_context=combined_quiz_context,
                 flashcard_progress=flashcard_progress,
