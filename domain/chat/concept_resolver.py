@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 
 SwitchDecision = Literal["accept", "reject"]
 
+# Below this confidence, weak mismatches are suppressed and the current concept
+# is preserved.  Only strong evidence (exact name match, multi-token overlap,
+# or explicit user language) triggers a switch suggestion.
+_SWITCH_CONFIDENCE_THRESHOLD = 0.75
+
 
 @dataclass(frozen=True)
 class ConceptInfo:
@@ -97,11 +102,21 @@ def resolve_concept_for_turn(
     resolved = inferred or suggested or current
     confidence = _to_confidence(score=score, used_suggestion=resolved == suggested)
 
+    # Stay on the current concept when the switch signal is weak.
+    if (
+        current is not None
+        and resolved is not None
+        and current.concept_id != resolved.concept_id
+        and confidence < _SWITCH_CONFIDENCE_THRESHOLD
+    ):
+        resolved = current
+
     switch_suggestion: ConceptSwitchSuggestion | None = None
     if (
         current is not None
         and resolved is not None
         and current.concept_id != resolved.concept_id
+        and confidence >= _SWITCH_CONFIDENCE_THRESHOLD
     ):
         switch_suggestion = ConceptSwitchSuggestion(
             from_concept_id=current.concept_id,
@@ -326,5 +341,6 @@ __all__ = [
     "ConceptResolution",
     "ConceptSwitchSuggestion",
     "SwitchDecision",
+    "_SWITCH_CONFIDENCE_THRESHOLD",
     "resolve_concept_for_turn",
 ]

@@ -5,6 +5,7 @@ from typing import Any
 from domain.chat.concept_resolver import (
     ConceptInfo,
     _infer_concept,
+    _SWITCH_CONFIDENCE_THRESHOLD,
     resolve_concept_for_turn,
 )
 
@@ -97,3 +98,88 @@ def test_resolve_concept_emits_switch_suggestion(monkeypatch: Any) -> None:
     assert resolution.switch_suggestion is not None
     assert resolution.switch_suggestion.from_concept_id == 1
     assert resolution.switch_suggestion.to_concept_id == 2
+
+
+def test_weak_mismatch_stays_on_current_concept(monkeypatch: Any) -> None:
+    """A partial token overlap (confidence < threshold) should NOT trigger a switch."""
+    concept_current = ConceptInfo(concept_id=1, canonical_name="Linear Map")
+    concept_next = ConceptInfo(concept_id=2, canonical_name="Gradient Descent")
+
+    def fake_by_id(
+        _session: Any,
+        *,
+        workspace_id: int,
+        concept_id: int | None,
+    ) -> ConceptInfo | None:
+        _ = workspace_id
+        if concept_id == 1:
+            return concept_current
+        if concept_id == 2:
+            return concept_next
+        return None
+
+    monkeypatch.setattr("domain.chat.concept_resolver._concept_by_id", fake_by_id)
+    # score=2.0 → confidence 0.65, below threshold
+    monkeypatch.setattr(
+        "domain.chat.concept_resolver._infer_concept",
+        lambda *args, **kwargs: (concept_next, 2.0),
+    )
+
+    resolution = resolve_concept_for_turn(
+        _SessionWithExecute(),
+        workspace_id=1,
+        query="Something about gradients maybe",
+        history_text="linear map",
+        current_concept_id=1,
+        suggested_concept_id=None,
+        switch_decision=None,
+    )
+    # Should stay on current concept
+    assert resolution.resolved_concept is not None
+    assert resolution.resolved_concept.concept_id == 1
+    assert resolution.switch_suggestion is None
+
+
+def test_strong_mismatch_suggests_switch(monkeypatch: Any) -> None:
+    """An exact match (confidence >= threshold) should create a switch suggestion."""
+    concept_current = ConceptInfo(concept_id=1, canonical_name="Linear Map")
+    concept_next = ConceptInfo(concept_id=2, canonical_name="Gradient Descent")
+
+    def fake_by_id(
+        _session: Any,
+        *,
+        workspace_id: int,
+        concept_id: int | None,
+    ) -> ConceptInfo | None:
+        _ = workspace_id
+        if concept_id == 1:
+            return concept_current
+        if concept_id == 2:
+            return concept_next
+        return None
+
+    monkeypatch.setattr("domain.chat.concept_resolver._concept_by_id", fake_by_id)
+    # score=3.0 → confidence 0.8, above threshold
+    monkeypatch.setattr(
+        "domain.chat.concept_resolver._infer_concept",
+        lambda *args, **kwargs: (concept_next, 3.0),
+    )
+
+    resolution = resolve_concept_for_turn(
+        _SessionWithExecute(),
+        workspace_id=1,
+        query="Explain gradient descent in detail",
+        history_text="linear map",
+        current_concept_id=1,
+        suggested_concept_id=None,
+        switch_decision=None,
+    )
+    assert resolution.resolved_concept is not None
+    assert resolution.resolved_concept.concept_id == 2
+    assert resolution.switch_suggestion is not None
+    assert resolution.switch_suggestion.to_concept_id == 2
+
+
+def test_switch_threshold_is_reasonable() -> None:
+    """Threshold should be between 0.5 and 0.95 to avoid too-eager or too-strict policy."""
+    assert 0.5 < _SWITCH_CONFIDENCE_THRESHOLD < 0.95
