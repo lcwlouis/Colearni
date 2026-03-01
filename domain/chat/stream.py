@@ -220,6 +220,15 @@ def _stream_inner(
     )
     learner_profile_summary = learner_snapshot.summary_text()
 
+    # ── Background trace state (AR6.5) ────────────────────────────────
+    from domain.chat.background_trace import fetch_background_trace_state
+
+    bg_state = fetch_background_trace_state(
+        session,
+        workspace_id=request.workspace_id,
+        user_id=request.user_id,
+    )
+
     # ── Turn plan (AR1.2 / AR1.3) ─────────────────────────────────────
     turn_plan = build_turn_plan(
         query_analysis=query_analysis,
@@ -505,6 +514,10 @@ def _stream_inner(
         "learner_frontier_count": len(learner_snapshot.current_frontier),
         "learner_review_count": len(learner_snapshot.review_queue),
         "learner_profile_summary": learner_profile_summary or None,
+        "bg_digest_available": bg_state.digest_available,
+        "bg_frontier_suggestion_count": bg_state.frontier_suggestion_count,
+        "bg_research_candidate_pending": bg_state.research_candidate_pending,
+        "bg_research_candidate_approved": bg_state.research_candidate_approved,
     })
 
     envelope = envelope.model_copy(
