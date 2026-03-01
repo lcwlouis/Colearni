@@ -409,6 +409,8 @@ def generate_chat_response(
             "evidence_plan_passes": evidence_plan.retrieval_passes_used,
             "evidence_plan_retrieved_count": evidence_plan.retrieved_chunk_count,
             "evidence_plan_used_count": len(envelope.evidence) if envelope.evidence else 0,
+            "evidence_plan_provenance_chunks": evidence_plan.provenance_chunks_added,
+            "evidence_plan_doc_summary_ids": len(evidence_plan.expanded_document_ids),
             "learner_weak_topic_count": len(learner_snapshot.weak_topics),
             "learner_strong_topic_count": len(learner_snapshot.strong_topics),
             "learner_frontier_count": len(learner_snapshot.current_frontier),

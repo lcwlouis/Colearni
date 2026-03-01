@@ -67,6 +67,8 @@ class EvidencePlan:
     stop_reason: StopReason = "initial"
     retrieved_chunk_count: int = 0
     retrieval_passes_used: int = 0
+    provenance_chunks_added: int = 0
+    expanded_document_ids: list[int] = field(default_factory=list)
 
     def with_results(
         self,
@@ -74,6 +76,8 @@ class EvidencePlan:
         stop_reason: StopReason,
         retrieved_chunk_count: int,
         retrieval_passes_used: int | None = None,
+        provenance_chunks_added: int | None = None,
+        expanded_document_ids: list[int] | None = None,
     ) -> EvidencePlan:
         """Return a copy capturing post-retrieval results."""
         return EvidencePlan(
@@ -95,6 +99,16 @@ class EvidencePlan:
                 retrieval_passes_used
                 if retrieval_passes_used is not None
                 else self.retrieval_passes_used
+            ),
+            provenance_chunks_added=(
+                provenance_chunks_added
+                if provenance_chunks_added is not None
+                else self.provenance_chunks_added
+            ),
+            expanded_document_ids=(
+                expanded_document_ids
+                if expanded_document_ids is not None
+                else self.expanded_document_ids
             ),
         )
 
@@ -133,6 +147,52 @@ def _plan_follow_up_subqueries(
 
 _GRAPH_HOP_BUDGET_DEFAULT = 1
 _GRAPH_MAX_NEIGHBOR_SUBQUERIES = 2
+_PROVENANCE_EXPANSION_BUDGET = 10
+
+
+def _discover_provenance_chunk_ids(
+    session: object,
+    *,
+    workspace_id: int,
+    concept_id: int,
+) -> list[int]:
+    """Return provenance-linked chunk IDs for a concept.
+
+    Uses the provenance table to find chunks that are linked to the
+    concept.  Returns empty list on failure or if session lacks execute
+    capability (test stubs).
+    """
+    if not hasattr(session, "execute"):
+        return []
+    try:
+        from sqlalchemy import text
+
+        rows = (
+            session.execute(
+                text(
+                    """
+                    SELECT chunk_id
+                    FROM provenance
+                    WHERE workspace_id = :workspace_id
+                      AND target_type = 'concept'
+                      AND target_id = :concept_id
+                    ORDER BY chunk_id ASC
+                    LIMIT 50
+                    """
+                ),
+                {"workspace_id": workspace_id, "concept_id": concept_id},
+            )
+            .mappings()
+            .all()
+        )
+        return [int(row["chunk_id"]) for row in rows]
+    except Exception:
+        log.debug(
+            "provenance discovery failed for concept_id=%d",
+            concept_id,
+            exc_info=True,
+        )
+        return []
 
 
 def _expand_graph_neighbors(
@@ -210,6 +270,7 @@ def build_evidence_plan(
     neighbor_names: list[str] = []
     expand_graph = False
     graph_hop_budget = 0
+    provenance_ids: list[int] = []
     if concept_id is not None and session is not None:
         neighbor_names = _expand_graph_neighbors(
             session,
@@ -219,6 +280,12 @@ def build_evidence_plan(
         if neighbor_names:
             expand_graph = True
             graph_hop_budget = _GRAPH_HOP_BUDGET_DEFAULT
+        # ── Provenance-linked chunk discovery (AR2.5) ─────────────
+        provenance_ids = _discover_provenance_chunk_ids(
+            session,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+        )
 
     subqueries = _plan_follow_up_subqueries(
         base_query=base_query,
@@ -235,6 +302,7 @@ def build_evidence_plan(
         subqueries=subqueries,
         expand_graph_neighbors=expand_graph,
         graph_hop_budget=graph_hop_budget,
+        provenance_linked_chunk_ids=provenance_ids,
         expand_document_summaries=True,
         retrieval_budget=top_k,
         max_retrieval_passes=max_retrieval_passes,
@@ -357,6 +425,43 @@ def execute_evidence_plan(
             ranked_chunks, follow_up_chunks, plan.retrieval_budget
         )
 
+    # ── Provenance-linked expansion (AR2.5) ───────────────────────
+    provenance_added = 0
+    if (
+        plan.provenance_linked_chunk_ids
+        and len(ranked_chunks) < plan.retrieval_budget
+    ):
+        from domain.chat.retrieval_context import retrieve_chunks_by_ids
+
+        existing_ids = {c.chunk_id for c in ranked_chunks}
+        missing_ids = [
+            cid
+            for cid in plan.provenance_linked_chunk_ids
+            if cid not in existing_ids
+        ][:_PROVENANCE_EXPANSION_BUDGET]
+
+        if missing_ids:
+            provenance_chunks = retrieve_chunks_by_ids(
+                session,
+                workspace_id=plan.workspace_id,
+                chunk_ids=missing_ids,
+            )
+            pre_count = len(ranked_chunks)
+            ranked_chunks = _merge_chunks(
+                ranked_chunks, provenance_chunks, plan.retrieval_budget
+            )
+            provenance_added = len(ranked_chunks) - pre_count
+            log.info(
+                "provenance_expansion added=%d from=%d candidates",
+                provenance_added,
+                len(missing_ids),
+            )
+
+    # ── Document-summary expansion (AR2.5) ────────────────────────
+    doc_ids: list[int] = []
+    if plan.expand_document_summaries and ranked_chunks:
+        doc_ids = list(dict.fromkeys(c.document_id for c in ranked_chunks))[:5]
+
     # ── Determine stop reason ─────────────────────────────────────
     if len(ranked_chunks) >= plan.retrieval_budget:
         stop: StopReason = "budget_exhausted"
@@ -369,12 +474,16 @@ def execute_evidence_plan(
         stop_reason=stop,
         retrieved_chunk_count=len(ranked_chunks),
         retrieval_passes_used=passes_used,
+        provenance_chunks_added=provenance_added,
+        expanded_document_ids=doc_ids,
     )
     log.info(
-        "evidence_plan_executed chunks=%d passes=%d stop=%s",
+        "evidence_plan_executed chunks=%d passes=%d stop=%s provenance=%d doc_ids=%s",
         final_plan.retrieved_chunk_count,
         final_plan.retrieval_passes_used,
         final_plan.stop_reason,
+        final_plan.provenance_chunks_added,
+        doc_ids,
     )
     return final_plan, ranked_chunks
 

@@ -548,6 +548,8 @@ export interface GenerationTrace {
   evidence_plan_passes: number | null;
   evidence_plan_retrieved_count: number | null;
   evidence_plan_used_count: number | null;
+  evidence_plan_provenance_chunks: number | null;
+  evidence_plan_doc_summary_ids: number | null;
   /** Learner profile trace (AR4.4) */
   learner_weak_topic_count: number | null;
   learner_strong_topic_count: number | null;

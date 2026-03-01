@@ -528,3 +528,214 @@ class TestSourceAccounting:
             retrieved_chunk_count=5,
         )
         assert updated.retrieved_chunk_count == 5
+
+
+class TestProvenanceExpansion:
+    """Verify provenance-linked expansion stage (AR2.5)."""
+
+    @patch("domain.retrieval.evidence_planner._discover_provenance_chunk_ids")
+    @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
+    def test_provenance_ids_populated_in_plan(self, mock_expand, mock_prov):
+        mock_expand.return_value = []
+        mock_prov.return_value = [100, 101, 102]
+        session = MagicMock()
+
+        plan = build_evidence_plan(
+            base_query="explain mitosis",
+            workspace_id=1,
+            needs_retrieval=True,
+            concept_id=5,
+            session=session,
+        )
+        assert plan.provenance_linked_chunk_ids == [100, 101, 102]
+
+    @patch("domain.retrieval.evidence_planner._discover_provenance_chunk_ids")
+    @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
+    def test_no_provenance_without_concept(self, mock_expand, mock_prov):
+        plan = build_evidence_plan(
+            base_query="hello",
+            workspace_id=1,
+            needs_retrieval=True,
+            session=MagicMock(),
+        )
+        assert plan.provenance_linked_chunk_ids == []
+        mock_prov.assert_not_called()
+
+    @patch("domain.chat.retrieval_context.retrieve_chunks_by_ids")
+    @patch("domain.chat.retrieval_context.workspace_has_no_chunks", return_value=False)
+    @patch("domain.chat.retrieval_context.apply_concept_bias", side_effect=lambda s, **kw: kw["chunks"])
+    @patch("domain.chat.retrieval_context.retrieve_ranked_chunks")
+    def test_provenance_expansion_adds_missing_chunks(
+        self, mock_retrieve, mock_bias, mock_no_chunks, mock_by_ids
+    ):
+        """Provenance-linked chunks not in initial results get merged in."""
+        pass1 = [_make_chunk(1, 0.5), _make_chunk(2, 0.5), _make_chunk(3, 0.5)]
+        mock_retrieve.return_value = pass1
+        # Provenance returns chunk 4 and 5 (not in pass1)
+        mock_by_ids.return_value = [_make_chunk(4, 0.3), _make_chunk(5, 0.3)]
+
+        plan = EvidencePlan(
+            base_query="q",
+            workspace_id=1,
+            candidate_concept_ids=[7],
+            provenance_linked_chunk_ids=[2, 4, 5],  # 2 already in results
+            retrieval_budget=20,
+        )
+
+        result_plan, chunks = execute_evidence_plan(
+            MagicMock(), plan=plan, settings=MagicMock()
+        )
+        assert result_plan.provenance_chunks_added == 2
+        assert len(chunks) == 5
+        chunk_ids = {c.chunk_id for c in chunks}
+        assert {1, 2, 3, 4, 5} == chunk_ids
+        # Only missing IDs (4, 5) requested
+        mock_by_ids.assert_called_once()
+        call_ids = mock_by_ids.call_args.kwargs["chunk_ids"]
+        assert call_ids == [4, 5]
+
+    @patch("domain.chat.retrieval_context.workspace_has_no_chunks", return_value=False)
+    @patch("domain.chat.retrieval_context.apply_concept_bias", side_effect=lambda s, **kw: kw["chunks"])
+    @patch("domain.chat.retrieval_context.retrieve_ranked_chunks")
+    def test_provenance_skipped_when_no_ids(
+        self, mock_retrieve, mock_bias, mock_no_chunks
+    ):
+        """No provenance expansion when provenance_linked_chunk_ids is empty."""
+        mock_retrieve.return_value = [_make_chunk(1, 0.5)]
+
+        plan = EvidencePlan(
+            base_query="q",
+            workspace_id=1,
+            provenance_linked_chunk_ids=[],
+            retrieval_budget=20,
+        )
+
+        result_plan, chunks = execute_evidence_plan(
+            MagicMock(), plan=plan, settings=MagicMock()
+        )
+        assert result_plan.provenance_chunks_added == 0
+        assert len(chunks) == 1
+
+    @patch("domain.chat.retrieval_context.retrieve_chunks_by_ids")
+    @patch("domain.chat.retrieval_context.workspace_has_no_chunks", return_value=False)
+    @patch("domain.chat.retrieval_context.apply_concept_bias", side_effect=lambda s, **kw: kw["chunks"])
+    @patch("domain.chat.retrieval_context.retrieve_ranked_chunks")
+    def test_provenance_respects_budget(
+        self, mock_retrieve, mock_bias, mock_no_chunks, mock_by_ids
+    ):
+        """Provenance expansion stops when budget is reached."""
+        pass1 = [_make_chunk(i, 0.5) for i in range(18)]
+        mock_retrieve.return_value = pass1
+        mock_by_ids.return_value = [_make_chunk(100 + i, 0.3) for i in range(5)]
+
+        plan = EvidencePlan(
+            base_query="q",
+            workspace_id=1,
+            provenance_linked_chunk_ids=[100, 101, 102, 103, 104],
+            retrieval_budget=20,
+        )
+
+        result_plan, chunks = execute_evidence_plan(
+            MagicMock(), plan=plan, settings=MagicMock()
+        )
+        assert len(chunks) == 20  # budget cap
+        assert result_plan.provenance_chunks_added == 2
+
+
+class TestDocumentSummaryExpansion:
+    """Verify document-summary expansion stage (AR2.5)."""
+
+    @patch("domain.chat.retrieval_context.workspace_has_no_chunks", return_value=False)
+    @patch("domain.chat.retrieval_context.retrieve_ranked_chunks")
+    def test_expanded_document_ids_populated(self, mock_retrieve, mock_no_chunks):
+        """When expand_document_summaries=True, doc IDs are gathered."""
+        chunks = [
+            RankedChunk(
+                workspace_id=1, document_id=doc_id, chunk_id=i,
+                chunk_index=0, text=f"t{i}", score=0.5, retrieval_method="hybrid",
+            )
+            for i, doc_id in enumerate([10, 20, 10, 30])
+        ]
+        mock_retrieve.return_value = chunks
+
+        plan = EvidencePlan(
+            base_query="q",
+            workspace_id=1,
+            expand_document_summaries=True,
+            retrieval_budget=20,
+        )
+
+        result_plan, _ = execute_evidence_plan(
+            MagicMock(), plan=plan, settings=MagicMock()
+        )
+        assert result_plan.expanded_document_ids == [10, 20, 30]
+
+    @patch("domain.chat.retrieval_context.workspace_has_no_chunks", return_value=False)
+    @patch("domain.chat.retrieval_context.retrieve_ranked_chunks")
+    def test_no_doc_ids_when_flag_false(self, mock_retrieve, mock_no_chunks):
+        """When expand_document_summaries=False, no doc IDs gathered."""
+        mock_retrieve.return_value = [_make_chunk(1)]
+
+        plan = EvidencePlan(
+            base_query="q",
+            workspace_id=1,
+            expand_document_summaries=False,
+            retrieval_budget=20,
+        )
+
+        result_plan, _ = execute_evidence_plan(
+            MagicMock(), plan=plan, settings=MagicMock()
+        )
+        assert result_plan.expanded_document_ids == []
+
+    @patch("domain.chat.retrieval_context.workspace_has_no_chunks", return_value=False)
+    @patch("domain.chat.retrieval_context.retrieve_ranked_chunks")
+    def test_doc_ids_capped_at_five(self, mock_retrieve, mock_no_chunks):
+        """Document ID list is capped at 5 unique values."""
+        chunks = [
+            RankedChunk(
+                workspace_id=1, document_id=doc_id, chunk_id=i,
+                chunk_index=0, text=f"t{i}", score=0.5, retrieval_method="hybrid",
+            )
+            for i, doc_id in enumerate([1, 2, 3, 4, 5, 6, 7])
+        ]
+        mock_retrieve.return_value = chunks
+
+        plan = EvidencePlan(
+            base_query="q",
+            workspace_id=1,
+            expand_document_summaries=True,
+            retrieval_budget=20,
+        )
+
+        result_plan, _ = execute_evidence_plan(
+            MagicMock(), plan=plan, settings=MagicMock()
+        )
+        assert len(result_plan.expanded_document_ids) == 5
+
+    def test_trace_fields_for_expansion(self):
+        """GenerationTrace includes new provenance/doc-summary trace fields."""
+        from core.schemas.assistant import GenerationTrace
+
+        trace = GenerationTrace(
+            evidence_plan_provenance_chunks=3,
+            evidence_plan_doc_summary_ids=2,
+        )
+        assert trace.evidence_plan_provenance_chunks == 3
+        assert trace.evidence_plan_doc_summary_ids == 2
+
+    def test_with_results_carries_new_fields(self):
+        """with_results() properly carries provenance and doc-summary fields."""
+        plan = EvidencePlan(
+            base_query="q",
+            workspace_id=1,
+            retrieval_budget=20,
+        )
+        updated = plan.with_results(
+            stop_reason="coverage_sufficient",
+            retrieved_chunk_count=10,
+            provenance_chunks_added=3,
+            expanded_document_ids=[10, 20],
+        )
+        assert updated.provenance_chunks_added == 3
+        assert updated.expanded_document_ids == [10, 20]

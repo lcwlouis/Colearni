@@ -132,6 +132,52 @@ def apply_concept_bias(
         ]
 
 
+def retrieve_chunks_by_ids(
+    session: Session,
+    *,
+    workspace_id: int,
+    chunk_ids: list[int],
+    score: float = 0.30,
+) -> list[RankedChunk]:
+    """Retrieve specific chunks by their IDs for provenance expansion.
+
+    Returns RankedChunk objects with a fixed provenance score.
+    Filters by workspace_id for tenant isolation.
+    """
+    if not chunk_ids or not hasattr(session, "execute"):
+        return []
+    # Limit to avoid unbounded queries
+    limited = chunk_ids[:50]
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT id, workspace_id, document_id, chunk_index, text
+                FROM chunks
+                WHERE workspace_id = :workspace_id
+                  AND id = ANY(:ids)
+                ORDER BY id ASC
+                """
+            ),
+            {"workspace_id": workspace_id, "ids": limited},
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        RankedChunk(
+            workspace_id=int(row["workspace_id"]),
+            document_id=int(row["document_id"]),
+            chunk_id=int(row["id"]),
+            chunk_index=int(row["chunk_index"]),
+            text=str(row["text"]),
+            score=score,
+            retrieval_method="provenance",
+        )
+        for row in rows
+    ]
+
+
 def _linked_chunks_for_concept(
     session: Session,
     *,
