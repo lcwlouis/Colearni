@@ -187,7 +187,9 @@ class TestStreamRouteSSE:
 
         events = _parse_sse(response.text)
         phases = [e.get("phase") for e in events if e["event"] == "status"]
-        assert phases == ["thinking", "searching", "finalizing"]
+        # Dedup consecutive same-phase (activity sub-events may repeat the phase)
+        deduped = [phases[0]] + [p for i, p in enumerate(phases[1:], 1) if p != phases[i - 1]]
+        assert deduped == ["thinking", "searching", "finalizing"]
         assert events[-1]["event"] == "final"
 
     def test_blocking_respond_still_works(self, monkeypatch: Any) -> None:

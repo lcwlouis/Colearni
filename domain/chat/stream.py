@@ -162,7 +162,7 @@ def _stream_inner(
         return
 
     # ── Phase: searching ──────────────────────────────────────────────
-    yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING)
+    yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="planning_turn", step_label="Analyzing question")
 
     history_text = load_history_text(session, session_id=request.session_id)
 
@@ -202,6 +202,7 @@ def _stream_inner(
         else None
     )
 
+    yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="checking_mastery", step_label="Checking mastery level")
     mastery_status = resolve_mastery_status(
         session=session,
         request=request,
@@ -218,6 +219,7 @@ def _stream_inner(
     )
 
     # ── Plan-gated retrieval via EvidencePlan (AR2.1 / AR2.2) ────────
+    yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="retrieving_chunks", step_label="Searching knowledge base")
     evidence_plan = build_evidence_plan(
         base_query=request.query,
         workspace_id=request.workspace_id,
@@ -231,6 +233,8 @@ def _stream_inner(
         concept_name=resolved_name,
         session=session,
     )
+    if evidence_plan.expand_graph_neighbors:
+        yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="expanding_graph", step_label="Finding related concepts")
     evidence_plan, ranked_chunks = execute_evidence_plan(
         session,
         plan=evidence_plan,
@@ -305,6 +309,7 @@ def _stream_inner(
     # Build tutor text — attempt streaming if client supports it
     generation_trace: GenerationTrace | None = None
     responded = False  # S1: track whether we've emitted 'responding'
+    yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="generating_reply", step_label="Generating response")
     if concept_resolution.requires_clarification:
         assistant_text = concept_resolution.clarification_prompt or ""
         # Clarification is immediate visible content
@@ -401,6 +406,7 @@ def _stream_inner(
     yield ChatStreamAnswerPartEvent(parts=answer_parts)
 
     # ── Verify + finalize ─────────────────────────────────────────────
+    yield ChatStreamStatusEvent(phase=ChatPhase.FINALIZING, activity="verifying_citations", step_label="Verifying citations")
     draft = AssistantDraft(text=assistant_text, evidence=evidence, citations=citations)
     allow_uncited_hybrid = (
         grounding_mode == GroundingMode.HYBRID

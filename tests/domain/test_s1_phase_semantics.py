@@ -30,7 +30,13 @@ def _collect_events(
 
 
 def _extract_phases(events: list[dict[str, Any]]) -> list[str]:
-    return [e["phase"] for e in events if e.get("event") == "status"]
+    """Return unique ordered phase transitions (dedup consecutive same-phase)."""
+    raw = [e["phase"] for e in events if e.get("event") == "status"]
+    deduped: list[str] = []
+    for p in raw:
+        if not deduped or deduped[-1] != p:
+            deduped.append(p)
+    return deduped
 
 
 class TestRespondingPhaseSemantics:
