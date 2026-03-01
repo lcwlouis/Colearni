@@ -101,10 +101,7 @@ The remaining work should stay narrow: keep the current hybrid retriever as stag
 
 ## Remaining Slice IDs
 
-- `AR2.1` Introduce `EvidencePlan`
-- `AR2.2` Add bounded follow-up retrieval loops
-- `AR2.3` Add graph-aware and document-summary expansion
-- `AR2.4` Add retrieved-vs-used source accounting
+- `AR2.5` Execute real provenance/document-summary expansion inside the evidence planner
 
 ## Decision Log For Remaining Work
 
@@ -150,8 +147,12 @@ Verification
 - Hybrid retrieval exists and is live.
 - Evidence and citation filtering exist and are live.
 - EvidencePlan type introduced and wired into both paths (AR2.1 complete).
-- `pytest -q`: 626 passed (with `PYTHONPATH=.`, as of 2026-03-01)
-- `npm --prefix apps/web test`: 91 passed (13 test files, as of 2026-03-01)
+- AR2.2 multi-pass follow-up retrieval is live.
+- AR2.3 graph-neighbor subquery expansion is live.
+- AR2.4 retrieved-vs-used accounting is live in turn traces.
+- AR2.5 provenance-linked expansion and document-summary expansion are now executed stages (not just flags).
+- `pytest -q`: 816 passed (with `PYTHONPATH=.`, as of session)
+- `npm --prefix apps/web test`: TS typecheck clean
 
 ### Verification Block - AR2.1
 
@@ -307,6 +308,48 @@ Removal Entries
 Observed outcome
 - 37 evidence planner tests pass (3 new for AR2.4)
 - All 652 backend tests green
+```
+
+### Verification Block - AR2.5
+
+```
+Verification Block - AR2.5
+
+Slice: AR2.5 – Execute real provenance/document-summary expansion
+
+Status: COMPLETE
+
+Commit: chore(refactor): AR2.5 execute real provenance/document-summary expansion
+
+Files changed
+- domain/retrieval/evidence_planner.py (provenance expansion stage + document-summary stage + new result fields)
+- domain/chat/retrieval_context.py (new retrieve_chunks_by_ids() function)
+- domain/chat/respond.py (wire provenance/doc-summary trace fields)
+- domain/chat/stream.py (wire provenance/doc-summary trace fields)
+- core/schemas/assistant.py (add evidence_plan_provenance_chunks + evidence_plan_doc_summary_ids)
+- apps/web/lib/api/types.ts (sync TS GenerationTrace interface)
+- tests/domain/test_evidence_planner.py (10 new tests, 47 total)
+
+What changed
+- build_evidence_plan() now populates provenance_linked_chunk_ids from concept provenance via _discover_provenance_chunk_ids()
+- execute_evidence_plan() runs a provenance expansion stage: retrieves chunks by ID that are provenance-linked but missing from initial results, merges them budget-bounded
+- execute_evidence_plan() runs a document-summary expansion stage: gathers unique doc IDs (capped at 5) when expand_document_summaries=True
+- EvidencePlan gains provenance_chunks_added and expanded_document_ids result fields
+- Both respond.py and stream.py populate the new trace fields (runtime consumption)
+
+Commands run
+- PYTHONPATH=. pytest tests/domain/test_evidence_planner.py -v (47 passed)
+- PYTHONPATH=. pytest tests/api/test_g3_stream.py -v (5 passed)
+- PYTHONPATH=. pytest -q (816 passed, 1 pre-existing failure)
+- npx tsc --noEmit (clean)
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- Plan flags now match actual execution stages
+- Both runtime paths (blocking + streaming) consume provenance/doc-summary expansion signals
+- All 816 backend tests green + TS typecheck clean
 ```
 
 Current hotspots:
@@ -505,6 +548,49 @@ Verification:
 Exit criteria:
 
 - source accounting distinguishes "looked at" from "actually used"
+
+### AR2.5. Slice 5: Execute real provenance/document-summary expansion inside the evidence planner
+
+Purpose:
+
+- make AR2.3 true in runtime, not just in plan flags
+
+Root problem:
+
+- `EvidencePlan` exposes provenance/document-summary expansion fields, but `execute_evidence_plan()` currently ignores them and only performs base-query plus subquery retrieval
+
+Files involved:
+
+- `domain/retrieval/evidence_planner.py`
+- `domain/chat/retrieval_context.py`
+- `domain/chat/respond.py`
+- `domain/chat/stream.py`
+- `tests/domain/test_evidence_planner.py`
+- `tests/api/test_g3_stream.py`
+
+Implementation steps:
+
+1. Add an explicit executed stage for provenance-linked expansion after stage-one retrieval when provenance IDs or concept-linked document hints are available.
+2. Turn `expand_document_summaries` into a real bounded retrieval/input stage instead of a plan-only flag.
+3. Keep budgets explicit per stage and visible in trace data.
+4. Preserve `filter_used_citations()` semantics and the current final verification flow.
+
+What stays the same:
+
+- hybrid retrieval remains stage 1
+- graph-neighbor subquery expansion remains bounded
+- no arbitrary tool use
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/domain/test_evidence_planner.py tests/api/test_g3_stream.py`
+- targeted manual check or trace assertion proving a turn can report provenance/document-summary expansion without weakening citation verification
+
+Exit criteria:
+
+- at least one non-test runtime path consumes provenance/document-summary expansion signals
+- plan flags match actual execution stages
+- AR2 can be marked `complete` again without overclaiming
 
 ## Verification Block Template
 

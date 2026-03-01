@@ -43,6 +43,7 @@ This master plan should be treated as incomplete unless it includes:
 7. This is an architecture / orchestration refactor. Do not mix in unrelated product work.
 8. Completing one child plan is NOT run completion. The run is only complete when every track in the master status ledger is marked `complete` or explicitly `blocked`.
 9. This file is INCOMPLETE unless it ends with `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)` followed by exactly one fenced code block.
+10. Run Python verification from the repo root with `PYTHONPATH=.`. This worktree shares top-level package names like `core` and `domain` with sibling repos, so plain `pytest` can import the wrong code.
 
 ## Purpose
 
@@ -253,6 +254,15 @@ Current repo verification status at plan creation time:
 - `npm --prefix apps/web test`: 87 passed (13 test files, as of 2026-02-28)
 - `npm --prefix apps/web run typecheck`: not re-run during this planning pass
 
+Post-implementation verification update (2026-03-01):
+
+- `PYTHONPATH=/Users/louisliu/Projects/Personal/copilotv2.0 pytest -q tests/domain/test_turn_plan.py tests/domain/test_evidence_planner.py tests/domain/test_research_planner.py tests/domain/test_research_promotion.py tests/jobs/test_learner_digest.py tests/jobs/test_research_digest.py tests/api/test_g3_stream.py` → 114 passed
+- plain `pytest` from outside the repo root imported `core` / `domain` from `/Users/louisliu/Projects/Personal/ColearniCodex`, so verification commands must pin repo-local import resolution
+- `AR2` was overclaimed: graph-neighbor subquery expansion is live, but provenance-linked chunk expansion and document-summary expansion are still flags rather than executed retrieval stages
+- `AR5` was overclaimed: topic planning is wired, but query planning and promotion are helper modules with tests only; no production callsites were found for `build_query_plan()`, `enqueue_query_results()`, `evaluate_candidate_for_promotion()`, or `promote_candidate()`
+- `AR6` was overclaimed: background trace fields exist in `GenerationTrace`, but blocking/streaming tutor turns do not populate them yet
+- `AR0/AR1` remain usable, but `TurnPlan.has_documents` is still hardcoded `True` in live tutor paths and `research_need` remains inert; keep this as a follow-up candidate unless it blocks reopened work
+
 Current remaining hotspots:
 
 | File | Why it still matters |
@@ -380,12 +390,12 @@ Update this table during execution:
 
 | Track | Status | Last note |
 |---|---|---|
-| `AR0/AR1` Conductor | ✅ complete | All 6 slices done (AR0.1, AR1.1–AR1.5); 583 backend / 87 frontend tests passing |
-| `AR2` Evidence planning | ✅ complete | All 4 slices done (AR2.1–AR2.4); 652 backend / 91 frontend tests passing |
+| `AR0/AR1` Conductor | ✅ complete | AR0.1 and AR1.1–AR1.5 landed; post-review found `has_documents` still hardcoded and `research_need` inert, but not yet blocking reopened work |
+| `AR2` Evidence planning | ✅ complete | AR2.1–AR2.5 all done; provenance/document-summary expansion now executed stages (816 tests pass) |
 | `AR3` Stream sync | ✅ complete | All 4 slices done (AR3.1–AR3.4); 657 backend / 94 frontend tests passing |
 | `AR4` Learner model | ✅ complete | All 4 slices done (AR4.1–AR4.4); 692 backend tests passing |
-| `AR5` Research | ✅ complete | All 4 slices done (AR5.1–AR5.4); 752 backend tests passing |
-| `AR6` Background/eval | ✅ complete | All 4 slices done (AR6.1–AR6.4); 806 backend tests passing |
+| `AR5` Research | 🔄 reopened | AR5.1 and AR5.2 landed; AR5.3 and AR5.4 are helper-only and not wired into routes/service/runner, so AR5.5 and AR5.6 are reopened |
+| `AR6` Background/eval | 🔄 reopened | AR6.1 and AR6.2 landed; AR6.3 trace fields are schema-only and AR6.4 misses runtime integration checks, so AR6.5 and AR6.6 are reopened |
 
 ## Verification Block Template
 
