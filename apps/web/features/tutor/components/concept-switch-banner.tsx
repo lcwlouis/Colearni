@@ -8,9 +8,13 @@ interface ConceptSwitchBannerProps {
   setSwitchDecision: (decision: "accept" | "reject" | null) => void;
   switchDecisionRef: React.MutableRefObject<"accept" | "reject" | null>;
   setSwitchSuggestion: (suggestion: ConceptSwitchSuggestion | null) => void;
-  onSubmitChat: (text: string) => void;
 }
 
+/**
+ * Non-blocking inline banner for concept switch suggestions.
+ * Replaces the previous modal dialog to avoid interrupting the chat flow.
+ * Rejecting a switch simply dismisses the banner — no synthetic follow-up.
+ */
 export function ConceptSwitchBanner({
   switchSuggestion,
   concepts,
@@ -19,49 +23,44 @@ export function ConceptSwitchBanner({
   setSwitchDecision,
   switchDecisionRef,
   setSwitchSuggestion,
-  onSubmitChat,
 }: ConceptSwitchBannerProps) {
   return (
-    <div className="switch-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="panel switch-modal">
-        <h3>Concept switch suggested</h3>
-        <p>
-          The tutor inferred your latest message may be about{" "}
-          <strong>{switchSuggestion.to_concept_name}</strong> instead of{" "}
-          <strong>{switchSuggestion.from_concept_name}</strong>.
-        </p>
-        <p className="field-label">Reason: {switchSuggestion.reason}</p>
-        <div className="button-row">
-          <button
-            type="button"
-            onClick={() => {
-              const matched = concepts.find(
-                (item) => item.concept_id === switchSuggestion.to_concept_id,
-              );
-              if (matched) setCurrentConcept(matched);
-              setSuggestedConceptId(switchSuggestion.to_concept_id);
-              setSwitchDecision("accept");
-              switchDecisionRef.current = "accept";
-              setSwitchSuggestion(null);
-            }}
-          >
-            Switch concept
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              setSwitchDecision("reject");
-              switchDecisionRef.current = "reject";
-              setSwitchSuggestion(null);
-              // E3: Auto-fire a follow-up to get the clarification question
-              void onSubmitChat("Which concept should we focus on?");
-            }}
-          >
-            Keep current
-          </button>
-        </div>
-      </div>
+    <div className="switch-banner" role="status" aria-live="polite">
+      <span className="switch-banner-text">
+        💡 Possible topic:{" "}
+        <strong>{switchSuggestion.to_concept_name}</strong>
+      </span>
+      <span className="switch-banner-actions">
+        <button
+          type="button"
+          className="secondary"
+          style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}
+          onClick={() => {
+            const matched = concepts.find(
+              (item) => item.concept_id === switchSuggestion.to_concept_id,
+            );
+            if (matched) setCurrentConcept(matched);
+            setSuggestedConceptId(switchSuggestion.to_concept_id);
+            setSwitchDecision("accept");
+            switchDecisionRef.current = "accept";
+            setSwitchSuggestion(null);
+          }}
+        >
+          Switch
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}
+          onClick={() => {
+            setSwitchDecision("reject");
+            switchDecisionRef.current = "reject";
+            setSwitchSuggestion(null);
+          }}
+        >
+          Dismiss
+        </button>
+      </span>
     </div>
   );
 }

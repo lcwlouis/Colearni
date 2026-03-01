@@ -202,6 +202,24 @@ pre {
   gap: 0.7rem;
 }
 
+.switch-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--surface, #f0f4f8);
+  border: 1px solid var(--line, #e0e0e0);
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.switch-banner-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
 
 /* ===== Markdown ===== */
 .markdown-content {

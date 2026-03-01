@@ -179,7 +179,6 @@ export default function TutorPage() {
           setSwitchDecision={t.setSwitchDecision}
           switchDecisionRef={t.switchDecisionRef}
           setSwitchSuggestion={t.setSwitchSuggestion}
-          onSubmitChat={(text) => void t.onSubmitChat(text)}
         />
       ) : null}
     </section>
