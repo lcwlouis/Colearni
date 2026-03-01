@@ -360,6 +360,7 @@ def _stream_inner(
                 chunks=ranked_chunks,
                 expanded_document_ids=evidence_plan.expanded_document_ids,
             ),
+            graph_context=evidence_plan.graph_evidence_context,
             flashcard_progress=flashcard_progress,
             learner_profile_summary=learner_profile_summary,
         )
@@ -413,6 +414,7 @@ def _stream_inner(
                 chunks=ranked_chunks,
                 expanded_document_ids=evidence_plan.expanded_document_ids,
             ),
+            graph_context=evidence_plan.graph_evidence_context,
             quiz_context=quiz_context_text,
             flashcard_progress=flashcard_progress,
             learner_profile_summary=learner_profile_summary,
@@ -511,6 +513,7 @@ def _stream_inner(
         "evidence_plan_used_count": len(envelope.evidence) if envelope.evidence else 0,
         "evidence_plan_provenance_chunks": evidence_plan.provenance_chunks_added,
         "evidence_plan_doc_summary_ids": len(evidence_plan.expanded_document_ids),
+        "evidence_plan_graph_concepts_used": len(evidence_plan.graph_evidence_context.split("\n")) if evidence_plan.graph_evidence_context else 0,
         "learner_weak_topic_count": len(learner_snapshot.weak_topics),
         "learner_strong_topic_count": len(learner_snapshot.strong_topics),
         "learner_frontier_count": len(learner_snapshot.current_frontier),

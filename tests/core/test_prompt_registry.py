@@ -89,6 +89,7 @@ class TestPromptRegistry:
             "strict_grounded_mode": "true",
             "mastery_status": "unlocked",
             "document_summaries": "Doc A summary",
+            "graph_context": "(none)",
             "assessment_context": "Topic: DNA, score: 80%",
             "flashcard_progress": "5/10 mastered",
             "learner_profile_summary": "(none)",

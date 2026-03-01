@@ -22,6 +22,8 @@ STRICT_GROUNDED_MODE: {strict_grounded_mode}
 MASTERY_STATUS: {mastery_status}
 DOCUMENT_SUMMARIES:
 {document_summaries}
+GRAPH_CONTEXT:
+{graph_context}
 ASSESSMENT_CONTEXT:
 {assessment_context}
 FLASHCARD_PROGRESS:

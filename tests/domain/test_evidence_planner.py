@@ -408,7 +408,7 @@ class TestGraphExpansion:
 
     @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
     def test_graph_neighbors_become_subqueries(self, mock_expand):
-        mock_expand.return_value = ["Chloroplast", "Light Reactions"]
+        mock_expand.return_value = (["Chloroplast", "Light Reactions"], "- Chloroplast: organelle\n- Light Reactions: process")
         mock_session = MagicMock()
 
         plan = build_evidence_plan(
@@ -425,6 +425,22 @@ class TestGraphExpansion:
         assert "Photosynthesis" in plan.subqueries
         assert "Chloroplast" in plan.subqueries
         assert "Light Reactions" in plan.subqueries
+        assert plan.graph_evidence_context != ""
+        assert "Chloroplast" in plan.graph_evidence_context
+
+    @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
+    def test_graph_context_empty_when_no_neighbors(self, mock_expand):
+        mock_expand.return_value = ([], "")
+        plan = build_evidence_plan(
+            base_query="how does it work?",
+            workspace_id=1,
+            needs_retrieval=True,
+            concept_id=7,
+            concept_name="Photosynthesis",
+            session=MagicMock(),
+        )
+        assert plan.graph_evidence_context == ""
+        assert not plan.expand_graph_neighbors
 
     @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
     def test_no_graph_expansion_without_concept(self, mock_expand):
@@ -460,31 +476,34 @@ class TestGraphExpansion:
                 ],
                 "edges": [],
             }
-            names = _expand_graph_neighbors(
+            names, context = _expand_graph_neighbors(
                 mock_session,
                 workspace_id=1,
                 concept_id=7,
             )
         # Root excluded, max 2 neighbors
         assert names == ["Neighbor1", "Neighbor2"]
+        assert "Neighbor1" in context
 
     def test_expand_graph_neighbors_handles_no_session(self):
-        names = _expand_graph_neighbors(
+        names, context = _expand_graph_neighbors(
             object(),  # no execute attribute
             workspace_id=1,
             concept_id=7,
         )
         assert names == []
+        assert context == ""
 
     def test_expand_graph_neighbors_rolls_back_on_failure(self):
         session = MagicMock()
         with patch("domain.graph.explore.get_bounded_subgraph", side_effect=RuntimeError("boom")):
-            names = _expand_graph_neighbors(
+            names, context = _expand_graph_neighbors(
                 session,
                 workspace_id=1,
                 concept_id=7,
             )
         assert names == []
+        assert context == ""
         session.rollback.assert_called_once()
 
     def test_document_summaries_flag_active(self):
@@ -561,7 +580,7 @@ class TestProvenanceExpansion:
     @patch("domain.retrieval.evidence_planner._discover_provenance_chunk_ids")
     @patch("domain.retrieval.evidence_planner._expand_graph_neighbors")
     def test_provenance_ids_populated_in_plan(self, mock_expand, mock_prov):
-        mock_expand.return_value = []
+        mock_expand.return_value = ([], "")
         mock_prov.return_value = [100, 101, 102]
         session = MagicMock()
 

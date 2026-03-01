@@ -114,6 +114,7 @@ def build_system_prompt(
             "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": document_summaries or "(none)",
+            "graph_context": "(none)",
             "assessment_context": assessment_context or "(none)",
             "flashcard_progress": flashcard_progress or "(none)",
             "history_summary": history_summary or "(none)",
@@ -139,6 +140,7 @@ def _build_system_prompt_inline(
     assessment_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
+    graph_context: str = "",
     flashcard_progress: str = "",
 ) -> str:
     """Inline fallback for system prompt assembly (pre-P2 behavior)."""
@@ -168,6 +170,13 @@ def _build_system_prompt_inline(
         lines.extend([
             "DOCUMENT SUMMARIES (for context about the user's study material):",
             document_summaries,
+            "",
+        ])
+
+    if graph_context:
+        lines.extend([
+            "GRAPH CONTEXT (concept relationships for explanation support):",
+            graph_context,
             "",
         ])
 
@@ -231,6 +240,7 @@ def build_full_tutor_prompt(
             "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": document_summaries or "(none)",
+            "graph_context": "(none)",
             "assessment_context": assessment_context or "(none)",
             "flashcard_progress": flashcard_progress or "(none)",
             "learner_profile_summary": learner_profile_summary or "(none)",
@@ -261,6 +271,7 @@ def build_full_tutor_prompt_with_meta(
     assessment_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
+    graph_context: str = "",
     flashcard_progress: str = "",
     learner_profile_summary: str = "",
 ) -> tuple[str, object]:
@@ -280,6 +291,7 @@ def build_full_tutor_prompt_with_meta(
             "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": document_summaries or "(none)",
+            "graph_context": graph_context or "(none)",
             "assessment_context": assessment_context or "(none)",
             "flashcard_progress": flashcard_progress or "(none)",
             "learner_profile_summary": learner_profile_summary or "(none)",
@@ -296,6 +308,7 @@ def build_full_tutor_prompt_with_meta(
             assessment_context=assessment_context,
             history_summary=history_summary,
             document_summaries=document_summaries,
+            graph_context=graph_context,
             flashcard_progress=flashcard_progress,
         )
         return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}", None

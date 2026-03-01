@@ -290,6 +290,7 @@ class GenerationTrace(BaseModel):
     evidence_plan_used_count: int | None = None
     evidence_plan_provenance_chunks: int | None = None
     evidence_plan_doc_summary_ids: int | None = None
+    evidence_plan_graph_concepts_used: int | None = None
     learner_weak_topic_count: int | None = None
     learner_strong_topic_count: int | None = None
     learner_frontier_count: int | None = None

@@ -28,6 +28,7 @@ def generate_tutor_text(
     history_text: str,
     assessment_context: str,
     document_summaries: str = "",
+    graph_context: str = "",
     quiz_context: str = "",
     flashcard_progress: str = "",
     learner_profile_summary: str = "",
@@ -50,6 +51,7 @@ def generate_tutor_text(
         assessment_context=combined_assessment,
         history_summary=history_text,
         document_summaries=document_summaries,
+        graph_context=graph_context,
         flashcard_progress=flashcard_progress,
         learner_profile_summary=learner_profile_summary,
     )

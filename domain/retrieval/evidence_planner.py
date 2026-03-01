@@ -69,6 +69,7 @@ class EvidencePlan:
     retrieval_passes_used: int = 0
     provenance_chunks_added: int = 0
     expanded_document_ids: list[int] = field(default_factory=list)
+    graph_evidence_context: str = ""
 
     def with_results(
         self,
@@ -150,6 +151,12 @@ _GRAPH_MAX_NEIGHBOR_SUBQUERIES = 2
 _PROVENANCE_EXPANSION_BUDGET = 10
 
 
+def _rollback_session_if_possible(session: object) -> None:
+    rollback = getattr(session, "rollback", None)
+    if callable(rollback):
+        rollback()
+
+
 def _discover_provenance_chunk_ids(
     session: object,
     *,
@@ -187,6 +194,7 @@ def _discover_provenance_chunk_ids(
         )
         return [int(row["chunk_id"]) for row in rows]
     except Exception:
+        _rollback_session_if_possible(session)
         log.debug(
             "provenance discovery failed for concept_id=%d",
             concept_id,
@@ -201,21 +209,21 @@ def _expand_graph_neighbors(
     workspace_id: int,
     concept_id: int,
     max_hops: int = _GRAPH_HOP_BUDGET_DEFAULT,
-) -> list[str]:
-    """Return canonical names of graph-adjacent concepts.
+) -> tuple[list[str], str]:
+    """Return canonical names and a structured context string for graph neighbors.
 
     Uses get_bounded_subgraph to find neighbors within max_hops, then
-    returns their names (excluding the root concept) for use as
-    subqueries.  Returns empty list on failure or if session lacks
-    execute capability (test stubs).
+    returns (names, context_string).  Names are used as subqueries;
+    context_string is a formatted evidence pack for the tutor prompt.
+    Returns ([], "") on failure.
     """
     try:
         from domain.graph.explore import get_bounded_subgraph
     except ImportError:
-        return []
+        return [], ""
 
     if not hasattr(session, "execute"):
-        return []
+        return [], ""
 
     try:
         subgraph = get_bounded_subgraph(
@@ -227,17 +235,36 @@ def _expand_graph_neighbors(
             max_edges=20,
         )
     except Exception:
+        _rollback_session_if_possible(session)
         log.debug("graph expansion failed for concept_id=%d", concept_id, exc_info=True)
-        return []
+        return [], ""
 
     names: list[str] = []
+    context_parts: list[str] = []
+
     for node in subgraph.get("nodes", []):
-        if node.get("concept_id") == concept_id:
+        cid = node.get("concept_id")
+        name = node.get("canonical_name", "")
+        desc = node.get("description", "")
+        if cid == concept_id:
+            if desc:
+                context_parts.insert(0, f"- {name} (active): {desc}")
             continue
-        name = node.get("canonical_name")
         if name:
             names.append(name)
-    return names[:_GRAPH_MAX_NEIGHBOR_SUBQUERIES]
+            if desc:
+                context_parts.append(f"- {name}: {desc}")
+            else:
+                context_parts.append(f"- {name}")
+
+    for edge in subgraph.get("edges", []):
+        rel = edge.get("relation_type", "")
+        edge_desc = edge.get("description", "")
+        if rel and edge_desc:
+            context_parts.append(f"  [{rel}] {edge_desc}")
+
+    context = "\n".join(context_parts[:10])  # cap context lines
+    return names[:_GRAPH_MAX_NEIGHBOR_SUBQUERIES], context
 
 
 def build_evidence_plan(
@@ -268,11 +295,12 @@ def build_evidence_plan(
 
     # ── Graph-neighbor expansion (AR2.3) ──────────────────────────
     neighbor_names: list[str] = []
+    graph_context = ""
     expand_graph = False
     graph_hop_budget = 0
     provenance_ids: list[int] = []
     if concept_id is not None and session is not None:
-        neighbor_names = _expand_graph_neighbors(
+        neighbor_names, graph_context = _expand_graph_neighbors(
             session,
             workspace_id=workspace_id,
             concept_id=concept_id,
@@ -304,6 +332,7 @@ def build_evidence_plan(
         graph_hop_budget=graph_hop_budget,
         provenance_linked_chunk_ids=provenance_ids,
         expand_document_summaries=True,
+        graph_evidence_context=graph_context,
         retrieval_budget=top_k,
         max_retrieval_passes=max_retrieval_passes,
     )

@@ -125,6 +125,7 @@ class TestObservabilityMetadata:
             "evidence_block": "Watson and Crick discovered...",
             "assessment_context": "",
             "document_summaries": "",
+            "graph_context": "(none)",
             "flashcard_progress": "",
             "learner_profile_summary": "",
             "history_summary": "Student asked about genetics",
