@@ -149,8 +149,165 @@ Verification
 
 - Hybrid retrieval exists and is live.
 - Evidence and citation filtering exist and are live.
-- Multi-step evidence planning is not confirmed in current runtime.
-- `pytest -q`: not re-run during this planning pass.
+- EvidencePlan type introduced and wired into both paths (AR2.1 complete).
+- `pytest -q`: 626 passed (with `PYTHONPATH=.`, as of 2026-03-01)
+- `npm --prefix apps/web test`: 91 passed (13 test files, as of 2026-03-01)
+
+### Verification Block - AR2.1
+
+```text
+Verification Block - AR2.1
+
+Root cause
+- Retrieval intent was implicit and scattered across local variables
+  in respond.py and stream.py with no inspectable typed object.
+
+Files changed
+- domain/retrieval/evidence_planner.py (new)
+- domain/retrieval/__init__.py
+- domain/chat/respond.py
+- domain/chat/stream.py
+- core/schemas/assistant.py
+- tests/domain/test_evidence_planner.py (new)
+- tests/api/test_g3_stream.py
+- tests/domain/test_g1_progress.py
+- tests/domain/test_g5_trace.py
+- tests/domain/test_s1_phase_semantics.py
+- tests/domain/test_u5_reasoning_summary.py
+- tests/domain/test_u6_answer_parts.py
+
+What changed
+- Introduced EvidencePlan frozen dataclass with retrieval goals, budgets,
+  expansion flags, and stop_reason
+- build_evidence_plan() creates plan from turn context
+- execute_evidence_plan() wraps existing retrieve_ranked_chunks +
+  apply_concept_bias as stage 1
+- Blocking and streaming paths both consume EvidencePlan
+- GenerationTrace gains evidence_plan_stop_reason, evidence_plan_budget,
+  evidence_plan_chunk_count fields
+- Test patches updated from domain.chat.stream/respond to
+  domain.chat.retrieval_context
+
+Commands run
+- PYTHONPATH=. pytest -q → 626 passed
+- npm --prefix apps/web test → 91 passed
+
+Manual verification
+- N/A (unit test coverage sufficient for typed data layer)
+
+Observed outcome
+- All tests green; plan fields visible in trace data
+```
+
+### Verification Block - AR2.2
+
+```text
+Verification Block - AR2.2
+
+Root cause
+- One-shot retrieval cannot express follow-up search loops when initial
+  coverage is low or the query doesn't match concept terminology.
+
+Files changed
+- domain/retrieval/evidence_planner.py
+- domain/chat/respond.py
+- domain/chat/stream.py
+- core/schemas/assistant.py
+- tests/domain/test_evidence_planner.py
+
+What changed
+- Added multi-pass retrieval loop with subquery expansion
+- Subqueries generated from concept_name when it differs from base query
+- Added _coverage_sufficient() to skip unnecessary follow-ups
+- Added _merge_chunks() for dedup and budget control across passes
+- Added max_retrieval_passes, retrieval_passes_used, concept_name fields
+- Added on_pass callback for status emission
+- Added evidence_plan_passes to GenerationTrace
+
+Commands run
+- PYTHONPATH=. pytest -q → 641 passed
+- npm --prefix apps/web test → 91 passed (no frontend changes)
+
+Manual verification
+- N/A (unit test coverage for multi-pass loop, coverage check, merge logic)
+
+Observed outcome
+- 26 evidence planner tests pass (15 new for AR2.2 loops)
+- All 641 backend tests green
+```
+
+### Verification Block - AR2.3
+
+```
+Verification Block - AR2.3
+
+Slice: AR2.3 – Graph-aware and document-summary expansion
+
+Status: COMPLETE
+
+Commit: chore(refactor): AR2.3 graph-aware and document-summary expansion
+
+Files changed
+- domain/retrieval/evidence_planner.py (added _expand_graph_neighbors, graph constants, session param on build_evidence_plan, expand_document_summaries defaults True)
+- domain/chat/respond.py (pass session= to build_evidence_plan)
+- domain/chat/stream.py (pass session= to build_evidence_plan)
+- tests/domain/test_evidence_planner.py (8 new tests for graph expansion, neighbor subqueries, document summaries flag)
+
+What changed
+- _expand_graph_neighbors() calls get_bounded_subgraph() to discover adjacent concepts, returns their names (capped at 2, 1-hop) for use as follow-up subqueries
+- build_evidence_plan() accepts optional session parameter; when session + concept_id are present, triggers graph neighbor expansion
+- _plan_follow_up_subqueries() accepts neighbor_names for graph-derived subqueries
+- expand_document_summaries defaults to True when retrieval is needed
+- New constants: _GRAPH_HOP_BUDGET_DEFAULT=1, _GRAPH_MAX_NEIGHBOR_SUBQUERIES=2
+
+Commands run
+- PYTHONPATH=. pytest tests/domain/test_evidence_planner.py -v (34 passed)
+- PYTHONPATH=. pytest -q (649 passed)
+- npm --prefix apps/web test (91 passed)
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- 34 evidence planner tests pass (8 new for AR2.3)
+- All 649 backend tests green
+- All 91 frontend tests green
+```
+
+### Verification Block - AR2.4
+
+```
+Verification Block - AR2.4
+
+Slice: AR2.4 – Add retrieved-vs-used source accounting
+
+Status: COMPLETE
+
+Commit: chore(refactor): AR2.4 retrieved-vs-used source accounting
+
+Files changed
+- core/schemas/assistant.py (added evidence_plan_retrieved_count, evidence_plan_used_count to GenerationTrace)
+- domain/chat/respond.py (populate retrieved_count and used_count in trace)
+- domain/chat/stream.py (populate retrieved_count and used_count in trace)
+- tests/domain/test_evidence_planner.py (3 new tests for source accounting)
+
+What changed
+- GenerationTrace now distinguishes "retrieved" (total chunks from planner) from "used" (evidence items surviving filter_used_citations)
+- retrieved_count = evidence_plan.retrieved_chunk_count (total fetched)
+- used_count = len(envelope.evidence) after citation filtering
+- filter_used_citations() remains the user-facing gate (unchanged)
+
+Commands run
+- PYTHONPATH=. pytest tests/domain/test_evidence_planner.py -v (37 passed)
+- PYTHONPATH=. pytest -q (652 passed)
+
+Removal Entries
+- None (additive-only slice)
+
+Observed outcome
+- 37 evidence planner tests pass (3 new for AR2.4)
+- All 652 backend tests green
+```
 
 Current hotspots:
 
@@ -390,7 +547,18 @@ Execution loop for this child plan:
    - a summary of all Removal Entries added during that slice
 5. After every 2 completed AR2 slices OR if context is compacted/summarized, re-open docs/AGENTIC_MASTER_PLAN.md and docs/agentic/02_evidence_plan.md and restate which AR2 slices remain.
 6. Continue to the next incomplete AR2 slice once the previous slice is verified.
-7. When all AR2 slices are complete, return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
+7. When all AR2 slices are complete, immediately re-open docs/AGENTIC_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
+
+Do NOT stop just because AR2 is complete. AR2 completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+
+START:
+
+Read docs/AGENTIC_MASTER_PLAN.md.
+Read docs/agentic/02_evidence_plan.md.
+Begin with the current AR2 slice in execution order exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When AR2 is complete, immediately return to docs/AGENTIC_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

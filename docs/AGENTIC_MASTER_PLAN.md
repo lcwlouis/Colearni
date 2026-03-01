@@ -41,7 +41,8 @@ This master plan should be treated as incomplete unless it includes:
    - the code no longer matches the assumptions recorded here
 6. If implementation uncovers a behavior-change risk, STOP and update the active child plan and this file before widening scope.
 7. This is an architecture / orchestration refactor. Do not mix in unrelated product work.
-8. This file is INCOMPLETE unless it ends with `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)` followed by exactly one fenced code block.
+8. Completing one child plan is NOT run completion. The run is only complete when every track in the master status ledger is marked `complete` or explicitly `blocked`.
+9. This file is INCOMPLETE unless it ends with `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)` followed by exactly one fenced code block.
 
 ## Purpose
 
@@ -248,8 +249,8 @@ Verification
 
 Current repo verification status at plan creation time:
 
-- `pytest -q`: not re-run during this planning pass
-- `npm --prefix apps/web test`: not re-run during this planning pass
+- `pytest -q`: 555 passed (with `PYTHONPATH=.`, as of 2026-02-28)
+- `npm --prefix apps/web test`: 87 passed (13 test files, as of 2026-02-28)
 - `npm --prefix apps/web run typecheck`: not re-run during this planning pass
 
 Current remaining hotspots:
@@ -379,8 +380,8 @@ Update this table during execution:
 
 | Track | Status | Last note |
 |---|---|---|
-| `AR0/AR1` Conductor | pending | not started |
-| `AR2` Evidence planning | pending | not started |
+| `AR0/AR1` Conductor | ✅ complete | All 6 slices done (AR0.1, AR1.1–AR1.5); 583 backend / 87 frontend tests passing |
+| `AR2` Evidence planning | ✅ complete | All 4 slices done (AR2.1–AR2.4); 652 backend / 91 frontend tests passing |
 | `AR3` Stream sync | pending | not started |
 | `AR4` Learner model | pending | not started |
 | `AR5` Research | pending | not started |
@@ -439,5 +440,18 @@ Stop only if:
 - a blocker requires user input or approval
 - completing the next slice would force a risky scope expansion
 
+Do NOT stop because one child plan is complete.
+Do NOT stop because you updated the session plan, todo list, or status ledger.
+The run is only complete when docs/AGENTIC_MASTER_PLAN.md shows no remaining incomplete tracks.
+
 Treat core/prompting/ as already landed infrastructure. Preserve verify_assistant_draft(), preserve runtime-owned topic/mastery policy, and do not auto-ingest external research.
+
+START:
+
+Read docs/AGENTIC_MASTER_PLAN.md.
+Pick the first incomplete child plan in execution order.
+Begin with the current slice in that child plan exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+Make sure you re-read docs/AGENTIC_MASTER_PLAN.md before every move to the next child plan. It can be dynamically updated. Check the latest version and continue.
 ```
