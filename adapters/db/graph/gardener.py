@@ -33,7 +33,8 @@ def list_gardener_seed_concepts(
                     aliases,
                     embedding,
                     is_active,
-                    dirty
+                    dirty,
+                    tier
                 FROM concepts_canon
                 WHERE workspace_id = :workspace_id
                   AND is_active = TRUE
