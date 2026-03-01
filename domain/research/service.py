@@ -161,7 +161,11 @@ def execute_topic_plan(
     """Build a query plan from an approved topic and enqueue candidates.
 
     Returns a dict with run_id, topic, queries_planned, candidates_inserted.
+    Uses bounded provider-backed discovery (AR5.7) when workspace
+    sources are registered; falls back gracefully with zero candidates
+    rather than inserting synthetic planned:// placeholders.
     """
+    from domain.research.discovery_provider import execute_planned_queries
     from domain.research.planner import TopicProposal
     from domain.research.query_planner import build_query_plan, enqueue_query_results
 
@@ -180,15 +184,13 @@ def execute_topic_plan(
 
     plan = build_query_plan(proposal=proposal)
 
-    # Convert planned queries into candidate-shaped results
-    results = [
-        {
-            "source_url": f"planned://{q.source_class}/{q.query_text[:200]}",
-            "title": f"[Planned] {q.query_text[:200]}",
-            "snippet": f"Source class: {q.source_class}, from topic: {topic}",
-        }
-        for q in plan.queries
-    ]
+    # Execute planned queries against registered workspace sources
+    results = execute_planned_queries(
+        db,
+        workspace_id=workspace_id,
+        queries=plan.queries,
+        max_total_results=plan.max_total_candidates,
+    )
 
     inserted = enqueue_query_results(
         db,

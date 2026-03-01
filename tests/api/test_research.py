@@ -11,10 +11,11 @@ class TestExecuteTopicPlanService:
     """Verify execute_topic_plan service function."""
 
     @patch("domain.research.query_planner.enqueue_query_results", return_value=3)
+    @patch("domain.research.discovery_provider.execute_planned_queries")
     @patch("domain.research.query_planner.build_query_plan")
     @patch("adapters.db.research.insert_run")
     def test_creates_run_and_plans_queries(
-        self, mock_insert_run, mock_build, mock_enqueue
+        self, mock_insert_run, mock_build, mock_discover, mock_enqueue
     ):
         from domain.research.planner import ResearchQuery, ResearchQueryPlan
 
@@ -33,6 +34,11 @@ class TestExecuteTopicPlanService:
             ],
             rationale="Fallback",
         )
+        mock_discover.return_value = [
+            {"source_url": "https://example.com/photo", "title": "Photosynthesis", "snippet": "Overview..."},
+            {"source_url": "https://example.com/light", "title": "Light Reactions", "snippet": "Details..."},
+            {"source_url": "https://example.com/calvin", "title": "Calvin Cycle", "snippet": "Tutorial..."},
+        ]
 
         db = MagicMock()
         result = execute_topic_plan(
@@ -47,20 +53,27 @@ class TestExecuteTopicPlanService:
         assert result["queries_planned"] == 3
         assert result["candidates_inserted"] == 3
 
-        # Verify enqueue was called with candidate-shaped results
+        # Verify discovery provider was called with queries
+        mock_discover.assert_called_once()
+        discover_kwargs = mock_discover.call_args.kwargs
+        assert discover_kwargs["workspace_id"] == 1
+        assert len(discover_kwargs["queries"]) == 3
+
+        # Verify enqueue was called with real URLs (not planned://)
         call_args = mock_enqueue.call_args
         assert call_args.kwargs["workspace_id"] == 1
         assert call_args.kwargs["run_id"] == 42
         results = call_args.kwargs["results"]
         assert len(results) == 3
-        assert results[0]["source_url"].startswith("planned://")
-        assert "[Planned]" in results[0]["title"]
+        assert results[0]["source_url"].startswith("https://")
+        assert "planned://" not in results[0]["source_url"]
 
     @patch("domain.research.query_planner.enqueue_query_results", return_value=1)
+    @patch("domain.research.discovery_provider.execute_planned_queries")
     @patch("domain.research.query_planner.build_query_plan")
     @patch("adapters.db.research.insert_run")
     def test_no_subtopics_still_works(
-        self, mock_insert_run, mock_build, mock_enqueue
+        self, mock_insert_run, mock_build, mock_discover, mock_enqueue
     ):
         from domain.research.planner import ResearchQuery, ResearchQueryPlan
 
@@ -74,6 +87,9 @@ class TestExecuteTopicPlanService:
             topic="Machine Learning",
             queries=[ResearchQuery(query_text="ML basics")],
         )
+        mock_discover.return_value = [
+            {"source_url": "https://example.com/ml", "title": "ML Basics", "snippet": "..."},
+        ]
 
         db = MagicMock()
         result = execute_topic_plan(
