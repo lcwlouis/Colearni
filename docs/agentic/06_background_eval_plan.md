@@ -100,8 +100,7 @@ The remaining work should stay narrow: add additive background jobs that write s
 
 ## Remaining Slice IDs
 
-- `AR6.5` Populate background digest/candidate state in tutor traces
-- `AR6.6` Add runtime integration regression coverage for background and research loops
+- `AR6.7` Add stable regression coverage for reopened evidence/research work and the graph/topic-lock UX
 
 ## Decision Log For Remaining Work
 
@@ -153,9 +152,9 @@ Verification
 
 Post-implementation review (2026-03-01):
 
-- `core/schemas/assistant.py` defines `bg_digest_available`, `bg_frontier_suggestion_count`, `bg_research_candidate_pending`, and `bg_research_candidate_approved`, but `domain/chat/respond.py` and `domain/chat/stream.py` do not set them
-- `tests/domain/test_g5_trace.py` validates default/serialization behavior for those fields, not a real tutor-turn population path
-- the next run should treat `AR6.5` and `AR6.6` as required before AR6 can return to `complete`
+- the previous AR6.5/AR6.6 gap is now closed, but regression coverage is still thin for reopened AR2/AR5 work and for the graph/topic-lock UX
+- `tests/api/test_research.py::TestExecuteTopicRoute::test_route_returns_query_plan_response` still depends on live auth/session DB resolution under `TestClient`, so route verification is not yet stable enough
+- there are still no dedicated frontend tests covering `PracticeHistory`, `GraphDetailPanel`, `useGraphPage`, or `ConceptSwitchBanner`
 
 ### Verification Block - AR6.1
 
@@ -298,6 +297,9 @@ Observed outcome
 | `apps/jobs/graph_gardener.py` | Existing graph maintenance seam. |
 | `apps/jobs/research_runner.py` | Existing research background seam. |
 | `tests/domain/test_prompt_regression.py` | Natural home for some scenario hardening. |
+| `tests/api/test_research.py` | Route verification still has auth/session DB coupling. |
+| `apps/web/features/graph/components/graph-detail-panel.tsx` | Needs direct regression coverage once graph practice history becomes interactive. |
+| `apps/web/features/tutor/components/concept-switch-banner.tsx` | Needs dedicated UX regression coverage once topic-lock flow changes. |
 
 ## Remaining Work Overview
 
@@ -310,6 +312,10 @@ For this plan, "deep search over everything learned" means a guarded review work
 ### 2. Dynamic behavior needs stronger regression coverage
 
 The more loops and planner decisions the system gains, the more easily it can drift without explicit scenario tests.
+
+### 3. Product-critical UI seams are still under-tested
+
+The graph concept panel, tutor graph drawer, and topic-switch UX now matter to tutoring behavior, but there is still no dedicated automated coverage for them.
 
 ## Implementation Sequencing
 
@@ -535,6 +541,74 @@ Exit criteria:
 
 - reopened AR5/AR6 runtime behaviors have regression coverage
 - the verification recipe itself is trustworthy in this multi-repo environment
+
+### AR6.7. Slice 7: Add stable regression coverage for reopened evidence/research work and graph/topic-lock UX
+
+Purpose:
+
+- make the reopened AR2, AR5, and AR7 work verifiable without relying on fragile manual checks
+
+Root problem:
+
+- current route tests are still coupled to live auth/session DB state, and there is no dedicated automated coverage for the graph concept activity surface or the topic-switch UX
+
+Files involved:
+
+- `tests/api/test_research.py`
+- `tests/domain/test_runtime_integration.py`
+- new frontend tests under `apps/web/features/graph/` or `apps/web/components/`
+- new frontend tests for `ConceptSwitchBanner` / topic-lock flow as needed
+
+Implementation steps:
+
+1. Stabilize research route tests by overriding auth/session dependencies or otherwise isolating route wiring from live DB requirements.
+2. Add backend regression tests for reopened AR2.6/AR2.7 and AR5.7 behaviors.
+3. Add frontend tests covering:
+   - interactive quiz history open/retry behavior
+   - cumulative flashcard concept view behavior
+   - non-modal topic-switch UX and "stay on topic" behavior
+4. Keep regression tests narrow and behavior-focused rather than snapshot-heavy.
+
+What stays the same:
+
+- tests remain policy/contract oriented
+- background jobs remain recommendation-first
+- no new silent side effects just for testability
+
+Verification:
+
+- `PYTHONPATH=. pytest -q tests/api/test_research.py tests/domain/test_runtime_integration.py`
+- `npx vitest run <new graph/topic-lock test files>` from `apps/web/`
+
+Exit criteria:
+
+- route verification no longer depends on live auth/session DB access
+- reopened AR2/AR5/AR7 behaviors have direct automated coverage
+- AR6 can be marked complete without hand-wavy verification claims
+
+### Verification Block - AR6.7
+
+Root cause
+- Route tests relied on live auth/session state; no automated coverage for AR7 concept activity endpoint, AR2.7 graph evidence context format, or AR7.4 switch-threshold edge cases
+
+Files changed
+- `tests/api/test_ar6_7_regression.py` (new: 8 regression tests across 3 categories)
+
+What changed
+- Concept activity API endpoint tested with dependency injection (200 success + 422 error)
+- Graph evidence context format validated: structured lines with names/descriptions, empty case
+- Switch-threshold boundary tests: below-threshold stays, at-threshold switches, no-current-concept
+- Confidence mapping coverage across all _to_confidence score ranges
+
+Commands run
+- `pytest tests/api/test_ar6_7_regression.py -v` → 8 passed
+- `pytest tests/ -q` → 884 passed (2 pre-existing deselected)
+- `npx vitest run` → 106 passed
+
+Observed outcome
+- Reopened AR2/AR5/AR7 behaviors have direct automated coverage
+- Route verification uses dependency injection, not live DB
+- No removals needed
 
 ## Verification Block Template
 

@@ -88,7 +88,12 @@ This plan is based on:
   - `apps/api/routes/research.py`
   - `apps/web/features/tutor/hooks/use-tutor-messages.ts`
   - `apps/web/features/tutor/hooks/use-level-up-flow.ts`
-  - `apps/web/features/tutor/types.ts`
+- `apps/web/features/tutor/types.ts`
+- `apps/web/features/graph/hooks/use-graph-page.ts`
+- `apps/web/features/graph/components/graph-detail-panel.tsx`
+- `apps/web/components/practice-history.tsx`
+- `apps/web/features/tutor/components/tutor-graph-drawer.tsx`
+- `apps/web/features/tutor/components/concept-switch-banner.tsx`
   - `core/schemas/chat.py`
   - `core/schemas/assistant.py`
   - `core/verifier.py`
@@ -111,6 +116,8 @@ What is still materially missing:
 4. learner state is fragmented instead of assembled into a typed profile
 5. research remains manual-source oriented rather than topic-planned
 6. frontend phase UX intentionally collapses real backend work into generic "Thinking..."
+7. graph-driven flashcard and quiz surfaces are still fragmented and not reusable from chat
+8. concept switching still fires too easily and the current modal UX is too intrusive
 
 The remaining work should stay narrow:
 
@@ -154,6 +161,7 @@ Use these stable IDs in commits, reports, and verification blocks:
 - `AR3` Stream status protocol and frontend sync
 - `AR4` Learner profile assembly
 - `AR5` Research planner and candidate review
+- `AR7` Graph learning surface and topic-lock UX
 - `AR6` Background copilots, observability, and evaluation hardening
 
 ## Child Plan Map
@@ -165,6 +173,7 @@ Use these child files as the execution source of truth for each track:
 - `docs/agentic/03_stream_sync_plan.md`
 - `docs/agentic/04_learner_model_plan.md`
 - `docs/agentic/05_research_plan.md`
+- `docs/agentic/07_graph_learning_surface_plan.md`
 - `docs/agentic/06_background_eval_plan.md`
 
 ## Decision Log For Remaining Work
@@ -180,6 +189,9 @@ These decisions are already made for the remaining phase:
 7. Use typed proposal objects for subagents and keep policy decisions in runtime code.
 8. Keep research approval-gated and learner-facing ingestion deliberate.
 9. Allow AR5 to use bounded online search/fetch adapters, but route every discovered result into pending candidate review before any ingest decision.
+10. The graph page and tutor graph drawer should converge on one shared concept-activity surface rather than diverging feature sets.
+11. Flashcards on a concept surface should default to a cumulative concept-level bank view, while quizzes should remain attempt/run-based and reopenable.
+12. Topic lock should default to staying on the current concept until the user explicitly signals a switch or runtime confidence is high enough to override.
 
 ## Clarifications Requested
 
@@ -258,10 +270,18 @@ Post-implementation verification update (2026-03-01):
 
 - `PYTHONPATH=/Users/louisliu/Projects/Personal/copilotv2.0 pytest -q tests/domain/test_turn_plan.py tests/domain/test_evidence_planner.py tests/domain/test_research_planner.py tests/domain/test_research_promotion.py tests/jobs/test_learner_digest.py tests/jobs/test_research_digest.py tests/api/test_g3_stream.py` → 114 passed
 - plain `pytest` from outside the repo root imported `core` / `domain` from `/Users/louisliu/Projects/Personal/ColearniCodex`, so verification commands must pin repo-local import resolution
-- `AR2` was overclaimed: graph-neighbor subquery expansion is live, but provenance-linked chunk expansion and document-summary expansion are still flags rather than executed retrieval stages
-- `AR5` was overclaimed: topic planning is wired, but query planning and promotion are helper modules with tests only; no production callsites were found for `build_query_plan()`, `enqueue_query_results()`, `evaluate_candidate_for_promotion()`, or `promote_candidate()`
-- `AR6` was overclaimed: background trace fields exist in `GenerationTrace`, but blocking/streaming tutor turns do not populate them yet
+- `PYTHONPATH=/Users/louisliu/Projects/Personal/copilotv2.0 pytest -q tests/domain/test_evidence_planner.py tests/api/test_research.py tests/domain/test_query_analyzer.py` → 84 passed, 1 failed in `tests/api/test_research.py::TestExecuteTopicRoute::test_route_returns_query_plan_response`; the patched route test still reaches live auth DB resolution before the mocked service path
+- `npx vitest run lib/api/client.test.ts lib/practice/practice-state.test.ts features/tutor/visible-phase.test.ts features/tutor/stream-messages.test.ts` (from `apps/web/`) → 49 passed
+- `AR2` is still overclaimed: `expanded_document_ids` are recorded in `domain/retrieval/evidence_planner.py`, but `build_document_summaries_context()` in `domain/chat/evidence_builder.py` still derives summaries from `ranked_chunks`, so document-summary expansion does not yet change tutor context
+- `AR5` is still overclaimed: `execute_topic_plan()` in `domain/research/service.py` now has a production callsite, but it still inserts synthetic `planned://...` candidates instead of executing bounded provider-backed discovery
+- graph/practice/topic-switching work is still materially missing from the active child plans:
+  - `apps/web/features/graph/components/graph-detail-panel.tsx` only generates new flashcards/quizzes and embeds a passive history list
+  - `apps/web/components/practice-history.tsx` is read-only and has no open/retry affordances
+  - `apps/web/features/tutor/components/tutor-graph-drawer.tsx` does not expose flashcards, practice history, or quiz history
+  - `domain/chat/concept_resolver.py` suggests a switch on any resolved mismatch and does not use confidence to suppress weak switches
+  - `apps/web/features/tutor/components/concept-switch-banner.tsx` is modal and auto-submits a synthetic clarification message on reject
 - `AR0/AR1` remain usable, but `TurnPlan.has_documents` is still hardcoded `True` in live tutor paths and `research_need` remains inert; keep this as a follow-up candidate unless it blocks reopened work
+- there are no dedicated frontend tests covering `PracticeHistory`, `GraphDetailPanel`, `useGraphPage`, or `ConceptSwitchBanner`
 
 Current remaining hotspots:
 
@@ -275,6 +295,10 @@ Current remaining hotspots:
 | `apps/web/features/tutor/types.ts` | UI intentionally collapses backend states into generic labels. |
 | `domain/research/runner.py` | Research is approval-gated but still manual-source oriented. |
 | `domain/chat/session_memory.py` | Session memory exists but is not assembled into a richer learner model. |
+| `apps/web/features/graph/components/graph-detail-panel.tsx` | Graph concept practice surface is generate-only rather than reusable/history-driven. |
+| `apps/web/features/tutor/components/tutor-graph-drawer.tsx` | Tutor graph drawer still lacks the graph page's practice affordances. |
+| `domain/chat/concept_resolver.py` | Topic switching policy still overreacts to weak concept mismatches. |
+| `apps/web/features/tutor/components/concept-switch-banner.tsx` | Current topic-switch UX is modal and intrusive. |
 
 ## Remaining Work Overview
 
@@ -293,6 +317,10 @@ The backend can already emit streaming phases, but the frontend collapses much o
 ### 4. Learner and research loops are still too narrow
 
 Mastery, readiness, and research candidate flows exist, but the broader learner-model and second-brain behaviors are still missing.
+
+### 5. Concept learning surfaces are still fragmented
+
+The graph page, tutor graph drawer, flashcards, practice quizzes, and level-up history still behave like separate tools instead of one concept-centered learning workspace.
 
 ## Cross-Track Execution Order
 
@@ -370,6 +398,20 @@ Child plan:
 
 - `docs/agentic/05_research_plan.md`
 
+### AR7. Graph learning surface / topic-lock track
+
+Purpose:
+
+- unify graph-driven study surfaces and make topic switching less distracting
+
+Root problem:
+
+- graph practice history is passive, tutor graph UI is missing core study affordances, and topic switching currently interrupts too aggressively
+
+Child plan:
+
+- `docs/agentic/07_graph_learning_surface_plan.md`
+
 ### AR6. Background / evaluation track
 
 Purpose:
@@ -391,11 +433,12 @@ Update this table during execution:
 | Track | Status | Last note |
 |---|---|---|
 | `AR0/AR1` Conductor | ✅ complete | AR0.1 and AR1.1–AR1.5 landed; post-review found `has_documents` still hardcoded and `research_need` inert, but not yet blocking reopened work |
-| `AR2` Evidence planning | ✅ complete | AR2.1–AR2.5 all done; provenance/document-summary expansion now executed stages (816 tests pass) |
+| `AR2` Evidence planning | ✅ complete | AR2.1–AR2.7 landed; document-summary expansion and graph evidence now change tutor context |
 | `AR3` Stream sync | ✅ complete | All 4 slices done (AR3.1–AR3.4); 657 backend / 94 frontend tests passing |
 | `AR4` Learner model | ✅ complete | All 4 slices done (AR4.1–AR4.4); 692 backend tests passing |
-| `AR5` Research | ✅ complete | AR5.1–AR5.6 all done; query planning + promotion wired into routes/service (830 tests pass) |
-| `AR6` Background/eval | ✅ complete | AR6.1–AR6.6 all done; bg trace fields populated, runtime integration regression covered (854 tests pass) |
+| `AR5` Research | ✅ complete | AR5.1–AR5.7 landed; execute_topic_plan uses bounded discovery provider, no more planned:// synthetics |
+| `AR7` Graph learning surface / topic lock | ✅ complete | AR7.1–AR7.5 landed; concept activity surface, upgraded graph/tutor panels, tightened switch policy, non-blocking switch UX |
+| `AR6` Background/eval | ✅ complete | AR6.1–AR6.7 landed; regression coverage for AR2/AR5/AR7 reopened work added |
 
 ## Verification Block Template
 
