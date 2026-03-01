@@ -9,9 +9,13 @@ from adapters.db.dependencies import get_db_session
 from adapters.llm.factory import build_graph_llm_client
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
 from core.schemas import (
+    FlashcardRunDetailResponse,
+    FlashcardRunListResponse,
     FlashcardRateRequest,
     FlashcardRateResponse,
+    PracticeQuizDetailResponse,
     PracticeFlashcardsResponse,
+    PracticeQuizHistoryListResponse,
     PracticeQuizSubmitResponse,
     QuizCreateResponse,
     StatefulFlashcardsResponse,
@@ -24,8 +28,12 @@ from domain.learning.practice import (
     PracticeUnavailableError,
     PracticeValidationError,
     create_practice_quiz,
+    get_flashcard_run,
+    get_practice_quiz,
     generate_practice_flashcards,
     generate_stateful_flashcards,
+    list_flashcard_runs,
+    list_practice_quizzes,
     rate_flashcard,
     submit_practice_quiz,
 )
@@ -178,6 +186,52 @@ def submit_quiz(
         _raise_http(exc)
 
 
+@router.get("/quizzes", response_model=PracticeQuizHistoryListResponse)
+def list_quizzes(
+    concept_id: int | None = None,
+    limit: int = 20,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> PracticeQuizHistoryListResponse:
+    try:
+        return PracticeQuizHistoryListResponse.model_validate(
+            list_practice_quizzes(
+                db,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+                concept_id=concept_id,
+                limit=min(limit, 100),
+            )
+        )
+    except (
+        PracticeNotFoundError,
+        PracticeValidationError,
+    ) as exc:
+        _raise_http(exc)
+
+
+@router.get("/quizzes/{quiz_id}", response_model=PracticeQuizDetailResponse)
+def get_quiz(
+    quiz_id: int,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> PracticeQuizDetailResponse:
+    try:
+        return PracticeQuizDetailResponse.model_validate(
+            get_practice_quiz(
+                db,
+                quiz_id=quiz_id,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+            )
+        )
+    except (
+        PracticeNotFoundError,
+        PracticeValidationError,
+    ) as exc:
+        _raise_http(exc)
+
+
 # ── Slice 10: Stateful flashcard endpoints ────────────────────────────
 
 
@@ -246,3 +300,71 @@ def due_flashcards_route(
         limit=min(limit, 50),
     )
     return {"workspace_id": ws.workspace_id, "due_flashcards": cards}
+
+
+@router.get("/flashcards/runs", response_model=FlashcardRunListResponse)
+def list_flashcard_runs_route(
+    concept_id: int | None = None,
+    limit: int = 20,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> FlashcardRunListResponse:
+    try:
+        return FlashcardRunListResponse.model_validate(
+            list_flashcard_runs(
+                db,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+                concept_id=concept_id,
+                limit=min(limit, 100),
+            )
+        )
+    except (
+        PracticeNotFoundError,
+        PracticeValidationError,
+    ) as exc:
+        _raise_http(exc)
+
+
+@router.get("/flashcards/runs/{run_id}", response_model=FlashcardRunDetailResponse)
+def get_flashcard_run_route(
+    run_id: str,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> FlashcardRunDetailResponse:
+    try:
+        return FlashcardRunDetailResponse.model_validate(
+            get_flashcard_run(
+                db,
+                run_id=run_id,
+                workspace_id=ws.workspace_id,
+                user_id=ws.user.id,
+            )
+        )
+    except (
+        PracticeNotFoundError,
+        PracticeValidationError,
+    ) as exc:
+        _raise_http(exc)
+
+
+@router.get("/concepts/{concept_id}/activity")
+def concept_activity_route(
+    concept_id: int,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return aggregate study activity for a concept (AR7.1)."""
+    from domain.learning.concept_activity import get_concept_activity
+
+    try:
+        return get_concept_activity(
+            db,
+            workspace_id=ws.workspace_id,
+            user_id=ws.user.id,
+            concept_id=concept_id,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc),
+        ) from exc

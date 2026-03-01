@@ -8,7 +8,10 @@ import type {
   DeleteChatSessionRequest,
   CreateLevelUpQuizRequest,
   CreateQuizRequest,
+  FlashcardRunDetailResponse,
+  FlashcardRunListResponse,
   FlashcardRateResponse,
+  ConceptActivityResponse,
   FlashcardsRequest,
   GraphConceptListResponse,
   GraphConceptDetailResponse,
@@ -20,6 +23,8 @@ import type {
   LuckyMode,
   MagicLinkResponse,
   PracticeFlashcardsResponse,
+  PracticeQuizDetailResponse,
+  PracticeQuizHistoryListResponse,
   PracticeQuizSubmitResponse,
   QuizCreateResponse,
   ReadinessSnapshotResponse,
@@ -238,10 +243,23 @@ export class ApiClient {
 
   // ── Practice (workspace-scoped) ─────────────────────────────────
   generatePracticeFlashcards(wsId: string, p: FlashcardsRequest) { return this.request<PracticeFlashcardsResponse>(`/workspaces/${wsId}/practice/flashcards`, { method: "POST", body: JSON.stringify(p) }); }
+  listPracticeQuizzes(wsId: string, conceptId?: number, limit?: number) {
+    return this.request<PracticeQuizHistoryListResponse>(`/workspaces/${wsId}/practice/quizzes`, { method: "GET" }, { concept_id: conceptId, limit });
+  }
+  getPracticeQuiz(wsId: string, quizId: number) {
+    return this.request<PracticeQuizDetailResponse>(`/workspaces/${wsId}/practice/quizzes/${quizId}`, { method: "GET" });
+  }
   createPracticeQuiz(wsId: string, p: CreateQuizRequest) { return this.request<QuizCreateResponse>(`/workspaces/${wsId}/practice/quizzes`, { method: "POST", body: JSON.stringify(p) }); }
   submitPracticeQuiz(wsId: string, quizId: number, p: SubmitQuizRequest) { return this.request<PracticeQuizSubmitResponse>(`/workspaces/${wsId}/practice/quizzes/${quizId}/submit`, { method: "POST", body: JSON.stringify(p) }); }
   generateStatefulFlashcards(wsId: string, p: { concept_id: number; card_count?: number }) { return this.request<StatefulFlashcardsResponse>(`/workspaces/${wsId}/practice/flashcards/stateful`, { method: "POST", body: JSON.stringify(p) }); }
+  listFlashcardRuns(wsId: string, conceptId?: number, limit?: number) {
+    return this.request<FlashcardRunListResponse>(`/workspaces/${wsId}/practice/flashcards/runs`, { method: "GET" }, { concept_id: conceptId, limit });
+  }
+  getFlashcardRun(wsId: string, runId: string) {
+    return this.request<FlashcardRunDetailResponse>(`/workspaces/${wsId}/practice/flashcards/runs/${runId}`, { method: "GET" });
+  }
   rateFlashcard(wsId: string, p: { flashcard_id: string; self_rating: string }) { return this.request<FlashcardRateResponse>(`/workspaces/${wsId}/practice/flashcards/rate`, { method: "POST", body: JSON.stringify(p) }); }
+  getConceptActivity(wsId: string, conceptId: number) { return this.request<ConceptActivityResponse>(`/workspaces/${wsId}/practice/concepts/${conceptId}/activity`, { method: "GET" }); }
 
   // ── Auth ─────────────────────────────────────────────────────────
   requestMagicLink(email: string) { return this.request<MagicLinkResponse>("/auth/magic-link", { method: "POST", body: JSON.stringify({ email }) }); }

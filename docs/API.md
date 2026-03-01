@@ -47,6 +47,7 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 - `GET /workspaces/{ws_id}/practice/quizzes`
 - `GET /workspaces/{ws_id}/practice/quizzes/{quiz_id}`
 - `POST /workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit`
+- `GET /workspaces/{ws_id}/practice/concepts/{concept_id}/activity`
 - `POST /workspaces/{ws_id}/quizzes/level-up`
 - `GET /workspaces/{ws_id}/quizzes/level-up`
 - `GET /workspaces/{ws_id}/quizzes/level-up/{quiz_id}`
@@ -889,6 +890,40 @@ curl -sS 'http://localhost:8000/graph/lucky?workspace_id=7&concept_id=42&mode=ad
   }
 }
 ```
+
+### GET /workspaces/{ws_id}/practice/concepts/{concept_id}/activity
+
+Tag/group: `practice`
+
+Purpose: return aggregate study activity for a concept, including practice quizzes, level-up quizzes, and flashcard runs with affordance metadata.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | integer | yes | workspace ID |
+| `concept_id` | path | integer | yes | concept ID |
+
+Success responses:
+
+- `200 OK` with `ConceptActivityResponse`
+
+`ConceptActivityResponse` fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | integer | workspace ID |
+| `user_id` | integer | current user ID |
+| `concept_id` | integer | concept ID |
+| `practice_quizzes` | object | `{ count, average_score, quizzes[] }` |
+| `level_up_quizzes` | object | `{ count, passed_count, quizzes[] }` |
+| `flashcard_runs` | object | `{ count, total_cards_generated, runs[] }` |
+| `affordances` | object | `{ can_generate_flashcards, can_create_practice_quiz, ... }` |
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `422 Unprocessable Entity` for validation failures
 
 ### POST /workspaces/{ws_id}/quizzes/level-up
 

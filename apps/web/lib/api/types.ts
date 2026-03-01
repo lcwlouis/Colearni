@@ -474,6 +474,57 @@ export interface FlashcardRateResponse {
   passed: boolean;
 }
 
+// ── Concept Activity (AR7.1) ────────────────────────────────────────
+
+export interface ConceptActivityQuiz {
+  quiz_id: number;
+  title: string;
+  latest_score: number | null;
+  passed: boolean | null;
+  graded_at: string | null;
+  can_retry: boolean;
+  critical_misconception?: string | null;
+  can_promote?: boolean;
+}
+
+export interface ConceptActivityFlashcardRun {
+  run_id: string;
+  item_count: number;
+  has_more: boolean;
+  exhausted: boolean;
+  created_at: string | null;
+  can_open: boolean;
+}
+
+export interface ConceptActivityResponse {
+  workspace_id: number;
+  user_id: number;
+  concept_id: number;
+  practice_quizzes: {
+    count: number;
+    average_score: number | null;
+    quizzes: ConceptActivityQuiz[];
+  };
+  level_up_quizzes: {
+    count: number;
+    passed_count: number;
+    quizzes: ConceptActivityQuiz[];
+  };
+  flashcard_runs: {
+    count: number;
+    total_cards_generated: number;
+    runs: ConceptActivityFlashcardRun[];
+  };
+  affordances: {
+    can_generate_flashcards: boolean;
+    can_create_practice_quiz: boolean;
+    can_create_level_up_quiz: boolean;
+    has_prior_flashcards: boolean;
+    has_prior_practice: boolean;
+    has_prior_level_up: boolean;
+  };
+}
+
 // ── Research ─────────────────────────────────────────────────────────
 
 export interface ResearchSourceSummary {
