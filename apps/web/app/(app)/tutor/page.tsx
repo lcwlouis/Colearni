@@ -153,6 +153,7 @@ export default function TutorPage() {
           loadSubgraph={t.loadSubgraph}
           setGraphViewConceptId={t.setGraphViewConceptId}
           tutorResetViewRef={t.tutorResetViewRef}
+          conceptActivity={t.conceptActivity}
         />
       ) : null}
 

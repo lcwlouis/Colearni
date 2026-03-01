@@ -11,6 +11,7 @@ import { useChatSession } from "@/lib/tutor/chat-session-context";
 import { useRequireAuth } from "@/lib/auth";
 import { useLevelUpFlow } from "./use-level-up-flow";
 import { useTutorMessages } from "./use-tutor-messages";
+import { useConceptActivity } from "@/lib/practice/use-concept-activity";
 import { errorText } from "../types";
 
 export function useTutorPage() {
@@ -43,6 +44,10 @@ export function useTutorPage() {
 
   // Onboarding
   const [onboarding, setOnboarding] = useState<OnboardingStatusResponse | null>(null);
+
+  // Concept activity for graph drawer
+  const activityConceptId = graphViewConceptId ?? currentConcept?.concept_id ?? undefined;
+  const conceptActivity = useConceptActivity(wsId, activityConceptId);
 
   async function ensureSession(): Promise<string | null> {
     if (!wsId) return null;
@@ -228,5 +233,7 @@ export function useTutorPage() {
     closeDrawer,
     // Onboarding
     onboarding,
+    // Concept activity
+    conceptActivity,
   };
 }

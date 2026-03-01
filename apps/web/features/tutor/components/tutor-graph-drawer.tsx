@@ -1,5 +1,6 @@
 import { ConceptGraph } from "@/components/concept-graph";
-import type { GraphConceptSummary, GraphSubgraphResponse } from "@/lib/api/types";
+import { ConceptActivityPanel } from "@/components/concept-activity-panel";
+import type { GraphConceptSummary, GraphSubgraphResponse, ConceptActivityResponse } from "@/lib/api/types";
 import { masteryLabel } from "../types";
 
 interface TutorGraphDrawerProps {
@@ -12,6 +13,12 @@ interface TutorGraphDrawerProps {
   loadSubgraph: (conceptId: number) => void;
   setGraphViewConceptId: (id: number | null) => void;
   tutorResetViewRef: React.MutableRefObject<(() => void) | null>;
+  conceptActivity?: {
+    activity: ConceptActivityResponse | null;
+    loading: boolean;
+    error: string | null;
+    refetch: () => void;
+  };
 }
 
 export function TutorGraphDrawer({
@@ -24,6 +31,7 @@ export function TutorGraphDrawer({
   loadSubgraph,
   setGraphViewConceptId,
   tutorResetViewRef,
+  conceptActivity,
 }: TutorGraphDrawerProps) {
   return (
     <aside className={`panel graph-drawer${closingDrawer === "graph" ? " closing" : ""}`}>
@@ -79,6 +87,16 @@ export function TutorGraphDrawer({
                 : currentConcept.description}
             </p>
           ) : null}
+        </div>
+      ) : null}
+      {conceptActivity ? (
+        <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.5rem", marginTop: "0.5rem" }}>
+          <ConceptActivityPanel
+            activity={conceptActivity.activity}
+            loading={conceptActivity.loading}
+            error={conceptActivity.error}
+            onRefresh={conceptActivity.refetch}
+          />
         </div>
       ) : null}
     </aside>
