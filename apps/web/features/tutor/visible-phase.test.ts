@@ -8,8 +8,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { PHASE_LABELS, visiblePhaseLabel } from "./types";
+import { ACTIVITY_LABELS, PHASE_LABELS, visiblePhaseLabel } from "./types";
 import type { ChatPhase } from "./types";
+import type { TutorActivity } from "@/lib/api/types";
 
 describe("visiblePhaseLabel (U1 policy)", () => {
   it("shows Thinking… for thinking phase", () => {
@@ -47,5 +48,33 @@ describe("visiblePhaseLabel (U1 policy)", () => {
   it("PHASE_LABELS never contains Finalizing…", () => {
     const values = Object.values(PHASE_LABELS);
     expect(values).not.toContain("Finalizing…");
+  });
+});
+
+describe("ACTIVITY_LABELS (AR3.3)", () => {
+  it("covers all 8 activity types", () => {
+    const keys = Object.keys(ACTIVITY_LABELS);
+    expect(keys).toHaveLength(8);
+    expect(keys).toContain("planning_turn");
+    expect(keys).toContain("retrieving_chunks");
+    expect(keys).toContain("expanding_graph");
+    expect(keys).toContain("checking_mastery");
+    expect(keys).toContain("preparing_quiz");
+    expect(keys).toContain("grading_quiz");
+    expect(keys).toContain("verifying_citations");
+    expect(keys).toContain("generating_reply");
+  });
+
+  it("all labels are non-empty strings", () => {
+    for (const label of Object.values(ACTIVITY_LABELS)) {
+      expect(typeof label).toBe("string");
+      expect(label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("activity labels are human-readable (no underscores)", () => {
+    for (const label of Object.values(ACTIVITY_LABELS)) {
+      expect(label).not.toMatch(/_/);
+    }
   });
 });
