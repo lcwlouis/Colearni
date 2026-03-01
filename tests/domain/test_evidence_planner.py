@@ -482,3 +482,49 @@ class TestGraphExpansion:
             needs_retrieval=True,
         )
         assert plan.expand_document_summaries
+
+
+class TestSourceAccounting:
+    """Verify retrieved-vs-used source accounting fields (AR2.4)."""
+
+    def test_generation_trace_has_accounting_fields(self):
+        from core.schemas.assistant import GenerationTrace
+
+        trace = GenerationTrace(
+            evidence_plan_retrieved_count=10,
+            evidence_plan_used_count=3,
+        )
+        assert trace.evidence_plan_retrieved_count == 10
+        assert trace.evidence_plan_used_count == 3
+
+    def test_generation_trace_defaults_none(self):
+        from core.schemas.assistant import GenerationTrace
+
+        trace = GenerationTrace()
+        assert trace.evidence_plan_retrieved_count is None
+        assert trace.evidence_plan_used_count is None
+
+    def test_retrieved_count_matches_plan(self):
+        """retrieved_chunk_count on EvidencePlan maps to retrieved_count in trace."""
+        plan = build_evidence_plan(
+            base_query="test",
+            workspace_id=1,
+            needs_retrieval=True,
+        )
+        assert plan.retrieved_chunk_count == 0
+
+        from domain.retrieval.types import RankedChunk
+
+        chunks = [
+            RankedChunk(
+                workspace_id=1, document_id=1, chunk_id=i,
+                chunk_index=0, text=f"chunk {i}", score=0.5,
+                retrieval_method="vector",
+            )
+            for i in range(5)
+        ]
+        updated = plan.with_results(
+            stop_reason="coverage_sufficient",
+            retrieved_chunk_count=5,
+        )
+        assert updated.retrieved_chunk_count == 5

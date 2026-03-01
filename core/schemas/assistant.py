@@ -286,6 +286,8 @@ class GenerationTrace(BaseModel):
     evidence_plan_budget: int | None = None
     evidence_plan_chunk_count: int | None = None
     evidence_plan_passes: int | None = None
+    evidence_plan_retrieved_count: int | None = None
+    evidence_plan_used_count: int | None = None
 
 
 class ReadinessTopicState(BaseModel):

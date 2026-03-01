@@ -477,6 +477,8 @@ def _stream_inner(
         "evidence_plan_budget": evidence_plan.retrieval_budget,
         "evidence_plan_chunk_count": evidence_plan.retrieved_chunk_count,
         "evidence_plan_passes": evidence_plan.retrieval_passes_used,
+        "evidence_plan_retrieved_count": evidence_plan.retrieved_chunk_count,
+        "evidence_plan_used_count": len(envelope.evidence) if envelope.evidence else 0,
     })
 
     envelope = envelope.model_copy(
