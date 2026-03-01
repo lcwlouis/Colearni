@@ -62,18 +62,19 @@ def _aggregate_practice_quizzes(
     rows = (
         session.execute(
             text("""
-                SELECT q.id AS quiz_id, q.title,
+                SELECT q.id AS quiz_id,
                        a.score, a.passed, a.graded_at
-                FROM practice_quizzes q
+                FROM quizzes q
                 LEFT JOIN LATERAL (
                     SELECT score, passed, graded_at
-                    FROM practice_quiz_attempts
+                    FROM quiz_attempts
                     WHERE quiz_id = q.id
                     ORDER BY id DESC LIMIT 1
                 ) a ON true
                 WHERE q.workspace_id = :workspace_id
                   AND q.user_id = :user_id
                   AND q.concept_id = :concept_id
+                  AND q.quiz_type = 'practice'
                 ORDER BY q.id DESC
                 LIMIT 10
             """),
@@ -91,7 +92,6 @@ def _aggregate_practice_quizzes(
             scores.append(float(score))
         quizzes.append({
             "quiz_id": int(r["quiz_id"]),
-            "title": str(r.get("title") or ""),
             "latest_score": float(score) if score is not None else None,
             "passed": bool(r["passed"]) if r.get("passed") is not None else None,
             "graded_at": str(r["graded_at"]) if r.get("graded_at") else None,
@@ -112,13 +112,13 @@ def _aggregate_level_up_quizzes(
     rows = (
         session.execute(
             text("""
-                SELECT q.id AS quiz_id, q.title,
+                SELECT q.id AS quiz_id,
                        a.score, a.passed, a.graded_at,
-                       a.critical_misconception
-                FROM practice_quizzes q
+                       a.grading->>'critical_misconception' AS critical_misconception
+                FROM quizzes q
                 LEFT JOIN LATERAL (
-                    SELECT score, passed, graded_at, critical_misconception
-                    FROM practice_quiz_attempts
+                    SELECT score, passed, graded_at, grading
+                    FROM quiz_attempts
                     WHERE quiz_id = q.id
                     ORDER BY id DESC LIMIT 1
                 ) a ON true
@@ -143,7 +143,6 @@ def _aggregate_level_up_quizzes(
             passed_count += 1
         quizzes.append({
             "quiz_id": int(r["quiz_id"]),
-            "title": str(r.get("title") or ""),
             "latest_score": float(r["score"]) if r.get("score") is not None else None,
             "passed": bool(passed) if passed is not None else None,
             "critical_misconception": str(r["critical_misconception"]) if r.get("critical_misconception") else None,
