@@ -454,6 +454,27 @@
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.chip-tier {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg));
+  color: var(--accent);
+}
+.chip-tier--umbrella {
+  background: color-mix(in srgb, #7c3aed 15%, var(--bg));
+  color: #7c3aed;
+}
+.chip-tier--topic {
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg));
+  color: var(--accent);
 }
 .chip-desc {
   font-size: 0.78rem;

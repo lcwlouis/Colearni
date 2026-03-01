@@ -68,7 +68,12 @@ export function TutorTimeline({
                   setQuery(`Teach me about ${topic.canonical_name}`);
                 }}
               >
-                <span className="chip-name">{topic.canonical_name}</span>
+                <span className="chip-name">
+                    {topic.canonical_name}
+                    {topic.tier ? (
+                      <span className={`chip-tier chip-tier--${topic.tier}`}>{topic.tier}</span>
+                    ) : null}
+                  </span>
                 {topic.description ? (
                   <span className="chip-desc">
                     {topic.description.length > 80 ? topic.description.slice(0, 80) + "…" : topic.description}

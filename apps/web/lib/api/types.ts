@@ -558,6 +558,7 @@ export interface OnboardingSuggestedTopic {
   concept_id: number;
   canonical_name: string;
   description: string | null;
+  tier?: 'umbrella' | 'topic' | 'subtopic' | 'granular' | null;
   degree: number;
 }
 

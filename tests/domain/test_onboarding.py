@@ -54,8 +54,8 @@ class _FakeSession:
 
 def test_suggest_starting_topics_returns_top_by_degree() -> None:
     rows = [
-        {"concept_id": 1, "canonical_name": "Linear Map", "description": "Maps vectors.", "degree": 5},
-        {"concept_id": 2, "canonical_name": "Eigenvalue", "description": None, "degree": 3},
+        {"concept_id": 1, "canonical_name": "Linear Map", "description": "Maps vectors.", "tier": "topic", "degree": 5},
+        {"concept_id": 2, "canonical_name": "Eigenvalue", "description": None, "tier": None, "degree": 3},
     ]
     # suggest_starting_topics calls execute() once directly — use a simple stub
     class _DirectSession:
@@ -67,7 +67,9 @@ def test_suggest_starting_topics_returns_top_by_degree() -> None:
     assert result[0]["concept_id"] == 1
     assert result[0]["canonical_name"] == "Linear Map"
     assert result[0]["degree"] == 5
+    assert result[0]["tier"] == "topic"
     assert result[1]["description"] is None
+    assert result[1]["tier"] is None
 
 
 def test_suggest_starting_topics_empty_workspace() -> None:
@@ -89,13 +91,14 @@ def test_get_onboarding_status_no_docs() -> None:
 
 def test_get_onboarding_status_with_concepts() -> None:
     topics = [
-        {"concept_id": 1, "canonical_name": "Basis", "description": "Foundation.", "degree": 4},
+        {"concept_id": 1, "canonical_name": "Basis", "description": "Foundation.", "tier": "umbrella", "degree": 4},
     ]
     session = _FakeSession(doc_count=2, concept_count=3, topic_rows=topics)
     status = get_onboarding_status(session, workspace_id=1)
     assert status["has_documents"] is True
     assert status["has_active_concepts"] is True
     assert len(status["suggested_topics"]) == 1
+    assert status["suggested_topics"][0]["tier"] == "umbrella"
 
 
 def test_onboarding_route_exists() -> None:

@@ -80,6 +80,7 @@ class OnboardingSuggestedTopic(BaseModel):
     concept_id: int = Field(gt=0)
     canonical_name: str
     description: str | None = None
+    tier: str | None = None
     degree: int = Field(ge=0)
 
 

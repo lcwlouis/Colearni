@@ -26,6 +26,7 @@ def suggest_starting_topics(
                     c.id   AS concept_id,
                     c.canonical_name,
                     c.description,
+                    c.tier,
                     (
                         SELECT count(*)
                         FROM edges_canon e
@@ -35,6 +36,7 @@ def suggest_starting_topics(
                 FROM concepts_canon c
                 WHERE c.workspace_id = :workspace_id
                   AND c.is_active = TRUE
+                  AND (c.tier IN ('umbrella', 'topic') OR c.tier IS NULL)
                 ORDER BY degree DESC, c.canonical_name
                 LIMIT :limit
                 """
@@ -49,6 +51,7 @@ def suggest_starting_topics(
             "concept_id": int(r["concept_id"]),
             "canonical_name": str(r["canonical_name"]),
             "description": str(r["description"]) if r["description"] else None,
+            "tier": str(r["tier"]) if r["tier"] else None,
             "degree": int(r["degree"]),
         }
         for r in rows
