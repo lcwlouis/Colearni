@@ -175,7 +175,7 @@ def generate_chat_response(
             has_documents=True,
         )
 
-        # ── Plan-gated retrieval via EvidencePlan (AR2.1) ─────────────
+        # ── Plan-gated retrieval via EvidencePlan (AR2.1 / AR2.2) ─────
         evidence_plan = build_evidence_plan(
             base_query=request.query,
             workspace_id=request.workspace_id,
@@ -186,6 +186,7 @@ def generate_chat_response(
                 if concept_resolution.resolved_concept is not None
                 else None
             ),
+            concept_name=resolved_name,
         )
         evidence_plan, ranked_chunks = execute_evidence_plan(
             session,
@@ -392,6 +393,7 @@ def generate_chat_response(
             "evidence_plan_stop_reason": evidence_plan.stop_reason,
             "evidence_plan_budget": evidence_plan.retrieval_budget,
             "evidence_plan_chunk_count": evidence_plan.retrieved_chunk_count,
+            "evidence_plan_passes": evidence_plan.retrieval_passes_used,
         })
 
         envelope = envelope.model_copy(

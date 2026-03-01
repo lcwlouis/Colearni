@@ -261,6 +261,7 @@ class GenerationTrace(BaseModel):
     - ``evidence_plan_stop_reason``: why evidence retrieval stopped.
     - ``evidence_plan_budget``: retrieval budget used for evidence planning.
     - ``evidence_plan_chunk_count``: number of chunks retrieved by the evidence planner.
+    - ``evidence_plan_passes``: number of retrieval passes executed.
     """
 
     provider: str | None = None
@@ -284,6 +285,7 @@ class GenerationTrace(BaseModel):
     evidence_plan_stop_reason: str | None = None
     evidence_plan_budget: int | None = None
     evidence_plan_chunk_count: int | None = None
+    evidence_plan_passes: int | None = None
 
 
 class ReadinessTopicState(BaseModel):
