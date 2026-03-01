@@ -37,6 +37,16 @@ def dedupe_keywords(keywords: list[str]) -> list[str]:
     return deduped
 
 
+VALID_TIERS: frozenset[str] = frozenset({"umbrella", "topic", "subtopic", "granular"})
+
+_TIER_RANK: dict[str, int] = {"umbrella": 1, "topic": 2, "subtopic": 3, "granular": 4}
+
+
+def tier_rank(tier: str | None) -> int:
+    """Return specificity rank for a tier value (higher = more specific, 0 = unknown/None)."""
+    return _TIER_RANK.get(tier or "", 0)
+
+
 @dataclass(frozen=True, slots=True)
 class ExtractedConcept:
     """One raw concept extracted from a chunk."""
@@ -44,6 +54,7 @@ class ExtractedConcept:
     name: str
     context_snippet: str
     description: str = ""
+    tier: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

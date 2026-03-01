@@ -10,8 +10,10 @@ from domain.graph.types import (
     ExtractedConcept,
     ExtractedEdge,
     RawGraphExtraction,
+    VALID_TIERS,
     dedupe_keywords,
     normalize_alias,
+    tier_rank as _tier_rank,
     truncate_text,
 )
 
@@ -24,6 +26,7 @@ class _ConceptPayload(BaseModel):
     name: str = Field(min_length=1)
     context_snippet: str | None = None
     description: str | None = None
+    tier: str | None = None
 
 
 class _EdgePayload(BaseModel):
@@ -73,6 +76,7 @@ def extract_raw_graph_from_chunk(
                 _MAX_CONTEXT_SNIPPET_CHARS,
             ),
             description=truncate_text(concept.description, concept_description_max_chars),
+            tier=concept.tier if concept.tier in VALID_TIERS else None,
         )
         existing = concept_by_alias.get(alias_norm)
         if existing is None:
@@ -93,6 +97,7 @@ def extract_raw_graph_from_chunk(
             name=existing.name,
             context_snippet=merged_context,
             description=merged_description,
+            tier=candidate.tier if _tier_rank(candidate.tier) > _tier_rank(existing.tier) else existing.tier,
         )
 
     edge_by_key: dict[tuple[str, str, str], ExtractedEdge] = {}

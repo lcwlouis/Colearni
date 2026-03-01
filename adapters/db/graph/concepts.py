@@ -34,7 +34,7 @@ def insert_raw_concepts(
             "chunk_id": chunk_id,
             "name": concept.name,
             "context_snippet": concept.context_snippet,
-            "extracted_json": json.dumps({"description": concept.description}),
+            "extracted_json": json.dumps({"description": concept.description, "tier": concept.tier}),
         }
         for concept in concepts
     ]
@@ -81,7 +81,8 @@ def find_alias_match(
                     c.aliases,
                     c.embedding,
                     c.is_active,
-                    c.dirty
+                    c.dirty,
+                    c.tier
                 FROM concept_merge_map m
                 JOIN concepts_canon c ON c.id = m.canon_concept_id
                 WHERE m.workspace_id = :workspace_id
@@ -117,7 +118,8 @@ def find_canonical_by_name_ci(
                     aliases,
                     embedding,
                     is_active,
-                    dirty
+                    dirty,
+                    tier
                 FROM concepts_canon
                 WHERE workspace_id = :workspace_id
                   AND is_active = TRUE
@@ -153,7 +155,8 @@ def get_canonical_concept(
                     aliases,
                     embedding,
                     is_active,
-                    dirty
+                    dirty,
+                    tier
                 FROM concepts_canon
                 WHERE workspace_id = :workspace_id
                   AND id = :concept_id
@@ -175,6 +178,7 @@ def create_canonical_concept(
     description: str,
     aliases: Sequence[str],
     embedding: Sequence[float] | None,
+    tier: str | None = None,
 ) -> CanonicalConceptRow:
     """Create canonical concept row (dirty=true) and return it."""
     if embedding is None:
@@ -189,7 +193,8 @@ def create_canonical_concept(
                         aliases,
                         embedding,
                         is_active,
-                        dirty
+                        dirty,
+                        tier
                     )
                     VALUES (
                         :workspace_id,
@@ -198,11 +203,13 @@ def create_canonical_concept(
                         :aliases,
                         NULL,
                         TRUE,
-                        TRUE
+                        TRUE,
+                        :tier
                     )
                     ON CONFLICT (workspace_id, canonical_name)
                     DO UPDATE
-                    SET updated_at = now()
+                    SET updated_at = now(),
+                        tier = COALESCE(concepts_canon.tier, EXCLUDED.tier)
                     RETURNING
                         id,
                         workspace_id,
@@ -211,7 +218,8 @@ def create_canonical_concept(
                         aliases,
                         embedding,
                         is_active,
-                        dirty
+                        dirty,
+                        tier
                     """
                 ),
                 {
@@ -219,6 +227,7 @@ def create_canonical_concept(
                     "canonical_name": canonical_name,
                     "description": description,
                     "aliases": list(aliases),
+                    "tier": tier,
                 },
             )
             .mappings()
@@ -237,7 +246,8 @@ def create_canonical_concept(
                     aliases,
                     embedding,
                     is_active,
-                    dirty
+                    dirty,
+                    tier
                 )
                 VALUES (
                     :workspace_id,
@@ -246,11 +256,13 @@ def create_canonical_concept(
                     :aliases,
                     CAST(:embedding AS vector),
                     TRUE,
-                    TRUE
+                    TRUE,
+                    :tier
                 )
                 ON CONFLICT (workspace_id, canonical_name)
                 DO UPDATE
-                SET updated_at = now()
+                SET updated_at = now(),
+                    tier = COALESCE(concepts_canon.tier, EXCLUDED.tier)
                 RETURNING
                     id,
                     workspace_id,
@@ -259,7 +271,8 @@ def create_canonical_concept(
                     aliases,
                     embedding,
                     is_active,
-                    dirty
+                    dirty,
+                    tier
                 """
             ),
             {
@@ -268,6 +281,7 @@ def create_canonical_concept(
                 "description": description,
                 "aliases": list(aliases),
                 "embedding": _vector_literal(embedding),
+                "tier": tier,
             },
         )
         .mappings()
@@ -285,6 +299,7 @@ def update_canonical_concept(
     aliases: Sequence[str],
     embedding: Sequence[float] | None,
     mark_dirty: bool,
+    tier: str | None = None,
 ) -> CanonicalConceptRow:
     """Update canonical concept fields and return latest row."""
     if embedding is None:
@@ -297,7 +312,8 @@ def update_canonical_concept(
                         description = :description,
                         aliases = :aliases,
                         dirty = :mark_dirty,
-                        updated_at = now()
+                        updated_at = now(),
+                        tier = COALESCE(:tier, tier)
                     WHERE workspace_id = :workspace_id
                       AND id = :concept_id
                     RETURNING
@@ -308,7 +324,8 @@ def update_canonical_concept(
                         aliases,
                         embedding,
                         is_active,
-                        dirty
+                        dirty,
+                        tier
                     """
                 ),
                 {
@@ -317,6 +334,7 @@ def update_canonical_concept(
                     "description": description,
                     "aliases": list(aliases),
                     "mark_dirty": mark_dirty,
+                    "tier": tier,
                 },
             )
             .mappings()
@@ -334,7 +352,8 @@ def update_canonical_concept(
                     aliases = :aliases,
                     embedding = CAST(:embedding AS vector),
                     dirty = :mark_dirty,
-                    updated_at = now()
+                    updated_at = now(),
+                    tier = COALESCE(:tier, tier)
                 WHERE workspace_id = :workspace_id
                   AND id = :concept_id
                 RETURNING
@@ -345,7 +364,8 @@ def update_canonical_concept(
                     aliases,
                     embedding,
                     is_active,
-                    dirty
+                    dirty,
+                    tier
                 """
             ),
             {
@@ -355,6 +375,7 @@ def update_canonical_concept(
                 "aliases": list(aliases),
                 "embedding": _vector_literal(embedding),
                 "mark_dirty": mark_dirty,
+                "tier": tier,
             },
         )
         .mappings()

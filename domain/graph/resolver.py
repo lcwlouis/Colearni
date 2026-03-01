@@ -29,6 +29,7 @@ from domain.graph.types import (
     ResolverDecision,
     dedupe_keywords,
     normalize_alias,
+    tier_rank,
     truncate_text,
 )
 
@@ -479,10 +480,18 @@ class OnlineResolver:
             merged_embedding = list(query_embedding)
             embedding_changed = True
 
+        # Promote tier only if the incoming tier is more specific than existing.
+        effective_tier = (
+            raw_concept.tier
+            if tier_rank(raw_concept.tier) > tier_rank(canonical.tier)
+            else canonical.tier
+        )
+
         changed = (
             merged_aliases != canonical.aliases
             or merged_description != canonical.description
             or embedding_changed
+            or effective_tier != canonical.tier
         )
         if not changed:
             return canonical
@@ -495,6 +504,7 @@ class OnlineResolver:
             aliases=merged_aliases,
             embedding=merged_embedding,
             mark_dirty=True,
+            tier=effective_tier,
         )
 
     def _create_or_reuse_canonical(
@@ -536,6 +546,7 @@ class OnlineResolver:
                 description=description,
                 aliases=[raw_concept.name.strip()],
                 embedding=query_embedding,
+                tier=raw_concept.tier,
             ),
             True,
         )
