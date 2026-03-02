@@ -1,4 +1,4 @@
-import { useReducer, useEffect, useState, useCallback } from "react";
+import { useReducer, useEffect, useState, useCallback, useRef } from "react";
 import { ApiError, apiClient } from "@/lib/api/client";
 import { graphReducer, initialGraphState } from "@/lib/graph/graph-state";
 import {
@@ -86,13 +86,18 @@ export function useGraphPage() {
       );
   }, [debouncedQuery, wsId]);
 
+  // Load the full graph once on mount and when graph controls change.
+  // Separate from concept selection — selecting a concept should NOT
+  // trigger a full graph refetch (which would restart the simulation).
+  const fullGraphLoadedRef = useRef(false);
   useEffect(() => {
-    if (!wsId || debouncedQuery.trim().length > 0 || state.selectedDetail) return;
+    if (!wsId || debouncedQuery.trim().length > 0) return;
+    fullGraphLoadedRef.current = true;
     apiClient
       .getFullGraph(wsId, { max_nodes: maxNodes, max_edges: maxEdges })
       .then((res) => setFullGraph(res))
       .catch((e) => console.error("Failed to load full graph overview", e));
-  }, [wsId, debouncedQuery, state.selectedDetail, maxNodes, maxEdges]);
+  }, [wsId, debouncedQuery, maxNodes, maxEdges]);
 
   const refreshFullGraph = useCallback(() => {
     if (!wsId) return;
@@ -110,16 +115,10 @@ export function useGraphPage() {
       setStatefulCards([]);
       setStatefulError(null);
       setFocusNodeId(conceptId);
-      Promise.all([
-        apiClient.getConceptDetail(wsId, conceptId),
-        apiClient.getConceptSubgraph(wsId, conceptId, {
-          max_hops: maxHops,
-          max_nodes: 40,
-          max_edges: 80,
-        }),
-      ])
-        .then(([detail, subgraph]) =>
-          dispatch({ type: "detail_success", detail, subgraph }),
+      apiClient
+        .getConceptDetail(wsId, conceptId)
+        .then((detail) =>
+          dispatch({ type: "detail_success", detail }),
         )
         .catch((e) =>
           dispatch({
@@ -128,7 +127,7 @@ export function useGraphPage() {
           }),
         );
     },
-    [wsId, maxHops],
+    [wsId],
   );
 
   const lucky = useCallback(

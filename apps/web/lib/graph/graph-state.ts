@@ -27,7 +27,7 @@ export type GraphAction =
   | { type: "list_success"; concepts: GraphConceptSummary[] }
   | { type: "list_error"; error: string }
   | { type: "detail_start" }
-  | { type: "detail_success"; detail: GraphConceptDetailResponse; subgraph: GraphSubgraphResponse }
+  | { type: "detail_success"; detail: GraphConceptDetailResponse; subgraph?: GraphSubgraphResponse | null }
   | { type: "detail_error"; error: string }
   | { type: "lucky_success"; pick: GraphLuckyResponse }
   | { type: "lucky_error"; error: string }
@@ -59,7 +59,7 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
     return { ...state, phase: "loading_detail", selectedDetail: null, luckyPick: null, error: null };
   }
   if (action.type === "detail_success") {
-    return { ...state, phase: "detail_ready", selectedDetail: action.detail, subgraph: action.subgraph, error: null };
+    return { ...state, phase: "detail_ready", selectedDetail: action.detail, subgraph: action.subgraph ?? state.subgraph, error: null };
   }
   if (action.type === "detail_error") {
     return { ...state, phase: "error", error: action.error };
