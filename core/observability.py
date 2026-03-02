@@ -303,6 +303,22 @@ def set_llm_span_attributes(
             span.set_attribute(LLM_TOKEN_COUNT_TOTAL, int(token_usage["token_total"]))
         set_usage_source(span, classify_usage_source(token_usage))
 
+    # Also populate input.value / output.value so Phoenix Info tab shows content
+    if messages is not None or response_message is not None:
+        input_text: str | None = None
+        if messages is not None:
+            parts: list[str] = []
+            for msg in messages:
+                role = str(msg.get("role", "unknown"))
+                content = str(msg.get("content", ""))
+                parts.append(f"[{role}]\n{content}")
+            input_text = "\n\n".join(parts)
+        set_input_output(
+            span,
+            input_value=input_text,
+            output_value=response_message,
+        )
+
 
 def set_span_kind(span: Any, kind: str) -> None:
     """Set the OpenInference span kind on a trace span."""
