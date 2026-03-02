@@ -152,6 +152,7 @@ What is materially missing:
 12. **Tier breakdown**: Backend returns per-tier counts in document list response. Frontend shows compact badges.
 13. **Practice quiz retry ONLY**: Level-up quizzes cannot be retried — they affect mastery progression. Practice quizzes are safe to retry.
 14. **Graph replacement scope**: UXG replaces concept-graph.tsx with a Sigma.js-based component. The graph detail panel (flashcards, quizzes, activity) remains and is enhanced in UXP. The data fetching hooks are adapted, not rewritten.
+15. **UXG scope expansion (user request)**: UXG.8–UXG.13 added by user request to cover remaining LightRAG porting checklist features: camera control panel, extended layout suite (6 algorithms + play/pause), loading states, legend & status bar, settings panel with persistence, and node expand/prune. These are NOT audit-cycle reopenings — they are new scope added to the plan.
 
 ## Deferred Follow-On Scope
 
@@ -283,7 +284,7 @@ Dependencies between tracks:
 | Track | Status | Last note |
 |---|---|---|
 | `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) |
-| `UXG` Graph replacement | 🔄 in progress | 13 slices total — UXG.1–UXG.7 ✅, UXG.8–UXG.13 🔲 (camera controls, extended layouts, loading states, legend/status bar, settings panel, node expand/prune) |
+| `UXG` Graph replacement | 🔄 in progress | UXG.1–UXG.7 ✅ done. UXG.8–UXG.13 🔲 pending (added by user request: camera controls, extended layouts, loading states, legend/status bar, settings panel, node expand/prune) |
 | `UXP` Practice UX | 🟢 done | All 3 slices complete (UXP.1–UXP.3) — flashcard stack, generate-more, quiz history |
 | `UXT` Tutor UX | 🟢 done | All 3 slices complete (UXT.1–UXT.3) — onboarding confirm, status animation, graph-chat |
 | `UXI` Infrastructure | 🔄 pending | Not started — sources, caching, dev stats |
