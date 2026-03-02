@@ -1,0 +1,250 @@
+# CoLearni UX Overhaul — Practice & Learning UX Plan
+
+Last updated: 2026-03-02
+
+Parent plan: `docs/UX_OVERHAUL_MASTER_PLAN.md`
+
+Archive snapshots:
+- `none` (new plan)
+
+## Plan Completeness Checklist
+
+1. archive snapshot path(s) ✓
+2. current verification status ✓
+3. ordered slice list with stable IDs ✓
+4. verification block template (inherited from master) ✓
+5. removal entry template (inherited from master) ✓
+6. final section `## REQUIRED KICKOFF PROMPT (DO NOT OMIT)` ✓
+
+## Non-Negotiable Run Rules
+
+1. Re-read this file at start, after every 2 slices, after context compaction, before completion claims.
+2. A slice is ONLY complete with code changed + behavior verified + verification block produced.
+3. Work PR-sized: `chore(refactor): <slice-id> <short description>`.
+4. If a behavior change risk is discovered, STOP and update this plan.
+
+## Purpose
+
+Redesign the flashcard and quiz UX so that users can review their learning history, retry practice quizzes, and access flashcards as a unified deck rather than fragmented generation sessions.
+
+## Inputs Used
+
+- `docs/UX_OVERHAUL_MASTER_PLAN.md`
+- User requirements (verbatim from session)
+- Code investigation of flashcard/quiz backend APIs and frontend components
+- `apps/api/routes/flashcards.py`, `apps/api/routes/practice_quiz.py`
+- `apps/web/features/graph/components/graph-detail-panel.tsx`
+- `apps/web/features/graph/components/concept-activity-panel.tsx`
+
+## Executive Summary
+
+What exists today:
+- Backend APIs: `listFlashcardRuns`, `getFlashcardRun`, `listPracticeQuizzes`, `getPracticeQuiz`
+- Flashcards stored per `run_id` in `practice_flashcard_bank` with dedup fingerprints
+- Exhaustion detection: returns `has_more: false` + `exhausted_reason` when content is exhausted
+- `ConceptActivityPanel` shows past flashcard runs and quiz history but with limited UX
+- Practice quizzes have `can_retry` flag; level-up quizzes do NOT
+
+What this track adds:
+1. **Unified flashcard stack** — all flashcards for a concept merged into one deck, not separate sessions
+2. **"Generate more" button** — LLM decides if there's more content; button disabled when exhausted
+3. **Quiz history browser** — list of past quizzes with datetime, click to view, retry button
+4. **Quiz retry flow** — reset answers and let user attempt again (practice only)
+
+## Non-Negotiable Constraints
+
+1. Level-up quizzes are NEVER retryable — only practice quizzes
+2. Flashcard dedup fingerprints must be preserved — no duplicate cards across generations
+3. "Generate more" must respect LLM exhaustion signal — cannot generate infinitely
+4. Existing flashcard and quiz API contracts must not break
+5. Concept detail panel layout: Flashcards section + Quizzes section below description/aliases/connections
+
+## Completed Work
+
+- Backend APIs for listing and getting flashcard runs / practice quizzes — fully functional
+- Exhaustion detection in flashcard generation — works correctly
+- `ConceptActivityPanel` shows basic run list
+
+## Remaining Slice IDs
+
+- `UXP.1` Unified flashcard stack viewer
+- `UXP.2` Generate-more with exhaustion awareness
+- `UXP.3` Quiz history browser with retry
+
+## Decision Log
+
+1. Flashcard stack view: merge all `run_id` sessions into one flat list, sorted by creation date, shown as a swipeable/flippable card deck.
+2. "Generate more" button lives at the bottom of the flashcard stack — clicking triggers a new generation run, appends new cards to the deck.
+3. When exhausted, the button is replaced with a text message: "All available content has been covered" (or similar).
+4. Quiz history: chronological list with the most recent quiz at the top. Each entry shows: datetime, score (if completed), status.
+5. Clicking a quiz entry opens it in review mode (read-only, showing correct/incorrect answers).
+6. "Retry" button on a quiz clears the user's answers and lets them attempt the same questions again.
+7. These views are accessible from the concept detail panel (graph side panel) under expandable sections.
+
+## Current Verification Status
+
+- `PYTHONPATH=. pytest -q`: 922 passed
+- `npx vitest run`: 106 passed
+
+Hotspots:
+
+| File | Role |
+|---|---|
+| `apps/web/features/graph/components/graph-detail-panel.tsx` | Main concept detail panel — add flashcard/quiz sections |
+| `apps/web/features/graph/components/concept-activity-panel.tsx` | Existing activity panel — refactor |
+| `apps/api/routes/flashcards.py` | Flashcard endpoints |
+| `apps/api/routes/practice_quiz.py` | Practice quiz endpoints |
+| `domain/practice/flashcard_service.py` | Flashcard generation + exhaustion logic |
+| `domain/practice/quiz_service.py` | Quiz generation + retry logic |
+
+## Implementation Sequencing
+
+### UXP.1. Unified flashcard stack viewer
+
+Purpose:
+- Show all flashcards for a concept as a single deck instead of separate generation sessions
+
+Files involved:
+- `apps/web/features/graph/components/flashcard-stack.tsx` (new)
+- `apps/web/features/graph/components/graph-detail-panel.tsx` (modified)
+- `apps/web/lib/api/flashcards.ts` (may need a new endpoint or client-side merge)
+
+Implementation steps:
+1. Create `flashcard-stack.tsx`:
+   - Fetch all flashcard runs for the selected concept
+   - Merge all cards into a single array, sorted by creation date (oldest first)
+   - Display as a stack: show one card at a time with flip animation (front: question, back: answer)
+   - Navigation: prev/next buttons, progress indicator (e.g., "5/23")
+   - If no flashcards exist, show a "Generate flashcards" button
+2. Add a "Flashcards" section to `graph-detail-panel.tsx`:
+   - Below Description, Aliases, and Connections
+   - Expandable/collapsible section
+   - Opens the `FlashcardStack` component when expanded
+3. Ensure the flashcard dedup fingerprints prevent duplicates when multiple runs are merged.
+
+Verification:
+- `npx vitest run`
+- Manual: select concept with existing flashcards → unified stack shows all cards
+- Manual: navigate through cards → prev/next works, flip works
+- Manual: concept with no flashcards → "Generate flashcards" button shown
+
+Exit criteria:
+- All flashcards for a concept visible in one stack
+- No duplicate cards shown
+- Navigation through the deck is smooth
+
+### UXP.2. Generate-more with exhaustion awareness
+
+Purpose:
+- Let users generate additional flashcards and automatically disable when content is exhausted
+
+Files involved:
+- `apps/web/features/graph/components/flashcard-stack.tsx` (modified)
+- Backend may need no changes (exhaustion is already detected)
+
+Implementation steps:
+1. Add "Generate more" button at the end of the flashcard stack (after the last card)
+2. On click: call the existing flashcard generation endpoint for this concept
+3. Poll or await the result; append new cards to the existing stack
+4. If the response returns `has_more: false`:
+   - Disable the button
+   - Show exhaustion message: "All content for this concept has been covered"
+5. Show a loading state while generating.
+6. After generation completes, automatically navigate to the first new card.
+
+Verification:
+- Manual: click "Generate more" → new cards appear in the stack
+- Manual: generate until exhausted → button disables with message
+- Manual: loading state visible during generation
+
+Exit criteria:
+- Users can request more flashcards without leaving the view
+- Exhaustion is clearly communicated
+- No duplicate cards generated
+
+### UXP.3. Quiz history browser with retry
+
+Purpose:
+- Show past quizzes for a concept with the ability to view results and retry
+
+Files involved:
+- `apps/web/features/graph/components/quiz-history.tsx` (new)
+- `apps/web/features/graph/components/quiz-viewer.tsx` (new or refactored from existing)
+- `apps/web/features/graph/components/graph-detail-panel.tsx` (modified)
+
+Implementation steps:
+1. Create `quiz-history.tsx`:
+   - Fetch all practice quizzes for the selected concept
+   - Display as a chronological list (most recent first)
+   - Each entry shows: date/time, score (if completed), question count, status
+   - Click an entry → opens quiz in review mode
+2. Create `quiz-viewer.tsx` (or refactor existing quiz component):
+   - Review mode: show questions with user's answers, correct answers highlighted
+   - Retry mode: same questions, answers cleared, user can attempt again
+   - "Retry" button visible only on practice quizzes (NOT level-up)
+3. Add "Quizzes" section to `graph-detail-panel.tsx`:
+   - Below Flashcards section
+   - Expandable/collapsible
+   - Shows quiz history list when expanded
+4. Retry implementation:
+   - When "Retry" is clicked, create a new attempt record (or reset the existing one, depending on backend design)
+   - The quiz questions stay the same, only answers are cleared
+   - After retry completion, score is updated
+
+Verification:
+- `npx vitest run`
+- Manual: select concept with past quizzes → history list shown with dates and scores
+- Manual: click a quiz → opens in review mode with correct/incorrect highlighting
+- Manual: click "Retry" on a practice quiz → answers cleared, can re-answer
+- Manual: level-up quiz → no "Retry" button
+
+Exit criteria:
+- Past quizzes are browsable per concept
+- Quiz review mode shows correct answers
+- Retry works for practice quizzes only
+- Level-up quizzes have no retry option
+
+## Execution Order (Update After Each Run)
+
+1. `UXP.1` Unified flashcard stack viewer
+2. `UXP.2` Generate-more with exhaustion awareness
+3. `UXP.3` Quiz history browser with retry
+
+## Verification Matrix
+
+```bash
+PYTHONPATH=. pytest -q
+npx vitest run  # from apps/web/
+```
+
+## Removal Ledger
+
+{Append entries during implementation — old activity panel components may be refactored}
+
+## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
+
+```text
+You are working in the CoLearni repo.
+
+STRICT INSTRUCTIONS:
+
+Open and read docs/ux_overhaul/03_practice_ux_plan.md now. This is the active child plan.
+Also read the master plan at docs/UX_OVERHAUL_MASTER_PLAN.md for cross-track context.
+
+You MUST implement slices in the EXACT execution order listed in this child plan.
+You MUST NOT claim a slice is complete until you produce a Verification Block.
+
+Key constraints:
+- Level-up quizzes are NEVER retryable
+- Flashcard dedup fingerprints must be preserved
+- "Generate more" must respect LLM exhaustion signal
+
+After every 2 slices, re-open this child plan and restate which slices remain.
+Work in small commits: chore(refactor): <slice-id> <short desc>.
+
+START:
+
+Read docs/ux_overhaul/03_practice_ux_plan.md.
+Begin with UXP.1 (unified flashcard stack viewer).
+Do not proceed beyond the current slice until verified.
+```
