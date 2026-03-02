@@ -1,5 +1,7 @@
 # docs/GRAPH.md
 
+> **Last updated after:** UXF.1 gardener commit fix + Sigma.js rendering migration (Jul 2025)
+
 ## Purpose
 Coleonri’s knowledge graph must stay **connected, manageable, and explainable** as ingestion scales.  
 We do this with a **two-layer graph** + two consolidation systems:
@@ -234,6 +236,25 @@ For each node being merged-away:
 - update `concept_merge_map` for all aliases → final canonical
 - mark impacted canonical node(s) dirty=false at end (if stable)
 
+### Transaction handling
+The gardener function (`run_graph_gardener`) does **not** commit internally.
+The caller (`apps/jobs/graph_gardener.py`) is responsible for committing:
+
+```
+session = new_session()
+result = run_graph_gardener(session, ...)
+session.commit()          # single commit after full run
+```
+
+This ensures the entire gardener pass is atomic — all merges, edge repoints,
+and orphan pruning succeed or roll back together.
+
+### Orphan pruning
+At the end of each run, the gardener calls `prune_orphan_graph_nodes` to
+deactivate canonical concepts and edges that have zero remaining provenance
+links (e.g. after a document deletion). Pruning counts are included in the
+`GardenerRunResult`.
+
 ### No endless loops
 - Each run processes a finite dirty set.
 - Merged-away nodes cannot be processed again (`is_active=false`).
@@ -272,3 +293,24 @@ Track per workspace:
 - Never delete anything; use `is_active=false` + logs.
 - Always preserve provenance links.
 - Provide admin endpoint later to manually map alias → canonical and rerun affected edges.
+
+---
+
+## Client-Side Rendering
+
+The canonical graph is rendered in the browser using **Sigma.js** (WebGL)
+backed by a **graphology** in-memory graph.
+
+| Layer | Package | Role |
+|---|---|---|
+| Data structure | `graphology` | Holds nodes/edges; consumed by Sigma |
+| Renderer | `sigma` + `@react-sigma/core` | WebGL canvas rendering via `SigmaContainer` |
+| Layout | `@react-sigma/layout-forceatlas2`, `noverlap` | Force-directed positioning + overlap removal |
+| Styling | `@sigma/node-border`, `@sigma/edge-curve` | Tier-coloured rings, curved edges |
+| Search | `minisearch` | Client-side full-text search over concept names/aliases |
+
+> **Note:** The previous D3 force-directed renderer is archived at
+> `components/concept-graph.d3-archive.tsx` for reference. All new graph
+> work must use the Sigma.js stack above.
+
+See `docs/FRONTEND.md` for the full component inventory.

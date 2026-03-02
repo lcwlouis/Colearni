@@ -1,6 +1,6 @@
 # docs/FRONTEND.md
 
-> **Last updated after:** Next 16.1.6 + React 19.2 migration (Feb 2026)
+> **Last updated after:** UX Overhaul — Sigma.js graph + graph-detail features (Jul 2025)
 
 This file is the source of truth for frontend coding patterns.
 AI agents and contributors must follow it when touching `apps/web/`.
@@ -17,6 +17,14 @@ AI agents and contributors must follow it when touching `apps/web/`.
 | eslint | 9.x | Flat config (`eslint.config.mjs`) |
 | eslint-config-next | 16.1.6 | Provides core-web-vitals + typescript presets |
 | vitest | 4.0.18 | Unit/component tests (vite 7.x, esbuild 0.27.x) |
+| graphology | 0.26.x | In-memory graph data structure for Sigma.js |
+| sigma | 3.0.x | WebGL graph renderer (replaced D3 force graph) |
+| @react-sigma/core | 5.0.x | React bindings for Sigma.js |
+| @react-sigma/layout-* | 5.0.x | Layout algorithms (circular, force, forceatlas2, noverlap) |
+| @sigma/edge-curve | 3.1.x | Curved edge rendering |
+| @sigma/node-border | 3.0.x | Node border styling (tier-based ring colours) |
+| minisearch | 7.2.x | Client-side full-text search over graph nodes |
+| katex | 0.16.x | LaTeX math rendering in markdown |
 
 Node requirement: **>= 20.9.0** (current: 23.x).
 
@@ -85,6 +93,44 @@ Run from `apps/web/`:
 | Large `"use client"` boundary files | Keep client components small; push logic to server components |
 | `React.memo` / `useMemo` without measurement | React 19 compiler handles most cases; profile first |
 | Importing from `react-dom/server` in client code | SSR APIs are server-only |
+
+---
+
+## Component inventory
+
+### Shared components (`components/`)
+
+| Component | Notes |
+|---|---|
+| `sigma-graph.tsx` | Top-level Sigma graph wrapper (uses `SigmaContainer`) |
+| `sigma-graph/graph-reducers.tsx` | Node/edge visual reducers (size, colour, hover/select state) |
+| `sigma-graph/graph-events.tsx` | Click, hover, and search event handlers |
+| `sigma-graph/graph-layout.tsx` | Layout orchestration (ForceAtlas2 → noverlap) |
+| `concept-graph.d3-archive.tsx` | **Archived** — former D3 force-directed graph; kept for reference only |
+| `concept-activity-panel.tsx` | Concept detail sidebar (quiz history, flashcards) |
+| `chat-thread.tsx` / `chat-response.tsx` | Tutor chat UI |
+| `flashcard-list.tsx` / `stateful-flashcard-list.tsx` | Flashcard display |
+| `practice-history.tsx` / `practice-quiz-card.tsx` | Practice session UI |
+| `markdown-content.tsx` | Markdown renderer with KaTeX math support |
+
+### Feature components (`features/`)
+
+| Feature | Key components |
+|---|---|
+| `features/graph/` | `graph-viz-panel`, `graph-detail-panel`, `concept-chat-links`, `flashcard-stack`, `quiz-history`, `quiz-viewer` |
+| `features/tutor/` | `onboarding-confirm`, `concept-switch-banner`, `tutor-graph-drawer`, `tutor-quiz-drawer`, `tutor-timeline` |
+| `features/kb/` | `kb-document-table`, `kb-upload-queue` |
+| `features/sidebar/` | `nav-rail`, `recent-sessions`, `workspace-actions`, `collapsed-footer` |
+
+### Graph utilities (`lib/graph/`)
+
+| Module | Purpose |
+|---|---|
+| `transform.ts` | API response → graphology graph conversion |
+| `search.ts` | MiniSearch index builder for concept search |
+| `graph-state.ts` | React state management for selected/hovered nodes |
+| `sigma-settings.ts` | Sigma renderer configuration |
+| `constants.ts` | Tier colours, size scales |
 
 ---
 
