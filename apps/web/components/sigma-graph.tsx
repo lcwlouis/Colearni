@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
-import Graph from "graphology";
+import { useRef, useMemo } from "react";
 import { SigmaContainer } from "@react-sigma/core";
 import "@react-sigma/core/lib/style.css";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
+import { buildGraphologyGraph } from "@/lib/graph/transform";
+import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/constants";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
 type Props = {
@@ -46,24 +47,23 @@ export default function SigmaGraph({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Build an empty graphology instance (populated in UXG.2)
-  const graph = useMemo(() => new Graph(), []);
+  // Build graphology instance from API data (UXG.2)
+  const graph = useMemo(
+    () => buildGraphologyGraph(nodes, edges, filteredTiers),
+    [nodes, edges, filteredTiers],
+  );
 
-  // TODO (UXG.2): populate graph with nodes/edges when props change
   // TODO (UXG.3): wire ForceAtlas2 layout
-  // TODO (UXG.4): handle selectedId, focusNodeId, searchHighlight, filteredTiers
+  // TODO (UXG.4): handle selectedId, focusNodeId, searchHighlight
   // TODO (UXG.5): expose onResetViewReady, drag behaviour, onBackgroundClick
 
   // Suppress unused-variable warnings until future slices consume these props
-  void nodes;
-  void edges;
   void selectedId;
   void onSelect;
   void onBackgroundClick;
   void focusNodeId;
   void searchHighlight;
   void onResetViewReady;
-  void filteredTiers;
 
   if (nodes.length === 0) {
     return <p style={{ color: "var(--muted)" }}>No graph data yet.</p>;
@@ -81,12 +81,7 @@ export default function SigmaGraph({
       <SigmaContainer
         graph={graph}
         style={{ width: "100%", height: "100%" }}
-        settings={{
-          renderLabels: true,
-          labelColor: { color: "var(--text)" },
-          defaultEdgeColor: "var(--line)",
-          defaultNodeColor: "var(--accent)",
-        }}
+        settings={DEFAULT_SIGMA_SETTINGS}
       />
     </div>
   );
