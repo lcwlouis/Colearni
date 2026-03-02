@@ -142,7 +142,7 @@ export function GraphDetailPanel({
           {pick ? (
             <div className="lucky-pick panel stack" style={{ opacity: luckyLoading ? 0.5 : 1, transition: 'opacity 0.15s' }}>
               <h3>
-                {luckyPick?.mode === "adjacent" ? "Adjacent" : "Wildcard"}{" "}
+                🎲{" "}{luckyPick?.mode === "adjacent" ? "Adjacent" : "Wildcard"}{" "}
                 suggestion
               </h3>
               <p>
@@ -165,7 +165,7 @@ export function GraphDetailPanel({
             </div>
           ) : luckyLoading ? (
             <div className="lucky-pick panel stack">
-              <h3>Loading suggestion…</h3>
+              <h3>🎲 Loading suggestion…</h3>
             </div>
           ) : null}
 
@@ -196,7 +196,7 @@ export function GraphDetailPanel({
                         marginBottom: "-2px",
                       }}
                     >
-                      {tab === "flashcards" ? "Flashcards" : tab === "quizzes" ? "Quizzes" : "Chat"}
+                      {tab === "flashcards" ? "Flashcards" : tab === "quizzes" ? "Quizzes" : "💬 Chat"}
                     </button>
                   ))}
                 </div>

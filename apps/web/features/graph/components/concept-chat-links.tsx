@@ -124,7 +124,7 @@ export function ConceptChatLinks({
         className="concept-chat-links__start"
         onClick={handleStartChat}
       >
-        Start new chat about {conceptName}
+        💬 Start a new chat about {conceptName}
       </button>
     </div>
   );

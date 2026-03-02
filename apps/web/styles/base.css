@@ -276,6 +276,74 @@ pre {
   padding-left: 1.5rem;
 }
 
+.markdown-content ol {
+  list-style-type: decimal;
+}
+
+.markdown-content ol ol {
+  list-style-type: lower-alpha;
+}
+
+.markdown-content ol ol ol {
+  list-style-type: lower-roman;
+}
+
+.markdown-content ul {
+  list-style-type: disc;
+}
+
+.markdown-content ul ul {
+  list-style-type: circle;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.9em;
+  overflow-x: auto;
+  display: block;
+}
+
+.markdown-content thead {
+  background: var(--surface-alt, #f8f9fa);
+  border-bottom: 2px solid var(--line, #e0e0e0);
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border: 1px solid var(--line, #e0e0e0);
+}
+
+.markdown-content th {
+  font-weight: 600;
+}
+
+.markdown-content tbody tr:nth-child(even) {
+  background: var(--surface-alt, #f8f9fa);
+}
+
+.markdown-content tbody tr:hover {
+  background: var(--hover, #f0f0f0);
+}
+
+.markdown-content del {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.markdown-content input[type="checkbox"] {
+  margin-right: 0.5rem;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--line, #e0e0e0);
+  margin: 1.5rem 0;
+}
+
 .markdown-content blockquote {
   border-left: 3px solid var(--accent);
   margin: 0.5rem 0;

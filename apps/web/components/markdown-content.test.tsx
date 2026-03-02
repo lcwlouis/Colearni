@@ -25,4 +25,24 @@ describe("MarkdownContent render contract", () => {
     const html = renderToString(<MarkdownContent content="hello" />);
     expect(html).toContain('class="markdown-content');
   });
+
+  it("renders a markdown table as <table>", () => {
+    const md = "| A | B |\n|---|---|\n| 1 | 2 |";
+    const html = renderToString(<MarkdownContent content={md} />);
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th>");
+    expect(html).toContain("<td>");
+  });
+
+  it("renders strikethrough as <del>", () => {
+    const md = "~~removed~~";
+    const html = renderToString(<MarkdownContent content={md} />);
+    expect(html).toContain("<del>");
+  });
+
+  it("renders task list checkboxes", () => {
+    const md = "- [x] done\n- [ ] todo";
+    const html = renderToString(<MarkdownContent content={md} />);
+    expect(html).toContain('type="checkbox"');
+  });
 });
