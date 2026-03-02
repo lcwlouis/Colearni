@@ -1,6 +1,7 @@
 import type { AssistantResponseEnvelope, ActionCTA, AnswerParts } from "@/lib/api/types";
 import { MarkdownContent } from "@/components/markdown-content";
 import { useState } from "react";
+import { useDevStats } from "@/lib/hooks/use-dev-stats";
 
 const refusalReasonLabel: Record<string, string> = {
   insufficient_evidence: "Insufficient evidence from your notes",
@@ -41,6 +42,7 @@ export function CollapsibleHint({ hint, index }: { hint: string; index: number }
 }
 
 export function ChatResponse({ response, onCtaClick }: { response: AssistantResponseEnvelope; onCtaClick?: (cta: ActionCTA) => void }) {
+  const { showDevStats } = useDevStats();
   const evidenceById = new Map(response.evidence.map((item) => [item.evidence_id, item]));
   const isSocial = response.response_mode === "social";
   const actions = response.actions ?? [];
@@ -109,14 +111,14 @@ export function ChatResponse({ response, onCtaClick }: { response: AssistantResp
         </div>
       ) : null}
 
-      {/* F5: Generation trace — dev-only operational metadata */}
-      {process.env.NODE_ENV === "development" && response.generation_trace ? (
-        <details className="chat-trace-panel" style={{ marginTop: "0.5rem", fontSize: "0.75rem", opacity: 0.6 }}>
-          <summary style={{ cursor: "pointer" }}>
+      {/* F5: Generation trace — opt-in via localStorage toggle */}
+      {showDevStats && response.generation_trace ? (
+        <details className="dev-trace">
+          <summary>
             ⚡ {response.generation_trace.model ?? "unknown"} · {response.generation_trace.timing_ms ?? "?"}ms · {response.generation_trace.total_tokens ?? "?"} tokens
             {response.generation_trace.plan_strategy ? ` · 🎯 ${response.generation_trace.plan_strategy}` : null}
           </summary>
-          <pre style={{ margin: "0.25rem 0", whiteSpace: "pre-wrap", fontSize: "0.7rem" }}>
+          <pre>
             {JSON.stringify(response.generation_trace, null, 2)}
           </pre>
         </details>

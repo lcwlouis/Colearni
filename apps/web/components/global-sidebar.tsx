@@ -12,6 +12,7 @@ import { NavRail } from "@/features/sidebar/components/nav-rail";
 import { RecentSessions } from "@/features/sidebar/components/recent-sessions";
 import { WorkspaceActions } from "@/features/sidebar/components/workspace-actions";
 import { CollapsedFooter } from "@/features/sidebar/components/collapsed-footer";
+import { useDevStats } from "@/lib/hooks/use-dev-stats";
 
 export function GlobalSidebar() {
     const pathname = usePathname();
@@ -28,6 +29,7 @@ export function GlobalSidebar() {
         }
         return false;
     });
+    const { showDevStats, toggleDevStats } = useDevStats();
 
     useEffect(() => {
         localStorage.setItem('sidebar-collapsed', String(collapsed));
@@ -78,6 +80,12 @@ export function GlobalSidebar() {
             />
 
             <div className="sidebar-footer" style={{ borderTop: "none", paddingTop: 0 }}>
+                {!collapsed && (
+                    <label className="dev-stats-toggle">
+                        <input type="checkbox" checked={showDevStats} onChange={toggleDevStats} />
+                        ⚙️ Dev stats
+                    </label>
+                )}
                 {footerMode !== "collapsed" && (
                     <WorkspaceActions
                         workspaces={workspaces}
