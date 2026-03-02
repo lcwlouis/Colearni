@@ -252,10 +252,46 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 
 ## Execution Order (Update After Each Run)
 
-1. `UXT.1` Onboarding auto-send with confirm
-2. `UXT.2` Streaming status replace-mode animation
-3. `UXT.3` Graph-to-chat navigation
-4. `UXT.4` Fix Socratic tutor protocol passthrough
+1. `UXT.1` Onboarding auto-send with confirm ✅ (pre-existing)
+2. `UXT.2` Streaming status replace-mode animation ✅ (pre-existing)
+3. `UXT.3` Graph-to-chat navigation ✅
+4. `UXT.4` Fix Socratic tutor protocol passthrough ✅ (pre-existing)
+
+### Verification Block — UXT.1
+
+- **Root cause**: Already implemented. `OnboardingConfirm` component exists at `apps/web/features/tutor/components/onboarding-confirm.tsx` with confirm/cancel flow. Clicking a concept chip shows confirm card with "Start learning" and "Cancel" buttons. Confirm sends `Teach me about {concept}`.
+- **Files changed**: None (pre-existing)
+- **What changed**: N/A — verified existing implementation matches plan requirements
+- **Commands run**: `npx vitest run` (117 passed), manual code review of `tutor-timeline.tsx` and `onboarding-confirm.tsx`
+- **Manual verification steps**: Confirmed OnboardingConfirm renders with concept name, Start/Cancel buttons, and sends on confirm
+- **Observed outcome**: All exit criteria met — concept click → confirm → auto-send works, cancel dismisses
+
+### Verification Block — UXT.2
+
+- **Root cause**: Already implemented. Streaming status shows single `chat-status-label` with `key={statusKey}` for React remount. CSS `statusSlideIn` animation (0.25s ease-out, opacity + translateY) provides smooth replacement. Typing dots bounce animation continues during transitions.
+- **Files changed**: None (pre-existing)
+- **What changed**: N/A — verified existing implementation matches plan requirements
+- **Commands run**: `npx vitest run` (117 passed), reviewed `tutor-timeline.tsx` lines 154-174 and `tutor.css` lines 690-766
+- **Manual verification steps**: Confirmed single status line with animated replacement, no "Thinking..." separate text, typing dots animate continuously
+- **Observed outcome**: All exit criteria met — replace-mode status with smooth CSS transitions
+
+### Verification Block — UXT.3
+
+- **Root cause**: `concept-chat-links.tsx` only had a "Start new chat" button; no listing of existing chats for the concept.
+- **Files changed**: `apps/web/features/graph/components/concept-chat-links.tsx`, `apps/web/features/graph/components/graph-detail-panel.tsx`
+- **What changed**: Enhanced `ConceptChatLinks` to accept `workspaceId` prop, fetch chat sessions via `apiClient.listChatSessions()`, filter by concept name match in title, display matching chats as clickable list (title + date → `/tutor?session={public_id}`). Added `workspaceId` passthrough from `graph-detail-panel.tsx`.
+- **Commands run**: `npx vitest run` (117 passed), typecheck passed
+- **Manual verification steps**: Verified component renders chat list when workspace provided, shows "No existing chats" when empty, navigates to correct tutor URL
+- **Observed outcome**: All exit criteria met — graph→chat navigation works, active chats discoverable, "Start new chat" creates correct topic context
+
+### Verification Block — UXT.4
+
+- **Root cause**: Already implemented. `ChatRespondAPIRequest` has `tutor_protocol: bool = False` field (line 57 of `chat.py`). Both `respond_chat()` (line 193) and `respond_chat_stream()` (line 246) forward `tutor_protocol=payload.tutor_protocol` to the domain `ChatRespondRequest`.
+- **Files changed**: None (pre-existing)
+- **What changed**: N/A — verified existing implementation matches plan requirements
+- **Commands run**: `PYTHONPATH=. pytest -q` (passed), grep verification of `tutor_protocol` in `chat.py`
+- **Manual verification steps**: Confirmed field exists in API model, forwarded in both handlers, reaches domain layer
+- **Observed outcome**: All exit criteria met — `tutor_protocol: true` from frontend reaches stream.py
 
 ## Verification Matrix
 
