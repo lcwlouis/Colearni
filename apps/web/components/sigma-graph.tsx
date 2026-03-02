@@ -9,6 +9,7 @@ import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/sigma-settings";
 import { GraphReducers } from "@/components/sigma-graph/graph-reducers";
 import { GraphLayout } from "@/components/sigma-graph/graph-layout";
 import type { LayoutType } from "@/components/sigma-graph/graph-layout";
+import { GraphEvents } from "@/components/sigma-graph/graph-events";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
 type Props = {
@@ -33,7 +34,7 @@ type Props = {
  * UXG.3: core rendering with visual programs and reducers.
  * Future slices will add:
  *   UXG.4  – ForceAtlas2 layout ✅
- *   UXG.5  – drag, zoom-to-fit, reset-view, onSelect, onBackgroundClick
+ *   UXG.5  – interactions: click, hover, drag, zoom-to-node, reset-view ✅
  */
 export default function SigmaGraph({
   nodes,
@@ -58,14 +59,6 @@ export default function SigmaGraph({
     [nodes, edges, filteredTiers],
   );
 
-  // TODO (UXG.5): expose onResetViewReady, drag behaviour, onSelect, onBackgroundClick, focusNodeId
-
-  // Suppress unused-variable warnings until future slices consume these props
-  void onSelect;
-  void onBackgroundClick;
-  void focusNodeId;
-  void onResetViewReady;
-
   if (nodes.length === 0) {
     return <p style={{ color: "var(--muted)" }}>No graph data yet.</p>;
   }
@@ -89,6 +82,13 @@ export default function SigmaGraph({
           selectedId={selectedId}
           hoveredNode={hoveredNode}
           searchHighlight={searchHighlight}
+        />
+        <GraphEvents
+          onSelect={onSelect}
+          onBackgroundClick={onBackgroundClick}
+          onHoverNode={setHoveredNode}
+          focusNodeId={focusNodeId}
+          onResetViewReady={onResetViewReady}
         />
       </SigmaContainer>
     </div>
