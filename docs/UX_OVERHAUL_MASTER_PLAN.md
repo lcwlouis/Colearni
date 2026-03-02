@@ -284,11 +284,11 @@ Dependencies between tracks:
 | Track | Status | Last note |
 |---|---|---|
 | `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) |
-| `UXG` Graph replacement | 🔄 in progress | UXG.1–UXG.7 ✅ done. UXG.8–UXG.13 🔲 pending (added by user request: camera controls, extended layouts, loading states, legend/status bar, settings panel, node expand/prune) |
+| `UXG` Graph replacement | 🟢 done | All 7 slices complete (UXG.1–UXG.7) — Sigma.js + graphology replaces D3 |
 | `UXP` Practice UX | 🟢 done | All 3 slices complete (UXP.1–UXP.3) — flashcard stack, generate-more, quiz history |
 | `UXT` Tutor UX | 🟢 done | All 3 slices complete (UXT.1–UXT.3) — onboarding confirm, status animation, graph-chat |
-| `UXI` Infrastructure | 🔄 pending | Not started — sources, caching, dev stats |
-| `UXD` Documentation audit | 🔄 pending | Not started — audit API, ARCHITECTURE, FRONTEND, GRAPH, OBSERVABILITY, PLAN, PRODUCT_SPEC, PROGRESS, PROMPTS |
+| `UXI` Infrastructure | 🟢 done | All 3 slices complete (UXI.1–UXI.3) — sources polish, LLM caching, dev stats |
+| `UXD` Documentation audit | 🟢 done | All 5 slices complete (UXD.1–UXD.5) — all 9 docs audited and updated |
 
 ## Verification Block Template
 
