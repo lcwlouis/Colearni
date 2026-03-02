@@ -1,0 +1,55 @@
+.toolbar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 10;
+  background: color-mix(in srgb, var(--surface, #fff) 75%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line, #e0e0e0);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text, #333);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 8px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.btn:hover {
+  background: var(--accent, #0070f3);
+  color: #fff;
+}
+
+.btn:active {
+  opacity: 0.8;
+}
+
+.separator {
+  width: 24px;
+  height: 1px;
+  background: var(--line, #e0e0e0);
+  margin: 2px auto;
+}
+
+.depth {
+  font-size: 11px;
+  color: var(--text-secondary, #666);
+  text-align: center;
+  padding: 2px 4px;
+}

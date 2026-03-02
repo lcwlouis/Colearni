@@ -18,6 +18,7 @@ import { EmptyState } from "@/components/sigma-graph/empty-state";
 import { GraphLegend } from "@/components/sigma-graph/graph-legend";
 import { StatusBar } from "@/components/sigma-graph/status-bar";
 import { SettingsPanel } from "@/components/sigma-graph/settings-panel";
+import { ExpandPruneControls } from "@/components/sigma-graph/expand-prune-controls";
 import { GraphSettingsProvider, useGraphSettings } from "@/lib/graph/settings-store";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
@@ -181,6 +182,7 @@ function SigmaGraphInner({
           onResetViewReady={onResetViewReady}
         />
         <CameraControls containerRef={containerRef} />
+        <ExpandPruneControls selectedId={selectedId} />
       </SigmaContainer>
       <LayoutControls
         layout={layout}
