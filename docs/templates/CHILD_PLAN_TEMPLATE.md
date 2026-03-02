@@ -42,6 +42,7 @@ This plan should be treated as incomplete unless it includes:
    - prefer commit message format: `chore(refactor): <slice-id> <short description>`
 4. For each slice, you MUST produce a `Verification Block` (template in master plan).
 5. If implementation uncovers a behavior change risk, STOP and update this plan and the master plan before widening scope.
+6. If a slice is reopened during an audit cycle, treat it as a fresh slice: re-read the slice definition, re-implement, re-verify, and produce a new Verification Block prefixed with "Audit Cycle N —".
 
 ## Purpose
 
@@ -129,6 +130,19 @@ Exit criteria:
 
 {Same format as above.}
 
+## Audit Cycle Reopening
+
+After all tracks in the master plan reach "done", the master plan's Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
+
+1. The slice status in the Execution Order is changed back to "reopened (audit cycle N)"
+2. The original Verification Block is preserved (do not delete it)
+3. A new Verification Block is produced, prefixed: `Audit Cycle N — Verification Block - {slice-id}`
+4. The reopening reason is documented inline:
+   ```
+   Reopened in Audit Cycle {N}: {reason}
+   ```
+5. Only the specific issue identified in the Audit Report is addressed — do not widen scope
+
 ## Execution Order (Update After Each Run)
 
 1. `{TRACK_PREFIX}.1` {name}
@@ -171,6 +185,8 @@ Execution loop for this child plan:
 7. When all {TRACK_ID} slices are complete, immediately re-open {master_plan_path}, select the next incomplete child plan, and continue in the same run.
 
 Do NOT stop just because {TRACK_ID} is complete. {TRACK_ID} completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
+
+If this child plan is being revisited during an audit cycle, only work on slices marked as "reopened". Produce audit-prefixed Verification Blocks. Do not re-examine slices that passed the audit.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 

@@ -338,6 +338,88 @@ Do not do the following during this project:
 - do not allow level-up quiz retry (mastery implications)
 - do not introduce Tailwind CSS to the main app (LightRAG uses it, but our app uses custom CSS)
 
+## Self-Audit Convergence Protocol
+
+After all implementation tracks (UXF, UXG, UXP, UXT, UXI, UXD) reach "done" in the Master Status Ledger, the run enters a self-audit convergence loop. The agent does NOT stop — it automatically audits its own work.
+
+### Why This Exists
+
+Agents working top-to-bottom commonly miss edge cases, leave subtle regressions, or make assumptions invalidated by later slices. This catches those gaps without manual review cycles.
+
+### Convergence Loop
+
+```text
+AUDIT_CYCLE = 0
+MAX_AUDIT_CYCLES = 3
+
+while AUDIT_CYCLE < MAX_AUDIT_CYCLES:
+    AUDIT_CYCLE += 1
+    
+    1. Re-read docs/UX_OVERHAUL_MASTER_PLAN.md and every child plan in order.
+    2. For each completed slice, verify:
+       a. The code change described in the Verification Block still holds
+          (files exist, tests pass, no regressions from later slices)
+       b. The slice's exit criteria are still met
+       c. No TODO/FIXME/HACK comments were left in changed files
+       d. No dead imports, unused variables, or orphaned test stubs
+       e. Cross-slice integration: does this slice's output still work
+          with what later slices built on top of it?
+    3. Run the full Verification Matrix:
+       - PYTHONPATH=. pytest -q
+       - npx vitest run (from apps/web/)
+       - npm --prefix apps/web run typecheck
+    4. Produce an Audit Report:
+       - Cycle number
+       - Slices re-examined
+       - Issues found (with severity: critical / minor / cosmetic)
+       - Slices to reopen (if any)
+       - Verdict: CONVERGED (0 issues) or NEEDS_REPASS (N issues)
+    5. If CONVERGED: update Master Status Ledger with "✅ audit-passed"
+       and exit the loop.
+    6. If NEEDS_REPASS:
+       a. Reopen affected slices (set status back to pending in the
+          child plan, add "Audit Cycle N" note)
+       b. Re-implement only the reopened slices (same verification rules)
+       c. Continue to next audit cycle
+```
+
+### Audit Cycle Budget
+
+- **Maximum 3 audit cycles** to prevent unbounded loops.
+- If cycle 3 still finds issues, produce a final Audit Report listing all remaining items and mark them as "deferred to manual review".
+- The agent MUST NOT enter cycle 4. Instead, it produces a handoff summary for the human reviewer.
+
+### Audit Report Template
+
+```text
+Audit Report — Cycle {N}
+
+Slices re-examined: {count}
+Full verification matrix: PYTHONPATH=. pytest -q / npx vitest run / typecheck
+
+Issues found:
+1. [{severity}] {slice-id}: {description}
+   - File(s): {paths}
+   - Expected: {what should be true}
+   - Actual: {what was found}
+   - Action: {reopen slice / cosmetic fix / defer}
+
+Verdict: {CONVERGED | NEEDS_REPASS}
+Slices reopened: {list or "none"}
+```
+
+### What the Audit Checks
+
+| Check | What it catches |
+|---|---|
+| Verification Block accuracy | Slice claims that are no longer true |
+| Exit criteria still met | Regressions from later slices |
+| Test suite passes | Broken tests from cross-slice interactions |
+| No TODO/FIXME/HACK left | Incomplete work markers |
+| Dead code / unused imports | Cleanup missed during implementation |
+| Cross-slice integration | Output of slice A still works after slice B modified shared code |
+| Plan accuracy | Master/child plan status matches actual repo state |
+
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
 This section is mandatory.
@@ -409,4 +491,32 @@ START:
 Read docs/UX_OVERHAUL_MASTER_PLAN.md.
 Pick the first incomplete child plan in execution order.
 Begin with the first incomplete slice.
+
+--- SELF-AUDIT PHASE ---
+
+When docs/UX_OVERHAUL_MASTER_PLAN.md shows all tracks complete (UXF, UXG, UXP, UXT, UXI, UXD all done),
+do NOT stop. Enter the self-audit convergence loop:
+
+Audit loop (max 3 cycles):
+
+1. Re-read docs/UX_OVERHAUL_MASTER_PLAN.md and every child plan (01 through 06).
+2. For each completed slice, verify the Verification Block still holds:
+   - Files exist and contain the described changes
+   - Tests pass (PYTHONPATH=. pytest -q && npx vitest run && npm --prefix apps/web run typecheck)
+   - Exit criteria are still met (no regressions from later slices)
+   - No TODO/FIXME/HACK comments left in changed files
+3. Check cross-slice integration:
+   - Does each slice's output still work with what later slices built?
+   - Are there dead imports, unused code, or orphaned tests?
+4. Produce an Audit Report (use template from Self-Audit Convergence Protocol section).
+5. If CONVERGED (0 issues found): mark all tracks as "audit-passed" in the
+   Master Status Ledger. The run is now complete.
+6. If NEEDS_REPASS: reopen affected slices, re-implement them with full
+   verification, then start the next audit cycle.
+7. If this is cycle 3 and issues remain: produce a final handoff report
+   listing all remaining items for manual review. The run is complete.
+
+The run is ONLY complete when:
+- All tracks show "audit-passed" in the Master Status Ledger, OR
+- 3 audit cycles have been exhausted and a handoff report is produced
 ```
