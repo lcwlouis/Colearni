@@ -412,6 +412,16 @@ class OnlineResolver:
 
         # Build batch payload
         batch_items: list[dict[str, object]] = []
+        all_candidate_ids: list[int] = []
+        for _i, raw_concept, candidates in items_for_llm:
+            all_candidate_ids.extend(c.concept_id for c in candidates)
+
+        neighbors_map = graph_repository.list_neighbors_for_concepts(
+            self._session,
+            workspace_id=workspace_id,
+            concept_ids=list(set(all_candidate_ids)),
+        )
+
         for _i, raw_concept, candidates in items_for_llm:
             batch_items.append({
                 "raw_name": raw_concept.name,
@@ -422,6 +432,7 @@ class OnlineResolver:
                         "canonical_name": c.canonical_name,
                         "description": c.description,
                         "aliases": list(c.aliases),
+                        "neighbors": neighbors_map.get(c.concept_id, []),
                     }
                     for c in candidates
                 ],
@@ -447,12 +458,11 @@ class OnlineResolver:
                         confidence=1.0, method="fallback", llm_used=True,
                     )
         except (RuntimeError, ValueError):
-            # Batch failed – fall back to individual calls
+            # Batch failed – create new for all items rather than single-call fallback
             for i, raw_concept, candidates in items_for_llm:
-                decisions[i] = self._llm_disambiguation_decision(
-                    workspace_id=workspace_id, chunk_id=chunk_id,
-                    raw_concept=raw_concept, candidates=candidates,
-                    budgets=budgets,
+                decisions[i] = ResolverDecision(
+                    decision="CREATE_NEW", merge_into_id=None,
+                    confidence=1.0, method="fallback", llm_used=True,
                 )
 
         return [decisions[i] for i in range(len(batch))]
@@ -551,6 +561,12 @@ class OnlineResolver:
                 chunk_id=chunk_id,
                 budgets=budgets,
             )
+            candidate_ids = [c.concept_id for c in candidates]
+            neighbors_map = graph_repository.list_neighbors_for_concepts(
+                self._session,
+                workspace_id=workspace_id,
+                concept_ids=candidate_ids,
+            )
             with observation_context(operation="graph.disambiguate"):
                 payload = _DisambiguationPayload.model_validate(
                     self._llm_client.disambiguate(
@@ -562,6 +578,7 @@ class OnlineResolver:
                                 "canonical_name": candidate.canonical_name,
                                 "description": candidate.description,
                                 "aliases": list(candidate.aliases),
+                                "neighbors": neighbors_map.get(candidate.concept_id, []),
                             }
                             for candidate in candidates
                         ],

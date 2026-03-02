@@ -55,6 +55,13 @@ class IntegrationGraphLLM(GraphLLMClient):
     ) -> Mapping[str, Any]:
         return {"decision": "CREATE_NEW", "confidence": 1.0}
 
+    def disambiguate_batch(
+        self,
+        *,
+        items: Sequence[Mapping[str, object]],
+    ) -> Sequence[Mapping[str, Any]]:
+        return [{"decision": "CREATE_NEW", "confidence": 1.0} for _ in items]
+
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt: str | None = None) -> str:
         return "Integration test summary."
 

@@ -43,6 +43,7 @@ class GardenerConfig:
     recent_window_days: int
     edge_weight_cap: float
     edge_description_max_chars: int
+    disambiguate_batch_size: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> GardenerConfig:
@@ -57,6 +58,7 @@ class GardenerConfig:
             recent_window_days=settings.gardener_recent_window_days,
             edge_weight_cap=settings.resolver_edge_weight_cap,
             edge_description_max_chars=settings.resolver_edge_description_max_chars,
+            disambiguate_batch_size=settings.resolver_disambiguate_batch_size,
         )
 
 
@@ -144,6 +146,7 @@ def run_graph_gardener(
     max_clusters: int | None = None,
     max_llm_calls: int | None = None,
     run_id: str | None = None,
+    full_scan: bool = False,
 ) -> GardenerRunResult:
     """Run one bounded offline graph-consolidation pass for one workspace."""
     resolved_run_id = run_id or str(uuid4())
@@ -207,6 +210,7 @@ def run_graph_gardener(
             workspace_id=workspace_id,
             recent_window_days=config.recent_window_days,
             limit=effective_max_dirty_nodes,
+            full_scan=full_scan,
         )
         if not seeds:
             return GardenerRunResult(
@@ -282,6 +286,8 @@ def run_graph_gardener(
         stopped_by_cluster_budget = False
         stopped_by_llm_budget = False
 
+        # Collect clusters eligible for LLM decisions
+        pending_clusters: list[tuple[set[int], set[int]]] = []  # (cluster, cluster_seed_ids)
         for cluster in clusters:
             cluster_seed_ids = seed_ids.intersection(cluster)
             if not cluster_seed_ids:
@@ -321,6 +327,17 @@ def run_graph_gardener(
                 )
                 break
             budgets.register_cluster()
+            pending_clusters.append((cluster, cluster_seed_ids))
+
+        # Batch LLM disambiguation calls
+        batch_size = config.disambiguate_batch_size
+        for batch_start in range(0, len(pending_clusters), batch_size):
+            batch = pending_clusters[batch_start:batch_start + batch_size]
+            decisions = _batch_cluster_llm_decisions(
+                llm_client=llm_client,
+                concepts=cluster_concepts,
+                clusters=[c for c, _ in batch],
+            )
             budgets.register_llm_call()
             emit_event(
                 "graph.gardener.budget.usage",
@@ -334,122 +351,116 @@ def run_graph_gardener(
                 max_clusters_per_run=budgets.max_clusters_per_run,
             )
 
-            decision = _cluster_llm_decision(
-                llm_client=llm_client,
-                concepts=cluster_concepts,
-                cluster=cluster,
-            )
-            if decision is None:
-                clusters_skipped += 1
-                emit_event(
-                    "graph.gardener.cluster.skip",
-                    status="info",
-                    component="graph",
-                    operation="graph.gardener.run",
-                    workspace_id=workspace_id,
-                    cluster_size=len(cluster),
-                    reason="llm_returned_none",
-                )
-                continue
-            if decision.confidence < config.cluster_llm_confidence_floor:
-                clusters_skipped += 1
-                emit_event(
-                    "graph.gardener.cluster.skip",
-                    status="info",
-                    component="graph",
-                    operation="graph.gardener.run",
-                    workspace_id=workspace_id,
-                    cluster_size=len(cluster),
-                    reason="low_confidence",
-                    confidence=decision.confidence,
-                    threshold=config.cluster_llm_confidence_floor,
-                )
-                continue
-
-            if decision.decision == "LINK_ONLY" and decision.link_to_id is not None:
-                # Create an edge between the reference and link target
-                ref_id = sorted(cluster)[0]
-                link_target = decision.link_to_id
-                if link_target in cluster and ref_id != link_target:
-                    relation = decision.link_relation_type or "related_to"
-                    graph_repository.upsert_canonical_edge(
-                        session,
-                        workspace_id=workspace_id,
-                        src_id=ref_id,
-                        tgt_id=link_target,
-                        relation_type=relation,
-                        description=(
-                            f"{cluster_concepts[ref_id].canonical_name} "
-                            f"{relation.replace('_', ' ')} "
-                            f"{cluster_concepts[link_target].canonical_name}"
-                        ),
-                        keywords=[],
-                        delta_weight=1.0,
-                        weight_cap=config.edge_weight_cap,
-                        edge_description_max_chars=config.edge_description_max_chars,
-                    )
-                    links_created += 1
+            for (cluster, cluster_seed_ids), decision in zip(batch, decisions):
+                if decision is None:
+                    clusters_skipped += 1
                     emit_event(
-                        "graph.gardener.link_created",
+                        "graph.gardener.cluster.skip",
                         status="info",
                         component="graph",
                         operation="graph.gardener.run",
                         workspace_id=workspace_id,
-                        src_id=ref_id,
-                        tgt_id=link_target,
-                        relation_type=relation,
-                        confidence=decision.confidence,
-                    )
-                stabilized_seed_ids.update(cluster_seed_ids)
-                continue
-
-            if decision.decision == "CREATE_NEW":
-                stabilized_seed_ids.update(cluster_seed_ids)
-                continue
-
-            target_id = decision.merge_into_id
-            if target_id is None or target_id not in cluster:
-                clusters_skipped += 1
-                emit_event(
-                    "graph.gardener.cluster.skip",
-                    status="info",
-                    component="graph",
-                    operation="graph.gardener.run",
-                    workspace_id=workspace_id,
-                    cluster_size=len(cluster),
-                    reason="invalid_target",
-                )
-                continue
-
-            merge_away_ids = sorted(cluster_seed_ids - {target_id})
-            for source_id in merge_away_ids:
-                # Mastery protection: never merge away a concept with learning progress
-                if cluster_concepts[source_id].has_mastery:
-                    emit_event(
-                        "graph.gardener.merge.skip",
-                        status="info",
-                        component="graph",
-                        operation="graph.gardener.run",
-                        workspace_id=workspace_id,
-                        source_id=source_id,
-                        reason="mastery_protection",
+                        cluster_size=len(cluster),
+                        reason="llm_returned_none",
                     )
                     continue
-                if _execute_merge(
-                    session=session,
-                    workspace_id=workspace_id,
-                    from_concept_id=source_id,
-                    to_concept_id=target_id,
-                    confidence=decision.confidence,
-                    method="llm",
-                    reason=_GARDENER_REASON,
-                    edge_weight_cap=config.edge_weight_cap,
-                    edge_description_max_chars=config.edge_description_max_chars,
-                ):
-                    merges_applied += 1
+                if decision.confidence < config.cluster_llm_confidence_floor:
+                    clusters_skipped += 1
+                    emit_event(
+                        "graph.gardener.cluster.skip",
+                        status="info",
+                        component="graph",
+                        operation="graph.gardener.run",
+                        workspace_id=workspace_id,
+                        cluster_size=len(cluster),
+                        reason="low_confidence",
+                        confidence=decision.confidence,
+                        threshold=config.cluster_llm_confidence_floor,
+                    )
+                    continue
 
-            if target_id in seed_ids:
-                stabilized_seed_ids.add(target_id)
+                if decision.decision == "LINK_ONLY" and decision.link_to_id is not None:
+                    ref_id = sorted(cluster)[0]
+                    link_target = decision.link_to_id
+                    if link_target in cluster and ref_id != link_target:
+                        relation = decision.link_relation_type or "related_to"
+                        graph_repository.upsert_canonical_edge(
+                            session,
+                            workspace_id=workspace_id,
+                            src_id=ref_id,
+                            tgt_id=link_target,
+                            relation_type=relation,
+                            description=(
+                                f"{cluster_concepts[ref_id].canonical_name} "
+                                f"{relation.replace('_', ' ')} "
+                                f"{cluster_concepts[link_target].canonical_name}"
+                            ),
+                            keywords=[],
+                            delta_weight=1.0,
+                            weight_cap=config.edge_weight_cap,
+                            edge_description_max_chars=config.edge_description_max_chars,
+                        )
+                        links_created += 1
+                        emit_event(
+                            "graph.gardener.link_created",
+                            status="info",
+                            component="graph",
+                            operation="graph.gardener.run",
+                            workspace_id=workspace_id,
+                            src_id=ref_id,
+                            tgt_id=link_target,
+                            relation_type=relation,
+                            confidence=decision.confidence,
+                        )
+                    stabilized_seed_ids.update(cluster_seed_ids)
+                    continue
+
+                if decision.decision == "CREATE_NEW":
+                    stabilized_seed_ids.update(cluster_seed_ids)
+                    continue
+
+                target_id = decision.merge_into_id
+                if target_id is None or target_id not in cluster:
+                    clusters_skipped += 1
+                    emit_event(
+                        "graph.gardener.cluster.skip",
+                        status="info",
+                        component="graph",
+                        operation="graph.gardener.run",
+                        workspace_id=workspace_id,
+                        cluster_size=len(cluster),
+                        reason="invalid_target",
+                    )
+                    continue
+
+                merge_away_ids = sorted(cluster_seed_ids - {target_id})
+                for source_id in merge_away_ids:
+                    if cluster_concepts[source_id].has_mastery:
+                        emit_event(
+                            "graph.gardener.merge.skip",
+                            status="info",
+                            component="graph",
+                            operation="graph.gardener.run",
+                            workspace_id=workspace_id,
+                            source_id=source_id,
+                            reason="mastery_protection",
+                        )
+                        continue
+                    if _execute_merge(
+                        session=session,
+                        workspace_id=workspace_id,
+                        from_concept_id=source_id,
+                        to_concept_id=target_id,
+                        confidence=decision.confidence,
+                        method="llm",
+                        reason=_GARDENER_REASON,
+                        edge_weight_cap=config.edge_weight_cap,
+                        edge_description_max_chars=config.edge_description_max_chars,
+                    ):
+                        merges_applied += 1
+
+                if target_id in seed_ids:
+                    stabilized_seed_ids.add(target_id)
 
         for concept_id in sorted(stabilized_seed_ids):
             graph_repository.set_canonical_concept_dirty(
@@ -647,36 +658,49 @@ def _connected_components(adjacency: Mapping[int, set[int]]) -> list[set[int]]:
     return components
 
 
-def _cluster_llm_decision(
+def _batch_cluster_llm_decisions(
     *,
     llm_client: GraphLLMClient,
     concepts: Mapping[int, _ClusterConcept],
-    cluster: set[int],
-) -> _GardenerDecisionPayload | None:
-    ordered_ids = sorted(cluster)
-    reference = concepts[ordered_ids[0]]
+    clusters: list[set[int]],
+) -> list[_GardenerDecisionPayload | None]:
+    """Disambiguate multiple clusters in a single LLM batch call."""
+    batch_items: list[dict[str, object]] = []
+    for cluster in clusters:
+        ordered_ids = sorted(cluster)
+        reference = concepts[ordered_ids[0]]
+        batch_items.append({
+            "raw_name": reference.canonical_name,
+            "context_snippet": reference.description,
+            "candidates": [
+                {
+                    "id": concept_id,
+                    "canonical_name": concepts[concept_id].canonical_name,
+                    "description": concepts[concept_id].description,
+                    "aliases": list(concepts[concept_id].aliases),
+                    "tier": concepts[concept_id].tier or "unknown",
+                    "has_mastery": concepts[concept_id].has_mastery,
+                    "provenance_count": concepts[concept_id].provenance_count,
+                    "neighbors": list(concepts[concept_id].neighbor_names),
+                }
+                for concept_id in ordered_ids
+            ],
+        })
+
     try:
-        with observation_context(operation="graph.disambiguate"):
-            payload = llm_client.disambiguate(
-                raw_name=reference.canonical_name,
-                context_snippet=reference.description,
-                candidates=[
-                    {
-                        "id": concept_id,
-                        "canonical_name": concepts[concept_id].canonical_name,
-                        "description": concepts[concept_id].description,
-                        "aliases": list(concepts[concept_id].aliases),
-                        "tier": concepts[concept_id].tier or "unknown",
-                        "has_mastery": concepts[concept_id].has_mastery,
-                        "provenance_count": concepts[concept_id].provenance_count,
-                        "neighbors": list(concepts[concept_id].neighbor_names),
-                    }
-                    for concept_id in ordered_ids
-                ],
-            )
-        return _GardenerDecisionPayload.model_validate(payload)
-    except (ValidationError, RuntimeError, ValueError):
-        return None
+        with observation_context(operation="graph.disambiguate_batch"):
+            raw_decisions = llm_client.disambiguate_batch(items=batch_items)
+
+        results: list[_GardenerDecisionPayload | None] = []
+        for raw_dec in raw_decisions:
+            try:
+                results.append(_GardenerDecisionPayload.model_validate(raw_dec))
+            except (ValidationError, ValueError):
+                results.append(None)
+        return results
+    except (RuntimeError, ValueError):
+        return [None] * len(clusters)
+
 
 
 def _execute_merge(

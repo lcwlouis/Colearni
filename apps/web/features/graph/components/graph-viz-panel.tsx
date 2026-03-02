@@ -87,7 +87,7 @@ export function GraphVizPanel({
     setGardenerLoading(true);
     setGardenerMessage(null);
     try {
-      const result = await apiClient.runGardener(wsId);
+      const result = await apiClient.runGardener(wsId, { fullScan: true });
       const merged = result.merges_applied;
       const linked = result.links_created ?? 0;
       const pruned = result.pruned_concepts;

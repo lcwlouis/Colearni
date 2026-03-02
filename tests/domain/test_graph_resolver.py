@@ -164,6 +164,11 @@ def _patch_repo_defaults(
         return None
 
     monkeypatch.setattr(graph_repository, "insert_provenance", _record_prov)
+    monkeypatch.setattr(
+        graph_repository,
+        "list_neighbors_for_concepts",
+        lambda *args, **kwargs: {},
+    )
     return calls
 
 

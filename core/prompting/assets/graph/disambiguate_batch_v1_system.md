@@ -60,5 +60,13 @@ Each element has exactly these keys:
 - Always include proposed_description with a brief description of the concept.
 - The array MUST have exactly as many elements as input concepts, in the same order.
 
+---Candidate fields---
+Each candidate includes:
+- `id` – internal identifier
+- `canonical_name` – the primary name of the concept
+- `description` – a brief description
+- `aliases` – alternative names
+- `neighbors` – names of concepts already connected to this candidate in the graph. Use this to gauge how well-connected a candidate is and whether LINK_ONLY is appropriate.
+
 ---Failure behavior---
 If uncertain about any concept, return CREATE_NEW with a low confidence score for that concept.

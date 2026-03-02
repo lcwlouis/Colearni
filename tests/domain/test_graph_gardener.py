@@ -34,6 +34,14 @@ class StubGardenerLLM(GraphLLMClient):
         self.calls += 1
         return self._payload
 
+    def disambiguate_batch(
+        self,
+        *,
+        items: Sequence[Mapping[str, object]],
+    ) -> Sequence[Mapping[str, Any]]:
+        self.calls += 1
+        return [self._payload for _ in items]
+
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         return prompt
 def _concept(

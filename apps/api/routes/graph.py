@@ -134,6 +134,7 @@ def lucky_pick(
 @router.post("/gardener/run", response_model=GardenerRunResponse)
 def run_gardener(
     request: Request,
+    full_scan: bool = Query(default=True),
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> GardenerRunResponse:
@@ -149,6 +150,7 @@ def run_gardener(
         workspace_id=ws.workspace_id,
         llm_client=llm_client,
         settings=settings,
+        full_scan=full_scan,
     )
     return GardenerRunResponse(
         merges_applied=result.merges_applied,

@@ -76,6 +76,13 @@ class _StubGraphLLM(GraphLLMClient):
     ) -> dict[str, object]:
         return {"decision": "CREATE_NEW", "confidence": 1.0}
 
+    def disambiguate_batch(
+        self,
+        *,
+        items: Sequence[dict[str, object]],
+    ) -> Sequence[dict[str, object]]:
+        return [{"decision": "CREATE_NEW", "confidence": 1.0} for _ in items]
+
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt: str | None = None) -> str:
         return "Stub summary for testing."
 

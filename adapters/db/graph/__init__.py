@@ -130,6 +130,7 @@ from adapters.db.graph.merge_map import (  # noqa: E402, F401
 from adapters.db.graph.provenance import insert_provenance  # noqa: E402, F401
 from adapters.db.graph.candidates import (  # noqa: E402, F401
     list_lexical_candidates,
+    list_neighbors_for_concepts,
     list_vector_candidates,
 )
 from adapters.db.graph.gardener import list_gardener_seed_concepts, list_null_tier_concepts, list_neighbor_names  # noqa: E402, F401

@@ -38,6 +38,20 @@ class IntegrationGardenerLLM(GraphLLMClient):
             "confidence": 0.92,
         }
 
+    def disambiguate_batch(
+        self,
+        *,
+        items: Sequence[Mapping[str, object]],
+    ) -> Sequence[Mapping[str, Any]]:
+        return [
+            {
+                "decision": "MERGE_INTO",
+                "merge_into_id": self._merge_into_id,
+                "confidence": 0.92,
+            }
+            for _ in items
+        ]
+
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         return prompt
 
