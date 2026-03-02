@@ -106,6 +106,14 @@ Run from `apps/web/`:
 | `sigma-graph/graph-reducers.tsx` | Node/edge visual reducers (size, colour, hover/select state) |
 | `sigma-graph/graph-events.tsx` | Click, hover, and search event handlers |
 | `sigma-graph/graph-layout.tsx` | Layout orchestration (ForceAtlas2 → noverlap) |
+| `sigma-graph/camera-controls.tsx` | Zoom, fit-to-screen, and center-on-node camera actions |
+| `sigma-graph/layout-controls.tsx` | Layout algorithm toggle (force-directed, circular) |
+| `sigma-graph/graph-skeleton.tsx` | Loading placeholder while graph data is fetched |
+| `sigma-graph/empty-state.tsx` | Empty-graph prompt (no concepts yet) |
+| `sigma-graph/graph-legend.tsx` | Tier colour legend overlay |
+| `sigma-graph/status-bar.tsx` | Node/edge counts and layout status |
+| `sigma-graph/settings-panel.tsx` | Graph display settings (label density, edge visibility) |
+| `sigma-graph/expand-prune-controls.tsx` | Expand neighbours / prune selection controls |
 | `concept-graph.d3-archive.tsx` | **Archived** — former D3 force-directed graph; kept for reference only |
 | `concept-activity-panel.tsx` | Concept detail sidebar (quiz history, flashcards) |
 | `chat-thread.tsx` / `chat-response.tsx` | Tutor chat UI |
@@ -121,6 +129,12 @@ Run from `apps/web/`:
 | `features/tutor/` | `onboarding-confirm`, `concept-switch-banner`, `tutor-graph-drawer`, `tutor-quiz-drawer`, `tutor-timeline` |
 | `features/kb/` | `kb-document-table`, `kb-upload-queue` |
 | `features/sidebar/` | `nav-rail`, `recent-sessions`, `workspace-actions`, `collapsed-footer` |
+
+### Hooks (`lib/hooks/`)
+
+| Hook | Purpose |
+|---|---|
+| `use-dev-stats.ts` | localStorage toggle exposing dev-only graph stats overlay |
 
 ### Graph utilities (`lib/graph/`)
 

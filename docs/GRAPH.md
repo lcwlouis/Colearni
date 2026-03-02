@@ -249,6 +249,10 @@ session.commit()          # single commit after full run
 This ensures the entire gardener pass is atomic — all merges, edge repoints,
 and orphan pruning succeed or roll back together.
 
+> **Note:** In the API layer, `get_db_session` auto-commits on clean exit and
+> rolls back on exception, so route handlers do not need explicit commit calls.
+> The gardener job bypasses this dependency and manages its own session.
+
 ### Orphan pruning
 At the end of each run, the gardener calls `prune_orphan_graph_nodes` to
 deactivate canonical concepts and edges that have zero remaining provenance
