@@ -80,6 +80,12 @@ What this track replaces:
 - `UXG.5` Interactions — node click, hover, drag, camera controls, zoom-to-node
 - `UXG.6` Search — MiniSearch integration with fuzzy matching and highlighting
 - `UXG.7` Integration — wire into graph page, replace old component, archive D3 code
+- `UXG.8` Camera control panel — zoom buttons, reset, rotate, fullscreen
+- `UXG.9` Extended layout suite — Force, Circlepack, Random + play/pause + configurable iterations
+- `UXG.10` Loading states — skeleton, progressive rendering, empty state
+- `UXG.11` Legend & status bar — tier color legend, node/edge counts, depth display
+- `UXG.12` Settings panel — toggleable graph settings with localStorage persistence
+- `UXG.13` Node expand/prune — subgraph exploration from selected node
 
 ## Decision Log
 
@@ -93,6 +99,25 @@ What this track replaces:
 8. Node size should reflect degree (number of connections) as in LightRAG
 9. Edge should be curved (using `@sigma/edge-curve`) for visual clarity
 10. Selected node should have a prominent highlight ring (border program) + label always visible
+11. Port all 6 layout algorithms from LightRAG (ForceAtlas2, Force, Circular, Circlepack, No-overlap, Random)
+12. Camera controls as floating toolbar (bottom-right) following LightRAG pattern
+13. Settings persisted via zustand + localStorage middleware
+14. Node expand/prune uses BFS with configurable depth — not a separate API call, operates on client-side graph
+15. Loading skeleton uses SVG shimmer, not a spinner
+16. Legend positioned bottom-left, collapsible to avoid cluttering the graph view
+
+## LightRAG Porting Checklist Cross-Reference
+
+Reference: `docs/lightrag-graph-porting-guide.md` Section 16
+
+| Porting Phase | Status | Covered By |
+|---|---|---|
+| Phase 1: Core Graph Rendering | ✅ | UXG.1, UXG.2, UXG.3 |
+| Phase 2: Basic Interactions | ✅ partially | UXG.5 (click, hover, drag, zoom, pan); UXG.8 adds rotate + camera buttons |
+| Phase 3: Search & Navigation | ✅ | UXG.6 (MiniSearch); UXG.11 adds entity label filter |
+| Phase 4: Properties Panel | ⏭️ skipped | We use our own detail panel (Decision Log #5) |
+| Phase 5: Layout Controls | ✅ partially | UXG.4 (ForceAtlas2, Circular, No-overlap); UXG.9 adds remaining layouts + play/pause |
+| Phase 6: Polish | 🔲 pending | UXG.10 (loading), UXG.11 (legend/status), UXG.12 (settings), UXG.13 (expand/prune) |
 
 ## Current Verification Status
 
@@ -296,6 +321,242 @@ Exit criteria:
 - All existing features preserved
 - Graph UX significantly improved (target: 7+/10)
 
+### UXG.8. Camera control panel
+
+Purpose:
+- Add a floating camera control panel with zoom, reset, rotate, and fullscreen buttons
+- Reference: porting guide Section 8.3
+
+Files involved:
+- `apps/web/components/sigma-graph/camera-controls.tsx` (new)
+- `apps/web/components/sigma-graph/camera-controls.module.css` (new)
+- `apps/web/components/sigma-graph.tsx` (add CameraControls child)
+
+Implementation steps:
+1. Create `camera-controls.tsx` component with buttons:
+   - Zoom In: `sigma.getCamera().animatedZoom({ duration: 200 })`
+   - Zoom Out: `sigma.getCamera().animatedUnzoom({ duration: 200 })`
+   - Reset View: `camera.animate({ x: 0.5, y: 0.5, ratio: 1.1 }, { duration: 1000 })`
+   - Rotate CW: `camera.animate({ angle: currentAngle + Math.PI / 8 }, { duration: 200 })`
+   - Rotate CCW: `camera.animate({ angle: currentAngle - Math.PI / 8 }, { duration: 200 })`
+   - Fullscreen: toggle `document.fullscreenElement` on the graph container
+2. Style as a floating vertical toolbar (bottom-right corner) using CSS modules.
+3. Use `useSigma()` hook from `@react-sigma/core` for camera access.
+4. Add keyboard shortcuts: `+`/`-` for zoom, `r` for reset, `f` for fullscreen.
+
+Verification:
+- `npx vitest run`
+- Manual: each camera button works, fullscreen toggles, keyboard shortcuts function
+
+Exit criteria:
+- All 6 camera control buttons render and function
+- Keyboard shortcuts work
+- Fullscreen toggle works
+- Camera animations are smooth (200-1000ms)
+
+### UXG.9. Extended layout suite
+
+Purpose:
+- Add remaining LightRAG layout algorithms with play/pause and configurable iteration count
+- Reference: porting guide Section 6
+
+Files involved:
+- `apps/web/components/sigma-graph/layout-controls.tsx` (new or extend existing)
+- `apps/web/components/sigma-graph.tsx` (wire layout controls)
+- `apps/web/lib/graph/constants.ts` (layout config constants)
+
+Implementation steps:
+1. Add layout algorithm options beyond current ForceAtlas2/Circular/No-overlap:
+   - Force Directed (`@react-sigma/layout-force`) — spring-electric model
+   - Circlepack (`@react-sigma/layout-circlepack`) — nested circles by group
+   - Random (`@react-sigma/layout-random`) — baseline/reset positioning
+2. Install any missing layout packages:
+   ```bash
+   cd apps/web && npm install @react-sigma/layout-circlepack @react-sigma/layout-random seedrandom
+   ```
+3. Add Play/Pause button for continuous layout animation:
+   - Play runs layout continuously
+   - Auto-stop after 3 seconds
+   - Pause freezes current positions
+4. Add iterations slider/input (range: 1-30, default: 15 for on-demand, 500 for initial load).
+5. Animated transitions between layouts (400ms smoothing via `animateNodePositions`).
+6. Use `seedrandom` for deterministic random initial positions.
+
+Verification:
+- `npx vitest run`
+- Manual: switch between all 6 layouts — nodes re-arrange smoothly
+- Manual: play/pause works, auto-stops after 3s
+- Manual: iteration count changes affect layout density
+
+Exit criteria:
+- 6 layout algorithms available in dropdown
+- Smooth animated transitions between all layouts
+- Play/pause with auto-stop works
+- Iteration control functions
+
+### UXG.10. Loading states
+
+Purpose:
+- Show loading skeleton during graph fetch, empty state when no data, progressive rendering for large graphs
+- Reference: porting guide data fetching patterns
+
+Files involved:
+- `apps/web/components/sigma-graph/graph-skeleton.tsx` (new)
+- `apps/web/components/sigma-graph/graph-skeleton.module.css` (new)
+- `apps/web/components/sigma-graph/empty-state.tsx` (new)
+- `apps/web/components/sigma-graph.tsx` (conditional rendering)
+
+Implementation steps:
+1. Create `graph-skeleton.tsx`:
+   - Pulsing SVG outline mimicking a graph layout (circles + lines)
+   - Animated gradient sweep (shimmer effect)
+   - Matches graph container dimensions
+2. Create `empty-state.tsx`:
+   - Icon + message: "No concepts yet — ingest a document to build your knowledge graph"
+   - Action button linking to sources page
+3. In `sigma-graph.tsx`:
+   - Show skeleton while `isFetching && nodes.length === 0`
+   - Show empty state when `!isFetching && nodes.length === 0`
+   - Progressive rendering: for graphs >500 nodes, render in batches of 100 with `requestAnimationFrame`
+4. Add transition animation from skeleton → rendered graph (fade-in).
+
+Verification:
+- `npx vitest run`
+- Manual: loading state visible during slow fetch (throttle network)
+- Manual: empty state shows for new users with no documents
+
+Exit criteria:
+- Skeleton displays during initial load
+- Empty state displays when graph is empty
+- Large graph renders progressively without blocking UI
+- Smooth transition from skeleton to rendered graph
+
+### UXG.11. Legend & status bar
+
+Purpose:
+- Add a tier color legend and a status bar showing graph statistics
+- Reference: porting guide Section 16 Phase 6 items
+
+Files involved:
+- `apps/web/components/sigma-graph/graph-legend.tsx` (new)
+- `apps/web/components/sigma-graph/graph-legend.module.css` (new)
+- `apps/web/components/sigma-graph/status-bar.tsx` (new)
+- `apps/web/components/sigma-graph/status-bar.module.css` (new)
+- `apps/web/components/sigma-graph.tsx` (add children)
+
+Implementation steps:
+1. Create `graph-legend.tsx`:
+   - Horizontal or vertical list of tier types with color dots
+   - Tiers: Umbrella, Topic, Subtopic, Granular (from our existing tier system)
+   - Collapsible (click to toggle visibility)
+   - Positioned bottom-left corner
+2. Create `status-bar.tsx`:
+   - Display: total nodes, total edges, visible nodes, visible edges
+   - Show current max depth if applicable
+   - Show currently selected node name (if any)
+   - Thin bar at bottom of graph container
+3. Add entity label filter dropdown:
+   - Filter nodes by tier type (show only umbrellas, only topics, etc.)
+   - Integrates with existing tier filtering but as a dropdown control
+   - Update MiniSearch index when filter changes
+
+Verification:
+- `npx vitest run`
+- Manual: legend shows correct tier colors, toggles visibility
+- Manual: status bar updates in real-time as filters change
+- Manual: entity filter dropdown works
+
+Exit criteria:
+- Legend accurately maps tier colors
+- Status bar shows correct counts
+- Entity label filter works with both tier filtering and search
+- All elements are non-intrusive and can be collapsed/hidden
+
+### UXG.12. Settings panel & persistence
+
+Purpose:
+- Centralized graph settings panel with localStorage persistence
+- Reference: porting guide Section 16 Phase 6
+
+Files involved:
+- `apps/web/components/sigma-graph/settings-panel.tsx` (new)
+- `apps/web/components/sigma-graph/settings-panel.module.css` (new)
+- `apps/web/lib/graph/settings-store.ts` (new — zustand store)
+
+Implementation steps:
+1. Create a zustand store `settings-store.ts` with settings:
+   - `showLabels: boolean` (default: true)
+   - `labelDensity: number` (range 0.1-3, default: 1)
+   - `showEdgeLabels: boolean` (default: false)
+   - `edgeCurvature: number` (range 0-1, default: 0.25)
+   - `defaultLayout: LayoutType` (default: 'forceatlas2')
+   - `animationDuration: number` (range 100-2000ms, default: 400)
+   - `highlightNeighbors: boolean` (default: true)
+   - `showLegend: boolean` (default: true)
+   - `showStatusBar: boolean` (default: true)
+2. Persist to localStorage using zustand `persist` middleware.
+3. Create `settings-panel.tsx`:
+   - Gear icon button to toggle panel open/closed
+   - Renders toggles, sliders, dropdowns for each setting
+   - Panel slides in from right edge or appears as a popover
+4. Wire settings into `sigma-graph.tsx` — all visual/behavior settings read from the store.
+
+Verification:
+- `npx vitest run`
+- Manual: change settings → graph updates in real-time
+- Manual: refresh page → settings persist from localStorage
+- Manual: reset button restores defaults
+
+Exit criteria:
+- All listed settings are functional
+- Settings persist across page refreshes
+- Real-time preview of setting changes
+- Reset to defaults works
+
+### UXG.13. Node expand/prune — subgraph exploration
+
+Purpose:
+- Allow users to explore subgraphs from a selected node (expand neighbors, prune unrelated)
+- Reference: porting guide node expand/prune pattern
+
+Files involved:
+- `apps/web/components/sigma-graph/expand-prune-controls.tsx` (new)
+- `apps/web/lib/graph/subgraph-utils.ts` (new)
+- `apps/web/components/sigma-graph.tsx` (integrate controls)
+
+Implementation steps:
+1. Create `subgraph-utils.ts`:
+   - `expandFromNode(graph: Graph, nodeId: string, depth: number): Set<string>` — BFS to find nodes within N hops
+   - `pruneToSubgraph(graph: Graph, keepNodes: Set<string>)` — hide all nodes not in the set
+   - `restoreFullGraph(graph: Graph)` — unhide all nodes
+   - Spread factor calculation: visible area / number of visible nodes → auto-adjust layout
+2. Create `expand-prune-controls.tsx`:
+   - "Expand" button (appears on node select): shows neighbors of selected node
+   - "Expand +1 hop" button: increases expansion depth
+   - "Prune to selection" button: hides everything except expanded subgraph
+   - "Restore full graph" button: shows all nodes again
+   - Depth indicator: shows current expansion depth
+3. When expanding:
+   - Newly visible nodes animate in (fade + position from center of selected node)
+   - Re-run layout only on visible subgraph
+4. When pruning:
+   - Non-selected nodes fade out
+   - Layout adjusts to fill available space
+
+Verification:
+- `npx vitest run`
+- Manual: select node → expand shows neighbors → expand again shows 2-hop neighbors
+- Manual: prune hides unrelated nodes
+- Manual: restore brings back full graph
+- Manual: animations are smooth
+
+Exit criteria:
+- Expand/prune controls appear on node selection
+- BFS expansion works correctly at each depth level
+- Prune hides non-selected nodes
+- Restore returns to full graph view
+- Layout adjusts after expand/prune operations
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -318,6 +579,12 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 5. `UXG.5` Interactions ✅
 6. `UXG.6` Search ✅
 7. `UXG.7` Integration + archive ✅
+8. `UXG.8` Camera control panel 🔲
+9. `UXG.9` Extended layout suite 🔲
+10. `UXG.10` Loading states 🔲
+11. `UXG.11` Legend & status bar 🔲
+12. `UXG.12` Settings panel + persistence 🔲
+13. `UXG.13` Node expand/prune 🔲
 
 ## Verification Matrix
 

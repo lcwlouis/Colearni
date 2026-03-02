@@ -119,7 +119,7 @@ What is materially missing:
 ## Remaining Track IDs
 
 - `UXF` Critical fixes — gardener commit, graph selection bugs (quick wins)
-- `UXG` Graph visualization replacement — port LightRAG Sigma.js graph
+- `UXG` Graph visualization replacement — port LightRAG Sigma.js graph (13 slices)
 - `UXP` Practice UX — unified flashcard viewer + quiz history browser
 - `UXT` Tutor UX — onboarding auto-send, streaming status, graph-chat integration
 - `UXI` Infrastructure — sources page, LLM caching, dev stats toggle
@@ -223,7 +223,7 @@ Quick wins that unblock other tracks. Fix the gardener transaction commit bug (d
 
 ### UXG. Graph Visualization Replacement
 
-Replace the D3 force simulation (`concept-graph.tsx`) with a Sigma.js + graphology-based graph component, following `docs/lightrag-graph-porting-guide.md`. This is the largest track: new rendering pipeline, layout algorithms, interaction model, search, and visual styling. Inherently fixes flicker, selection highlighting, and overall graph UX quality.
+Replace the D3 force simulation (`concept-graph.tsx`) with a Sigma.js + graphology-based graph component, following `docs/lightrag-graph-porting-guide.md`. This is the largest track (13 slices): new rendering pipeline, layout algorithms, interaction model, search, and visual styling. Inherently fixes flicker, selection highlighting, and overall graph UX quality. UXG.1–7 cover core rendering, data binding, interaction, search, styling, subgraph, and detail-panel wiring. UXG.8–13 add camera controls, extended layouts, loading states, legend/status bar, settings panel, and node expand/prune.
 
 ### UXP. Practice UX
 
@@ -283,9 +283,9 @@ Dependencies between tracks:
 | Track | Status | Last note |
 |---|---|---|
 | `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) |
-| `UXG` Graph replacement | 🔄 pending | Not started — LightRAG port |
-| `UXP` Practice UX | 🔄 pending | Not started — flashcard stack, quiz history |
-| `UXT` Tutor UX | 🔄 pending | Not started — onboarding, status, chat integration |
+| `UXG` Graph replacement | 🔄 in progress | 13 slices total — UXG.1–UXG.7 ✅, UXG.8–UXG.13 🔲 (camera controls, extended layouts, loading states, legend/status bar, settings panel, node expand/prune) |
+| `UXP` Practice UX | 🟢 done | All 3 slices complete (UXP.1–UXP.3) — flashcard stack, generate-more, quiz history |
+| `UXT` Tutor UX | 🟢 done | All 3 slices complete (UXT.1–UXT.3) — onboarding confirm, status animation, graph-chat |
 | `UXI` Infrastructure | 🔄 pending | Not started — sources, caching, dev stats |
 | `UXD` Documentation audit | 🔄 pending | Not started — audit API, ARCHITECTURE, FRONTEND, GRAPH, OBSERVABILITY, PLAN, PRODUCT_SPEC, PROGRESS, PROMPTS |
 
