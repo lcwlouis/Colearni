@@ -266,7 +266,7 @@ Dependencies between tracks:
 
 | Track | Status | Last note |
 |---|---|---|
-| `UXF` Critical fixes | 🔄 pending | Not started — gardener commit, selection bugs |
+| `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) |
 | `UXG` Graph replacement | 🔄 pending | Not started — LightRAG port |
 | `UXP` Practice UX | 🔄 pending | Not started — flashcard stack, quiz history |
 | `UXT` Tutor UX | 🔄 pending | Not started — onboarding, status, chat integration |
