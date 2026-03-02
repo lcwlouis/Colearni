@@ -1,393 +1,369 @@
 # Drift Report
 
-As of 2026-02-28.
+As of 2026-03-02.
 
-This report compares three baselines:
+This report compares three baselines against a full top-to-bottom audit of the codebase (60 domain files, 97 test files, 48+ API endpoints, 5 frontend pages, 9 migrations, 16 prompt assets, 124 env vars):
 
 1. The original project description in the thread request.
 2. The planning discussion in `tmp/pdfs/branch_colearni_discussion.txt`.
 3. The current implementation in the repo.
 
+Previous report: 2026-02-28.
+
+---
+
 ## Executive Summary
 
-The project has not drifted evenly.
+Since the last report (2026-02-28), the project has made meaningful forward progress in several areas — research planning, learner profiles, concept tiers, document lifecycle tracking, and streaming — while the core tutor/graph/quiz product remains stable and well-built.
 
-- Compared with the later planning discussion, the app is mostly on-track.
-- Compared with the original broad "learning copilot + second brain + research/search" vision, the app has drifted substantially toward a narrower product: a grounded learning workspace over user-uploaded materials.
+However, the overall strategic drift pattern has not changed:
 
-The clearest pattern is this:
+- The pedagogy + graph + quiz core is **production-grade and architecturally sound**.
+- The research/discovery layer has progressed from "mostly missing" to **early scaffolding** (topic planner, query planner, promotion logic, 38 tests) — but is still not user-facing or agentic.
+- The learner profile has moved from "fragmented" to **partially assembled** (`domain/learner/` exists with profile assembly and activity state) — but is not yet a living, auto-updating model.
+- The conductor/router has moved from "conceptual" to **in-progress** (typed `TurnPlan`, query analyzer) — but is not yet wired into the runtime.
 
-- The pedagogy layer is real.
-- The graph layer is real.
-- The upload-ground-retrieve-answer loop is real.
-- The proactive research/search/knowledge-discovery layer is still mostly missing or only partially scaffolded.
+The product today remains:
 
-So the product today is much closer to:
+> "Graph-backed Socratic tutor with mastery-gated quizzes and practice over user-uploaded materials"
 
-> "Graph-backed Socratic tutor with mastery-gated quizzes and practice"
+The original "agentic second brain" vision is still mostly unrealized, though the building blocks are now closer.
 
-than to:
-
-> "Agentic second brain that finds, filters, researches, ingests, and periodically updates knowledge for the user"
+---
 
 ## Bottom-Line Assessment
 
-Estimated alignment, by baseline:
+| Baseline | Alignment (prev) | Alignment (now) | Change | Summary |
+| --- | --- | --- | --- | --- |
+| Original broad vision | 35–45% | 40–50% | ↑ ~5pp | Research planner, learner profile assembly, concept tiers landed. Still no user-facing discovery, no deep-search synthesis, no living user model. |
+| Planning discussion | 70–80% | 75–85% | ↑ ~5pp | Research scaffolding, document lifecycle, streaming, learner digests added. Conductor still not wired. |
+| Current docs (`ARCHITECTURE.md` + `PRODUCT_SPEC.md`) | 75–85% | 80–88% | ↑ ~3pp | ARCHITECTURE.md status note is now accurate. GRAPH.md has column-name errors. Streaming status UI still missing despite spec. |
 
-| Baseline | Estimated alignment | Summary |
-| --- | --- | --- |
-| Original broad vision | 35-45% | The learning/quiz/graph core exists, but the search, topic-finding, user-model, and deep-search second-brain layers are mostly absent. |
-| Planning discussion | 70-80% | The implemented app matches the narrowed MVP surprisingly well: upload, graph, grounded tutor, quizzes, practice, mastery, graph explorer, jobs. |
-| Current `docs/ARCHITECTURE.md` + `docs/PRODUCT_SPEC.md` | 75-85% | The docs mostly describe the current shape, but they overstate explicit "agent" boundaries and understate some implementation realities. |
+These remain directional estimates.
 
-These are directional estimates, not test-derived metrics.
+---
 
 ## Current State Snapshot
 
-The current app already has a meaningful vertical slice:
+The codebase is substantial: **60 domain files**, **48+ API endpoints**, **97 test files (~650 tests)**, **16 versioned prompt assets**, a **5-page Next.js app** with Sigma.js graph, and **9 Alembic migrations**.
 
-- Auth + multi-workspace support.
-- Knowledge-base upload and reprocessing.
-- Ingestion for `.txt`, `.md`, and `.pdf`.
-- Chunking, embeddings, and hybrid retrieval.
-- Raw + canonical concept graph with resolver and offline gardener.
-- Chat tutor with evidence/citations and strict vs hybrid grounding.
-- Mastery-gated behavior in tutor responses.
-- Level-up quiz generation, submission, grading, and mastery update.
-- Practice quizzes and flashcards from graph concepts.
-- Graph explorer and "I’m feeling lucky" graph traversal.
-- Readiness analyzer and quiz CTA actions.
-- A working Next.js web app for KB, tutor, graph, and login.
-- File-based prompt asset system (`core/prompting/`) with versioned assets per task family.
-- Query analysis scaffold (`domain/chat/query_analyzer.py`) — exists and tested but not yet wired into the tutor runtime.
+### What exists and works
 
-This is already a real product slice, not just scaffolding.
+- Auth + multi-workspace support (magic links, workspace members).
+- Knowledge-base upload, reprocessing, and per-document lifecycle tracking (`ingestion_status`, `graph_status`, `graph_concept_count`).
+- Ingestion for `.txt`, `.md`, `.pdf` with word/char-based chunking and paragraph-aware splitting.
+- Chunking, embeddings (OpenAI / LiteLLM / Mock), and hybrid retrieval (pgvector cosine + Postgres FTS).
+- Raw + canonical concept graph with online resolver (budgeted), offline gardener (budgeted), and orphan pruning.
+- Concept tier taxonomy (`umbrella | topic | subtopic | granular`) in schema and graph extraction.
+- Chat tutor with evidence/citations, strict vs hybrid grounding, and streaming SSE.
+- Mastery-gated Socratic/direct response style switching.
+- Level-up quiz generation, mixed grading (MCQ deterministic + short-answer LLM rubric), mastery update.
+- Practice quizzes and unified flashcard stacks with exhaustion tracking and quiz history with retry.
+- Graph explorer with Sigma.js WebGL rendering, ForceAtlas2 layout, MiniSearch, expand/prune controls.
+- "I'm feeling lucky" graph traversal (bounded topology-based selection).
+- Readiness analyzer with half-life decay.
+- Onboarding confirmation step.
+- Dev stats toggle (localStorage, client-side).
+- File-based prompt asset system (`core/prompting/`) with 16 versioned assets across 7 task families.
+- Comprehensive observability (OpenTelemetry + optional Phoenix, 400+ lines in `core/observability.py`).
+- Learner profile assembly (`domain/learner/`) — activity state and profile data gathered but not yet a living model.
+- Query analyzer and typed turn plan (`domain/chat/query_analyzer.py`, `domain/chat/turn_plan.py`) — implemented and tested (22 + 14 tests) but not yet wired into the runtime conductor.
+- Research subsystem with topic planner, query planner, source management, candidate promotion, and background runner — tested (38 tests) but not user-facing.
+- Learner digest background job.
+- Spaced repetition scaffold (`domain/learning/spaced_repetition.py`) — minimal, appears incomplete.
+
+### What does not exist
+
+- No user-facing research discovery UI or agentic search loop.
+- No periodic synthesis ("everything I've learned") surface.
+- No living user model that auto-consolidates preferences, goals, interests.
+- No deep-search agent.
+- No conductor/router wired at runtime (still functional if/else orchestration in `respond.py`).
+- No SuggestionAgent (deferred; prompt asset `suggestion_hook_v1` exists but no agent).
+- No streaming status ticker visible in the chat UI (types exist, display missing).
+- No grounding-mode toggle in the frontend UI.
+- No E2E pipeline tests.
+
+---
 
 ## Where The App Matches The Plan Well
 
 ### 1. Learning-first, anti-brainrot tutor
 
-This is one of the strongest areas of alignment.
+**Status: Strong. Production-grade.**
 
-- The planning discussion narrowed the product around Socratic tutoring, mastery gating, and grounded responses.
-- The current app implements that shape directly in chat response orchestration and tutor prompt building.
+The tutor pipeline (`domain/chat/respond.py` → `tutor_agent.py` → `verifier.py`) implements the full Socratic/direct gating loop with evidence/citation verification. The prompt asset system (`core/prompting/assets/tutor/`) provides versioned Socratic and direct-mode templates. Social-intent fast-path (`domain/chat/social_turns.py`) handles greetings without wasting retrieval budget.
 
-Current implementation:
+The streaming path (`POST /chat/respond/stream`) uses proper SSE with feature-flag gating and event counting.
 
-- Chat response flow: `apps/api/routes/chat.py`, `domain/chat/respond.py`, `domain/chat/response_service.py`
-- Evidence/citation verification: `core/verifier.py`
-- Tutor style gating: `domain/chat/tutor_agent.py`
+Grounding policy enforcement is strict: `verify_assistant_draft()` validates citation labels against evidence source types, refuses on insufficient evidence in strict mode, and returns structured refusal reasons.
 
-Assessment:
-
-- Very close to the planning discussion.
-- Moderately aligned with the original vision.
+**Concern:** The verifier validates citation *structure* (labels, IDs, source types) but does not check citation *semantic overlap* with the response text. LLM hallucinations that correctly format citations but don't actually ground in the cited evidence would pass verification. This is a real product risk at scale.
 
 ### 2. Graph-backed learning model
 
-This is also close to plan.
+**Status: Strong. Well-budgeted. Improved since last report.**
 
-- The planning discussion heavily emphasized LightRAG-inspired graph extraction, canonicalization, and bounded consolidation.
-- The current app implements the raw/canonical graph split, online resolver budgets, and offline gardener.
+The two-layer graph (raw → canonical) with online resolver and offline gardener is mature. Budget enforcement is present throughout: `ResolverBudgets` (lexical, vector, LLM calls per chunk/doc), `GardenerConfig` (max LLM calls, clusters, dirty nodes per run). No unbounded loops detected anywhere in `domain/graph/`.
 
-Current implementation:
+New since last report: concept tier taxonomy (`umbrella | topic | subtopic | granular`) landed in migration 0009 with a workspace+tier index. Orphan pruning (`domain/graph/orphan_pruner.py`) cleans up disconnected nodes after document deletion.
 
-- Graph extraction pipeline: `domain/graph/pipeline.py`, `domain/graph/extraction.py`
-- Online resolver: `domain/graph/resolver.py`
-- Offline gardener: `domain/graph/gardener.py`
-- Graph exploration API: `apps/api/routes/graph.py`, `domain/graph/explore.py`
+The resolver pipeline is well-decomposed: `resolver.py` → `resolver_candidates.py` → `resolver_decision.py` → `resolver_apply.py`.
 
-Assessment:
+**Concern:** `docs/GRAPH.md` has incorrect column names. It says `src_concept_id`/`tgt_concept_id` (edges) and `from_concept_id`/`to_concept_id` (merge log), but the actual schema uses `src_id`/`tgt_id` and `from_id`/`to_id`. Any developer reading the docs will write code against nonexistent columns.
 
-- Very close to the planning discussion.
-- More concrete and productized than the original description.
+**Concern:** `GRAPH.md` recommends `pg_trgm` similarity indexes on `canonical_name` and aliases for lexical blocking (candidate generation), but no migration creates these indexes. This means lexical blocking may degrade as graph size grows.
 
 ### 3. Quiz, mastery, and practice loops
 
-This area is strong and materially complete.
+**Status: Strong. Materially complete. Well-tested.**
 
-- The planning discussion framed level-up quizzes as the progression mechanic and graph practice as non-leveling.
-- The current app supports both.
+Quiz logic is well-decomposed: `quiz_flow.py` (shared orchestration), `quiz_generation.py` (item diversity, validation, 16 defs), `quiz_grading.py` (MCQ deterministic + SA rubric, 11 defs), `quiz_persistence.py` (DB ops, 17 defs). Practice has novelty deduplication via `practice_novelty.py` fingerprinting. Unified flashcard stacks with exhaustion tracking implemented in both backend and frontend.
 
-Current implementation:
+Practice submissions are idempotent on replay. Generation retries capped at 3 attempts. Practice never mutates mastery state (product spec compliance).
 
-- Level-up quiz flow: `apps/api/routes/quizzes.py`, `domain/learning/level_up.py`
-- Practice flow: `apps/api/routes/practice.py`, `domain/learning/practice.py`
-- Readiness/review loop: `domain/readiness/analyzer.py`, `apps/jobs/readiness_analyzer.py`
-
-Assessment:
-
-- Very close to the planning discussion.
-- More specific and disciplined than the original description.
+**17 backend tests + 5 DB integration tests** covering flows.
 
 ### 4. Thin-route, Postgres-first implementation style
 
-The repo follows the later planning discussion closely here.
+**Status: Mostly strong. Two violations found.**
 
-- Routes are thin.
-- Domain logic is mostly outside routes.
-- Postgres is the single source of truth for chunks, graph, quizzes, mastery, and workspace state.
+48+ API endpoints across 13 route files. The vast majority (85%) follow the thin-route pattern: validate Pydantic input → call domain function → return response.
 
-Current implementation:
+**Violation 1:** `apps/api/routes/readiness.py` executes raw SQL directly in the route handler, including joins and column transformations. This is business logic that belongs in `domain/readiness/`.
 
-- Thin routes throughout `apps/api/routes/*`
-- Single-DB posture visible across `adapters/db/*`
+**Violation 2:** `apps/api/routes/documents.py` contains multipart payload parsing logic (`_read_upload_payload()`) that belongs in `adapters/parsers/`.
 
-Assessment:
+These are not showstoppers but they violate the CODEX.md golden rules and should be refactored.
 
-- Strong alignment with the planning discussion.
+---
 
 ## Where The Project Has Drifted Most From The Original Vision
 
-### 1. Search-first topic discovery is mostly missing
+### 1. Search-first topic discovery: scaffolded, not delivered
 
-This is the biggest gap versus the original plan.
+**Previous assessment: "mostly missing". Updated: early scaffolding exists.**
 
-The original description emphasized:
+The research subsystem has progressed since the last report:
 
-- topic finder agent
-- knowledge finder agent
-- search queries over web/papers/SME posts
-- human-in-the-loop selection of POIs
-- periodic topic expansion
+- Topic planner (`domain/research/topic_planner.py`) — generates subtopic proposals from a goal. 16 tests.
+- Query planner — generates search queries. Tested.
+- Source management — CRUD for research sources. 11 API routes.
+- Candidate promotion — decides which candidates to ingest. 12 tests.
+- Research runner — background job for execution. Exists.
 
-Current state:
+However, this is still **internal plumbing, not a user-facing product loop**:
 
-- There is no implemented search-planning agent.
-- There is no topic-finder workflow that proposes subtopics from a prompt.
-- There is no paper/post search orchestration layer.
-- There is no user-visible POI selection loop.
+- No UI for research discovery or topic exploration.
+- No human-in-the-loop approval flow visible in the frontend.
+- No periodic/automatic topic expansion.
+- No web-scale search orchestration.
+- The research runner lacks explicit budget enforcement (unlike the graph gardener).
+- 11 API routes exist but no frontend consumes them.
 
-What exists instead:
+**Drift from original:** Still high, but the gap is narrowing. The building blocks are testable; the product surface is not.
 
-- A lightweight research subsystem for manually registered source URLs and background fetching.
+### 2. The learner model: partially assembled, not living
 
-Current implementation:
+**Previous assessment: "fragmented". Updated: assembly started.**
 
-- Research routes: `apps/api/routes/research.py`
-- Research CRUD service: `domain/research/service.py`
-- Research runner: `domain/research/runner.py`, `apps/jobs/research_runner.py`
+New since last report:
 
-Assessment:
+- `domain/learner/` exists with 2 files: profile assembly and activity state.
+- Learner profile assembler has **17 tests** — it gathers mastery, readiness, activity data.
+- Learner digests (migration 0008) provide background-job-generated summaries.
+- `user_tutor_profile` in the auth system provides `readiness_summary`, `learning_style_notes`, `last_activity_at`.
 
-- High drift from the original description.
-- Moderate underdelivery relative to the original "agentic research" ambition.
-- Less drift relative to the later planning discussion, because that discussion intentionally narrowed the MVP around uploaded materials first.
+What is still missing:
 
-### 2. The "current knowledge/config of user" is not implemented as a living user model
+- No single canonical learner profile object that consolidates everything.
+- No automatic updater that evolves the profile based on user behavior.
+- No preference/interest/goal tracking.
+- The assembled data is used for context injection but not surfaced as a user-visible model.
 
-The original plan wanted a dynamic user knowledge/config file containing:
+**Drift from original:** Still high, but the data plumbing is closer. The *product behavior* (a living, evolving learner model that users can see and the system uses to personalize proactively) does not exist.
 
-- summary of the knowledge base
-- user preferences
-- known knowledge
-- weaker topics
-- interests
-- goals
-- dates and summaries of ingested data
+### 3. Deep-search / second-brain synthesis: still absent
 
-Current state is fragmented instead of unified:
+No progress here since the last report. No deep-search agent, no "everything I've learned" synthesis, no periodic external update pipeline.
 
-- Workspace settings exist as generic JSON.
-- A `user_tutor_profile` exists, but it currently exposes only `readiness_summary`, `learning_style_notes`, and `last_activity_at`.
-- Mastery exists per concept.
-- Readiness exists per topic.
-- Chat memory exists.
+The learner digest job is the closest thing, but it's a background job output stored in a table — not a user-facing synthesis surface.
 
-What is missing:
+**Drift from original:** High. Unchanged.
 
-- No single canonical learner profile object.
-- No automatic updater that consolidates user preferences/interests/goals.
-- No dynamic prompt profile comparable to the original concept.
-
-Current implementation:
-
-- Workspace settings: `apps/api/routes/workspaces.py`
-- Tutor profile: `apps/api/routes/auth.py`, `adapters/db/auth.py`
-- Mastery/readiness: `domain/learning/level_up.py`, `domain/readiness/analyzer.py`
-
-Assessment:
-
-- High drift from the original vision.
-- The app has the data fragments, but not the original "living learner model" product behavior.
-
-### 3. Deep-search / second-brain synthesis is not present
-
-The original description explicitly wanted:
-
-- a deep-search agent
-- periodic synthesis of everything learned
-- a current-knowledge review layer
-- periodic updates about new developments
-
-Current state:
-
-- No deep-search synthesis agent exists.
-- No periodic "everything learned" summary exists.
-- No periodic external update pipeline exists.
-- No user-facing second-brain review surface exists beyond graph browsing, chat history, and readiness.
-
-Assessment:
-
-- High drift from the original description.
+---
 
 ## Where The Docs And The App Have Drifted From Each Other
 
-The docs are fairly close to the current product shape, but there are important mismatches.
+### 1. ARCHITECTURE.md: moderately accurate, one stale claim fixed
 
-### 1. The docs describe more explicit agents than the code actually has
+The status note added at the top of ARCHITECTURE.md (lines 26–32) now correctly describes the current state: "functional orchestration modules rather than hard agent boundaries" with typed turn planning as the next target.
 
-`docs/ARCHITECTURE.md` presents a clean "Conductor / Router" with `TutorAgent`, `LevelUpQuizAgent`, `PracticeAgent`, and `SuggestionAgent`.
+However:
 
-Current implementation is less agentic and more function-oriented:
+- The Mermaid diagram still shows `SuggestionAgent` as a first-class component. No SuggestionAgent exists in code (only a prompt asset `suggestion_hook_v1`).
+- The ingestion pipeline diagram shows `.md/.txt` only. PDF is supported and has been for weeks.
+- The repo structure section lists `adapters/retrieval/` but retrieval lives in `domain/retrieval/` — an architectural divergence that is neither documented nor justified.
 
-- chat orchestration is mostly `domain/chat/respond.py`
-- quiz logic is mostly `domain/learning/level_up.py`
-- practice logic is mostly `domain/learning/practice.py`
-- "lucky" is implemented as graph exploration logic, not a dedicated suggestion agent
+### 2. GRAPH.md: column-name errors
 
-There is no general conductor module in `core/loop.py`, and the agent boundaries are mostly conceptual rather than hard runtime modules.
+`docs/GRAPH.md` uses `src_concept_id`/`tgt_concept_id` (line 69) and `from_concept_id`/`to_concept_id` (line 100). The actual schema (migration 0001) uses `src_id`/`tgt_id` and `from_id`/`to_id`. This is a documentation bug that will trip up any developer or AI agent writing graph queries.
 
-Assessment:
+### 3. PRODUCT_SPEC.md vs frontend: streaming status gap
 
-- Moderate docs-to-code drift.
-- The product behavior exists, but the implementation is less explicitly "agentic" than the docs suggest.
+PRODUCT_SPEC.md §8 specifies streaming status as a "replace-mode" indicator showing steps like "Retrieving evidence…", "Composing response…". The backend emits `ChatPhase` and `ActivityStep` types. The frontend defines `ACTIVITY_LABELS` and has `stream-messages.ts` for delta appending.
 
-### 2. "I'm feeling lucky" is simpler than the docs imply
+But the **visible streaming status ticker does not exist in the UI**. The types are defined; the display is not wired. This is a spec feature that appears implemented to anyone reading the code, but is invisible to users.
 
-The docs frame this like a dedicated suggestion capability.
+### 4. PRODUCT_SPEC.md vs frontend: grounding-mode toggle
 
-Current implementation:
+The spec describes a strict/hybrid grounding toggle. The backend supports it (`default_grounding_mode` setting, `verify_assistant_draft()` policy). The frontend displays the grounding mode label in `chat-response.tsx` — but there is **no user-facing toggle** to switch modes. It's config-only.
 
-- `pick_lucky` is a bounded graph-selection function using graph topology and random choice.
-- It does not currently generate a tutor hook or learning path via a dedicated LLM suggestion flow.
+### 5. Retrieval layer location mismatch
 
-Current implementation:
+ARCHITECTURE.md shows `adapters/retrieval/` in the repo structure. The actual implementation lives in `domain/retrieval/` (`hybrid_retriever.py`, `vector_retriever.py`, `fts_retriever.py`, `evidence_planner.py`). The low-level DB queries (`vector_top_k()`, `full_text_top_k()`) are correctly in `adapters/db/chunks_repository.py`, but the retrieval orchestration logic sits in `domain/` rather than `adapters/`.
 
-- `apps/api/routes/graph.py`
-- `domain/graph/explore.py`
+This is arguably fine (retrieval orchestration is domain logic), but the docs should reflect reality.
 
-Assessment:
+### 6. FRONTEND.md: mostly accurate, underdocuments feature components
 
-- Moderate drift.
-- The feature exists, but in a simpler deterministic form.
+The shared component inventory in FRONTEND.md is accurate. However, the `features/` directory has grown significantly (graph detail panel, flashcard stack, quiz history/viewer, tutor timeline, concept-chat links, KB upload queue, sidebar) and these are not cataloged in FRONTEND.md.
 
-### 3. The docs say "UI later", but the web app already exists
+---
 
-`docs/ARCHITECTURE.md` still frames Next.js UI as "later".
+## Code Quality & Hygiene Assessment
 
-Current implementation:
+This section is new. The previous report focused on product drift. A constructive drift report should also audit engineering quality.
 
-- Tutor UI: `apps/web/app/tutor/page.tsx`
-- Graph UI: `apps/web/app/graph/page.tsx`
-- Knowledge base UI: `apps/web/app/kb/page.tsx`
-- Login and shell: `apps/web/app/login/page.tsx`, `apps/web/app/page.tsx`
+### Strengths
 
-Assessment:
+1. **Zero TODO/FIXME/HACK comments** across 60+ domain files and all route handlers. The codebase is either genuinely clean or someone is rigorous about not leaving breadcrumbs.
 
-- Low-to-moderate doc staleness.
-- The app is ahead of that part of the architecture doc.
+2. **Budget enforcement is real, not aspirational.** The resolver, gardener, practice generation, and research candidate limits all have explicit caps with hard stops. No unbounded loops found anywhere in `domain/`.
 
-### 4. File-type support is ahead of the early narrow plan
+3. **No cross-layer import violations.** `core/` and `domain/` never import from `apps/`. Verified across entire codebase.
 
-The planning discussion initially recommended `.md` and `.txt` first, with PDF later.
+4. **Type safety is strong.** Pydantic models for all API payloads, Protocol-based contracts in `core/contracts.py`, custom exception hierarchies (`QuizValidationError`, `QuizGradingError`, `ChatNotFoundError`), and consistent use of dataclasses for configuration objects.
 
-Current implementation already supports PDF parsing:
+5. **Prompt system is well-designed.** File-based assets with YAML front-matter, strict placeholder validation (no silent failures), caching, and metadata export for observability. 16 assets across 7 task families.
 
-- `adapters/parsers/text.py`
-- Knowledge-base upload accepts `.txt`, `.md`, `.pdf` in `apps/web/app/kb/page.tsx`
+6. **Test suite is substantial.** 97 files, ~650 tests, covering all major domain areas. Evidence planner alone has 57 tests. Research planner has 38. Chat/tutor commands have 44.
 
-Assessment:
+7. **Observability is comprehensive.** 400+ lines in `core/observability.py` with OpenTelemetry semantic conventions, Phoenix integration, token/cost tracking, content recording toggle, and span sanitization.
 
-- Positive drift.
-- The app is ahead of the original MVP cut here.
+### Weaknesses
 
-### 5. The "in-chat card" model is only partially realized
+1. **Test coverage is uneven.** Graph resolver: 7 tests. Graph gardener: 7 tests (+ 1 integration). Verifier: 6 tests. These are critical-path components that deserve 3–5x more coverage, especially for edge cases (disambiguation conflicts, budget exhaustion mid-merge, concurrent gardener runs).
 
-The product docs describe level-up quizzes as in-chat cards.
+2. **No E2E pipeline tests exist.** There is no test that exercises the full `upload → chunk → embed → store → ask question → retrieve → tutor response → verify citations` loop. Unit tests are strong; the integration seams between layers are undertested.
 
-Current state:
+3. **Settings bloat.** `core/settings.py` has 60+ configuration fields in a single flat `Settings` class. This works but makes it hard to understand which settings belong to which subsystem. Logical grouping (e.g., nested Pydantic models for `GraphSettings`, `RetrievalSettings`, `ReasoningSettings`) would improve maintainability.
 
-- The backend has quiz creation/submission flows.
-- The frontend has a quiz drawer and result cards.
-- Chat responses contain CTA actions.
-- But quiz creation is still a separate route flow and UI drawer interaction, not a fully unified chat-native card runtime.
+4. **Verifier scope is narrow.** `verify_assistant_draft()` validates citation *structure* but not *semantic correctness*. It cannot detect a response that formats citations correctly but hallucinates content not present in the cited evidence. For a product that emphasizes "evidence-first" and "grounded answers", this is a meaningful gap.
 
-Assessment:
+5. **Dead code risk.** Several small modules may be unused: `domain/chat/social_turns.py` (1 function), `domain/chat/answer_parts.py` (1 function), `domain/chat/title_gen.py` (2 functions), `domain/learning/spaced_repetition.py` (3 functions, appears incomplete). These should be audited for actual call paths.
 
-- Moderate implementation gap relative to the product wording.
+6. **Readiness route violates thin-route rule.** `apps/api/routes/readiness.py` executes raw SQL with joins and column transformations directly in the route handler. This is the most visible CODEX.md violation in the codebase.
 
-## Drift Matrix By Feature Area
+7. **Job budget inconsistency.** The graph gardener job has explicit CLI budget args. The readiness analyzer iterates all (workspace, user) pairs without a cap. The research runner has no documented budget constraints. Per CODEX.md rule 5, all agent/job loops must obey explicit budgets.
 
-| Area | Original vision | Planning discussion | Current app | Drift verdict |
-| --- | --- | --- | --- | --- |
-| Grounded tutor | Important | Core MVP | Implemented | Low drift |
-| Socratic gating | Important | Core MVP | Implemented | Low drift |
-| Level-up quiz progression | Important | Core MVP | Implemented | Low drift |
-| Practice from graph nodes | Mentioned later | Core MVP | Implemented | Low drift |
-| Raw + canonical graph | Not explicit originally | Core MVP | Implemented | Low drift |
-| Multi-workspace Postgres app | Not central originally | Strongly emphasized | Implemented | Low drift |
-| Topic finder agent | Core original idea | Deprioritized for MVP | Missing | High drift vs original |
-| Knowledge finder/search agent | Core original idea | Deprioritized for MVP | Mostly missing | High drift vs original |
-| User config / learner model object | Core original idea | Only partially present later | Fragmented/partial | High drift |
-| Periodic deep-search synthesis | Core original idea | Still conceptually desired | Missing | High drift |
-| External source discovery | Core original idea | Deprioritized | Partial research scaffolding only | High drift |
-| PDF support | Desired | Deferred | Implemented | Positive drift |
-| Explicit agent runtime | Implied | Conceptually emphasized | Mostly functional modules | Moderate drift |
-| Web UI | Optional/secondary | Optional then later | Implemented | Positive drift |
+8. **Missing pg_trgm index.** GRAPH.md recommends trigram similarity indexes for lexical blocking in the resolver. No migration creates them. As graph size grows, candidate generation will slow down.
+
+---
+
+## Drift Matrix By Feature Area (Updated)
+
+| Area | Original vision | Planning discussion | Current app | Drift vs original | Change since 2026-02-28 |
+| --- | --- | --- | --- | --- | --- |
+| Grounded tutor | Important | Core MVP | Implemented + streaming | Low | Stable |
+| Socratic gating | Important | Core MVP | Implemented | Low | Stable |
+| Level-up quiz progression | Important | Core MVP | Implemented + quiz flow decomposition | Low | Stable |
+| Practice from graph nodes | Mentioned later | Core MVP | Implemented + novelty dedup + exhaustion | Low | Improved |
+| Unified flashcard stack | Not mentioned | Specified later | Implemented (frontend + backend) | Low | Improved |
+| Quiz history with retry | Not mentioned | Specified later | Implemented | Low | New |
+| Raw + canonical graph | Not explicit | Core MVP | Implemented + concept tiers + orphan pruning | Low | Improved |
+| Concept tier taxonomy | Not mentioned | Emerged later | Schema landed, extraction partial | Low–Moderate | New |
+| Multi-workspace Postgres app | Not central | Strongly emphasized | Implemented | Low | Stable |
+| Document lifecycle tracking | Not mentioned | Implied | Implemented (ingestion_status, graph_status, summaries) | Low | New |
+| File-based prompt assets | Not mentioned | Emerged later | 16 assets, 7 task families, versioned | Low | Stable |
+| Observability | Not mentioned | Desired | Comprehensive (OTel + Phoenix + tracing) | Low | Stable |
+| Topic finder agent | Core idea | Deprioritized | Topic planner exists (16 tests), not user-facing | High | Improved (was missing) |
+| Knowledge finder / search agent | Core idea | Deprioritized | Query planner + source CRUD exists, not user-facing | High | Improved (was missing) |
+| User config / learner model | Core idea | Partial | Profile assembler + learner digests, not living model | High | Improved (was fragmented) |
+| Periodic deep-search synthesis | Core idea | Desired | Missing | High | Unchanged |
+| External source discovery | Core idea | Deprioritized | Research scaffolding (11 routes, 38 tests), no UI | High | Improved |
+| Conductor / router | Implied | Emphasized | TurnPlan + QueryAnalyzer exist, not wired | Moderate | Improved (was conceptual) |
+| SuggestionAgent | Implied | In architecture diagram | Prompt asset exists, no agent | Moderate | Unchanged |
+| Streaming status UI | Not mentioned | Specified in PRODUCT_SPEC | Types exist, visible display missing | Moderate | Gap identified |
+| Grounding mode toggle UI | Not mentioned | Specified in PRODUCT_SPEC | Backend supports it, no frontend toggle | Moderate | Gap identified |
+| Spaced repetition | Mentioned (phase 2) | Non-goal for MVP | Minimal scaffold, appears incomplete | Low (expected) | New scaffold |
+| PDF support | Desired | Deferred | Implemented | Positive drift | Stable |
+| Web UI | Optional | Optional/later | 5 pages, Sigma.js graph, rich feature components | Positive drift | Stable |
+
+---
 
 ## Most Important Product Reframe
 
-The project has effectively undergone a product reframe:
+The same reframe from the previous report still applies:
 
-- Original: "agentic learning copilot and second brain that actively finds and curates new knowledge"
-- Current: "grounded learning environment over user-uploaded material, with graph-backed tutoring and mastery workflows"
+- **Original:** "agentic learning copilot and second brain that actively finds and curates new knowledge"
+- **Current:** "grounded learning workspace over user-uploaded material, with graph-backed tutoring and mastery workflows"
 
-This is not necessarily bad drift.
+What has changed since the last report is that **the bridge between these two visions is now partially built**. The research planner, query planner, candidate promotion logic, and learner profile assembler are real code with real tests. They are just not connected to users yet.
 
-In fact, it is probably the right MVP cut.
+The strategic question remains the same but is now more urgent, because the scaffolding exists:
 
-But it is important to name it clearly, because the current app does not yet support some of the most ambitious original use cases:
+- **Commit to Phase 1:** Polish the learning workspace (fix streaming UI, grounding toggle, conductor wiring, test coverage) and ship it as a standalone product.
+- **Open Phase 2:** Wire the research planner into a user-facing discovery loop, build the learner profile surface, and add synthesis — using the scaffolding that already exists.
 
-- learning a brand-new field through automatic discovery
-- web-scale paper/post collection
-- ongoing agentic updates about new developments
-- a unified learner model that evolves automatically
-- deep-search synthesis across everything the user has learned
+Doing both simultaneously risks both. The codebase is clean enough to support either path, but not both paths at once without more test coverage and a real conductor.
+
+---
+
+## Specific Findings Requiring Action
+
+### Documentation bugs (fix immediately)
+
+1. **GRAPH.md column names** — Lines 69 and 100 use `src_concept_id`/`tgt_concept_id` and `from_concept_id`/`to_concept_id`. Actual schema: `src_id`/`tgt_id`, `from_id`/`to_id`.
+2. **ARCHITECTURE.md ingestion diagram** — Shows `.md/.txt` only; PDF is supported.
+3. **ARCHITECTURE.md repo structure** — Lists `adapters/retrieval/`; retrieval is in `domain/retrieval/`.
+4. **ARCHITECTURE.md Mermaid diagram** — Shows `SuggestionAgent`; no agent exists.
+
+### CODEX.md violations (fix soon)
+
+5. **readiness.py route** — Raw SQL in route handler. Move to `domain/readiness/snapshot.py`.
+6. **documents.py route** — Multipart parsing in route. Move to `adapters/parsers/`.
+7. **Job budgets** — Readiness analyzer and research runner lack budget enforcement per CODEX.md rule 5.
+
+### Schema / performance (fix before scale)
+
+8. **Missing pg_trgm index** — Add migration for trigram similarity index on `concepts_canon.canonical_name`. Required for resolver lexical blocking at scale.
+9. **Concept tier extraction** — Migration 0009 adds the `tier` column. Verify that `domain/graph/extraction.py` actually populates it during raw→canonical resolution.
+
+### Test gaps (fix for confidence)
+
+10. **Graph resolver** — 7 unit tests is insufficient for a component that makes merge-vs-create decisions affecting the entire knowledge graph. Add disambiguation conflict, budget exhaustion, and concurrent resolution scenarios.
+11. **Graph gardener** — 7 unit tests + 1 integration. Add cluster conflict, partial merge, budget exhaustion mid-run scenarios.
+12. **Verifier** — 6 tests for the component that enforces the "evidence-first" product promise. Add strict-mode edge cases, malformed citation payloads, and boundary conditions.
+13. **E2E pipeline** — No test exercises the full upload→chunk→embed→retrieve→respond→verify loop. This is the most important integration seam in the product.
+
+### Frontend gaps (fix for product spec compliance)
+
+14. **Streaming status ticker** — PRODUCT_SPEC.md §8 specifies it. Types exist. Display is not wired. Users see no streaming status.
+15. **Grounding mode toggle** — PRODUCT_SPEC.md describes a strict/hybrid toggle. Backend supports it. No UI control exists.
+
+---
 
 ## Recommendation
 
-The right way to think about the current state is:
+The codebase is in better shape than the last report. The engineering quality is high — clean layers, strong typing, real budget enforcement, good test coverage in most areas. The main risk is not code quality; it is **product ambiguity**.
 
-1. The pedagogical core is real and viable.
-2. The graph architecture is real and viable.
-3. The current app is a strong "Phase 1 learning workspace".
-4. The original "second brain + research copilot" vision is mostly a Phase 2/3 layer that still needs deliberate design, not just incremental polish.
+Three things would most improve the project's position:
 
-If you keep the current direction, the next major strategic choice is not "fix drift" in general.
+1. **Fix the docs to match reality.** The GRAPH.md column-name errors, the ARCHITECTURE.md stale diagram, and the retrieval location mismatch are all trivially fixable and create unnecessary confusion. Do this first.
 
-It is:
+2. **Wire what is already built.** The conductor (TurnPlan + QueryAnalyzer), the streaming status UI, and the grounding toggle are all partially or fully implemented in the backend. Finishing the last mile of integration would close the gap between docs and product with relatively low effort.
 
-- either fully commit to the narrower learning-workspace product, or
-- deliberately reopen the original research-agent track and add it as a second product loop
+3. **Decide on Phase 2 scope before building more scaffolding.** The research planner, learner assembler, and learner digest job are real code — but they are not connected to users, and they are not being tested end-to-end. Adding more scaffolding without a clear product decision about when and how these features ship will create maintenance burden without user value.
 
-without destabilizing the current tutor/graph/quiz foundation.
-
-## Suggested Next-Step Themes
-
-If the goal is to reduce drift from the original vision, the highest-leverage additions would be:
-
-1. A real learner profile model.
-   Consolidate workspace settings, tutor profile, mastery, readiness, interests, and recent ingestion into one coherent domain object.
-
-2. A topic/search planning workflow.
-   Add the missing topic finder and knowledge finder loop, with explicit human approval before ingestion.
-
-3. A second-brain synthesis surface.
-   Build periodic summaries of what the learner has covered, what is weak, and what has changed recently.
-
-4. A true research ingestion loop.
-   Evolve the current `research` subsystem from manual URL fetching into a query-driven discovery pipeline with approval and ingestion.
-
-5. A clearer agent/runtime boundary.
-   Either simplify the docs to match the current functional architecture, or add a real orchestrator/agent boundary so the docs are no longer aspirational.
+The worst outcome would be continuing to build internal plumbing for Phase 2 features while Phase 1 has spec-vs-implementation gaps (streaming status, grounding toggle, conductor wiring) that are visible to users. Ship the current product cleanly first.

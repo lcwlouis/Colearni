@@ -152,6 +152,7 @@ def run_gardener(
     )
     return GardenerRunResponse(
         merges_applied=result.merges_applied,
+        links_created=result.links_created,
         clusters_processed=result.clusters_processed,
         llm_calls=result.llm_calls,
         pruned_concepts=result.pruned_concepts,

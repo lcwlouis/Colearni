@@ -95,6 +95,7 @@ class GardenerRunResult:
     clusters_processed: int
     clusters_skipped: int
     merges_applied: int
+    links_created: int
     llm_calls: int
     stopped_by_cluster_budget: bool
     stopped_by_llm_budget: bool
@@ -118,14 +119,18 @@ class _ClusterConcept:
 class _GardenerDecisionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    decision: Literal["MERGE_INTO", "CREATE_NEW"]
+    decision: Literal["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]
     merge_into_id: int | None = None
     confidence: float = Field(ge=0.0, le=1.0)
+    link_to_id: int | None = None
+    link_relation_type: str | None = None
 
     @model_validator(mode="after")
-    def validate_merge_id(self) -> _GardenerDecisionPayload:
+    def validate_ids(self) -> _GardenerDecisionPayload:
         if self.decision == "MERGE_INTO" and self.merge_into_id is None:
             raise ValueError("merge_into_id is required when decision=MERGE_INTO")
+        if self.decision == "LINK_ONLY" and self.link_to_id is None:
+            raise ValueError("link_to_id is required when decision=LINK_ONLY")
         return self
 
 
@@ -210,6 +215,7 @@ def run_graph_gardener(
                 clusters_processed=0,
                 clusters_skipped=0,
                 merges_applied=0,
+                links_created=0,
                 llm_calls=budgets.llm_calls,
                 stopped_by_cluster_budget=False,
                 stopped_by_llm_budget=False,
@@ -271,6 +277,7 @@ def run_graph_gardener(
 
         stabilized_seed_ids: set[int] = set()
         merges_applied = 0
+        links_created = 0
         clusters_skipped = 0
         stopped_by_cluster_budget = False
         stopped_by_llm_budget = False
@@ -358,6 +365,48 @@ def run_graph_gardener(
                     threshold=config.cluster_llm_confidence_floor,
                 )
                 continue
+
+            if decision.decision == "LINK_ONLY" and decision.link_to_id is not None:
+                # Create an edge between the reference and link target
+                ref_id = sorted(cluster)[0]
+                link_target = decision.link_to_id
+                if link_target in cluster and ref_id != link_target:
+                    relation = decision.link_relation_type or "related_to"
+                    graph_repository.upsert_canonical_edge(
+                        session,
+                        workspace_id=workspace_id,
+                        src_id=ref_id,
+                        tgt_id=link_target,
+                        relation_type=relation,
+                        description=(
+                            f"{cluster_concepts[ref_id].canonical_name} "
+                            f"{relation.replace('_', ' ')} "
+                            f"{cluster_concepts[link_target].canonical_name}"
+                        ),
+                        keywords=[],
+                        delta_weight=1.0,
+                        weight_cap=config.edge_weight_cap,
+                        edge_description_max_chars=config.edge_description_max_chars,
+                    )
+                    links_created += 1
+                    emit_event(
+                        "graph.gardener.link_created",
+                        status="info",
+                        component="graph",
+                        operation="graph.gardener.run",
+                        workspace_id=workspace_id,
+                        src_id=ref_id,
+                        tgt_id=link_target,
+                        relation_type=relation,
+                        confidence=decision.confidence,
+                    )
+                stabilized_seed_ids.update(cluster_seed_ids)
+                continue
+
+            if decision.decision == "CREATE_NEW":
+                stabilized_seed_ids.update(cluster_seed_ids)
+                continue
+
             target_id = decision.merge_into_id
             if target_id is None or target_id not in cluster:
                 clusters_skipped += 1
@@ -428,6 +477,7 @@ def run_graph_gardener(
             clusters_processed=budgets.clusters_processed,
             clusters_skipped=clusters_skipped,
             merges_applied=merges_applied,
+            links_created=links_created,
             llm_calls=budgets.llm_calls,
             stopped_by_cluster_budget=stopped_by_cluster_budget,
             stopped_by_llm_budget=stopped_by_llm_budget,
@@ -441,6 +491,7 @@ def run_graph_gardener(
             span.set_attribute("graph.clusters_processed", budgets.clusters_processed)
             span.set_attribute("graph.clusters_skipped", clusters_skipped)
             span.set_attribute("graph.merges_applied", merges_applied)
+            span.set_attribute("graph.links_created", links_created)
             span.set_attribute("graph.llm_calls", budgets.llm_calls)
             span.set_attribute("graph.stopped_by_cluster_budget", stopped_by_cluster_budget)
             span.set_attribute("graph.stopped_by_llm_budget", stopped_by_llm_budget)
@@ -449,7 +500,7 @@ def run_graph_gardener(
                 input_summary=f"workspace={workspace_id}, seeds={len(seeds)}",
                 output_summary=(
                     f"processed={budgets.clusters_processed}, merges={merges_applied}, "
-                    f"llm={budgets.llm_calls}"
+                    f"links={links_created}, llm={budgets.llm_calls}"
                     + (", budget_stop" if stopped_by_cluster_budget or stopped_by_llm_budget else "")
                 ),
             )

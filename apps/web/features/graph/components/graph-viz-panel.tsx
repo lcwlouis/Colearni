@@ -89,12 +89,14 @@ export function GraphVizPanel({
     try {
       const result = await apiClient.runGardener(wsId);
       const merged = result.merges_applied;
+      const linked = result.links_created ?? 0;
       const pruned = result.pruned_concepts;
-      if (merged === 0 && pruned === 0) {
+      if (merged === 0 && linked === 0 && pruned === 0) {
         setGardenerMessage("No changes needed — graph is clean");
       } else {
         const parts: string[] = [];
         if (merged > 0) parts.push(`Merged ${merged} concept${merged !== 1 ? "s" : ""}`);
+        if (linked > 0) parts.push(`linked ${linked} concept${linked !== 1 ? "s" : ""}`);
         if (pruned > 0) parts.push(`pruned ${pruned} orphan${pruned !== 1 ? "s" : ""}`);
         setGardenerMessage(parts.join(", "));
       }

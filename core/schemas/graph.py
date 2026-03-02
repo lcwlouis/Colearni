@@ -114,6 +114,7 @@ class GraphLuckyResponse(BaseModel):
 
 class GardenerRunResponse(BaseModel):
     merges_applied: int
+    links_created: int = 0
     clusters_processed: int
     llm_calls: int
     pruned_concepts: int = 0
