@@ -203,6 +203,7 @@ def _infer_concept(
                 FROM concepts_canon
                 WHERE workspace_id = :workspace_id
                   AND is_active = TRUE
+                  AND (tier IN ('topic', 'umbrella') OR tier IS NULL)
                 ORDER BY updated_at DESC, id DESC
                 LIMIT 200
                 """
