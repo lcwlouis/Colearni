@@ -498,6 +498,7 @@ GenerationTrace fields:
 | `completion_tokens` | `int \| null` | Output tokens consumed |
 | `total_tokens` | `int \| null` | Total tokens |
 | `reasoning_tokens` | `int \| null` | Tokens consumed by internal reasoning |
+| `cached_tokens` | `int \| null` | Prompt tokens served from provider prefix cache (e.g. OpenAI automatic caching) |
 | `reasoning_requested` | `bool \| null` | Whether reasoning was requested |
 | `reasoning_supported` | `bool \| null` | Whether the model supports reasoning |
 | `reasoning_used` | `bool \| null` | Whether reasoning params were sent |

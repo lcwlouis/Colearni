@@ -42,7 +42,7 @@ flowchart TB
   GRAPH --> GARD[GraphGardener (offline consolidation)]
   RET --> PG[(Postgres: chunks + embeddings + FTS + graph + mastery)]
   GRAPH --> PG
-  API --> UI[Next.js Web App]
+  API --> UI[Next.js Web App (Sigma.js graph)]
   COND --> LLM[LLM Provider]
   COND --> OBS[Observability (Events + OTel)]
   OBS --> PHX[Phoenix (optional)]
@@ -147,6 +147,8 @@ Practice constraints:
 apps/
   api/                  # FastAPI routes only (thin)
   web/                  # Next.js web app (tutor, KB, graph, login)
+    components/sigma-graph/  # Sigma.js WebGL graph rendering (graphology + @react-sigma/core)
+    lib/graph/               # Graph data transform, layout, search (minisearch)
 core/
   schemas/              # Evidence, Citation, Card payload schemas
   contracts.py          # Tool/LLM interfaces
@@ -203,6 +205,24 @@ Requirements:
 - Never log secrets or full sensitive payloads.
 
 See [OBSERVABILITY.md](OBSERVABILITY.md) for local Phoenix setup and event reference.
+
+---
+
+## Frontend graph rendering
+
+The concept graph is rendered client-side using **Sigma.js** (WebGL) backed by
+**graphology** for the in-memory graph data structure.  Key dependencies:
+
+| Package | Role |
+|---|---|
+| `graphology` | In-memory graph model |
+| `sigma` | WebGL graph renderer |
+| `@react-sigma/core` | React bindings for Sigma.js |
+| `minisearch` | Client-side fuzzy node search |
+
+Graph data flows from the `/graph/explore` API → `lib/graph/transform.ts`
+(maps API nodes/edges to graphology) → `components/sigma-graph/` (renders via
+Sigma.js with force-atlas layout, hover/click reducers, and search overlay).
 
 ---
 
