@@ -431,6 +431,15 @@
   box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
 }
 
+.health-dot--transitioning {
+  animation: health-dot-pulse 0.6s ease;
+}
+
+@keyframes health-dot-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.6); }
+}
+
 /* ===== Navigation ===== */
 .nav {
   display: flex;
