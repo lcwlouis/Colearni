@@ -22,17 +22,14 @@ type Props = {
 export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors = true, theme }: Props) {
   const sigma = useSigma();
 
-  // Ensure NodeBorderProgram is registered before reducers trigger a render.
-  // During route transitions, SigmaContainer may not have compiled the program
-  // before children mount. Imperatively registering here guarantees it exists.
   useEffect(() => {
+    // Ensure NodeBorderProgram is registered. During React StrictMode
+    // remounting or SigmaContainer recreation, the program may be missing.
     const programs = sigma.getSetting("nodeProgramClasses") ?? {};
     if (!programs.bordered) {
       sigma.setSetting("nodeProgramClasses", { ...programs, bordered: NodeBorderProgram });
     }
-  }, [sigma]);
 
-  useEffect(() => {
     const selectedKey = selectedId != null ? String(selectedId) : null;
     const graph = sigma.getGraph();
     const dimmed = theme?.dimmedNodeColor ?? "#e0e0e0";
@@ -97,11 +94,23 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       return result;
     });
 
-    sigma.refresh();
+    // Guard against stale Sigma instance. In React StrictMode (dev) or during
+    // SigmaContainer recreation, children effects re-run before the parent
+    // effect recreates the Sigma instance, so refresh() may hit a killed
+    // instance whose nodePrograms have been cleared.
+    try {
+      sigma.refresh();
+    } catch {
+      // Instance was killed; the replacement will render on its own.
+    }
 
     return () => {
-      sigma.setSetting("nodeReducer", null);
-      sigma.setSetting("edgeReducer", null);
+      try {
+        sigma.setSetting("nodeReducer", null);
+        sigma.setSetting("edgeReducer", null);
+      } catch {
+        // Instance already killed.
+      }
     };
   }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors, theme]);
 
