@@ -14,6 +14,7 @@ import { useLevelUpFlow } from "./use-level-up-flow";
 import { useTutorMessages } from "./use-tutor-messages";
 import { useConceptActivity } from "@/lib/practice/use-concept-activity";
 import { errorText } from "../types";
+import type { SlideOverTab } from "../components/tutor-slide-over";
 
 export function useTutorPage() {
   const { user, isLoading: authLoading, activeWorkspaceId } = useRequireAuth();
@@ -39,10 +40,10 @@ export function useTutorPage() {
   const [switchDecision, setSwitchDecision] = useState<"accept" | "reject" | null>(null);
   const switchDecisionRef = useRef<"accept" | "reject" | null>(null);
 
-  // Drawer state
-  const [showGraph, setShowGraph] = useState(false);
-  const [showQuiz, setShowQuiz] = useState(false);
-  const [closingDrawer, setClosingDrawer] = useState<"graph" | "quiz" | null>(null);
+  // Slide-over state (unified drawer)
+  const [showSlideOver, setShowSlideOver] = useState(false);
+  const [slideOverTab, setSlideOverTab] = useState<SlideOverTab>("graph");
+  const [closingDrawer, setClosingDrawer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const tutorResetViewRef = useRef<(() => void) | null>(null);
 
@@ -145,20 +146,20 @@ export function useTutorPage() {
     }
   }
 
-  function closeDrawer(which: "graph" | "quiz", onDone?: () => void) {
-    setClosingDrawer(which);
+  function closeDrawer(onDone?: () => void) {
+    setClosingDrawer(true);
     if (!onDone) setDrawerOpen(false);
     setTimeout(() => {
-      if (which === "graph") setShowGraph(false);
-      else setShowQuiz(false);
-      setClosingDrawer(null);
+      setShowSlideOver(false);
+      setClosingDrawer(false);
       onDone?.();
     }, 320);
   }
 
-  function openDrawer(which: "graph" | "quiz") {
-    if (which === "graph") setShowGraph(true);
-    else setShowQuiz(true);
+  function openDrawer(which: "graph" | "quiz" | "practice") {
+    const tab: SlideOverTab = which === "quiz" ? "level-up" : which === "practice" ? "practice" : "graph";
+    setSlideOverTab(tab);
+    setShowSlideOver(true);
     setDrawerOpen(true);
   }
 
@@ -190,12 +191,12 @@ export function useTutorPage() {
   }, [activeSessionId]);
 
   useEffect(() => {
-    if (showGraph && currentConcept) {
+    if (showSlideOver && slideOverTab === "graph" && currentConcept) {
       void loadSubgraph(currentConcept.concept_id);
       setGraphViewConceptId(currentConcept.concept_id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGraph, currentConcept?.concept_id, wsId]);
+  }, [showSlideOver, slideOverTab, currentConcept?.concept_id, wsId]);
 
   return {
     // Auth
@@ -241,8 +242,9 @@ export function useTutorPage() {
     setSwitchDecision,
     switchDecisionRef,
     // Drawers
-    showGraph,
-    showQuiz,
+    showSlideOver,
+    slideOverTab,
+    setSlideOverTab,
     drawerOpen,
     closingDrawer,
     openDrawer,

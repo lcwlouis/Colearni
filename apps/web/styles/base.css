@@ -407,7 +407,8 @@ pre {
   }
 
   .graph-drawer,
-  .quiz-drawer {
+  .quiz-drawer,
+  .slide-over {
     grid-column: 1 / -1;
   }
 
@@ -434,7 +435,8 @@ pre {
   }
 
   .graph-drawer,
-  .quiz-drawer {
+  .quiz-drawer,
+  .slide-over {
     grid-column: auto;
   }
 

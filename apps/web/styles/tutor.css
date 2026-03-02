@@ -151,7 +151,8 @@
 
 /* Slideover drawers (graph and quiz, mutually exclusive) */
 .graph-drawer,
-.quiz-drawer {
+.quiz-drawer,
+.slide-over {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -160,6 +161,51 @@
   padding: 1rem;
   overflow: hidden auto;
   min-width: 0;
+}
+
+/* Slide-over tabs */
+.slide-over__tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.5rem;
+  flex-shrink: 0;
+}
+
+.slide-over__tabs--sub {
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0.25rem;
+}
+
+.slide-over__tab {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.slide-over__tab:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.slide-over__tab--active {
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
+.slide-over__content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .session-list,
@@ -349,7 +395,8 @@
 
 .chat-header h1,
 .graph-drawer h2,
-.quiz-drawer h2 {
+.quiz-drawer h2,
+.slide-over h2 {
   margin: 0;
 }
 

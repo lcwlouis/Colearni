@@ -35,6 +35,8 @@ type Props = {
   onResetViewReady?: (resetFn: () => void) => void;
   filteredTiers?: ReadonlySet<string>;
   isLoading?: boolean;
+  /** Hide layout controls, camera, settings panel, legend, status bar */
+  compact?: boolean;
 };
 
 /**
@@ -68,6 +70,7 @@ function SigmaGraphInner({
   onResetViewReady,
   filteredTiers,
   isLoading,
+  compact,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
@@ -181,20 +184,22 @@ function SigmaGraphInner({
           focusNodeId={focusNodeId}
           onResetViewReady={onResetViewReady}
         />
-        <CameraControls containerRef={containerRef} />
-        <ExpandPruneControls selectedId={selectedId} />
+        {!compact && <CameraControls containerRef={containerRef} />}
+        {!compact && <ExpandPruneControls selectedId={selectedId} />}
       </SigmaContainer>
-      <LayoutControls
-        layout={layout}
-        onLayoutChange={setLayout}
-        isRunning={isLayoutRunning}
-        onIsRunningChange={setIsLayoutRunning}
-      />
-      {settings.showLegend && <GraphLegend />}
-      {settings.showStatusBar && (
+      {!compact && (
+        <LayoutControls
+          layout={layout}
+          onLayoutChange={setLayout}
+          isRunning={isLayoutRunning}
+          onIsRunningChange={setIsLayoutRunning}
+        />
+      )}
+      {!compact && settings.showLegend && <GraphLegend />}
+      {!compact && settings.showStatusBar && (
         <StatusBar nodes={nodes} edges={edges} selectedId={selectedId} filteredTiers={filteredTiers} />
       )}
-      <SettingsPanel onLayoutChange={setLayout} />
+      {!compact && <SettingsPanel onLayoutChange={setLayout} />}
     </div>
   );
 }

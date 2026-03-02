@@ -4,8 +4,7 @@ import { FormEvent } from "react";
 import { useTutorPage } from "@/features/tutor/hooks/use-tutor-page";
 import { masteryLabel } from "@/features/tutor/types";
 import { TutorTimeline } from "@/features/tutor/components/tutor-timeline";
-import { TutorGraphDrawer } from "@/features/tutor/components/tutor-graph-drawer";
-import { TutorQuizDrawer } from "@/features/tutor/components/tutor-quiz-drawer";
+import { TutorSlideOver } from "@/features/tutor/components/tutor-slide-over";
 import { ConceptSwitchBanner } from "@/features/tutor/components/concept-switch-banner";
 import type { ActionCTA, GroundingMode } from "@/lib/api/types";
 import { useCallback } from "react";
@@ -20,12 +19,8 @@ export default function TutorPage() {
           const matched = t.concepts.find((c) => c.concept_id === cta.concept_id);
           if (matched) t.setCurrentConcept(matched);
         }
-        const doOpen = () => {
-          t.openDrawer("quiz");
-          if (cta.action_type === "quiz_start") void t.startLevelUp();
-        };
-        if (t.showGraph) t.closeDrawer("graph", doOpen);
-        else doOpen();
+        t.openDrawer("quiz");
+        if (cta.action_type === "quiz_start") void t.startLevelUp();
       }
     },
     [t],
@@ -76,35 +71,30 @@ export default function TutorPage() {
             </button>
             <button
               type="button"
-              className={`header-action-btn${t.showQuiz ? " active" : ""}`}
+              className={`header-action-btn${t.showSlideOver && t.slideOverTab === "level-up" ? " active" : ""}`}
               onClick={() => {
-                if (!t.showQuiz) {
-                  const doOpen = () => {
-                    t.openDrawer("quiz");
-                    if (t.levelUpState.phase === "idle") void t.startLevelUp();
-                  };
-                  if (t.showGraph) t.closeDrawer("graph", doOpen);
-                  else doOpen();
+                if (t.showSlideOver && t.slideOverTab === "level-up") {
+                  t.closeDrawer();
                 } else {
-                  t.closeDrawer("quiz");
+                  t.openDrawer("quiz");
+                  if (t.levelUpState.phase === "idle") void t.startLevelUp();
                 }
               }}
             >
-              {t.showQuiz ? "Hide quiz" : "Level-up quiz"}
+              {t.showSlideOver && t.slideOverTab === "level-up" ? "Hide quiz" : "Level-up quiz"}
             </button>
             <button
               type="button"
-              className={`header-action-btn${t.showGraph ? " active" : ""}`}
+              className={`header-action-btn${t.showSlideOver && t.slideOverTab === "graph" ? " active" : ""}`}
               onClick={() => {
-                if (!t.showGraph) {
-                  if (t.showQuiz) t.closeDrawer("quiz", () => t.openDrawer("graph"));
-                  else t.openDrawer("graph");
+                if (t.showSlideOver && t.slideOverTab === "graph") {
+                  t.closeDrawer();
                 } else {
-                  t.closeDrawer("graph");
+                  t.openDrawer("graph");
                 }
               }}
             >
-              {t.showGraph ? "Hide graph" : "Show graph"}
+              {t.showSlideOver && t.slideOverTab === "graph" ? "Hide graph" : "Show graph"}
             </button>
           </div>
         </header>
@@ -152,9 +142,11 @@ export default function TutorPage() {
         </div>
       </section>
 
-      {t.showGraph ? (
-        <TutorGraphDrawer
-          closingDrawer={t.closingDrawer}
+      {t.showSlideOver ? (
+        <TutorSlideOver
+          closing={t.closingDrawer}
+          activeTab={t.slideOverTab}
+          onTabChange={t.setSlideOverTab}
           currentConcept={t.currentConcept}
           graphViewConceptId={t.graphViewConceptId}
           subgraph={t.subgraph}
@@ -164,12 +156,6 @@ export default function TutorPage() {
           setGraphViewConceptId={t.setGraphViewConceptId}
           tutorResetViewRef={t.tutorResetViewRef}
           conceptActivity={t.conceptActivity}
-        />
-      ) : null}
-
-      {t.showQuiz ? (
-        <TutorQuizDrawer
-          closingDrawer={t.closingDrawer}
           levelUpState={t.levelUpState}
           onStartQuiz={() => void t.startLevelUp()}
           onAnswerChange={(itemId, value) =>
@@ -177,6 +163,7 @@ export default function TutorPage() {
           }
           onSubmitQuiz={() => void t.submitLevelUp()}
           dispatchReset={() => t.dispatchLevelUp({ type: "reset" })}
+          workspaceId={t.wsId}
         />
       ) : null}
 
