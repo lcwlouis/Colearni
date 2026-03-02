@@ -139,6 +139,7 @@ graph.gardener.run (CHAIN)              ← offline graph consolidation
 | `llm.token_count.prompt` | Input token count |
 | `llm.token_count.completion` | Output token count |
 | `llm.token_count.total` | Total token count |
+| `llm.token_count.cached` | Cached prompt tokens (prefix caching); null when provider does not report |
 | `llm.usage_source` | `provider_reported`, `estimated`, or `missing` |
 
 ### Content Capture Policy
@@ -377,8 +378,9 @@ content should not be persisted.
 
 - Token counts are **per LLM call**, not per request or per quiz.
 - Aggregate token counts in the Phoenix UI using span grouping.
-- The `extract_token_usage` helper normalises both OpenAI (`prompt_tokens`) and Anthropic (`input_tokens`) key names.
+- The `extract_token_usage` helper normalises both OpenAI (`prompt_tokens`) and Anthropic (`input_tokens`) key names and extracts `cached_tokens` from `prompt_tokens_details.cached_tokens` when present.
 - Usage source is always labeled via `llm.usage_source` — never silently estimated.
+- **Cached tokens**: When the provider reports `prompt_tokens_details.cached_tokens`, this value is surfaced on LLM spans as `llm.token_count.cached`, in the `llm.call` event as `token_cached`, and in the user-facing `GenerationTrace` as `cached_tokens`.  A non-null value indicates a prefix-caching hit — the corresponding prompt tokens were served from cache at reduced cost/latency.
 
 ---
 
@@ -463,6 +465,7 @@ chain-of-thought, prompt content, or raw model output is ever included.
 | `prompt_tokens` | integer \| null | Input token count |
 | `completion_tokens` | integer \| null | Output token count |
 | `total_tokens` | integer \| null | Sum of prompt + completion |
+| `cached_tokens` | integer \| null | Cached prompt tokens (prefix caching hit); null when provider does not report |
 | `reasoning_tokens` | integer \| null | Reasoning tokens (o1/o3/o4 models only) |
 | `reasoning_requested` | boolean \| null | Whether reasoning was requested for this call |
 | `reasoning_supported` | boolean \| null | Whether the model supports reasoning params |

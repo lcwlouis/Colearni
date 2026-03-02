@@ -3,7 +3,7 @@
 > Source-of-truth catalog of all LLM prompts used across the codebase.
 > **Runtime prompt assets** live in `core/prompting/assets/` as versioned Markdown files.
 > Design templates and rationale live in `docs/prompt_templates/`.
-> Last updated: Prompt Refactor P9
+> Last updated: 2026-03-02 (UXD.5 docs refresh)
 
 ## Overview
 
@@ -255,6 +255,25 @@ Graph gardener (offline)
 Auto quiz generation (S34)
   └─► quiz_gardener.py → create_level_up_quiz()      [→ #9]
 ```
+
+---
+
+## Prefix Caching Layout
+
+Prompt assets follow a **static-first, dynamic-last** structure to maximise
+OpenAI prefix-caching hits (UXI.2).  Within each asset file the content is
+ordered:
+
+1. **Static instructions** — role, goal, rules, output contract, failure
+   behaviour.  These sections are identical across calls and form the cacheable
+   prefix.
+2. **Dynamic inputs** — context variables (`{document_summaries}`,
+   `{evidence_block}`, `{query}`, etc.) are placed at the end of the template
+   so that only the tail of the prompt changes between requests.
+
+This layout is visible in `core/prompting/assets/tutor/socratic_v1.md` and
+`direct_v1.md`.  New prompt assets should preserve this ordering to keep the
+cacheable prefix as long as possible.
 
 ---
 
