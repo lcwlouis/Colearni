@@ -352,6 +352,9 @@ class _BaseGraphLLMClient(ABC):
             reasoning_tokens=reasoning_tokens,
             cached_tokens=usage.get("token_cached"),
         )
+        cached = usage.get("token_cached")
+        if cached:
+            log.debug("prefix cache hit (stream): %d tokens cached", cached)
 
         response_text = "".join(collected_text)
         set_llm_span_attributes(
@@ -543,6 +546,9 @@ class _BaseGraphLLMClient(ABC):
                 ) from exc
 
             token_usage = extract_token_usage(result)
+            cached = token_usage.get("token_cached")
+            if cached:
+                log.debug("prefix cache hit: %d tokens cached", cached)
             response_content = self._extract_content_safe(result)
 
             set_llm_span_attributes(
