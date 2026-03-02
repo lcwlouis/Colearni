@@ -67,7 +67,10 @@ from domain.chat.session_memory import (
     persist_turn,
 )
 from domain.chat.social_turns import try_social_response
-from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, get_persona
+from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, build_socratic_interactive_prompt, get_persona
+from domain.chat.tutor_commands import parse_command, apply_command
+from domain.chat.tutor_state_store import get_tutor_state, save_tutor_state
+from core.schemas.tutor_state import TutorState
 from domain.chat.tutor_agent import resolve_tutor_style
 from domain.chat.answer_parts import split_answer_parts
 from domain.chat.turn_plan import build_turn_plan
@@ -353,6 +356,53 @@ def _stream_inner(
         if assistant_text:
             yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
             responded = True
+    elif request.tutor_protocol and request.session_id and tutor_llm_client is not None and hasattr(tutor_llm_client, "generate_tutor_text_stream"):
+        # ── Socratic interactive tutor protocol ──
+        tutor_state = get_tutor_state(request.session_id)
+        if not tutor_state.active:
+            tutor_state.init_relation_concept()
+
+        # Parse and apply any user command
+        cmd = parse_command(request.query)
+        command_context = ""
+        if cmd is not None:
+            command_context = apply_command(tutor_state, cmd)
+        else:
+            tutor_state.last_user_answer = request.query
+
+        prompt, prompt_meta = build_socratic_interactive_prompt(
+            query=request.query,
+            evidence=evidence,
+            tutor_state_text=tutor_state.state_block(),
+            command_context=command_context,
+            history_summary=history_text,
+            document_summaries=build_document_summaries_context(
+                session=session,
+                workspace_id=request.workspace_id,
+                chunks=ranked_chunks,
+                expanded_document_ids=evidence_plan.expanded_document_ids,
+            ),
+        )
+
+        text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
+            prompt=prompt, prompt_meta=prompt_meta, operation="chat.stream.socratic",
+        )
+        text_parts: list[str] = []
+        for delta in text_stream:
+            if not responded and delta:
+                yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
+                responded = True
+            text_parts.append(delta)
+            yield ChatStreamDeltaEvent(text=delta)
+        assistant_text = "".join(text_parts).strip()
+        generation_trace = text_stream.trace
+        if generation_trace is not None:
+            yield ChatStreamTraceEvent(trace=generation_trace)
+
+        # Parse STATE block from LLM response to update tutor state
+        _update_tutor_state_from_response(tutor_state, assistant_text)
+        save_tutor_state(request.session_id, tutor_state)
+
     elif tutor_llm_client is not None and hasattr(tutor_llm_client, "generate_tutor_text_stream"):
         style = resolve_tutor_style(mastery_status=mastery_status)
         persona = get_persona("colearni")
@@ -566,3 +616,41 @@ def _stream_inner(
     )
 
     yield ChatStreamFinalEvent(envelope=envelope)
+
+
+def _update_tutor_state_from_response(state: "TutorState", response: str) -> None:
+    """Parse the STATE block from the LLM response to update tutor state."""
+    import re
+    m = re.search(r"^STATE\s*\n(.*?)$", response, re.MULTILINE | re.DOTALL)
+    if not m:
+        return
+    block = m.group(1)
+
+    def _extract(key: str) -> str | None:
+        match = re.search(rf"^{key}:\s*(.+)$", block, re.MULTILINE)
+        return match.group(1).strip() if match else None
+
+    bloom_raw = _extract("bloom")
+    if bloom_raw:
+        # e.g. "Understand (2/6)"
+        bloom_match = re.match(r"(\w+)\s*\((\d+)/6\)", bloom_raw)
+        if bloom_match:
+            state.bloom = bloom_match.group(1)
+            state.bloom_step = int(bloom_match.group(2))
+
+    step_raw = _extract("step")
+    if step_raw and step_raw.isdigit():
+        state.step = int(step_raw)
+
+    dup_raw = _extract("duplicates_mode")
+    if dup_raw:
+        state.duplicates_mode = dup_raw == "on"
+
+    null_raw = _extract("nulls_mode")
+    if null_raw:
+        state.nulls_mode = null_raw == "on"
+
+    misc_raw = _extract("misconceptions_detected")
+    if misc_raw and misc_raw != "[none]" and misc_raw != "[]":
+        items = re.findall(r"[\"']([^\"']+)[\"']|(\w[\w\s]+\w)", misc_raw)
+        state.misconceptions_detected = [g[0] or g[1] for g in items if g[0] or g[1]]

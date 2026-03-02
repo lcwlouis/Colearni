@@ -90,6 +90,7 @@ PROMPT_VERSION = "v1"
 _TUTOR_ASSET_IDS: dict[str, str] = {
     "socratic": "tutor_socratic_v1",
     "direct": "tutor_direct_v1",
+    "socratic_interactive": "tutor_socratic_interactive_v1",
 }
 
 
@@ -314,11 +315,41 @@ def build_full_tutor_prompt_with_meta(
         return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}", None
 
 
+def build_socratic_interactive_prompt(
+    *,
+    query: str,
+    evidence: Sequence[EvidenceItem],
+    tutor_state_text: str,
+    command_context: str = "",
+    history_summary: str = "",
+    document_summaries: str = "",
+) -> tuple[str, object]:
+    """Build prompt for the Socratic interactive protocol."""
+    evidence_block = build_evidence_block(evidence)
+    try:
+        text, meta = _registry.render_with_meta("tutor_socratic_interactive_v1", {
+            "tutor_state": tutor_state_text,
+            "command_context": command_context or "(no command — regular message)",
+            "evidence_block": evidence_block,
+            "history_summary": history_summary or "(none)",
+            "query": query,
+            "document_summaries": document_summaries or "(none)",
+        })
+        return text, meta
+    except Exception:
+        log.debug("socratic interactive asset failed, using inline fallback")
+        return (
+            f"You are a Socratic tutor.\n\nSTATE:\n{tutor_state_text}\n\n"
+            f"COMMAND: {command_context}\n\n{evidence_block}\n\nUSER: {query}"
+        ), None
+
+
 __all__ = [
     "PROMPT_VERSION",
     "build_evidence_block",
     "build_full_tutor_prompt",
     "build_full_tutor_prompt_with_meta",
+    "build_socratic_interactive_prompt",
     "build_social_response",
     "build_system_prompt",
     "classify_social_intent",

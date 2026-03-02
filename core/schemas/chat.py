@@ -39,6 +39,7 @@ class ChatRespondRequest(BaseModel):
     concept_switch_decision: ConceptSwitchDecision | None = None
     top_k: int = Field(default=5, ge=1)
     grounding_mode: GroundingMode | None = None
+    tutor_protocol: bool = False
 
     @field_validator("query")
     @classmethod
