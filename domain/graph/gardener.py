@@ -447,7 +447,7 @@ def _backfill_null_tiers(
             tier = DEFAULT_TIER
         session.execute(
             text(
-                "UPDATE concepts_canon SET tier = :tier, updated_at = now()"
+                "UPDATE concepts_canon SET tier = :tier"
                 " WHERE workspace_id = :workspace_id AND id = :concept_id"
             ),
             {"tier": tier, "workspace_id": workspace_id, "concept_id": concept.id},

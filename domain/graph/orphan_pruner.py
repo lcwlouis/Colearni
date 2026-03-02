@@ -104,6 +104,22 @@ def prune_orphan_graph_nodes(
             """),
             {"wid": workspace_id, "ids": orphan_concept_ids},
         )
+        # Remove merge map/log rows referencing orphan concepts
+        session.execute(
+            text("""
+                DELETE FROM concept_merge_map
+                WHERE workspace_id = :wid AND canon_concept_id = ANY(:ids)
+            """),
+            {"wid": workspace_id, "ids": orphan_concept_ids},
+        )
+        session.execute(
+            text("""
+                DELETE FROM concept_merge_log
+                WHERE workspace_id = :wid
+                  AND (from_id = ANY(:ids) OR to_id = ANY(:ids))
+            """),
+            {"wid": workspace_id, "ids": orphan_concept_ids},
+        )
         # Remove mastery rows referencing orphan concepts
         session.execute(
             text("""

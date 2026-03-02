@@ -316,6 +316,8 @@ export interface GardenerRunResponse {
   merges_applied: number;
   clusters_processed: number;
   llm_calls: number;
+  pruned_concepts: number;
+  pruned_edges: number;
 }
 
 export interface QuizItemCreateDraft {

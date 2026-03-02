@@ -83,7 +83,16 @@ export function GraphVizPanel({
     setGardenerMessage(null);
     try {
       const result = await apiClient.runGardener(wsId);
-      setGardenerMessage(`Merged ${result.merges_applied} concept${result.merges_applied !== 1 ? "s" : ""}`);
+      const merged = result.merges_applied;
+      const pruned = result.pruned_concepts;
+      if (merged === 0 && pruned === 0) {
+        setGardenerMessage("No changes needed — graph is clean");
+      } else {
+        const parts: string[] = [];
+        if (merged > 0) parts.push(`Merged ${merged} concept${merged !== 1 ? "s" : ""}`);
+        if (pruned > 0) parts.push(`pruned ${pruned} orphan${pruned !== 1 ? "s" : ""}`);
+        setGardenerMessage(parts.join(", "));
+      }
       onGardenerSuccess?.();
       setTimeout(() => setGardenerMessage(null), 4000);
     } catch {

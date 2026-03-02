@@ -44,7 +44,7 @@ def delete_kb_document(
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
     prune_orphan_graph: bool = Query(
-        default=False,
+        default=True,
         description="Remove canonical graph nodes/edges with no remaining provenance after deletion.",
     ),
 ) -> Response:

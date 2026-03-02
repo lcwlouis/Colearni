@@ -97,7 +97,8 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                         aliases,
                         is_active,
                         dirty,
-                        embedding
+                        embedding,
+                        tier
                     )
                     VALUES (
                         :workspace_id,
@@ -106,7 +107,8 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                         :aliases,
                         TRUE,
                         TRUE,
-                        NULL
+                        NULL,
+                        'topic'
                     )
                     RETURNING id
                     """
@@ -125,7 +127,8 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                         aliases,
                         is_active,
                         dirty,
-                        embedding
+                        embedding,
+                        tier
                     )
                     VALUES (
                         :workspace_id,
@@ -134,7 +137,8 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                         :aliases,
                         TRUE,
                         TRUE,
-                        NULL
+                        NULL,
+                        'topic'
                     )
                     RETURNING id
                     """
@@ -153,7 +157,8 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                         aliases,
                         is_active,
                         dirty,
-                        embedding
+                        embedding,
+                        tier
                     )
                     VALUES (
                         :workspace_id,
@@ -162,7 +167,8 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                         :aliases,
                         TRUE,
                         FALSE,
-                        NULL
+                        NULL,
+                        'subtopic'
                     )
                     RETURNING id
                     """
@@ -180,6 +186,40 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                 """
             ),
             {"workspace_id": workspace_id, "concept_id": neighbor_id},
+        )
+
+        # Create provenance for keep_id so it is not pruned as orphan
+        doc_id = int(
+            session.execute(
+                text(
+                    "INSERT INTO documents (workspace_id, uploaded_by_user_id, title, content_hash)"
+                    " VALUES (:wid, :uid, 'stub', :hash) RETURNING id"
+                ),
+                {"wid": workspace_id, "uid": user_id, "hash": unique},
+            ).scalar_one()
+        )
+        chunk_id = int(
+            session.execute(
+                text(
+                    "INSERT INTO chunks (workspace_id, document_id, chunk_index, text)"
+                    " VALUES (:wid, :did, 0, 'stub') RETURNING id"
+                ),
+                {"wid": workspace_id, "did": doc_id},
+            ).scalar_one()
+        )
+        session.execute(
+            text(
+                "INSERT INTO provenance (workspace_id, target_type, target_id, chunk_id)"
+                " VALUES (:wid, 'concept', :tid, :cid)"
+            ),
+            {"wid": workspace_id, "tid": keep_id, "cid": chunk_id},
+        )
+        session.execute(
+            text(
+                "INSERT INTO provenance (workspace_id, target_type, target_id, chunk_id)"
+                " VALUES (:wid, 'concept', :tid, :cid)"
+            ),
+            {"wid": workspace_id, "tid": neighbor_id, "cid": chunk_id},
         )
 
         session.execute(
@@ -208,6 +248,38 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
             },
         )
 
+        edge_keep_id = int(
+            session.execute(
+                text(
+                    """
+                    INSERT INTO edges_canon (
+                        workspace_id,
+                        src_id,
+                        tgt_id,
+                        relation_type,
+                        description,
+                        keywords,
+                        weight
+                    )
+                    VALUES (
+                        :workspace_id,
+                        :keep_id,
+                        :neighbor_id,
+                        'contains',
+                        'edge-keep',
+                        '{basis}'::text[],
+                        1.0
+                    )
+                    RETURNING id
+                    """
+                ),
+                {
+                    "workspace_id": workspace_id,
+                    "keep_id": keep_id,
+                    "neighbor_id": neighbor_id,
+                },
+            ).scalar_one()
+        )
         session.execute(
             text(
                 """
@@ -220,33 +292,29 @@ def test_graph_gardener_merge_bookkeeping_and_idempotency() -> None:
                     keywords,
                     weight
                 )
-                VALUES
-                    (
-                        :workspace_id,
-                        :keep_id,
-                        :neighbor_id,
-                        'contains',
-                        'edge-keep',
-                        '{basis}'::text[],
-                        1.0
-                    ),
-                    (
-                        :workspace_id,
-                        :merge_away_id,
-                        :neighbor_id,
-                        'contains',
-                        'edge-dup',
-                        '{independence}'::text[],
-                        2.0
-                    )
+                VALUES (
+                    :workspace_id,
+                    :merge_away_id,
+                    :neighbor_id,
+                    'contains',
+                    'edge-dup',
+                    '{independence}'::text[],
+                    2.0
+                )
                 """
             ),
             {
                 "workspace_id": workspace_id,
-                "keep_id": keep_id,
                 "merge_away_id": merge_away_id,
                 "neighbor_id": neighbor_id,
             },
+        )
+        session.execute(
+            text(
+                "INSERT INTO provenance (workspace_id, target_type, target_id, chunk_id)"
+                " VALUES (:wid, 'edge', :tid, :cid)"
+            ),
+            {"wid": workspace_id, "tid": edge_keep_id, "cid": chunk_id},
         )
 
         llm = IntegrationGardenerLLM(merge_into_id=keep_id)
