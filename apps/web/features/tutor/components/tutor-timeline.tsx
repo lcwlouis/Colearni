@@ -151,34 +151,27 @@ export function TutorTimeline({
         </article>
       ))}
 
-      {chatLoading && chatPhase !== "idle" ? (
-        <div className="chat-status-indicator">
-          <div className="chat-avatar" style={{ background: "var(--accent)", color: "#fff" }}>🤖</div>
-          <div className="chat-status-content">
-            <span className="chat-typing-dots" aria-hidden="true">
-              <span className="dot" />
-              <span className="dot" />
-              <span className="dot" />
-            </span>
-            <span className="chat-status-label">{PHASE_LABELS[chatPhase]}</span>
-            {streamFallback ? (
-              <span className="chat-fallback-badge" title="Stream unavailable — using fallback mode">⚠ fallback</span>
-            ) : null}
-            {activitySteps.length > 0 ? (
-              <div className="chat-activity-rail" aria-label="Agent activity steps">
-                {activitySteps.map((step, i) => (
-                  <span
-                    key={`${step.activity}-${i}`}
-                    className={`activity-step ${step.done ? "done" : "active"}`}
-                  >
-                    {step.done ? "✓" : "›"} {step.done ? step.label : <WaveLabel text={step.label} />}
-                  </span>
-                ))}
-              </div>
-            ) : null}
+      {chatLoading && chatPhase !== "idle" ? (() => {
+        const activeStep = activitySteps.filter((s) => !s.done).at(-1);
+        const currentLabel = activeStep?.label ?? PHASE_LABELS[chatPhase];
+        const statusKey = activeStep ? `${activeStep.activity}-${activeStep.label}` : chatPhase;
+        return (
+          <div className="chat-status-indicator">
+            <div className="chat-avatar" style={{ background: "var(--accent)", color: "#fff" }}>🤖</div>
+            <div className="chat-status-content">
+              <span className="chat-typing-dots" aria-hidden="true">
+                <span className="dot" />
+                <span className="dot" />
+                <span className="dot" />
+              </span>
+              <span className="chat-status-label" key={statusKey}>{currentLabel}</span>
+              {streamFallback ? (
+                <span className="chat-fallback-badge" title="Stream unavailable — using fallback mode">⚠ fallback</span>
+              ) : null}
+            </div>
           </div>
-        </div>
-      ) : null}
+        );
+      })() : null}
       {chatError ? (
         <p className="status error" style={{ maxWidth: "48rem", margin: "0 auto" }}>{chatError}</p>
       ) : null}
