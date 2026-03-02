@@ -1,5 +1,10 @@
 import { AsyncState } from "@/components/async-state";
-import SigmaGraph from "@/components/sigma-graph";
+import dynamic from "next/dynamic";
+
+const SigmaGraph = dynamic(() => import("@/components/sigma-graph"), {
+  ssr: false,
+  loading: () => <p style={{ color: "var(--muted)" }}>Loading graph…</p>,
+});
 import { useState, useCallback } from "react";
 import { apiClient } from "@/lib/api/client";
 import type {

@@ -25,4 +25,5 @@ export const DEFAULT_SIGMA_SETTINGS = {
   labelDensity: 0.5,
   enableEdgeEvents: true,
   zIndex: true,
+  allowInvalidContainer: true,
 } as const;

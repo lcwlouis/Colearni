@@ -1,4 +1,9 @@
-import SigmaGraph from "@/components/sigma-graph";
+import dynamic from "next/dynamic";
+
+const SigmaGraph = dynamic(() => import("@/components/sigma-graph"), {
+  ssr: false,
+  loading: () => <p style={{ color: "var(--muted)" }}>Loading graph…</p>,
+});
 import { ConceptActivityPanel } from "@/components/concept-activity-panel";
 import type { GraphConceptSummary, GraphSubgraphResponse, ConceptActivityResponse } from "@/lib/api/types";
 import { masteryLabel } from "../types";
