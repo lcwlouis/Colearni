@@ -8,6 +8,7 @@ import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 import { buildGraphologyGraph } from "@/lib/graph/transform";
 import { buildSearchIndex, searchNodes } from "@/lib/graph/search";
 import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/sigma-settings";
+import { useGraphTheme } from "@/lib/graph/hooks/use-graph-theme";
 import { GraphReducers } from "@/components/sigma-graph/graph-reducers";
 import { GraphLayout } from "@/components/sigma-graph/graph-layout";
 import type { LayoutType } from "@/components/sigma-graph/graph-layout";
@@ -77,21 +78,25 @@ function SigmaGraphInner({
   const [layout, setLayout] = useState<LayoutType>("forceatlas2");
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const settings = useGraphSettings();
+  const graphTheme = useGraphTheme();
 
   // Sync layout state when settings change
   useEffect(() => {
     setLayout(settings.defaultLayout as LayoutType);
   }, [settings.defaultLayout]);
 
-  // Merge user settings into Sigma renderer settings
+  // Merge user settings + theme colors into Sigma renderer settings
   const sigmaSettings = useMemo(
     () => ({
       ...DEFAULT_SIGMA_SETTINGS,
       renderLabels: settings.showLabels,
       labelDensity: settings.labelDensity,
       renderEdgeLabels: settings.showEdgeLabels,
+      labelColor: { color: graphTheme.labelColor },
+      defaultEdgeColor: graphTheme.defaultEdgeColor,
+      defaultNodeColor: graphTheme.defaultNodeColor,
     }),
-    [settings.showLabels, settings.labelDensity, settings.showEdgeLabels],
+    [settings.showLabels, settings.labelDensity, settings.showEdgeLabels, graphTheme],
   );
 
   // Build graphology instance from API data (UXG.2)
@@ -176,6 +181,7 @@ function SigmaGraphInner({
           searchMatchKeys={searchMatchKeys}
           hasSearchQuery={!!searchHighlight?.trim()}
           highlightNeighbors={settings.highlightNeighbors}
+          theme={graphTheme}
         />
         <GraphEvents
           onSelect={onSelect}

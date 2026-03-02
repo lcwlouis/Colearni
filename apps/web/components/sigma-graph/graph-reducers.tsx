@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useSigma } from "@react-sigma/core";
+import type { GraphTheme } from "@/lib/graph/hooks/use-graph-theme";
 
 type Props = {
   selectedId?: number;
@@ -9,6 +10,7 @@ type Props = {
   searchMatchKeys?: Set<string>;
   hasSearchQuery?: boolean;
   highlightNeighbors?: boolean;
+  theme?: GraphTheme;
 };
 
 /**
@@ -16,12 +18,15 @@ type Props = {
  * selection highlighting, neighbour dimming, and search filtering.
  * Must be rendered inside a <SigmaContainer>.
  */
-export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors = true }: Props) {
+export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors = true, theme }: Props) {
   const sigma = useSigma();
 
   useEffect(() => {
     const selectedKey = selectedId != null ? String(selectedId) : null;
     const graph = sigma.getGraph();
+    const dimmed = theme?.dimmedNodeColor ?? "#e0e0e0";
+    const border = theme?.selectionBorderColor ?? "#ff6600";
+    const hlEdge = theme?.highlightEdgeColor ?? "#88ccff";
 
     sigma.setSetting("nodeReducer", (node, data) => {
       const result = { ...data };
@@ -31,27 +36,27 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
         const neighbors = new Set(graph.neighbors(activeNode));
         if (node === activeNode) {
           result.highlighted = true;
-          result.borderColor = "#ff6600";
+          result.borderColor = border;
           result.borderSize = 0.3;
           result.zIndex = 2;
         } else if (neighbors.has(node)) {
           result.highlighted = true;
           result.zIndex = 1;
         } else {
-          result.color = "#e0e0e0";
+          result.color = dimmed;
           result.label = undefined;
           result.zIndex = 0;
         }
       } else if (!highlightNeighbors && activeNode && graph.hasNode(activeNode) && node === activeNode) {
         result.highlighted = true;
-        result.borderColor = "#ff6600";
+        result.borderColor = border;
         result.borderSize = 0.3;
         result.zIndex = 2;
       }
 
       if (hasSearchQuery) {
         if (!searchMatchKeys?.has(node)) {
-          result.color = "#e0e0e0";
+          result.color = dimmed;
           result.label = undefined;
           result.zIndex = 0;
         } else {
@@ -70,7 +75,7 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       if (highlightNeighbors && activeNode && graph.hasNode(activeNode)) {
         const extremities = graph.extremities(edge);
         if (extremities.includes(activeNode)) {
-          result.color = "#88ccff";
+          result.color = hlEdge;
           result.size = (data.size || 1) * 1.5;
           result.zIndex = 1;
         } else {
@@ -96,7 +101,7 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       sigma.setSetting("nodeReducer", null);
       sigma.setSetting("edgeReducer", null);
     };
-  }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors]);
+  }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors, theme]);
 
   return null;
 }
