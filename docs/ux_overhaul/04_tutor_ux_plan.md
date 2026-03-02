@@ -456,10 +456,10 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 2. `UXT.2` Streaming status replace-mode animation ✅ (pre-existing)
 3. `UXT.3` Graph-to-chat navigation ✅
 4. `UXT.4` Fix Socratic tutor protocol passthrough ✅ (pre-existing)
-5. `UXT.5` Parameterize Socratic concept initialization 🔲
-6. `UXT.6` Move prompt templates into system role 🔲
-7. `UXT.7` Add syntax highlighting to markdown renderer 🔲
-8. `UXT.8` Backend `.env` flags for Socratic mode and dev stats 🔲
+5. `UXT.5` Parameterize Socratic concept initialization ✅
+6. `UXT.6` Move prompt templates into system role ✅
+7. `UXT.7` Add syntax highlighting to markdown renderer ✅
+8. `UXT.8` Backend `.env` flags for Socratic mode and dev stats ✅
 
 ### Verification Block — UXT.1
 
@@ -496,6 +496,42 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 - **Commands run**: `PYTHONPATH=. pytest -q` (passed), grep verification of `tutor_protocol` in `chat.py`
 - **Manual verification steps**: Confirmed field exists in API model, forwarded in both handlers, reaches domain layer
 - **Observed outcome**: All exit criteria met — `tutor_protocol: true` from frontend reaches stream.py
+
+### Verification Block — UXT.5
+
+- **Root cause**: `init_relation_concept()` hardcoded concept="Relation" with a Students table, preventing topic-aware Socratic sessions.
+- **Files changed**: `core/schemas/tutor_state.py`, `domain/chat/stream.py`, `tests/chat/test_tutor_state.py`
+- **What changed**: Added `init_concept(topic)` method that initializes a fresh Socratic session for any topic. `init_relation_concept()` now delegates to `init_concept("Relation")` + sets the Students table preset. stream.py passes `resolved_name or request.query` instead of hardcoded "Relation".
+- **Commands run**: `PYTHONPATH=. pytest -q` (977 passed), `PYTHONPATH=. pytest tests/chat/test_tutor_state.py` (14 passed)
+- **Manual verification steps**: Verified `init_concept("B-Trees")` sets concept="B-Trees" with empty table. Verified `init_relation_concept()` still sets Students table preset. Verified stream.py passes resolved topic.
+- **Observed outcome**: All exit criteria met — Socratic init is topic-aware, legacy preset preserved
+
+### Verification Block — UXT.6
+
+- **Root cause**: Entire 3KB+ prompt template placed in `role: user` while `role: system` had a 12-word stub, degrading model instruction-following and prefix caching.
+- **Files changed**: `domain/chat/prompt_kit.py`, `adapters/llm/providers.py`, `core/contracts.py`, `domain/chat/stream.py`, `domain/chat/response_service.py`, `tests/domain/test_s1_phase_semantics.py`, `tests/domain/test_u5_reasoning_summary.py`, `tests/domain/test_u6_answer_parts.py`, `tests/api/test_chat_respond.py`
+- **What changed**: Added `PromptMessages` dataclass with `system` and `user` fields. Refactored `build_full_tutor_prompt_with_meta()` and `build_socratic_interactive_prompt()` to return `(PromptMessages, meta)`. System message contains full protocol template; user message contains only evidence + query. Added `system_prompt` param to `generate_tutor_text_stream()` and related methods.
+- **Commands run**: `PYTHONPATH=. pytest -q` (977 passed), `npx vitest run` (117 passed), `npm --prefix apps/web run typecheck` (passed with pre-existing error)
+- **Manual verification steps**: Verified prompt builders return PromptMessages with system/user split. Verified LLM adapter uses system_prompt for message construction. Verified all test monkeypatches updated.
+- **Observed outcome**: All exit criteria met — prompts properly split between system and user roles
+
+### Verification Block — UXT.7
+
+- **Root cause**: Code blocks in chat rendered as plain monospace without syntax highlighting — no rehype-highlight plugin installed.
+- **Files changed**: `apps/web/components/markdown-content.tsx`, `apps/web/package.json`
+- **What changed**: Installed `rehype-highlight`. Added `rehypeHighlight` to react-markdown's `rehypePlugins` array. Imported `highlight.js/styles/github-dark.css` for dark theme.
+- **Commands run**: `npx vitest run` (117 passed), `npm --prefix apps/web run typecheck` (passed with pre-existing error)
+- **Manual verification steps**: Verified rehype-highlight is in rehypePlugins array. Verified existing markdown-content tests pass.
+- **Observed outcome**: All exit criteria met — fenced code blocks with language hints will render with syntax colors
+
+### Verification Block — UXT.8
+
+- **Root cause**: Socratic toggle and dev stats were frontend-only (useState/localStorage) with no backend control.
+- **Files changed**: `core/settings.py`, `apps/api/routes/features.py`, `apps/api/main.py`, `domain/chat/respond.py`, `apps/web/lib/api/client.ts`, `apps/web/lib/api/types.ts`, `apps/web/features/tutor/hooks/use-tutor-page.ts`, `apps/web/lib/hooks/use-dev-stats.ts`, `docs/API.md`, `tests/api/test_features.py`, `tests/domain/test_g5_trace.py`
+- **What changed**: Added `APP_SOCRATIC_MODE_DEFAULT` and `APP_INCLUDE_DEV_STATS` to Settings. Created `/settings/features` GET endpoint returning backend feature flags. Frontend fetches flags on load for initial toggle state. generation_trace conditionally included based on include_dev_stats.
+- **Commands run**: `PYTHONPATH=. pytest -q` (979 passed), `npx vitest run` (117 passed), `npm --prefix apps/web run typecheck` (passed)
+- **Manual verification steps**: Verified endpoint returns correct defaults. Verified custom env vars change response. Verified trace gating works.
+- **Observed outcome**: All exit criteria met — both features controllable via .env, frontend reads backend defaults
 
 ## Verification Matrix
 
