@@ -411,7 +411,7 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 2. `UXI.2` LLM prompt caching ✅
 3. `UXI.3` Dev stats toggle ✅ (pre-existing)
 4. `UXI.4` Phoenix Info tab: system prompts & output in LLM traces ✅
-5. `UXI.5` Fix document chunking pipeline 🔲
+5. `UXI.5` Fix document chunking pipeline ✅
 6. `UXI.6` Fix truncated source excerpts in prompts 🔲
 7. `UXI.7` Rework gardener design 🔲
 8. `UXI.8` Audit and fix conductor/intent classifier 🔲
@@ -463,6 +463,16 @@ npx vitest run  # from apps/web/
 ## Removal Ledger
 
 {Append entries during implementation}
+
+### Verification Block — UXI.5
+
+- **Root cause**: `chunk_text_deterministic()` used `max()` across `rfind()` results for `\n\n`, `\n`, and ` `. This picks the *latest position* regardless of boundary quality — a space at position 999 beats a paragraph break at position 500. Documents were not silently truncated (full PDF text was chunked), but splits landed at poor boundaries.
+- **Files changed**: `adapters/parsers/chunker.py`, `domain/ingestion/service.py`, `tests/parsers/test_chunker.py`
+- **What changed**: (1) Extracted `_find_best_break()` helper with priority cascade: paragraph break `\n\n` > line break `\n` > sentence end (`. ` / `? ` / `! `) > space. (2) Added `logging.info` in both `ingest_text_document()` and `ingest_text_document_fast()` to log chunk counts. (3) Added 3 new tests: paragraph preference, sentence preference, empty input.
+- **Commands run**: `PYTHONPATH=. pytest -q` → 982 passed, 1 failed (pre-existing Phoenix)
+- **Manual verification steps**: Verified `_find_best_break` returns paragraph break when available even if space occurs later. Verified no silent truncation in pipeline (all chunks stored).
+- **Observed outcome**: All exit criteria met — chunks split at natural boundaries, no silent truncation, chunk counts logged.
+- **Removal Entries**: None
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 

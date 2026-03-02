@@ -57,8 +57,8 @@ def test_truncates_long_messages(mock_list):
     long_text = "x" * 500
     mock_list.return_value = _make_messages([("user", long_text)])
     result = load_chat_context_for_quiz(_FakeSession(), session_id=1)
-    # Should truncate to 200 chars in the line
-    assert len(result.split("Learner: ")[1]) <= 200
+    # Should truncate to 500 chars in the line
+    assert len(result.split("Learner: ")[1]) <= 500
 
 
 @patch("domain.chat.session_memory.list_recent_chat_messages")

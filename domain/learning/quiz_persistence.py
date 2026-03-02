@@ -427,7 +427,7 @@ def load_generation_context(
                   AND p.target_type = 'concept'
                   AND p.target_id = :concept_id
                 ORDER BY p.chunk_id ASC
-                LIMIT 3
+                LIMIT 10
                 """
             ),
             {"workspace_id": workspace_id, "concept_id": concept_id},
@@ -435,7 +435,7 @@ def load_generation_context(
         .mappings()
         .all()
     )
-    chunk_excerpts = [str(r["text"])[:300] for r in chunk_rows]
+    chunk_excerpts = [str(r["text"])[:1000] for r in chunk_rows]
     return {
         "concept_name": concept_name,
         "concept_description": str(concept["description"] or ""),

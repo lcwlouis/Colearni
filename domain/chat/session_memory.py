@@ -204,9 +204,9 @@ def load_chat_context_for_quiz(
             continue
         role = str(message.get("type", ""))
         if role == "user":
-            lines.append(f"Learner: {text_value[:200]}")
+            lines.append(f"Learner: {text_value[:500]}")
         elif role == "assistant":
-            lines.append(f"Tutor: {text_value[:200]}")
+            lines.append(f"Tutor: {text_value[:500]}")
         if len(lines) >= max_turns:
             break
 
