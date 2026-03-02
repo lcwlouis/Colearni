@@ -67,6 +67,15 @@ export default function TutorPage() {
             </select>
             <button
               type="button"
+              className={`header-action-btn${t.tutorProtocol ? " active" : ""}`}
+              onClick={() => t.setTutorProtocol(!t.tutorProtocol)}
+              title="Enable Socratic interactive tutor mode"
+              style={{ fontSize: "0.85rem", padding: "0.2rem 0.5rem" }}
+            >
+              {t.tutorProtocol ? "Socratic ✓" : "Socratic"}
+            </button>
+            <button
+              type="button"
               className={`header-action-btn${t.showQuiz ? " active" : ""}`}
               onClick={() => {
                 if (!t.showQuiz) {

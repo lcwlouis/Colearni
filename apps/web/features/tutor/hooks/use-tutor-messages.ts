@@ -37,6 +37,7 @@ interface UseTutorMessagesOptions {
   suggestedConceptId: number | null;
   switchDecisionRef: React.MutableRefObject<"accept" | "reject" | null>;
   grounding_mode: GroundingMode;
+  tutorProtocol: boolean;
   refreshSessions: () => Promise<void>;
   setCurrentConcept: (concept: GraphConceptSummary | null) => void;
   setSwitchSuggestion: (suggestion: ConceptSwitchSuggestion | null) => void;
@@ -52,6 +53,7 @@ export function useTutorMessages({
   suggestedConceptId,
   switchDecisionRef,
   grounding_mode,
+  tutorProtocol,
   refreshSessions,
   setCurrentConcept,
   setSwitchSuggestion,
@@ -143,6 +145,7 @@ export function useTutorMessages({
           suggested_concept_id: suggestedConceptId ?? undefined,
           concept_switch_decision: switchDecisionRef.current ?? undefined,
           grounding_mode,
+          tutor_protocol: tutorProtocol || undefined,
         },
         (event: ChatStreamEvent) => {
           if (requestId !== activeRequestIdRef.current) return;
@@ -255,6 +258,7 @@ export function useTutorMessages({
         suggested_concept_id: suggestedConceptId ?? undefined,
         concept_switch_decision: switchDecisionRef.current ?? undefined,
         grounding_mode,
+        tutor_protocol: tutorProtocol || undefined,
       });
 
       if (requestId !== activeRequestIdRef.current) return;

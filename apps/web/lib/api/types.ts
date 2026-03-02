@@ -78,6 +78,7 @@ export interface ChatRespondRequest {
   concept_switch_decision?: ConceptSwitchDecision;
   top_k?: number;
   grounding_mode?: GroundingMode;
+  tutor_protocol?: boolean;
 }
 
 export type ChatMessageType = "user" | "assistant" | "system" | "tool" | "card";

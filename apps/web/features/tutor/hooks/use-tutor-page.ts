@@ -23,6 +23,7 @@ export function useTutorPage() {
   const topicParam = searchParams.get("topic");
 
   const [grounding_mode, setGroundingMode] = useState<GroundingMode>("hybrid");
+  const [tutorProtocol, setTutorProtocol] = useState(false);
 
   // Concept state
   const [concepts, setConcepts] = useState<GraphConceptSummary[]>([]);
@@ -83,6 +84,7 @@ export function useTutorPage() {
     suggestedConceptId,
     switchDecisionRef,
     grounding_mode,
+    tutorProtocol,
     refreshSessions,
     setCurrentConcept,
     setSwitchSuggestion,
@@ -212,6 +214,8 @@ export function useTutorPage() {
     onSubmitChat,
     grounding_mode,
     setGroundingMode,
+    tutorProtocol,
+    setTutorProtocol,
     // Concepts
     concepts,
     conceptsLoading,
