@@ -371,7 +371,7 @@ def _stream_inner(
         else:
             tutor_state.last_user_answer = request.query
 
-        prompt, prompt_meta = build_socratic_interactive_prompt(
+        prompt_msgs, prompt_meta = build_socratic_interactive_prompt(
             query=request.query,
             evidence=evidence,
             tutor_state_text=tutor_state.state_block(),
@@ -386,7 +386,8 @@ def _stream_inner(
         )
 
         text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
-            prompt=prompt, prompt_meta=prompt_meta, operation="chat.stream.socratic",
+            prompt=prompt_msgs.user, prompt_meta=prompt_meta,
+            system_prompt=prompt_msgs.system, operation="chat.stream.socratic",
         )
         text_parts: list[str] = []
         for delta in text_stream:
@@ -414,7 +415,7 @@ def _stream_inner(
                 if assessment_context
                 else quiz_context_text
             )
-        prompt, prompt_meta = build_full_tutor_prompt_with_meta(
+        prompt_msgs, prompt_meta = build_full_tutor_prompt_with_meta(
             query=request.query,
             evidence=evidence,
             persona=persona,
@@ -433,7 +434,8 @@ def _stream_inner(
             learner_profile_summary=learner_profile_summary,
         )
         text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
-            prompt=prompt, prompt_meta=prompt_meta, operation="chat.stream",
+            prompt=prompt_msgs.user, prompt_meta=prompt_meta,
+            system_prompt=prompt_msgs.system, operation="chat.stream",
         )
         text_parts: list[str] = []
         for delta in text_stream:

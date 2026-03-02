@@ -42,7 +42,7 @@ def generate_tutor_text(
     combined_assessment = assessment_context
     if quiz_context:
         combined_assessment = f"{assessment_context}\n\n{quiz_context}" if assessment_context else quiz_context
-    prompt, prompt_meta = build_full_tutor_prompt_with_meta(
+    prompt_msgs, prompt_meta = build_full_tutor_prompt_with_meta(
         query=query,
         evidence=evidence,
         persona=persona,
@@ -56,8 +56,9 @@ def generate_tutor_text(
         learner_profile_summary=learner_profile_summary,
     )
     log.debug(
-        "tutor prompt assembled: %d chars, history=%d, assessment=%d, docs=%d, flashcards=%d",
-        len(prompt),
+        "tutor prompt assembled: system=%d user=%d chars, history=%d, assessment=%d, docs=%d, flashcards=%d",
+        len(prompt_msgs.system),
+        len(prompt_msgs.user),
         len(history_text),
         len(combined_assessment),
         len(document_summaries),
@@ -68,7 +69,10 @@ def generate_tutor_text(
         traced_fn = getattr(llm_client, "generate_tutor_text_traced", None)
         if callable(traced_fn):
             try:
-                text, trace = traced_fn(prompt=prompt, prompt_meta=prompt_meta)
+                text, trace = traced_fn(
+                    prompt=prompt_msgs.user, prompt_meta=prompt_meta,
+                    system_prompt=prompt_msgs.system,
+                )
                 text = text.strip()
             except (RuntimeError, ValueError):
                 text, trace = "", None
@@ -77,7 +81,8 @@ def generate_tutor_text(
         else:
             try:
                 text = llm_client.generate_tutor_text(
-                    prompt=prompt, prompt_meta=prompt_meta,
+                    prompt=prompt_msgs.user, prompt_meta=prompt_meta,
+                    system_prompt=prompt_msgs.system,
                 ).strip()
             except (RuntimeError, ValueError):
                 text = ""

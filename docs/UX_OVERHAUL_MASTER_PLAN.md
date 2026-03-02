@@ -285,7 +285,7 @@ Audit and update all key documentation files to reflect the current state of the
 Tracks should be executed in this order. Each track's child plan defines its internal slice order.
 
 1. `UXF` Critical fixes — FIRST because gardener commit bug is data integrity
-2. `UXG` Graph replacement (UXG.1-13 ✅, UXG.14-17 🔲) — SECOND because it's the largest and subsumes graph UX issues
+2. `UXG` Graph replacement (UXG.1-17 ✅) — SECOND because it's the largest and subsumes graph UX issues
 3. `UXP` Practice UX — THIRD because it builds on top of the graph detail panel (works regardless of graph engine)
 4. `UXT` Tutor UX — FOURTH because it's independent of graph work
 5. `UXI` Infrastructure (UXI.1-4 ✅, UXI.5-9 🔲) — FIFTH because infrastructure improvements support quality
@@ -305,7 +305,7 @@ Dependencies between tracks:
 | Track | Status | Last note |
 |---|---|---|
 | `UXF` Critical fixes | ✅ audit-passed | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
-| `UXG` Graph replacement | ⚠️ partial | UXG.1-13 done, UXG.14-17 pending — tutor drawer, dark mode, layout review, bordered fix |
+| `UXG` Graph replacement | ✅ done | UXG.1-17 all complete — core rendering, camera, layouts, loading, legend, settings, expand/prune, tutor drawer, dark mode, layout audit, bordered fix |
 | `UXP` Practice UX | ✅ audit-passed | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
 | `UXT` Tutor UX | ⚠️ partial — needs re-audit | UXT.1-3 pass. UXT.4 Socratic passthrough plumbing works BUT: (1) `init_relation_concept()` hardcodes "Relation" concept — no topic adaptation, (2) entire prompt template placed in `role:user` instead of `role:system`, (3) Socratic toggle not persisted and no `.env` flag. See `docs/ux_overhaul/deep_audit_report.md` |
 | `UXI` Infrastructure | ⚠️ partial — needs re-audit | UXI.1, UXI.4 pass. UXI.2 minimal (6 lines of logging, no prompt restructuring for caching). UXI.3 dev stats toggle was pre-existing code; commit `de09f77` only updates docs. No backend `.env` flags for dev stats or Socratic mode. UXI.5-9 pending — chunking, excerpts, gardener rework, conductor audit, Phoenix trace self-test harness. See `docs/ux_overhaul/deep_audit_report.md` |

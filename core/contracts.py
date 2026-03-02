@@ -117,5 +117,6 @@ class StreamingLLMClient(Protocol):
         prompt_meta: Any | None = None,
         reasoning_effort_override: str | None = None,
         operation: str | None = None,
+        system_prompt: str | None = None,
     ) -> TutorTextStream:
         """Stream tutor-facing response text, yielding text deltas."""

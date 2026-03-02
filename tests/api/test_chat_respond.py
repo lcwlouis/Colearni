@@ -31,8 +31,8 @@ class DummyEmbeddingProvider:
 class DummyTutorLLMClient:
     """Tutor LLM client double used by chat API tests."""
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
-        lower = prompt.lower()
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt: str | None = None) -> str:
+        lower = (prompt + (system_prompt or "")).lower()
         if "direct" in lower and (
             "mastery is unlocked" in lower
             or "style: direct" in lower

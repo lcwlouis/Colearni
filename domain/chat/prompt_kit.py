@@ -13,10 +13,19 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Literal
 
 from core.prompting import PromptRegistry
 from core.schemas import EvidenceItem, GroundingMode
+
+
+@dataclass
+class PromptMessages:
+    """Structured prompt with separate system and user messages."""
+
+    system: str
+    user: str
 
 log = logging.getLogger("domain.chat.prompt_kit")
 
@@ -275,20 +284,19 @@ def build_full_tutor_prompt_with_meta(
     graph_context: str = "",
     flashcard_progress: str = "",
     learner_profile_summary: str = "",
-) -> tuple[str, object]:
-    """Build the complete prompt and return (text, PromptMeta | None).
+) -> tuple[PromptMessages, object]:
+    """Build the complete prompt and return (PromptMessages, PromptMeta | None).
 
-    Like :func:`build_full_tutor_prompt` but also returns prompt metadata
-    for observability propagation.
+    Returns a :class:`PromptMessages` with system and user content split so
+    that the system message contains the full protocol/rules template and the
+    user message contains only the evidence and query for this turn.
     """
-    from typing import Any  # noqa: PLC0415
-
     evidence_block = build_evidence_block(evidence)
     asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
     strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
 
     try:
-        text, meta = _registry.render_with_meta(asset_id, {
+        system_text, meta = _registry.render_with_meta(asset_id, {
             "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": document_summaries or "(none)",
@@ -297,13 +305,12 @@ def build_full_tutor_prompt_with_meta(
             "flashcard_progress": flashcard_progress or "(none)",
             "learner_profile_summary": learner_profile_summary or "(none)",
             "history_summary": history_summary or "(none)",
-            "evidence_block": evidence_block,
-            "query": query,
+            "evidence_block": "(see user message)",
+            "query": "(see user message)",
         })
-        return text, meta
     except Exception:
         log.debug("asset render_with_meta failed for %s, using inline fallback", asset_id)
-        system = _build_system_prompt_inline(
+        system_text = _build_system_prompt_inline(
             persona=persona,
             style=style,
             assessment_context=assessment_context,
@@ -312,7 +319,10 @@ def build_full_tutor_prompt_with_meta(
             graph_context=graph_context,
             flashcard_progress=flashcard_progress,
         )
-        return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}", None
+        meta = None
+
+    user_text = f"{evidence_block}\n\nUSER_QUESTION: {query}"
+    return PromptMessages(system=system_text, user=user_text), meta
 
 
 def build_socratic_interactive_prompt(
@@ -323,29 +333,38 @@ def build_socratic_interactive_prompt(
     command_context: str = "",
     history_summary: str = "",
     document_summaries: str = "",
-) -> tuple[str, object]:
-    """Build prompt for the Socratic interactive protocol."""
+) -> tuple[PromptMessages, object]:
+    """Build prompt for the Socratic interactive protocol.
+
+    Returns ``(PromptMessages, PromptMeta | None)`` with the protocol and
+    tutor state in the system message and the evidence + user query in the
+    user message.
+    """
     evidence_block = build_evidence_block(evidence)
     try:
-        text, meta = _registry.render_with_meta("tutor_socratic_interactive_v1", {
+        system_text, meta = _registry.render_with_meta("tutor_socratic_interactive_v1", {
             "tutor_state": tutor_state_text,
             "command_context": command_context or "(no command — regular message)",
-            "evidence_block": evidence_block,
+            "evidence_block": "(see user message)",
             "history_summary": history_summary or "(none)",
-            "query": query,
+            "query": "(see user message)",
             "document_summaries": document_summaries or "(none)",
         })
-        return text, meta
     except Exception:
         log.debug("socratic interactive asset failed, using inline fallback")
-        return (
+        system_text = (
             f"You are a Socratic tutor.\n\nSTATE:\n{tutor_state_text}\n\n"
-            f"COMMAND: {command_context}\n\n{evidence_block}\n\nUSER: {query}"
-        ), None
+            f"COMMAND: {command_context}"
+        )
+        meta = None
+
+    user_text = f"{evidence_block}\n\nUSER: {query}"
+    return PromptMessages(system=system_text, user=user_text), meta
 
 
 __all__ = [
     "PROMPT_VERSION",
+    "PromptMessages",
     "build_evidence_block",
     "build_full_tutor_prompt",
     "build_full_tutor_prompt_with_meta",

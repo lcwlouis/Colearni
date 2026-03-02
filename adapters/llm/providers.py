@@ -165,18 +165,19 @@ class _BaseGraphLLMClient(ABC):
             prompt_meta=prompt_meta,
         )
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None) -> str:
-        text, _ = self.generate_tutor_text_traced(prompt=prompt, prompt_meta=prompt_meta)
+    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> str:
+        text, _ = self.generate_tutor_text_traced(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)
         return text
 
-    def generate_tutor_text_traced(self, *, prompt: str, prompt_meta: Any | None = None) -> tuple[str, "GenerationTrace"]:
+    def generate_tutor_text_traced(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> tuple[str, "GenerationTrace"]:
         """Generate tutor text and return (text, trace) tuple."""
         from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
 
         text, trace = self._chat_text_traced(
             prompt=prompt,
             system_instruction=(
-                "You are a grounded tutor. Follow style instructions exactly and stay concise."
+                system_prompt
+                or "You are a grounded tutor. Follow style instructions exactly and stay concise."
             ),
             prompt_meta=prompt_meta,
         )
@@ -189,8 +190,13 @@ class _BaseGraphLLMClient(ABC):
         prompt_meta: Any | None = None,
         reasoning_effort_override: str | None = None,
         operation: str | None = None,
+        system_prompt: str | None = None,
     ) -> TutorTextStream:
         """Stream tutor text, yielding deltas. Trace available after iteration.
+
+        ``system_prompt`` overrides the default system instruction.  When the
+        prompt builder returns a ``PromptMessages``, callers should pass
+        ``system_prompt=messages.system`` and ``prompt=messages.user``.
 
         ``reasoning_effort_override`` is a reserved seam for future first-layer
         per-call effort selection.  When set, it overrides the settings-level
@@ -200,7 +206,7 @@ class _BaseGraphLLMClient(ABC):
         active observation context's ``operation`` field, then ``llm.stream``.
         """
         messages = [
-            {"role": "system", "content": "You are a grounded tutor. Follow style instructions exactly and stay concise."},
+            {"role": "system", "content": system_prompt or "You are a grounded tutor. Follow style instructions exactly and stay concise."},
             {"role": "user", "content": prompt},
         ]
         supported = self._model_supports_reasoning()

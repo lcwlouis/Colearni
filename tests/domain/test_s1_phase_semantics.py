@@ -7,6 +7,7 @@ from collections.abc import Iterator
 
 import pytest
 from core.schemas.chat import ChatPhase, ChatStreamEvent
+from domain.chat.prompt_kit import PromptMessages
 from domain.chat.stream import generate_chat_response_stream
 from core.schemas import ChatRespondRequest, GroundingMode
 
@@ -120,7 +121,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
         monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: ("fake prompt", None))
+        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: (PromptMessages(system="fake system", user="fake user"), None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         # Create a fake streaming LLM client
@@ -191,7 +192,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
         monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: ("fake prompt", None))
+        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: (PromptMessages(system="fake system", user="fake user"), None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         class EmptyStream:
@@ -282,7 +283,7 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
         monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: ("fake prompt", None))
+        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: (PromptMessages(system="fake system", user="fake user"), None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         class FakeStream:
@@ -334,7 +335,7 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
         monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: ("fake prompt", None))
+        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: (PromptMessages(system="fake system", user="fake user"), None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         class FakeStream:
