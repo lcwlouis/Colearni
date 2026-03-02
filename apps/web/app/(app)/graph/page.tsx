@@ -56,6 +56,7 @@ export default function GraphPage() {
         />
 
         <GraphDetailPanel
+          wsId={g.wsId}
           state={g.state}
           practiceState={g.practiceState}
           practiceMode={g.practiceMode}

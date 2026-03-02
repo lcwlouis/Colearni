@@ -1,0 +1,63 @@
+.flashcard-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+}
+
+.flashcard-stack__progress {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.flashcard-stack__card {
+  min-height: 120px;
+  padding: 1.25rem;
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+.flashcard-stack__card--flipped .flashcard-stack__front {
+  display: none;
+}
+
+.flashcard-stack__card:not(.flashcard-stack__card--flipped) .flashcard-stack__back {
+  display: none;
+}
+
+.flashcard-stack__face {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.flashcard-stack__hint {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.flashcard-stack__nav {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.flashcard-stack__nav button {
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.flashcard-stack__nav button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

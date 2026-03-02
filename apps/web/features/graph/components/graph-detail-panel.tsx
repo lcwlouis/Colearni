@@ -1,4 +1,5 @@
 import { AsyncState } from "@/components/async-state";
+import { FlashcardStack } from "./flashcard-stack";
 
 const TIER_BADGE_STYLES: Record<string, React.CSSProperties> = {
   umbrella: { background: '#e0e7ff', color: '#4338ca', borderRadius: '9999px', padding: '0.1rem 0.55rem', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.05em', display: 'inline-block', verticalAlign: 'middle' },
@@ -19,6 +20,7 @@ import type { GraphState } from "@/lib/graph/graph-state";
 import type { PracticeState } from "@/lib/practice/practice-state";
 
 interface GraphDetailPanelProps {
+  wsId: string;
   state: GraphState;
   practiceState: PracticeState;
   practiceMode: "none" | "flashcards" | "quiz";
@@ -50,6 +52,7 @@ interface GraphDetailPanelProps {
 }
 
 export function GraphDetailPanel({
+  wsId,
   state,
   practiceState,
   practiceMode,
@@ -241,6 +244,20 @@ export function GraphDetailPanel({
 
             {practiceMode === "flashcards" && statefulError ? (
               <p className="status error">{statefulError}</p>
+            ) : null}
+
+            {selectedDetail && wsId ? (
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
+                <details>
+                  <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.95rem" }}>Flashcards</summary>
+                  <FlashcardStack
+                    workspaceId={wsId}
+                    conceptId={selectedDetail.concept.concept_id}
+                    conceptName={selectedDetail.concept.canonical_name}
+                    onGenerateFlashcards={loadStatefulFlashcards}
+                  />
+                </details>
+              </div>
             ) : null}
 
             {conceptActivity ? (
