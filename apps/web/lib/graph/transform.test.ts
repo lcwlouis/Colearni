@@ -55,7 +55,7 @@ describe("buildGraphologyGraph", () => {
     expect(g.getEdgeAttribute("11", "label")).toBe("depends on");
   });
 
-  it("hides nodes whose tier is in filteredTiers", () => {
+  it("excludes nodes whose tier is in filteredTiers from the graph", () => {
     const nodes = [
       makeNode({ concept_id: 1, canonical_name: "A", tier: "umbrella" }),
       makeNode({ concept_id: 2, canonical_name: "B", tier: "topic" }),
@@ -63,8 +63,8 @@ describe("buildGraphologyGraph", () => {
 
     const g = buildGraphologyGraph(nodes, [], new Set(["umbrella"]));
 
-    expect(g.getNodeAttribute("1", "hidden")).toBe(true);
-    expect(g.getNodeAttribute("2", "hidden")).toBe(false);
+    expect(g.hasNode("1")).toBe(false);
+    expect(g.hasNode("2")).toBe(true);
   });
 
   it("assigns larger size to higher-degree nodes", () => {

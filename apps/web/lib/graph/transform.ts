@@ -13,8 +13,10 @@ export function buildGraphologyGraph(
 ): Graph {
   const graph = new Graph();
 
-  // --- Add nodes ---
+  // --- Add nodes (skip filtered tiers entirely so layouts ignore them) ---
   for (const node of nodes) {
+    if (filteredTiers && filteredTiers.has(node.tier ?? "")) continue;
+
     const key = String(node.concept_id);
     graph.addNode(key, {
       label: node.canonical_name,
@@ -22,7 +24,6 @@ export function buildGraphologyGraph(
       x: Math.random(),
       y: Math.random(),
       size: NODE_SIZE_RANGE.min, // placeholder; updated after degree computation
-      hidden: filteredTiers ? filteredTiers.has(node.tier ?? "") : false,
       tier: node.tier ?? null,
       conceptId: node.concept_id,
       masteryStatus: node.mastery_status,
