@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useMemo, useState } from "react";
+import { useRef, useMemo, useState, useEffect, useCallback } from "react";
 import { SigmaContainer } from "@react-sigma/core";
 import "@react-sigma/core/lib/style.css";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
@@ -11,6 +11,7 @@ import { GraphReducers } from "@/components/sigma-graph/graph-reducers";
 import { GraphLayout } from "@/components/sigma-graph/graph-layout";
 import type { LayoutType } from "@/components/sigma-graph/graph-layout";
 import { GraphEvents } from "@/components/sigma-graph/graph-events";
+import { CameraControls } from "@/components/sigma-graph/camera-controls";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
 type Props = {
@@ -67,6 +68,41 @@ export default function SigmaGraph({
     [searchIndex, searchHighlight],
   );
 
+  // UXG.8: keyboard shortcuts (active when container is focused or hovered)
+  const isHovered = useRef(false);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (!isHovered.current && !containerRef.current?.contains(document.activeElement)) return;
+    // Ignore when typing in inputs
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+    switch (e.key) {
+      case "+":
+      case "=":
+        e.preventDefault();
+        containerRef.current?.querySelector<HTMLButtonElement>("[aria-label='Zoom in']")?.click();
+        break;
+      case "-":
+        e.preventDefault();
+        containerRef.current?.querySelector<HTMLButtonElement>("[aria-label='Zoom out']")?.click();
+        break;
+      case "r":
+        e.preventDefault();
+        containerRef.current?.querySelector<HTMLButtonElement>("[aria-label='Reset view']")?.click();
+        break;
+      case "f":
+        e.preventDefault();
+        containerRef.current?.querySelector<HTMLButtonElement>("[aria-label='Toggle fullscreen']")?.click();
+        break;
+    }
+  }, [containerRef]);
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
   if (nodes.length === 0) {
     return <p style={{ color: "var(--muted)" }}>No graph data yet.</p>;
   }
@@ -74,10 +110,15 @@ export default function SigmaGraph({
   return (
     <div
       ref={containerRef}
+      tabIndex={0}
+      onMouseEnter={() => { isHovered.current = true; }}
+      onMouseLeave={() => { isHovered.current = false; }}
       style={{
         width: width ?? "100%",
         height: height ?? "100%",
         minHeight: 200,
+        position: "relative",
+        outline: "none",
       }}
     >
       <SigmaContainer
@@ -99,6 +140,7 @@ export default function SigmaGraph({
           focusNodeId={focusNodeId}
           onResetViewReady={onResetViewReady}
         />
+        <CameraControls containerRef={containerRef} />
       </SigmaContainer>
     </div>
   );
