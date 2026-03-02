@@ -10,6 +10,10 @@ class DummySession:
     def __init__(self) -> None:
         self.closed = False
         self.rollback_called = False
+        self.commit_called = False
+
+    def commit(self) -> None:
+        self.commit_called = True
 
     def rollback(self) -> None:
         self.rollback_called = True
@@ -31,6 +35,7 @@ def test_get_db_session_closes_session_on_success(monkeypatch: pytest.MonkeyPatc
         next(generator)
 
     assert session.closed is True
+    assert session.commit_called is True
     assert session.rollback_called is False
 
 
