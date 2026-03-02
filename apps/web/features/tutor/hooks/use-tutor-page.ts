@@ -173,7 +173,14 @@ export function useTutorPage() {
     apiClient.getOnboardingStatus(wsId).then(setOnboarding).catch(() => setOnboarding(null));
   }, [wsId]);
 
-  // Pre-populate query from ?topic= deep-link (graph-to-chat navigation)
+  // Fetch feature flags from backend for Socratic default
+  useEffect(() => {
+    apiClient.getFeatureFlags()
+      .then((flags) => {
+        setTutorProtocol(flags.socratic_mode_default);
+      })
+      .catch(() => { /* keep local default */ });
+  }, []);
   const topicConsumedRef = useRef(false);
   useEffect(() => {
     if (topicParam && !topicConsumedRef.current) {

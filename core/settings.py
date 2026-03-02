@@ -469,6 +469,24 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ── Feature flags ─────────────────────────────────────────────────
+    socratic_mode_default: bool = Field(
+        default=False,
+        description="Default state of the Socratic toggle in the tutor UI.",
+        validation_alias=AliasChoices(
+            "APP_SOCRATIC_MODE_DEFAULT",
+            "SOCRATIC_MODE_DEFAULT",
+        ),
+    )
+    include_dev_stats: bool = Field(
+        default=False,
+        description="Include generation_trace in chat API responses.",
+        validation_alias=AliasChoices(
+            "APP_INCLUDE_DEV_STATS",
+            "INCLUDE_DEV_STATS",
+        ),
+    )
+
     llm_reasoning_quiz_grading: bool = Field(
         default=True,
         validation_alias=AliasChoices(

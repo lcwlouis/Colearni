@@ -117,6 +117,7 @@ class TestTraceOnBlockingEnvelope:
         from domain.chat.respond import generate_chat_response
 
         req = ChatRespondRequest(workspace_id=1, query="explain linear maps")
+        monkeypatch.setenv("APP_INCLUDE_DEV_STATS", "true")
         result = generate_chat_response(
             object(),  # type: ignore[arg-type]
             request=req,

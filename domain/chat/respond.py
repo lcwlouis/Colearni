@@ -452,11 +452,14 @@ def generate_chat_response(
             "bg_research_candidate_approved": bg_state.research_candidate_approved,
         })
 
+        include_trace = (
+            settings is None or settings.include_dev_stats
+        )
         envelope = envelope.model_copy(
             update={
                 "actions": actions,
                 "response_mode": envelope.response_mode,
-                "generation_trace": generation_trace,
+                "generation_trace": generation_trace if include_trace else None,
                 "answer_parts": split_answer_parts(envelope.text),
             }
         )

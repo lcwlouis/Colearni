@@ -12,6 +12,7 @@ import type {
   FlashcardRunListResponse,
   FlashcardRateResponse,
   ConceptActivityResponse,
+  FeatureFlagsResponse,
   FlashcardsRequest,
   GardenerRunResponse,
   GraphConceptListResponse,
@@ -300,6 +301,9 @@ export class ApiClient {
 
   // ── Onboarding (workspace-scoped) ───────────────────────────────
   getOnboardingStatus(wsId: string) { return this.request<OnboardingStatusResponse>(`/workspaces/${wsId}/onboarding/status`, { method: "GET" }); }
+
+  // ── Feature flags ──────────────────────────────────────────────
+  getFeatureFlags() { return this.request<FeatureFlagsResponse>("/settings/features", { method: "GET" }); }
 }
 
 export const apiClient = new ApiClient();

@@ -12,6 +12,7 @@ from apps.api.middleware import CorrelationIdMiddleware
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.chat import router as chat_router
 from apps.api.routes.documents import router as documents_router
+from apps.api.routes.features import router as features_router
 from apps.api.routes.graph import router as graph_router
 from apps.api.routes.healthz import router as healthz_router
 from apps.api.routes.knowledge_base import router as knowledge_base_router
@@ -55,6 +56,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
 
     app.include_router(healthz_router)
     app.include_router(auth_router)
+    app.include_router(features_router)
     app.include_router(workspaces_router)
     app.include_router(chat_router)
     app.include_router(documents_router)

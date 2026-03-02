@@ -695,3 +695,8 @@ export type ChatStreamEvent =
   | ChatStreamErrorEvent
   | ChatStreamReasoningSummaryEvent
   | ChatStreamAnswerPartEvent;
+
+export interface FeatureFlagsResponse {
+  socratic_mode_default: boolean;
+  include_dev_stats: boolean;
+}

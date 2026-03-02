@@ -14,6 +14,7 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 ### Endpoint Index
 
 - `GET /healthz`
+- `GET /settings/features`
 - `POST /auth/magic-link`
 - `POST /auth/verify`
 - `POST /auth/logout`
@@ -93,6 +94,28 @@ curl -sS http://localhost:8000/healthz
 ```json
 {
   "status": "ok"
+}
+```
+
+### GET /settings/features
+
+Tag/group: settings
+
+Purpose: return backend-configured feature flags for the frontend.
+
+Request contract:
+
+- Path params: none
+- Query params: none
+- Body: none
+
+Success responses:
+
+- `200 OK` — JSON:
+```json
+{
+  "socratic_mode_default": false,
+  "include_dev_stats": false
 }
 ```
 
