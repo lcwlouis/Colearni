@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiClient } from "@/lib/api/client";
 import type {
   ConceptSwitchSuggestion,
@@ -18,6 +19,8 @@ export function useTutorPage() {
   const { user, isLoading: authLoading, activeWorkspaceId } = useRequireAuth();
   const wsId = activeWorkspaceId ?? undefined;
   const { activeSessionId, startNewSession, refreshSessions } = useChatSession();
+  const searchParams = useSearchParams();
+  const topicParam = searchParams.get("topic");
 
   const [grounding_mode, setGroundingMode] = useState<GroundingMode>("hybrid");
 
@@ -166,6 +169,15 @@ export function useTutorPage() {
     if (!wsId) return;
     apiClient.getOnboardingStatus(wsId).then(setOnboarding).catch(() => setOnboarding(null));
   }, [wsId]);
+
+  // Pre-populate query from ?topic= deep-link (graph-to-chat navigation)
+  const topicConsumedRef = useRef(false);
+  useEffect(() => {
+    if (topicParam && !topicConsumedRef.current) {
+      topicConsumedRef.current = true;
+      setQuery(`Teach me about ${topicParam}`);
+    }
+  }, [topicParam, setQuery]);
 
   // Reset level-up when session changes and no active session
   useEffect(() => {

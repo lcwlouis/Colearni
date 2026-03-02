@@ -817,3 +817,25 @@
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ===== Concept Chat Links (graph-to-chat) ===== */
+.concept-chat-links {
+  padding: 0.75rem 0;
+}
+
+.concept-chat-links__start {
+  width: 100%;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.concept-chat-links__start:hover {
+  background: var(--accent);
+  color: white;
+}

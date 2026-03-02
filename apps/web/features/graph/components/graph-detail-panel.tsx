@@ -1,6 +1,7 @@
 import { AsyncState } from "@/components/async-state";
 import { FlashcardStack } from "./flashcard-stack";
 import { QuizHistory } from "./quiz-history";
+import { ConceptChatLinks } from "./concept-chat-links";
 
 const TIER_BADGE_STYLES: Record<string, React.CSSProperties> = {
   umbrella: { background: '#e0e7ff', color: '#4338ca', borderRadius: '9999px', padding: '0.1rem 0.55rem', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.05em', display: 'inline-block', verticalAlign: 'middle' },
@@ -273,6 +274,18 @@ export function GraphDetailPanel({
                 </details>
               </div>
             ) : null}
+
+            {selectedDetail && (
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
+                <details>
+                  <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.95rem" }}>💬 Chat</summary>
+                  <ConceptChatLinks
+                    conceptName={selectedDetail.concept.canonical_name}
+                    conceptId={selectedDetail.concept.concept_id}
+                  />
+                </details>
+              </div>
+            )}
 
             {conceptActivity ? (
               <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
