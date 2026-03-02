@@ -58,17 +58,56 @@ These do **not** change mastery status to learned. They are practice only.
   - regenerate up to **3 attempts** before returning a validation error
 - Practice submissions return score + feedback but never mutate mastery state.
 
+#### 4a) Unified flashcard stack
+- All flashcard runs for a concept are merged into a single reviewable stack.
+- "Generate more" appends to the existing stack rather than creating a new run.
+- When all cards for a concept are exhausted, the generate button is disabled with an exhaustion reason.
+
+#### 4b) Quiz history with retry
+- Past practice quizzes are listed with date and score.
+- Users can open a past quiz to review answers and feedback.
+- A retry button resets answers and lets the user re-attempt (practice quizzes only, not level-up).
+
 ### 5) Graph UI (progress + exploration)
 Users can:
 - view their concept graph (canonical)
 - inspect a node’s description
 - see adjacent nodes
 - trigger practice tools from a node
+- navigate to an active chat session from the graph detail panel (graph-chat navigation)
 
 ### 6) “I’m feeling lucky”
 A button that suggests:
 - **Adjacent learning**: topics within k hops of current node
 - **Wildcard**: something new (optionally random, but still relevant to the workspace domain)
+
+### 7) Onboarding confirmation step
+- When a user selects a topic chip during onboarding, a confirmation card is shown ("Ready to learn about X? → Start learning") instead of auto-populating the chat textbox.
+- This prevents accidental topic starts and gives the user an explicit opt-in.
+
+### 8) Streaming status (replace-mode)
+- During tutor response generation, a single-line status indicator shows the current processing step (e.g., "Retrieving evidence…", "Composing response…").
+- Each new status replaces the previous one (ChatGPT-style) rather than appending to a growing log.
+
+### 9) Dev stats toggle
+- A frontend-only toggle (persisted via `localStorage`) to show or hide generation trace metadata (token counts, latency, model) on tutor responses.
+- The backend always includes `generation_trace` in the response; visibility is controlled client-side.
+
+### 10) LLM prompt caching
+- Tutor and generation prompts are structured to maximize OpenAI prefix caching (stable system message prefix).
+- `cached_tokens` is logged in generation traces for observability.
+
+---
+
+## Sources page
+
+### Tier breakdown
+- Each document in the knowledge base shows:
+  - `ingestion_status` — current processing state
+  - `graph_status` — whether graph extraction completed
+  - `graph_concept_count` — number of concepts extracted from the document
+  - Document summary (generated at ingest time)
+- This gives users per-document visibility into how their materials contribute to the knowledge graph.
 
 ---
 

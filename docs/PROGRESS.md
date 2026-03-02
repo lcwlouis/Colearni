@@ -1,6 +1,6 @@
 # WOW Release - Implementation Progress
 
-> Last updated: Session 14
+> Last updated: 2026-03-02 (UX Overhaul completion)
 
 ## Slice Status Overview
 
@@ -683,3 +683,28 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 - Files: `core/prompting/` (new module), `domain/chat/prompt_kit.py`, `domain/chat/tutor_agent.py`, `adapters/llm/providers.py`, `domain/learning/quiz_flow.py`, `domain/learning/quiz_grading.py`, `domain/learning/practice.py`, `domain/ingestion/post_ingest.py`, `docs/PROMPTS.md`, `docs/ARCHITECTURE.md`
 - Tests: 100+ new tests across 8 test files covering assets, rendering, regression, and integration
 - All existing tests pass; no behavioral regressions.
+
+---
+
+## UX Overhaul (2026-03-02)
+
+> Master plan: [`docs/UX_OVERHAUL_MASTER_PLAN.md`](UX_OVERHAUL_MASTER_PLAN.md)
+
+### Track Status
+
+| Track | Description | Status |
+|-------|-------------|--------|
+| UXF | Critical fixes — gardener commit, graph selection bugs | ✅ Done |
+| UXG | Graph visualization replacement — Sigma.js/graphology port | ✅ Done |
+| UXP | Practice UX — unified flashcard viewer, quiz history browser | ✅ Done |
+| UXT | Tutor UX — onboarding confirmation, streaming status, graph-chat nav | ✅ Done |
+| UXI | Infrastructure — sources page tier breakdown, LLM caching, dev stats toggle | ✅ Done |
+| UXD | Documentation audit — verify key docs reflect current implementation | ✅ Done |
+
+### Key deliverables
+- **UXF:** Gardener transaction commit fix, graph node-click flicker fix, wildcard/adjacent highlight fix
+- **UXG:** D3 force simulation replaced with Sigma.js + graphology (13 slices)
+- **UXP:** Unified flashcard stack (merged per-concept), quiz history list with retry
+- **UXT:** Onboarding confirmation card, streaming replace-mode status, graph-chat navigation
+- **UXI:** Per-document tier breakdown in sources page, OpenAI prefix caching, dev stats localStorage toggle
+- **UXD:** Updated PRODUCT_SPEC.md, PLAN.md, PROGRESS.md to reflect UX overhaul completion

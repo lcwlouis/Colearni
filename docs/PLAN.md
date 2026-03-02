@@ -1,5 +1,7 @@
 # WOW Release Plan: Multi-Workspace Intelligent Tutor
 
+> **Note (2026-03-02):** The WOW release is complete. The active development plan is now the UX overhaul — see [`docs/UX_OVERHAUL_MASTER_PLAN.md`](UX_OVERHAUL_MASTER_PLAN.md) for current tracks (UXF, UXG, UXP, UXT, UXI, UXD).
+
 ## Summary
 - Convert Colearni from manual-ID MVP flows into authenticated, private-by-default multi-workspace learning with UUID-based external IDs.
 - Add stateful tutor intelligence across sessions/workspaces, including scheduled readiness analysis and quiz CTA recommendations.
@@ -105,6 +107,12 @@
 - Add readiness CTA cards in tutor timeline.
 - Add flashcard self-rating controls and “Generate 5 / 10 / 25 more”.
 - Remove red refusal UI for `response_mode="social"` responses.
+
+---
+
+## Historical
+
+> The following session plans were executed during the WOW release (Sessions 4–14). They are archived here for reference. All items are complete unless noted.
 
 ## UX Follow-up Plan (Post Session 4)
 - KB upload flow clarity:
