@@ -64,14 +64,17 @@ class TestPracticeFlashcardsGenerateAsset:
         rendered = registry.render("practice_practice_flashcards_generate_v1", {
             "card_count": "10",
             "context_json": '{"concept_name": "Mitosis"}',
+            "existing_flashcards_text": "- Q: What is mitosis?  A: Cell division",
         })
         assert "CARD_COUNT: 10" in rendered
         assert "Mitosis" in rendered
+        assert "What is mitosis?" in rendered
 
     def test_asset_contains_json_output_contract(self, registry: PromptRegistry) -> None:
         rendered = registry.render("practice_practice_flashcards_generate_v1", {
             "card_count": "5",
             "context_json": "{}",
+            "existing_flashcards_text": "None yet.",
         })
         assert "flashcards" in rendered
         assert "front" in rendered
@@ -82,5 +85,15 @@ class TestPracticeFlashcardsGenerateAsset:
         rendered = registry.render("practice_practice_flashcards_generate_v1", {
             "card_count": "5",
             "context_json": "{}",
+            "existing_flashcards_text": "None yet.",
         })
         assert "source" in rendered.lower() or "concept" in rendered.lower()
+
+    def test_asset_includes_existing_flashcards_dedup(self, registry: PromptRegistry) -> None:
+        rendered = registry.render("practice_practice_flashcards_generate_v1", {
+            "card_count": "5",
+            "context_json": "{}",
+            "existing_flashcards_text": "- Q: What is X?  A: X is Y",
+        })
+        assert "do not" in rendered.lower() or "do not repeat" in rendered.lower()
+        assert "What is X?" in rendered

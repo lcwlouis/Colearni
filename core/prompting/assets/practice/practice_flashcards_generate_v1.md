@@ -14,6 +14,10 @@ Create concise, targeted flashcards that help the learner recall key facts and r
 2. Each card must have front (question), back (answer), and hint fields.
 3. Cards must be specific to the concept and grounded in the source material.
 4. Keep front/back text concise.
+5. Do NOT repeat or closely paraphrase any of the existing flashcards listed below. Generate entirely new questions covering different aspects of the concept.
+
+---Existing flashcards (do not duplicate)---
+{existing_flashcards_text}
 
 ---Inputs---
 CARD_COUNT: {card_count}

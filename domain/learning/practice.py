@@ -58,6 +58,8 @@ MAX_FLASHCARDS = 12
 MIN_ITEMS = 3
 MAX_ITEMS = 6
 ADJACENT_LIMIT = 6
+MAX_EXISTING_FLASHCARDS_CONTEXT = 20
+MAX_FLASHCARD_BACK_LENGTH = 200
 MAX_GENERATION_ATTEMPTS = 3
 RETRY_HINT = "create a new practice quiz to retry"
 
@@ -102,6 +104,9 @@ def generate_practice_flashcards(
         )
 
     context = _context(session, workspace_id=workspace_id, concept_id=concept_id)
+    context["existing_flashcards"] = _load_existing_flashcard_content(
+        session, workspace_id=workspace_id, concept_id=concept_id,
+    )
     prompt, prompt_meta = _build_flashcard_prompt(card_count=card_count, context=context)
     with observation_context(
         component="practice",
@@ -541,6 +546,39 @@ def _context(session: Session, *, workspace_id: int, concept_id: int) -> dict[st
     }
 
 
+def _load_existing_flashcard_content(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+) -> list[dict[str, str]]:
+    """Load up to MAX_EXISTING_FLASHCARDS_CONTEXT recent flashcards for LLM context."""
+    rows = session.execute(
+        text(
+            """
+            SELECT front, back
+            FROM practice_flashcard_bank
+            WHERE workspace_id = :workspace_id
+              AND concept_id = :concept_id
+            ORDER BY id DESC
+            LIMIT :limit
+            """
+        ),
+        {
+            "workspace_id": workspace_id,
+            "concept_id": concept_id,
+            "limit": MAX_EXISTING_FLASHCARDS_CONTEXT,
+        },
+    ).mappings().all()
+    result: list[dict[str, str]] = []
+    for row in rows:
+        back = str(row["back"] or "")
+        if len(back) > MAX_FLASHCARD_BACK_LENGTH:
+            back = back[:MAX_FLASHCARD_BACK_LENGTH] + "…"
+        result.append({"front": str(row["front"] or ""), "back": back})
+    return result
+
+
 def _parse_json(response: str, message: str) -> dict[str, Any]:
     text_value = response.strip()
     if text_value.startswith("```"):
@@ -585,6 +623,9 @@ def generate_stateful_flashcards(
         )
 
     context = _context(session, workspace_id=workspace_id, concept_id=concept_id)
+    context["existing_flashcards"] = _load_existing_flashcard_content(
+        session, workspace_id=workspace_id, concept_id=concept_id,
+    )
 
     # Load already-seen fingerprints (Slice 11 – novelty)
     existing_fps = _load_existing_fingerprints(
@@ -1038,17 +1079,34 @@ def _build_practice_quiz_prompt(*, question_count: int, context: dict[str, Any])
 
 def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> tuple[str, Any]:
     """Build the flashcard generation prompt from asset or inline fallback."""
+    existing = context.get("existing_flashcards", [])
+    if existing:
+        lines = [f"- Q: {c['front']}  A: {c['back']}" for c in existing]
+        existing_text = "\n".join(lines)
+    else:
+        existing_text = "None yet."
+
     try:
         return _registry.render_with_meta("practice_practice_flashcards_generate_v1", {
             "card_count": str(card_count),
             "context_json": json.dumps(context, ensure_ascii=True),
+            "existing_flashcards_text": existing_text,
         })
     except Exception:
         log.debug("asset render failed for practice_flashcards_generate_v1, using inline fallback")
+        dedup_block = ""
+        if existing:
+            dedup_block = (
+                "\nThe following flashcards already exist for this concept. "
+                "Do NOT repeat or closely paraphrase any of them. "
+                "Generate entirely new questions covering different aspects.\n"
+                f"{existing_text}\n"
+            )
         return (
             "Return JSON flashcards only. "
             "Schema: {\"flashcards\":[{\"front\":\"...\",\"back\":\"...\","
             "\"hint\":\"...\"}]}\n"
             f"CARD_COUNT: {card_count}\n"
             f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
+            f"{dedup_block}"
         ), None
