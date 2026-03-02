@@ -412,7 +412,7 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 3. `UXI.3` Dev stats toggle ✅ (pre-existing)
 4. `UXI.4` Phoenix Info tab: system prompts & output in LLM traces ✅
 5. `UXI.5` Fix document chunking pipeline ✅
-6. `UXI.6` Fix truncated source excerpts in prompts 🔲
+6. `UXI.6` Fix truncated source excerpts in prompts ✅
 7. `UXI.7` Rework gardener design 🔲
 8. `UXI.8` Audit and fix conductor/intent classifier 🔲
 9. `UXI.9` Phoenix trace self-test harness 🔲
@@ -472,6 +472,16 @@ npx vitest run  # from apps/web/
 - **Commands run**: `PYTHONPATH=. pytest -q` → 982 passed, 1 failed (pre-existing Phoenix)
 - **Manual verification steps**: Verified `_find_best_break` returns paragraph break when available even if space occurs later. Verified no silent truncation in pipeline (all chunks stored).
 - **Observed outcome**: All exit criteria met — chunks split at natural boundaries, no silent truncation, chunk counts logged.
+- **Removal Entries**: None
+
+### Verification Block — UXI.6
+
+- **Root cause**: `load_generation_context()` limited to 3 chunks × 300 chars = ~900 chars of source material. `load_chat_context_for_quiz()` truncated each message to 200 chars. Both limits starved quiz/flashcard prompts of context.
+- **Files changed**: `domain/learning/quiz_persistence.py`, `domain/chat/session_memory.py`, `tests/domain/test_chat_context_for_quiz.py`
+- **What changed**: (1) Increased chunk LIMIT from 3 to 10. (2) Increased per-chunk truncation from 300 to 1000 chars. (3) Increased chat message truncation from 200 to 500 chars. (4) Updated test assertion to match new 500-char limit.
+- **Commands run**: `PYTHONPATH=. pytest -q` → 982 passed, 1 failed (pre-existing Phoenix)
+- **Manual verification steps**: Verified `load_generation_context` now returns up to 10 chunks of 1000 chars each (max ~10K chars of source material vs previous ~900). Verified chat history provides 500 chars per message.
+- **Observed outcome**: All exit criteria met — source material in prompts is now sufficient for concept-specific generation.
 - **Removal Entries**: None
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)

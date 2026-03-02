@@ -8,6 +8,8 @@ from typing import Literal
 from uuid import uuid4
 
 from adapters.db import graph_repository
+from adapters.db.graph.provenance import count_provenance_for_concepts
+from adapters.db.mastery import get_mastered_concept_ids
 from core.contracts import GraphLLMClient
 from domain.graph.orphan_pruner import prune_orphan_graph_nodes
 from core.observability import (
@@ -108,6 +110,9 @@ class _ClusterConcept:
     description: str
     aliases: tuple[str, ...]
     tier: str | None = None
+    has_mastery: bool = False
+    provenance_count: int = 0
+    neighbor_names: tuple[str, ...] = ()
 
 
 class _GardenerDecisionPayload(BaseModel):
@@ -240,6 +245,30 @@ def run_graph_gardener(
                 adjacency.setdefault(candidate.concept_id, set()).add(seed.id)
 
         clusters = _connected_components(adjacency)
+
+        # Enrich cluster concepts with provenance, mastery, and neighbor info
+        all_concept_ids = list(cluster_concepts.keys())
+        provenance_counts = count_provenance_for_concepts(
+            session, workspace_id=workspace_id, concept_ids=all_concept_ids,
+        )
+        mastered_ids = get_mastered_concept_ids(
+            session, workspace_id=workspace_id, concept_ids=all_concept_ids,
+        )
+        for cid, cc in list(cluster_concepts.items()):
+            neighbors = graph_repository.list_neighbor_names(
+                session, workspace_id=workspace_id, concept_id=cid,
+            )
+            cluster_concepts[cid] = _ClusterConcept(
+                concept_id=cc.concept_id,
+                canonical_name=cc.canonical_name,
+                description=cc.description,
+                aliases=cc.aliases,
+                tier=cc.tier,
+                has_mastery=cid in mastered_ids,
+                provenance_count=provenance_counts.get(cid, 0),
+                neighbor_names=tuple(neighbors),
+            )
+
         stabilized_seed_ids: set[int] = set()
         merges_applied = 0
         clusters_skipped = 0
@@ -345,6 +374,18 @@ def run_graph_gardener(
 
             merge_away_ids = sorted(cluster_seed_ids - {target_id})
             for source_id in merge_away_ids:
+                # Mastery protection: never merge away a concept with learning progress
+                if cluster_concepts[source_id].has_mastery:
+                    emit_event(
+                        "graph.gardener.merge.skip",
+                        status="info",
+                        component="graph",
+                        operation="graph.gardener.run",
+                        workspace_id=workspace_id,
+                        source_id=source_id,
+                        reason="mastery_protection",
+                    )
+                    continue
                 if _execute_merge(
                     session=session,
                     workspace_id=workspace_id,
@@ -572,6 +613,10 @@ def _cluster_llm_decision(
                         "canonical_name": concepts[concept_id].canonical_name,
                         "description": concepts[concept_id].description,
                         "aliases": list(concepts[concept_id].aliases),
+                        "tier": concepts[concept_id].tier or "unknown",
+                        "has_mastery": concepts[concept_id].has_mastery,
+                        "provenance_count": concepts[concept_id].provenance_count,
+                        "neighbors": list(concepts[concept_id].neighbor_names),
                     }
                     for concept_id in ordered_ids
                 ],

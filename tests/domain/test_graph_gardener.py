@@ -75,8 +75,28 @@ def _candidate(
     )
 
 
+def _patch_enrichment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub out provenance, mastery, and neighbor queries used by the gardener."""
+    monkeypatch.setattr(
+        gardener,
+        "count_provenance_for_concepts",
+        lambda *args, **kwargs: {},
+    )
+    monkeypatch.setattr(
+        gardener,
+        "get_mastered_concept_ids",
+        lambda *args, **kwargs: set(),
+    )
+    monkeypatch.setattr(
+        graph_repository,
+        "list_neighbor_names",
+        lambda *args, **kwargs: [],
+    )
+
+
 def test_gardener_stops_when_llm_budget_is_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """Zero LLM budget should hard-stop before any cluster decision call."""
+    _patch_enrichment(monkeypatch)
     events: list[dict[str, Any]] = []
     set_event_sink(events)
     configure_observability(
@@ -159,6 +179,7 @@ def test_gardener_stops_when_llm_budget_is_zero(monkeypatch: pytest.MonkeyPatch)
 
 def test_gardener_stops_when_cluster_budget_is_hit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cluster cap should stop processing after the first eligible cluster."""
+    _patch_enrichment(monkeypatch)
     events: list[dict[str, Any]] = []
     set_event_sink(events)
     configure_observability(
