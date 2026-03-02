@@ -290,7 +290,7 @@ Dependencies between tracks:
 | `UXG` Graph replacement | 🟢 done | All 13 slices complete (UXG.1–UXG.13) — Sigma.js core + camera, layouts, loading, legend, settings, expand/prune |
 | `UXP` Practice UX | 🟢 done | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
 | `UXT` Tutor UX | 🟢 done | All 4 slices complete (UXT.1–UXT.4) — onboarding confirm, status replace-mode, graph-chat nav, Socratic passthrough |
-| `UXI` Infrastructure | 🔲 not started | 0/4 slices — sources, caching, dev stats, Phoenix Info tab all pending |
+| `UXI` Infrastructure | 🟢 done | All 4 slices complete (UXI.1–UXI.4) — sources polish, LLM caching, dev stats, Phoenix Info tab |
 | `UXD` Documentation audit | 🔄 in progress | UXD.1 ✅ done (audit report). UXD.2–UXD.5 🔲 pending |
 
 ## Verification Block Template

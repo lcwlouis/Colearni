@@ -224,10 +224,46 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 
 ## Execution Order (Update After Each Run)
 
-1. `UXI.1` Sources page polish
-2. `UXI.2` LLM prompt caching
-3. `UXI.3` Dev stats toggle
-4. `UXI.4` Phoenix Info tab: system prompts & output in LLM traces
+1. `UXI.1` Sources page polish ✅ (pre-existing)
+2. `UXI.2` LLM prompt caching ✅
+3. `UXI.3` Dev stats toggle ✅ (pre-existing)
+4. `UXI.4` Phoenix Info tab: system prompts & output in LLM traces ✅
+
+### Verification Block — UXI.1
+
+- **Root cause**: Already implemented. Global `button` in `base.css:90` has `cursor: pointer`. Tier breakdown display exists in `kb-document-table.tsx:59-70` showing `umbrella · topic · subtopic · granular` counts.
+- **Files changed**: None (pre-existing)
+- **What changed**: N/A — verified existing implementation matches plan requirements
+- **Commands run**: Code review of `base.css` and `kb-document-table.tsx`
+- **Manual verification steps**: Confirmed button cursor pointer, tier breakdown rendering with fallback to "N concepts"
+- **Observed outcome**: All exit criteria met
+
+### Verification Block — UXI.2
+
+- **Root cause**: Prompt structure was already cache-friendly; `cached_tokens` extraction existed but lacked logging.
+- **Files changed**: `adapters/llm/providers.py`
+- **What changed**: Added `log.debug` for prefix cache hits in both `_call_with_observability` and `_stream_with_usage` paths.
+- **Commands run**: `PYTHONPATH=. python -c "from adapters.llm.providers import _BaseGraphLLMClient"` — import ok
+- **Manual verification steps**: Verified prompt structure (static prefix first, dynamic last), cached_tokens extraction in `extract_token_usage()`, and GenerationTrace.cached_tokens field
+- **Observed outcome**: All exit criteria met — cache hits now logged, traces capture cached token counts
+
+### Verification Block — UXI.3
+
+- **Root cause**: Already implemented. `use-dev-stats.ts` hook reads `colearni:showDevStats` from localStorage. `chat-response.tsx` conditionally renders traces in `<details>` when `showDevStats` is true. `global-sidebar.tsx` has checkbox toggle.
+- **Files changed**: None (pre-existing)
+- **What changed**: N/A — verified existing implementation matches plan requirements
+- **Commands run**: Code review of `use-dev-stats.ts`, `chat-response.tsx`, `global-sidebar.tsx`
+- **Manual verification steps**: Confirmed default OFF, toggle persists via localStorage, traces in collapsible section
+- **Observed outcome**: All exit criteria met
+
+### Verification Block — UXI.4
+
+- **Root cause**: `set_llm_span_attributes()` set `llm.input_messages`/`llm.output_messages` (Attributes panel) but never called `set_input_output()` for `input.value`/`output.value` (Phoenix Info tab).
+- **Files changed**: `core/observability.py`
+- **What changed**: Added call to `set_input_output()` at the end of `set_llm_span_attributes()`. Input formatted as `[role]\ncontent` blocks. Output is the assistant response text. Gated by existing `record_content_enabled()`.
+- **Commands run**: `PYTHONPATH=. pytest tests/ -q` — 963 passed
+- **Manual verification steps**: Verified import works, all tests pass, `set_input_output` called with properly formatted input/output
+- **Observed outcome**: All exit criteria met — LLM spans will now show system prompt and output in Phoenix Info tab
 
 ## Verification Matrix
 
