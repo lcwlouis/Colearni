@@ -290,7 +290,7 @@ Dependencies between tracks:
 | `UXG` Graph replacement | 🔄 in progress | UXG.1–UXG.7 ✅ done (Sigma.js core). UXG.8–UXG.13 🔲 pending (user-requested: camera, layouts, loading, legend, settings, expand/prune) |
 | `UXP` Practice UX | 🔲 not started | 0/3 slices — flashcard stack, generate-more, quiz history all pending |
 | `UXT` Tutor UX | 🔲 not started | 0/3 slices — onboarding, status animation, graph-chat nav all pending |
-| `UXI` Infrastructure | 🔲 not started | 0/3 slices — sources, caching, dev stats all pending |
+| `UXI` Infrastructure | 🔲 not started | 0/4 slices — sources, caching, dev stats, Phoenix Info tab all pending |
 | `UXD` Documentation audit | 🔄 in progress | UXD.1 ✅ done (audit report). UXD.2–UXD.5 🔲 pending |
 
 ## Verification Block Template

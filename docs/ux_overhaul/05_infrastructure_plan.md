@@ -42,6 +42,7 @@ Three independent slices:
 1. **Sources page polish**: Fix hover cursor on upload button, change "concepts" count to show node tier breakdown
 2. **LLM prompt caching**: Implement OpenAI prefix caching support for repeated system prompts
 3. **Dev stats toggle**: Add a localStorage-based toggle so users can opt into seeing generation traces
+4. **Phoenix Info tab observability**: Make system prompts and LLM output visible in the Phoenix Info tab for every LLM trace (not just buried in attributes)
 
 ## Non-Negotiable Constraints
 
@@ -60,6 +61,7 @@ Three independent slices:
 - `UXI.1` Sources page polish
 - `UXI.2` LLM prompt caching
 - `UXI.3` Dev stats toggle
+- `UXI.4` Phoenix Info tab: system prompts & output in LLM traces
 
 ## Decision Log
 
@@ -170,6 +172,43 @@ Exit criteria:
 - Traces visible when enabled
 - Persists across refreshes
 
+### UXI.4. Phoenix Info tab: system prompts & output in LLM traces
+
+Purpose:
+- Make system prompts and LLM output immediately visible in the Phoenix Info tab for every LLM span, not buried in span attributes.
+
+Current state:
+- `set_llm_span_attributes()` in `core/observability.py` sets `llm.input_messages` and `llm.output_messages` as JSON string attributes — these appear under the Attributes panel in Phoenix, but NOT in the Info tab.
+- `set_input_output()` exists and sets `input.value` / `output.value` (the fields Phoenix shows on the Info tab), but it is NOT called on LLM spans — only on domain chain spans.
+- Result: opening an LLM trace in Phoenix shows a blank Info tab. The user has to dig through attributes to find the system prompt or output.
+
+Root cause:
+- `_call_with_observability()` and `_stream_with_usage()` in `adapters/llm/providers.py` call `set_llm_span_attributes()` but never call `set_input_output()`.
+
+Files involved:
+- `core/observability.py` — `set_llm_span_attributes()` function
+- `adapters/llm/providers.py` — `_call_with_observability()` and `_stream_with_usage()`
+
+Implementation steps:
+1. In `set_llm_span_attributes()`, after setting `llm.input_messages` and `llm.output_messages`, also call `set_input_output()`:
+   - `input_value`: format as readable text showing the system prompt and user messages (e.g., `"[system]\n{system_prompt}\n\n[user]\n{user_message}"`)
+   - `output_value`: the assistant's response text
+   - This ensures the Info tab shows a human-readable view of the conversation
+2. Alternatively, call `set_input_output()` directly in `_call_with_observability()` and `_stream_with_usage()` after `set_llm_span_attributes()` completes.
+3. Ensure this respects the existing `record_content_enabled()` gate — `set_input_output()` already checks this internally.
+4. Verify all LLM call sites (chat, gardener, mastery, flashcard, quiz, graph extraction) emit the Info tab fields.
+
+Verification:
+- `PYTHONPATH=. pytest -q`
+- Manual: send a tutor chat message → open Phoenix → find the LLM span → Info tab shows system prompt + user message as input, assistant response as output
+- Manual: check a gardener trace → same visibility
+- Manual: check a graph extraction trace → same visibility
+
+Exit criteria:
+- Every LLM span in Phoenix shows system prompt + messages in the Info tab (not just attributes)
+- Output message visible in the Info tab
+- Existing tests pass (no regressions)
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -188,6 +227,7 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 1. `UXI.1` Sources page polish
 2. `UXI.2` LLM prompt caching
 3. `UXI.3` Dev stats toggle
+4. `UXI.4` Phoenix Info tab: system prompts & output in LLM traces
 
 ## Verification Matrix
 
