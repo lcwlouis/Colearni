@@ -108,8 +108,12 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       try {
         sigma.setSetting("nodeReducer", null);
         sigma.setSetting("edgeReducer", null);
+        // Cancel the RAF that setSetting schedules via scheduleRefresh().
+        // Without this, a RAF fires later on the killed instance (nodePrograms={})
+        // and throws an uncaught "could not find a suitable program for bordered".
+        sigma.refresh();
       } catch {
-        // Instance already killed.
+        // Instance already killed; RAF was cancelled or never fired.
       }
     };
   }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors, theme]);
