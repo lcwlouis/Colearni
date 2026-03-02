@@ -185,17 +185,20 @@ def ingest_text_document(
         parsed.normalized_text,
         chunk_size=active_settings.ingest_vector_chunk_size,
         overlap=active_settings.ingest_vector_chunk_overlap,
+        size_unit=active_settings.ingest_chunk_unit,
     )
     if not chunks:
         raise IngestionValidationError("Document produced no chunks after normalization.")
 
     log.info(
-        "Chunked '%s': %d chars → %d chunks (size=%d, overlap=%d)",
+        "Chunked '%s': %d chars → %d chunks (size=%d %s, overlap=%d %s)",
         request.filename,
         len(parsed.normalized_text),
         len(chunks),
         active_settings.ingest_vector_chunk_size,
+        active_settings.ingest_chunk_unit,
         active_settings.ingest_vector_chunk_overlap,
+        active_settings.ingest_chunk_unit,
     )
 
     document, existing_result = _dedup_or_insert(
@@ -307,17 +310,20 @@ def ingest_text_document_fast(
         parsed.normalized_text,
         chunk_size=active_settings.ingest_vector_chunk_size,
         overlap=active_settings.ingest_vector_chunk_overlap,
+        size_unit=active_settings.ingest_chunk_unit,
     )
     if not chunks:
         raise IngestionValidationError("Document produced no chunks after normalization.")
 
     log.info(
-        "Chunked '%s': %d chars → %d chunks (size=%d, overlap=%d)",
+        "Chunked '%s': %d chars → %d chunks (size=%d %s, overlap=%d %s)",
         request.filename,
         len(parsed.normalized_text),
         len(chunks),
         active_settings.ingest_vector_chunk_size,
+        active_settings.ingest_chunk_unit,
         active_settings.ingest_vector_chunk_overlap,
+        active_settings.ingest_chunk_unit,
     )
 
     document, existing_result = _dedup_or_insert(

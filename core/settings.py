@@ -82,33 +82,43 @@ class Settings(BaseSettings):
     # adjacent vector chunks are batched together to reach this size.
     # Set INGEST_GRAPH_CHUNK_SIZE=0 to use one LLM call per vector chunk.
     ingest_vector_chunk_size: int = Field(
-        default=1000,
+        default=250,
         validation_alias=AliasChoices(
             "APP_INGEST_VECTOR_CHUNK_SIZE",
             "INGEST_VECTOR_CHUNK_SIZE",
         ),
-        ge=64,
-        description="Max chars per stored vector-retrieval chunk (≈ chunk_size/4 tokens).",
+        ge=10,
+        description="Target size per vector chunk in the configured unit (words or chars).",
     )
     ingest_vector_chunk_overlap: int = Field(
-        default=150,
+        default=40,
         validation_alias=AliasChoices(
             "APP_INGEST_VECTOR_CHUNK_OVERLAP",
             "INGEST_VECTOR_CHUNK_OVERLAP",
         ),
         ge=0,
-        description="Overlap in chars between adjacent vector chunks.",
+        description="Overlap between adjacent vector chunks in the configured unit.",
+    )
+    ingest_chunk_unit: str = Field(
+        default="words",
+        validation_alias=AliasChoices(
+            "APP_INGEST_CHUNK_UNIT",
+            "INGEST_CHUNK_UNIT",
+        ),
+        pattern=r"^(chars|words)$",
+        description="Unit for chunk sizing: 'chars' or 'words'. Default 'words'.",
     )
     ingest_graph_chunk_size: int = Field(
-        default=0,
+        default=20000,
         validation_alias=AliasChoices(
             "APP_INGEST_GRAPH_CHUNK_SIZE",
             "INGEST_GRAPH_CHUNK_SIZE",
         ),
         ge=0,
         description=(
-            "Max chars per graph-extraction LLM call. Adjacent vector chunks are "
-            "concatenated up to this size. 0 = one LLM call per vector chunk."
+            "Target size per graph-extraction LLM window in the configured unit. "
+            "Adjacent vector chunks are concatenated up to this size. "
+            "0 = one LLM call per vector chunk."
         ),
     )
 

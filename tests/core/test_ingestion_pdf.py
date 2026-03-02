@@ -288,7 +288,7 @@ def test_multipage_pdf_produces_reasonable_chunk_count() -> None:
         f"got {total_extracted}"
     )
 
-    chunks = chunk_text_deterministic(parsed.normalized_text, chunk_size=1000, overlap=150)
+    chunks = chunk_text_deterministic(parsed.normalized_text, chunk_size=1000, overlap=150, size_unit="chars")
     # With ~5000 chars total and 1000-char chunks, we expect at least 4 chunks
     expected_min = max(1, total_extracted // 1000)
     assert len(chunks) >= expected_min, (

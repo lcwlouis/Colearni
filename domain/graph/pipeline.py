@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 def _make_graph_windows(
     chunks: "Sequence[ChunkRow]",
     graph_chunk_size: int,
+    size_unit: str = "words",
 ) -> "list[tuple[int, str]]":
     """Batch adjacent vector chunks into larger text windows for graph extraction.
 
@@ -30,6 +31,9 @@ def _make_graph_windows(
     Returns a list of ``(representative_chunk_id, window_text)`` tuples.
     The representative chunk id is the first chunk id in each batch.
     """
+    def _measure(text: str) -> int:
+        return len(text.split()) if size_unit == "words" else len(text)
+
     if graph_chunk_size <= 0:
         return [(c.id, c.text) for c in chunks]
 
@@ -39,14 +43,14 @@ def _make_graph_windows(
     batch_size = 0
 
     for chunk in chunks:
-        if batch_size + len(chunk.text) > graph_chunk_size and batch_texts:
+        if batch_size + _measure(chunk.text) > graph_chunk_size and batch_texts:
             windows.append((batch_ids[0], "\n\n".join(batch_texts)))
             batch_ids = []
             batch_texts = []
             batch_size = 0
         batch_ids.append(chunk.id)
         batch_texts.append(chunk.text)
-        batch_size += len(chunk.text)
+        batch_size += _measure(chunk.text)
 
     if batch_texts:
         windows.append((batch_ids[0], "\n\n".join(batch_texts)))
@@ -100,7 +104,7 @@ def build_graph_for_chunks(
         canonical_merged = 0
         canonical_edges_upserted = 0
 
-        windows = _make_graph_windows(chunks, settings.ingest_graph_chunk_size)
+        windows = _make_graph_windows(chunks, settings.ingest_graph_chunk_size, settings.ingest_chunk_unit)
         for window_chunk_id, window_text in windows:
             with observation_context(chunk_id=window_chunk_id), start_span(
                 "graph.resolver.chunk",
