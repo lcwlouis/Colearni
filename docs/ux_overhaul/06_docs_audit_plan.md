@@ -22,6 +22,7 @@ Archive snapshots:
 2. A slice is ONLY complete with docs updated + accuracy verified + verification block produced.
 3. Work PR-sized: `chore(docs): <slice-id> <short description>`.
 4. If a behavior change risk is discovered, STOP and update this plan.
+5. If a slice is reopened during an audit cycle, treat it as a fresh slice: re-read the slice definition, re-implement, re-verify, and produce a new Verification Block prefixed with "Audit Cycle N —".
 
 ## Purpose
 
@@ -281,6 +282,19 @@ Exit criteria:
 - PROMPTS.md catalog matches current prompt templates
 - All 9 docs fully audited and updated
 
+## Audit Cycle Reopening
+
+After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
+
+1. The slice status in the Execution Order is changed back to "reopened (audit cycle N)"
+2. The original Verification Block is preserved (do not delete it)
+3. A new Verification Block is produced, prefixed: `Audit Cycle N — Verification Block - {slice-id}`
+4. The reopening reason is documented inline:
+   ```
+   Reopened in Audit Cycle {N}: {reason}
+   ```
+5. Only the specific issue identified in the Audit Report is addressed — do not widen scope
+
 ## Execution Order (Update After Each Run)
 
 1. `UXD.1` Audit and flag stale sections
@@ -320,6 +334,8 @@ Execution loop for this child plan:
 7. When all UXD slices are complete, immediately re-open docs/UX_OVERHAUL_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
 
 Do NOT stop just because UXD is complete. UXD completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
+
+If this child plan is being revisited during an audit cycle, only work on slices marked as "reopened". Produce audit-prefixed Verification Blocks. Do not re-examine slices that passed the audit.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 
