@@ -54,6 +54,7 @@ class ChatRespondAPIRequest(BaseModel):
     concept_switch_decision: str | None = None
     top_k: int = Field(default=5, ge=1)
     grounding_mode: str | None = None
+    tutor_protocol: bool = False
 
 
 @router.post("/sessions", response_model=ChatSessionSummary, status_code=status.HTTP_201_CREATED)
@@ -189,6 +190,7 @@ def respond_chat(
         concept_switch_decision=payload.concept_switch_decision,
         top_k=payload.top_k,
         grounding_mode=payload.grounding_mode,
+        tutor_protocol=payload.tutor_protocol,
     )
     try:
         return generate_chat_response(
@@ -241,6 +243,7 @@ def respond_chat_stream(
         concept_switch_decision=payload.concept_switch_decision,
         top_k=payload.top_k,
         grounding_mode=payload.grounding_mode,
+        tutor_protocol=payload.tutor_protocol,
     )
 
     def _sse_generator():

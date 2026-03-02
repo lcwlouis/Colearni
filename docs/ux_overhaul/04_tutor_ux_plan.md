@@ -68,6 +68,7 @@ What this track changes:
 - `UXT.1` Onboarding auto-send with confirm
 - `UXT.2` Streaming status replace-mode animation
 - `UXT.3` Graph-to-chat navigation
+- `UXT.4` Fix Socratic tutor protocol passthrough
 
 ## Decision Log
 
@@ -204,6 +205,38 @@ Exit criteria:
 - Active chats are discoverable from concept view
 - "Start new chat" creates a chat with the right topic context
 
+### UXT.4. Fix Socratic tutor protocol passthrough
+
+Purpose:
+- The `tutor_protocol` flag sent by the frontend never reaches the domain layer — two breaks in the API gateway silently drop it, making the Socratic interactive mode a dead code path.
+- See full audit: `docs/ux_overhaul/socratic_tutor_audit.md`
+
+Root cause:
+- `ChatRespondAPIRequest` (client-facing Pydantic model) is missing the `tutor_protocol` field, so Pydantic silently discards it from the request body.
+- Both route handlers (`respond_chat` and `respond_chat_stream`) omit `tutor_protocol` when constructing the internal `ChatRespondRequest`, so it always defaults to `False`.
+
+Files involved:
+- `apps/api/routes/chat.py` — Add `tutor_protocol: bool = False` to `ChatRespondAPIRequest` (line 56) and forward it in both route handlers (lines 192, 244)
+
+Implementation steps:
+1. Add `tutor_protocol: bool = False` field to `ChatRespondAPIRequest` class at `apps/api/routes/chat.py:56`.
+2. In `respond_chat()` (line 182-192): add `tutor_protocol=payload.tutor_protocol` to the `ChatRespondRequest(...)` constructor.
+3. In `respond_chat_stream()` (line 234-244): add `tutor_protocol=payload.tutor_protocol` to the `ChatRespondRequest(...)` constructor.
+4. Add a route-level integration test that verifies `tutor_protocol=True` in the API request body reaches the domain's `ChatRespondRequest` with `tutor_protocol=True`.
+5. Consider adding a `log.warning` in `stream.py` when `tutor_protocol` is `True` but the Socratic branch is skipped due to missing `session_id` or unavailable `tutor_llm_client`.
+
+Verification:
+- `pytest tests/` — existing tests still pass
+- New route-level test: POST `/respond/stream` with `tutor_protocol: true` → domain receives `tutor_protocol=True`
+- Manual: enable Socratic toggle → send a message → response uses Socratic protocol (concept card, step progress, question-first format)
+- Manual: disable Socratic toggle → response uses normal chat format
+
+Exit criteria:
+- `tutor_protocol: true` from frontend reaches `stream.py:359` condition
+- Socratic interactive branch activates when toggle is on
+- No regression in normal (non-Socratic) chat flow
+- Route-level test covering the passthrough
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -222,6 +255,7 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 1. `UXT.1` Onboarding auto-send with confirm
 2. `UXT.2` Streaming status replace-mode animation
 3. `UXT.3` Graph-to-chat navigation
+4. `UXT.4` Fix Socratic tutor protocol passthrough
 
 ## Verification Matrix
 
