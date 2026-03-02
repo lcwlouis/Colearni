@@ -287,7 +287,7 @@ Dependencies between tracks:
 | Track | Status | Last note |
 |---|---|---|
 | `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
-| `UXG` Graph replacement | 🔄 in progress | UXG.1–UXG.7 ✅ done (Sigma.js core). UXG.8–UXG.13 🔲 pending (user-requested: camera, layouts, loading, legend, settings, expand/prune) |
+| `UXG` Graph replacement | 🟢 done | All 13 slices complete (UXG.1–UXG.13) — Sigma.js core + camera, layouts, loading, legend, settings, expand/prune |
 | `UXP` Practice UX | 🔲 not started | 0/3 slices — flashcard stack, generate-more, quiz history all pending |
 | `UXT` Tutor UX | 🔲 not started | 0/3 slices — onboarding, status animation, graph-chat nav all pending |
 | `UXI` Infrastructure | 🔲 not started | 0/4 slices — sources, caching, dev stats, Phoenix Info tab all pending |

@@ -579,12 +579,12 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 5. `UXG.5` Interactions ✅
 6. `UXG.6` Search ✅
 7. `UXG.7` Integration + archive ✅
-8. `UXG.8` Camera control panel 🔲
-9. `UXG.9` Extended layout suite 🔲
-10. `UXG.10` Loading states 🔲
-11. `UXG.11` Legend & status bar 🔲
-12. `UXG.12` Settings panel + persistence 🔲
-13. `UXG.13` Node expand/prune 🔲
+8. `UXG.8` Camera control panel ✅
+9. `UXG.9` Extended layout suite ✅
+10. `UXG.10` Loading states ✅
+11. `UXG.11` Legend & status bar ✅
+12. `UXG.12` Settings panel + persistence ✅
+13. `UXG.13` Node expand/prune ✅
 
 ## Verification Matrix
 
