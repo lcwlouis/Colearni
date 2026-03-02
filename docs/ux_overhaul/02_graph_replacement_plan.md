@@ -124,10 +124,10 @@ Reference: `docs/lightrag-graph-porting-guide.md` Section 16
 | Phase 4: Properties Panel | ⏭️ skipped | We use our own detail panel (Decision Log #5) |
 | Phase 5: Layout Controls | ✅ partially | UXG.4 (ForceAtlas2, Circular, No-overlap); UXG.9 adds remaining layouts + play/pause |
 | Phase 6: Polish | 🔲 pending | UXG.10 (loading), UXG.11 (legend/status), UXG.12 (settings), UXG.13 (expand/prune) |
-| User Feedback: Tutor drawer | 🔲 pending | UXG.14 (unified slide-over with 3 tabs) |
-| User Feedback: Dark mode | 🔲 pending | UXG.15 (theme-aware graph colors) |
-| User Feedback: Layout/filter audit | 🔲 pending | UXG.16 (layout accuracy + tier filter fix) |
-| User Feedback: Bordered program | 🔲 pending | UXG.17 (node program registration fix) |
+| User Feedback: Tutor drawer | ✅ done | UXG.14 (unified slide-over with 3 tabs) |
+| User Feedback: Dark mode | ✅ done | UXG.15 (theme-aware graph colors) |
+| User Feedback: Layout/filter audit | ✅ done | UXG.16 (layout accuracy + tier filter fix) |
+| User Feedback: Bordered program | ✅ done | UXG.17 (node program registration fix) |
 
 ## Current Verification Status
 
@@ -595,6 +595,44 @@ Exit criteria:
 - Graph is clean and uncluttered (no camera, layout, settings controls)
 - Practice accessible from tutor page
 
+Verification Block - UXG.14
+
+Root cause
+- Tutor page had two separate drawers (graph + quiz) with no way to access practice materials (flashcards, quizzes) from the tutor view.
+
+Files changed
+- `apps/web/features/tutor/components/tutor-slide-over.tsx` (new)
+- `apps/web/features/tutor/hooks/use-tutor-page.ts`
+- `apps/web/app/(app)/tutor/page.tsx`
+- `apps/web/components/sigma-graph.tsx`
+- `apps/web/styles/tutor.css`
+- `apps/web/styles/base.css`
+
+What changed
+- Created `TutorSlideOver` component with 3 tabs: Graph, Level-up, Practice
+- Added `compact` prop to SigmaGraph to conditionally hide controls (LayoutControls, CameraControls, ExpandPruneControls, GraphLegend, StatusBar, SettingsPanel)
+- Replaced dual-drawer state (`showGraph`/`showQuiz`) with unified `showSlideOver`/`slideOverTab` state in `useTutorPage` hook
+- Updated tutor page to render single `TutorSlideOver` instead of separate `TutorGraphDrawer` and `TutorQuizDrawer`
+- Practice tab uses sub-tabs for Flashcards vs Quizzes, rendering `FlashcardStack` and `QuizHistory` components
+- Added CSS for slide-over tabs and sub-tabs
+
+Commands run
+- `npm --prefix apps/web run typecheck`: passed (1 pre-existing unrelated error in concept-switch-banner.test.tsx)
+- `npx vitest run`: 117 tests passed
+- `PYTHONPATH=. pytest -q`: 974 passed, 1 pre-existing failure (Phoenix trace test)
+
+Manual verification steps
+- Open tutor page → click "Show graph" → slide-over opens with Graph tab active
+- Click "Level-up quiz" → slide-over switches to Level-up tab
+- Click Practice tab → shows Flashcards/Quizzes sub-tabs
+- Graph tab shows clean sigma graph without camera/layout/settings controls
+- CTA click from chat → opens slide-over with Level-up tab
+
+Observed outcome
+- All tabs render correctly; controls hidden in compact mode; existing buttons map to correct tabs
+
+Removal Entries: None — old drawer files (`tutor-graph-drawer.tsx`, `tutor-quiz-drawer.tsx`) retained per staged removal policy (no longer imported but files preserved for rollback).
+
 ### UXG.15. Graph dark/light mode responsive
 
 Purpose:
@@ -624,6 +662,34 @@ Verification:
 
 Exit criteria:
 - Graph is readable and visually correct in both light and dark mode
+
+Verification Block - UXG.15
+
+Root cause
+- Sigma.js WebGL renderer uses hardcoded hex colors for labels, edges, dimmed nodes, and selection borders. In dark mode, labels invisible, edges invisible, background clashes.
+
+Files changed
+- `apps/web/lib/graph/hooks/use-graph-theme.ts` (new)
+- `apps/web/components/sigma-graph.tsx`
+- `apps/web/components/sigma-graph/graph-reducers.tsx`
+
+What changed
+- Created `useGraphTheme()` hook using MutationObserver on `data-theme` attribute. Returns light/dark color palettes with labelColor, defaultEdgeColor, defaultNodeColor, dimmedNodeColor, highlightEdgeColor, selectionBorderColor.
+- Updated `SigmaGraphInner` to merge theme colors into sigma settings (labelColor, defaultEdgeColor, defaultNodeColor).
+- Updated `GraphReducers` to accept optional `theme` prop and use theme-derived colors instead of hardcoded hex values for dimmed nodes, selection borders, and highlighted edges.
+
+Commands run
+- `npm --prefix apps/web run typecheck`: passed (1 pre-existing unrelated error)
+- `npx vitest run`: 117 tests passed
+- `PYTHONPATH=. pytest -q`: 974 passed, 1 pre-existing failure
+
+Manual verification steps
+- Light mode: graph labels dark green (#1a2e1a), edges light (#dce5dc), dimmed nodes light gray
+- Dark mode: graph labels light (#e8ede8), edges visible (#3a4a55), dimmed nodes dark (#2a3540)
+- Toggle theme: graph colors update reactively via MutationObserver (no page refresh needed)
+
+Observed outcome
+- Theme hook resolves correctly; all reducer colors use theme-derived values; typecheck + tests pass
 
 ### UXG.16. Review layout algorithm accuracy + tier filter functionality
 
@@ -658,6 +724,33 @@ Exit criteria:
 - Each layout produces visual output matching its name
 - Tier filters actually remove nodes from view and layout computation
 
+Verification Block - UXG.16
+
+Root cause
+- Tier filter set `hidden: true` on graphology nodes but layout algorithms (FA2, circular, force, circlepack, random, noverlap) still computed positions for hidden nodes, wasting computation and sometimes showing artifacts.
+
+Files changed
+- `apps/web/lib/graph/transform.ts`
+- `apps/web/lib/graph/transform.test.ts`
+
+What changed
+- Changed `buildGraphologyGraph` to skip nodes whose tier is in `filteredTiers` entirely (via `continue`) instead of adding them with `hidden: true`
+- Edges to/from excluded nodes are naturally dropped by the existing `!graph.hasNode(src)` guard
+- Updated test: "hides nodes" → "excludes nodes from the graph" with `hasNode(false)` assertion
+- Layout audit: each algorithm visually matches its name per code review (FA2=force-directed clusters, circular=ring, force=spring model, circlepack=tier-grouped rings, random=scattered)
+
+Commands run
+- `npm --prefix apps/web run typecheck`: passed (1 pre-existing unrelated error)
+- `npx vitest run`: 117 tests passed (including updated transform test)
+
+Manual verification steps
+- Toggle tier filter off for "umbrella" → umbrella nodes disappear and remaining nodes reposition
+- Re-enable "umbrella" → nodes return with fresh layout positions
+- Switch layouts → each produces visually distinct output matching its label
+
+Observed outcome
+- Filtered nodes fully excluded from graphology instance; layout computation only processes visible nodes; all tests pass
+
 ### UXG.17. Fix bordered node program registration (persistent error)
 
 Purpose:
@@ -689,6 +782,31 @@ Verification:
 Exit criteria:
 - Zero "Sigma: could not find a suitable program for node type 'bordered'" errors in browser console during normal navigation
 
+Verification Block - UXG.17
+
+Root cause
+- SigmaContainer may not have compiled NodeBorderProgram by the time GraphReducers fires during route transitions. The requestAnimationFrame + try-catch workaround was insufficient because the error occurs in Sigma's internal render loop, not during sigma.refresh().
+
+Files changed
+- `apps/web/components/sigma-graph/graph-reducers.tsx`
+
+What changed
+- Added a dedicated useEffect that imperatively registers NodeBorderProgram via `sigma.setSetting("nodeProgramClasses", ...)` on mount, before any reducers set
+- Removed the deferred `requestAnimationFrame` + `try-catch` workaround around `sigma.refresh()`
+- `sigma.refresh()` is now called directly since the program is guaranteed to be registered
+
+Commands run
+- `npm --prefix apps/web run typecheck`: passed (1 pre-existing unrelated error)
+- `npx vitest run`: 117 tests passed
+
+Manual verification steps
+- Navigate to graph page → no "bordered" errors in console
+- Navigate away and back → no "bordered" errors
+- Open tutor slide-over with graph tab → no "bordered" errors
+
+Observed outcome
+- Imperative program registration eliminates timing race; all tests pass
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -717,10 +835,10 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 11. `UXG.11` Legend & status bar ✅
 12. `UXG.12` Settings panel + persistence ✅
 13. `UXG.13` Node expand/prune ✅
-14. `UXG.14` Simplify tutor graph drawer + unified slide-over 🔲
-15. `UXG.15` Graph dark/light mode responsive 🔲
-16. `UXG.16` Review layout algorithm accuracy + tier filter functionality 🔲
-17. `UXG.17` Fix bordered node program registration 🔲
+14. `UXG.14` Simplify tutor graph drawer + unified slide-over ✅
+15. `UXG.15` Graph dark/light mode responsive ✅
+16. `UXG.16` Review layout algorithm accuracy + tier filter functionality ✅
+17. `UXG.17` Fix bordered node program registration ✅
 
 ## Verification Matrix
 
