@@ -88,6 +88,17 @@ _DISAMBIGUATION_SCHEMA: dict[str, object] = {
     "required": ["decision", "confidence", "merge_into_id", "alias_to_add", "proposed_description", "link_to_id", "link_relation_type"],
     "additionalProperties": False,
 }
+_DISAMBIGUATION_BATCH_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "decisions": {
+            "type": "array",
+            "items": _DISAMBIGUATION_SCHEMA,
+        },
+    },
+    "required": ["decisions"],
+    "additionalProperties": False,
+}
 
 
 class _BaseGraphLLMClient(ABC):
@@ -186,6 +197,73 @@ class _BaseGraphLLMClient(ABC):
             prompt_meta=prompt_meta,
             system_prompt=system_prompt,
         )
+
+    def disambiguate_batch(
+        self,
+        *,
+        items: Sequence[Mapping[str, object]],
+    ) -> Sequence[Mapping[str, Any]]:
+        """Disambiguate multiple concepts in one LLM call.
+
+        Each item must have: raw_name, context_snippet, candidates.
+        Returns list of decision dicts in input order.
+        Falls back to individual calls on parse failure.
+        """
+        if not items:
+            return []
+        if len(items) == 1:
+            item = items[0]
+            result = self.disambiguate(
+                raw_name=str(item["raw_name"]),
+                context_snippet=str(item.get("context_snippet") or ""),
+                candidates=list(item.get("candidates", [])),  # type: ignore[arg-type]
+            )
+            return [result]
+
+        batch_payload = []
+        for item in items:
+            batch_payload.append({
+                "raw_name": item["raw_name"],
+                "context_snippet": item.get("context_snippet") or "",
+                "candidates": list(item.get("candidates", [])),
+            })
+        batch_json = json.dumps(batch_payload, ensure_ascii=True)
+
+        prompt_meta = None
+        system_prompt = None
+        try:
+            system_prompt, _ = _registry.render_with_meta(
+                "graph_disambiguate_batch_v1_system", {}
+            )
+            prompt, prompt_meta = _registry.render_with_meta(
+                "graph_disambiguate_batch_v1",
+                {"batch_items_json": batch_json},
+            )
+        except Exception:
+            system_prompt = (
+                "You are a conservative graph resolver. "
+                "For each concept, decide MERGE_INTO, CREATE_NEW, or LINK_ONLY. "
+                "Return JSON with a 'decisions' array."
+            )
+            prompt = (
+                "Resolve each concept below.\n\n"
+                f"{batch_json}"
+            )
+
+        raw = self._chat_json(
+            schema_name="graph_disambiguation_batch",
+            schema=_DISAMBIGUATION_BATCH_SCHEMA,
+            prompt=prompt,
+            prompt_meta=prompt_meta,
+            system_prompt=system_prompt,
+        )
+        decisions = raw.get("decisions", [])
+        if not isinstance(decisions, list) or len(decisions) != len(items):
+            raise ValueError(
+                f"Batch disambiguation returned {len(decisions)} decisions "
+                f"for {len(items)} items"
+            )
+        return decisions
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> str:
         text, _ = self.generate_tutor_text_traced(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)

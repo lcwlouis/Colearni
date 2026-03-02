@@ -142,13 +142,13 @@ def build_graph_for_chunks(
                 )
 
                 resolved_in_chunk: dict[str, int] = {}
-                for concept in extraction.concepts:
-                    resolved = resolver.resolve_concept(
-                        workspace_id=workspace_id,
-                        chunk_id=window_chunk_id,
-                        raw_concept=concept,
-                        budgets=budgets,
-                    )
+                resolved_list = resolver.resolve_concepts_batch(
+                    workspace_id=workspace_id,
+                    chunk_id=window_chunk_id,
+                    raw_concepts=extraction.concepts,
+                    budgets=budgets,
+                )
+                for concept, resolved in zip(extraction.concepts, resolved_list):
                     resolved_in_chunk[normalize_alias(concept.name)] = resolved.concept_id
                     if resolved.created:
                         canonical_created += 1

@@ -49,6 +49,7 @@ class ResolverConfig:
     concept_description_max_chars: int
     edge_description_max_chars: int
     edge_weight_cap: float
+    disambiguate_batch_size: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ResolverConfig:
@@ -64,6 +65,7 @@ class ResolverConfig:
             concept_description_max_chars=settings.resolver_concept_description_max_chars,
             edge_description_max_chars=settings.resolver_edge_description_max_chars,
             edge_weight_cap=settings.resolver_edge_weight_cap,
+            disambiguate_batch_size=settings.resolver_disambiguate_batch_size,
         )
 
 
@@ -196,6 +198,98 @@ class OnlineResolver:
             query_embedding=query_embedding,
         )
 
+    def resolve_concepts_batch(
+        self,
+        *,
+        workspace_id: int,
+        chunk_id: int,
+        raw_concepts: Sequence[ExtractedConcept],
+        budgets: ResolverBudgets,
+    ) -> list[ResolvedConcept]:
+        """Resolve multiple raw concepts, batching LLM disambiguation calls.
+
+        Runs exact/lexical/vector deterministic stages per concept. Concepts
+        that fall through to LLM disambiguation are collected and sent in
+        batches of ``config.disambiguate_batch_size``.
+        """
+        batch_size = self._config.disambiguate_batch_size
+
+        # Phase 1: run deterministic stages, collect LLM-needing concepts
+        results: dict[int, ResolvedConcept] = {}  # index → result
+        llm_pending: list[tuple[int, ExtractedConcept, str, list[CanonicalCandidate], list[float] | None]] = []
+
+        for idx, raw_concept in enumerate(raw_concepts):
+            name_norm = normalize_alias(raw_concept.name)
+            if not name_norm:
+                continue
+
+            exact_match = graph_repository.find_alias_match(
+                self._session, workspace_id=workspace_id, alias=name_norm,
+            )
+            query_embedding = self._embed_query(
+                raw_name=raw_concept.name, context=raw_concept.context_snippet,
+            )
+
+            if exact_match is not None:
+                decision = ResolverDecision(
+                    decision="MERGE_INTO", merge_into_id=exact_match.id,
+                    confidence=1.0, method="exact",
+                )
+                results[idx] = self._apply_decision(
+                    workspace_id=workspace_id, chunk_id=chunk_id,
+                    raw_concept=raw_concept, name_norm=name_norm,
+                    decision=decision, query_embedding=query_embedding,
+                )
+                continue
+
+            lexical_rows = graph_repository.list_lexical_candidates(
+                self._session, workspace_id=workspace_id,
+                alias=name_norm, top_k=self._config.lexical_top_k,
+            )
+            vector_rows: list[graph_repository.CanonicalCandidateRow] = []
+            if query_embedding is not None:
+                vector_rows = graph_repository.list_vector_candidates(
+                    self._session, workspace_id=workspace_id,
+                    query_embedding=query_embedding, top_k=self._config.vector_top_k,
+                )
+            candidates = self._combine_candidates(lexical_rows=lexical_rows, vector_rows=vector_rows)
+
+            lex_dec = self._deterministic_lexical_decision(candidates)
+            if lex_dec is not None:
+                results[idx] = self._apply_decision(
+                    workspace_id=workspace_id, chunk_id=chunk_id,
+                    raw_concept=raw_concept, name_norm=name_norm,
+                    decision=lex_dec, query_embedding=query_embedding,
+                )
+                continue
+
+            vec_dec = self._deterministic_vector_decision(candidates)
+            if vec_dec is not None:
+                results[idx] = self._apply_decision(
+                    workspace_id=workspace_id, chunk_id=chunk_id,
+                    raw_concept=raw_concept, name_norm=name_norm,
+                    decision=vec_dec, query_embedding=query_embedding,
+                )
+                continue
+
+            llm_pending.append((idx, raw_concept, name_norm, candidates, query_embedding))
+
+        # Phase 2: batch LLM disambiguation
+        for batch_start in range(0, len(llm_pending), batch_size):
+            batch = llm_pending[batch_start:batch_start + batch_size]
+            decisions = self._batch_llm_disambiguation(
+                workspace_id=workspace_id, chunk_id=chunk_id,
+                batch=batch, budgets=budgets,
+            )
+            for (idx, raw_concept, name_norm, _candidates, query_embedding), decision in zip(batch, decisions):
+                results[idx] = self._apply_decision(
+                    workspace_id=workspace_id, chunk_id=chunk_id,
+                    raw_concept=raw_concept, name_norm=name_norm,
+                    decision=decision, query_embedding=query_embedding,
+                )
+
+        return [results[i] for i in sorted(results)]
+
     def upsert_edge(
         self,
         *,
@@ -276,6 +370,138 @@ class OnlineResolver:
             vector_margin_threshold=self._config.vector_margin_threshold,
         )
 
+    def _batch_llm_disambiguation(
+        self,
+        *,
+        workspace_id: int,
+        chunk_id: int,
+        batch: list[tuple[int, ExtractedConcept, str, list[CanonicalCandidate], list[float] | None]],
+        budgets: ResolverBudgets,
+    ) -> list[ResolverDecision]:
+        """Disambiguate a batch of concepts in a single LLM call.
+
+        Falls back to individual calls on batch failure.
+        """
+        # Filter out concepts with no candidates (straight CREATE_NEW)
+        items_for_llm: list[tuple[int, ExtractedConcept, list[CanonicalCandidate]]] = []
+        decisions: dict[int, ResolverDecision] = {}
+
+        for i, (idx, raw_concept, _name_norm, candidates, _emb) in enumerate(batch):
+            if not candidates:
+                decisions[i] = ResolverDecision(
+                    decision="CREATE_NEW", merge_into_id=None,
+                    confidence=1.0, method="fallback",
+                )
+            elif not budgets.can_call_llm():
+                emit_event(
+                    "graph.resolver.budget.hard_stop",
+                    status="warning", component="graph",
+                    operation="graph.resolver.resolve_concept",
+                    workspace_id=workspace_id, chunk_id=chunk_id,
+                    reason=budgets.last_hard_stop_reason or "budget_exhausted",
+                )
+                decisions[i] = ResolverDecision(
+                    decision="CREATE_NEW", merge_into_id=None,
+                    confidence=1.0, method="fallback",
+                )
+            else:
+                items_for_llm.append((i, raw_concept, candidates))
+
+        if not items_for_llm:
+            return [decisions[i] for i in range(len(batch))]
+
+        # Build batch payload
+        batch_items: list[dict[str, object]] = []
+        for _i, raw_concept, candidates in items_for_llm:
+            batch_items.append({
+                "raw_name": raw_concept.name,
+                "context_snippet": raw_concept.context_snippet or "",
+                "candidates": [
+                    {
+                        "id": c.concept_id,
+                        "canonical_name": c.canonical_name,
+                        "description": c.description,
+                        "aliases": list(c.aliases),
+                    }
+                    for c in candidates
+                ],
+            })
+
+        # Register one LLM call for the whole batch
+        budgets.register_llm_call()
+        emit_resolver_budget_usage(
+            workspace_id=workspace_id, chunk_id=chunk_id, budgets=budgets,
+        )
+
+        try:
+            with observation_context(operation="graph.disambiguate_batch"):
+                raw_decisions = self._llm_client.disambiguate_batch(items=batch_items)
+
+            for (i, raw_concept, candidates), raw_dec in zip(items_for_llm, raw_decisions):
+                try:
+                    payload = _DisambiguationPayload.model_validate(raw_dec)
+                    decisions[i] = self._payload_to_decision(payload, candidates)
+                except (ValidationError, ValueError):
+                    decisions[i] = ResolverDecision(
+                        decision="CREATE_NEW", merge_into_id=None,
+                        confidence=1.0, method="fallback", llm_used=True,
+                    )
+        except (RuntimeError, ValueError):
+            # Batch failed – fall back to individual calls
+            for i, raw_concept, candidates in items_for_llm:
+                decisions[i] = self._llm_disambiguation_decision(
+                    workspace_id=workspace_id, chunk_id=chunk_id,
+                    raw_concept=raw_concept, candidates=candidates,
+                    budgets=budgets,
+                )
+
+        return [decisions[i] for i in range(len(batch))]
+
+    def _payload_to_decision(
+        self,
+        payload: _DisambiguationPayload,
+        candidates: Sequence[CanonicalCandidate],
+    ) -> ResolverDecision:
+        """Convert a validated disambiguation payload into a ResolverDecision."""
+        candidate_ids = {c.concept_id for c in candidates}
+
+        if payload.confidence < self._config.llm_confidence_floor:
+            return ResolverDecision(
+                decision="CREATE_NEW", merge_into_id=None,
+                confidence=payload.confidence, method="llm",
+                alias_to_add=payload.alias_to_add,
+                proposed_description=payload.proposed_description,
+                llm_used=True,
+            )
+
+        if payload.decision == "MERGE_INTO" and payload.merge_into_id in candidate_ids:
+            return ResolverDecision(
+                decision="MERGE_INTO", merge_into_id=payload.merge_into_id,
+                confidence=payload.confidence, method="llm",
+                alias_to_add=payload.alias_to_add,
+                proposed_description=payload.proposed_description,
+                llm_used=True,
+            )
+
+        if payload.decision == "LINK_ONLY" and payload.link_to_id in candidate_ids:
+            return ResolverDecision(
+                decision="LINK_ONLY", merge_into_id=None,
+                confidence=payload.confidence, method="llm",
+                alias_to_add=payload.alias_to_add,
+                proposed_description=payload.proposed_description,
+                llm_used=True,
+                link_to_id=payload.link_to_id,
+                link_relation_type=payload.link_relation_type or "related_to",
+            )
+
+        return ResolverDecision(
+            decision="CREATE_NEW", merge_into_id=None,
+            confidence=payload.confidence, method="llm",
+            alias_to_add=payload.alias_to_add,
+            proposed_description=payload.proposed_description,
+            llm_used=True,
+        )
+
     def _llm_disambiguation_decision(
         self,
         *,
@@ -350,51 +576,7 @@ class OnlineResolver:
                 llm_used=True,
             )
 
-        candidate_ids = {candidate.concept_id for candidate in candidates}
-        if payload.confidence < self._config.llm_confidence_floor:
-            return ResolverDecision(
-                decision="CREATE_NEW",
-                merge_into_id=None,
-                confidence=payload.confidence,
-                method="llm",
-                alias_to_add=payload.alias_to_add,
-                proposed_description=payload.proposed_description,
-                llm_used=True,
-            )
-
-        if payload.decision == "MERGE_INTO" and payload.merge_into_id in candidate_ids:
-            return ResolverDecision(
-                decision="MERGE_INTO",
-                merge_into_id=payload.merge_into_id,
-                confidence=payload.confidence,
-                method="llm",
-                alias_to_add=payload.alias_to_add,
-                proposed_description=payload.proposed_description,
-                llm_used=True,
-            )
-
-        if payload.decision == "LINK_ONLY" and payload.link_to_id in candidate_ids:
-            return ResolverDecision(
-                decision="LINK_ONLY",
-                merge_into_id=None,
-                confidence=payload.confidence,
-                method="llm",
-                alias_to_add=payload.alias_to_add,
-                proposed_description=payload.proposed_description,
-                llm_used=True,
-                link_to_id=payload.link_to_id,
-                link_relation_type=payload.link_relation_type or "related_to",
-            )
-
-        return ResolverDecision(
-            decision="CREATE_NEW",
-            merge_into_id=None,
-            confidence=payload.confidence,
-            method="llm",
-            alias_to_add=payload.alias_to_add,
-            proposed_description=payload.proposed_description,
-            llm_used=True,
-        )
+        return self._payload_to_decision(payload, candidates)
 
     def _apply_decision(
         self,

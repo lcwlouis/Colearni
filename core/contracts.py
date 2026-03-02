@@ -41,6 +41,17 @@ class GraphLLMClient(Protocol):
     ) -> Mapping[str, Any]:
         """Choose merge target vs create-new from bounded candidate set."""
 
+    def disambiguate_batch(
+        self,
+        *,
+        items: Sequence[Mapping[str, object]],
+    ) -> Sequence[Mapping[str, Any]]:
+        """Disambiguate multiple concepts in a single LLM call.
+
+        Each item has keys: raw_name, context_snippet, candidates.
+        Returns a list of decision dicts in the same order as input.
+        """
+
     def generate_tutor_text(
         self,
         *,

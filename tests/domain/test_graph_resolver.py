@@ -36,6 +36,16 @@ class StubLLM(GraphLLMClient):
             raise self._disambiguation_payload
         return self._disambiguation_payload
 
+    def disambiguate_batch(
+        self,
+        *,
+        items: Sequence[Mapping[str, object]],
+    ) -> Sequence[Mapping[str, Any]]:
+        self.disambiguate_calls += 1
+        if isinstance(self._disambiguation_payload, Exception):
+            raise self._disambiguation_payload
+        return [self._disambiguation_payload for _ in items]
+
 
 class StubEmbeddingProvider(EmbeddingProvider):
     """Embedding stub returning one deterministic vector per query."""
@@ -68,6 +78,7 @@ def _resolver(
             concept_description_max_chars=500,
             edge_description_max_chars=300,
             edge_weight_cap=10.0,
+            disambiguate_batch_size=5,
         ),
     )
 
@@ -375,3 +386,41 @@ def test_upsert_edge_normalizes_keywords_and_weight(monkeypatch: pytest.MonkeyPa
     assert edge_id == 777
     assert captured["keywords"] == ["span", "dimension"]
     assert captured["delta_weight"] == 0.0
+
+
+def test_resolve_concepts_batch_uses_batch_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """resolve_concepts_batch should batch LLM calls instead of calling per concept."""
+    llm = StubLLM({
+        "decision": "CREATE_NEW",
+        "confidence": 0.9,
+        "merge_into_id": None,
+        "alias_to_add": None,
+        "proposed_description": "test",
+        "link_to_id": None,
+        "link_relation_type": None,
+    })
+    resolver = _resolver(llm)
+    _patch_repo_defaults(monkeypatch)
+
+    # Give lexical candidates so concepts reach LLM stage
+    monkeypatch.setattr(
+        graph_repository, "list_lexical_candidates",
+        lambda *args, **kwargs: [_candidate_row(101, lexical=0.5)],
+    )
+
+    concepts = [
+        ExtractedConcept(name=f"Concept {i}", context_snippet=f"context {i}")
+        for i in range(6)
+    ]
+    budgets = ResolverBudgets(max_llm_calls_per_chunk=50, max_llm_calls_per_document=100)
+
+    results = resolver.resolve_concepts_batch(
+        workspace_id=1, chunk_id=2,
+        raw_concepts=concepts, budgets=budgets,
+    )
+
+    assert len(results) == 6
+    # With batch_size=5, 6 concepts should need 2 LLM calls (batch of 5 + batch of 1)
+    # batch of 1 falls back to single disambiguate() call
+    assert llm.disambiguate_calls == 2
+    assert all(r.created for r in results)

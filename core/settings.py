@@ -324,6 +324,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("APP_RESOLVER_EDGE_WEIGHT_CAP", "RESOLVER_EDGE_WEIGHT_CAP"),
         ge=0.0,
     )
+    resolver_disambiguate_batch_size: int = Field(
+        default=5,
+        description="Number of concepts to disambiguate in a single LLM call (1 = no batching)",
+        validation_alias=AliasChoices(
+            "APP_RESOLVER_DISAMBIGUATE_BATCH_SIZE",
+            "RESOLVER_DISAMBIGUATE_BATCH_SIZE",
+        ),
+        ge=1,
+        le=50,
+    )
     gardener_max_llm_calls_per_run: int = Field(
         default=30,
         validation_alias=AliasChoices(
