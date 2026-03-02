@@ -8,6 +8,7 @@ type Props = {
   hoveredNode: string | null;
   searchMatchKeys?: Set<string>;
   hasSearchQuery?: boolean;
+  highlightNeighbors?: boolean;
 };
 
 /**
@@ -15,7 +16,7 @@ type Props = {
  * selection highlighting, neighbour dimming, and search filtering.
  * Must be rendered inside a <SigmaContainer>.
  */
-export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSearchQuery }: Props) {
+export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors = true }: Props) {
   const sigma = useSigma();
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       const result = { ...data };
       const activeNode = hoveredNode || selectedKey;
 
-      if (activeNode && graph.hasNode(activeNode)) {
+      if (highlightNeighbors && activeNode && graph.hasNode(activeNode)) {
         const neighbors = new Set(graph.neighbors(activeNode));
         if (node === activeNode) {
           result.highlighted = true;
@@ -41,6 +42,11 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
           result.label = undefined;
           result.zIndex = 0;
         }
+      } else if (!highlightNeighbors && activeNode && graph.hasNode(activeNode) && node === activeNode) {
+        result.highlighted = true;
+        result.borderColor = "#ff6600";
+        result.borderSize = 0.3;
+        result.zIndex = 2;
       }
 
       if (hasSearchQuery) {
@@ -61,7 +67,7 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       const result = { ...data };
       const activeNode = hoveredNode || selectedKey;
 
-      if (activeNode && graph.hasNode(activeNode)) {
+      if (highlightNeighbors && activeNode && graph.hasNode(activeNode)) {
         const extremities = graph.extremities(edge);
         if (extremities.includes(activeNode)) {
           result.color = "#88ccff";
@@ -90,7 +96,7 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       sigma.setSetting("nodeReducer", null);
       sigma.setSetting("edgeReducer", null);
     };
-  }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery]);
+  }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors]);
 
   return null;
 }
