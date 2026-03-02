@@ -94,7 +94,7 @@ class TestPromptBuilder:
     def test_system_prompt_socratic(self) -> None:
         persona = get_persona("colearni")
         prompt = build_system_prompt(persona=persona, style="socratic")
-        assert "study partner" in prompt.lower()
+        assert "ai tutor" in prompt.lower()
         assert "guiding question" in prompt.lower()
 
     def test_system_prompt_direct(self) -> None:

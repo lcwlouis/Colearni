@@ -22,6 +22,7 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 - `POST /documents/upload` *(deprecated — see KB upload)*
 - `GET /workspaces`
 - `POST /workspaces`
+- `DELETE /workspaces/{ws_id}`
 - `GET /workspaces/{ws_id}`
 - `PATCH /workspaces/{ws_id}/settings`
 - `POST /workspaces/{ws_id}/chat/respond`
@@ -33,6 +34,7 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 - `GET /workspaces/{ws_id}/graph/concepts`
 - `GET /workspaces/{ws_id}/graph/concepts/{concept_id}`
 - `GET /workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph`
+- `POST /workspaces/{ws_id}/graph/gardener/run`
 - `GET /workspaces/{ws_id}/graph/lucky`
 - `GET /workspaces/{ws_id}/knowledge-base/documents`
 - `POST /workspaces/{ws_id}/knowledge-base/documents/upload`
@@ -321,6 +323,28 @@ Request contract:
 Success responses:
 
 - `200 OK` with `WorkspaceDetail`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+- `404 Not Found` when workspace does not exist
+
+### DELETE /workspaces/{ws_id}
+
+Tag/group: `workspaces`
+
+Purpose: delete a workspace and all its data.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | string | yes | workspace public ID |
+
+Success responses:
+
+- `204 No Content`
 
 Error responses:
 
@@ -823,6 +847,27 @@ Request contract:
 Success responses:
 
 - `200 OK` with `GraphSubgraphResponse`
+
+Error responses:
+
+- `401 Unauthorized` when not authenticated
+- `403 Forbidden` when not a workspace member
+
+### POST /workspaces/{ws_id}/graph/gardener/run
+
+Tag/group: `graph`
+
+Purpose: trigger the graph gardener to merge clusters and prune orphans.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `ws_id` | path | string | yes | workspace public ID |
+
+Success responses:
+
+- `200 OK` with gardener run summary
 
 Error responses:
 

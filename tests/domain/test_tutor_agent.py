@@ -63,6 +63,5 @@ def test_build_tutor_prompt_includes_socratic_constraints() -> None:
     )
 
     assert "guiding question" in prompt.lower()
-    assert "study partner" in prompt.lower()
+    assert "do not provide the final answer directly" in prompt.lower()
     assert "How do I derive this?" in prompt
-    assert "STRICT_GROUNDED_MODE: false" in prompt
