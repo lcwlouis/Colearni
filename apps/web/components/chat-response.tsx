@@ -111,7 +111,7 @@ export function ChatResponse({ response, onCtaClick }: { response: AssistantResp
         </div>
       ) : null}
 
-      {/* F5: Generation trace — opt-in via localStorage toggle */}
+      {/* F5: Generation trace — controlled by backend APP_INCLUDE_DEV_STATS */}
       {showDevStats && response.generation_trace ? (
         <details className="dev-trace">
           <summary>

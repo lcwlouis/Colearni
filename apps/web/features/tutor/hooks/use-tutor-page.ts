@@ -223,7 +223,6 @@ export function useTutorPage() {
     grounding_mode,
     setGroundingMode,
     tutorProtocol,
-    setTutorProtocol,
     // Concepts
     concepts,
     conceptsLoading,
