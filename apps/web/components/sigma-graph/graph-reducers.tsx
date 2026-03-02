@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useSigma } from "@react-sigma/core";
+import { NodeBorderProgram } from "@sigma/node-border";
 import type { GraphTheme } from "@/lib/graph/hooks/use-graph-theme";
 
 type Props = {
@@ -20,6 +21,16 @@ type Props = {
  */
 export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors = true, theme }: Props) {
   const sigma = useSigma();
+
+  // Ensure NodeBorderProgram is registered before reducers trigger a render.
+  // During route transitions, SigmaContainer may not have compiled the program
+  // before children mount. Imperatively registering here guarantees it exists.
+  useEffect(() => {
+    const programs = sigma.getSetting("nodeProgramClasses") ?? {};
+    if (!programs.bordered) {
+      sigma.setSetting("nodeProgramClasses", { ...programs, bordered: NodeBorderProgram });
+    }
+  }, [sigma]);
 
   useEffect(() => {
     const selectedKey = selectedId != null ? String(selectedId) : null;
@@ -86,18 +97,9 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       return result;
     });
 
-    // Defer refresh to next tick — programs may not be registered yet
-    // when navigating to graph page from another route (fresh Sigma instance).
-    const rafId = requestAnimationFrame(() => {
-      try {
-        sigma.refresh();
-      } catch {
-        // Swallow "no suitable program" if still initializing
-      }
-    });
+    sigma.refresh();
 
     return () => {
-      cancelAnimationFrame(rafId);
       sigma.setSetting("nodeReducer", null);
       sigma.setSetting("edgeReducer", null);
     };
