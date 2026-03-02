@@ -81,6 +81,8 @@ export function ConceptGraph({
   const onSelectRef = useRef(onSelect);
   const onBackgroundClickRef = useRef(onBackgroundClick);
   const nodeGroupsRef = useRef<{ node: GNode; g: SVGGElement; circle: SVGCircleElement }[]>([]);
+  const edgesRef = useRef(edges);
+  const focusNodeIdRef = useRef(focusNodeId);
   const [size, setSize] = useState({ w: propWidth ?? 600, h: propHeight ?? 380 });
   const [themeKey, setThemeKey] = useState(0);
 
@@ -103,6 +105,8 @@ export function ConceptGraph({
   // Keep callback refs in sync without triggering draw
   useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
   useEffect(() => { onBackgroundClickRef.current = onBackgroundClick; }, [onBackgroundClick]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+  useEffect(() => { focusNodeIdRef.current = focusNodeId; }, [focusNodeId]);
 
   // Theme change observer — redraw when data-theme changes
   useEffect(() => {
@@ -225,13 +229,14 @@ export function ConceptGraph({
     const nodeRadius = isHugeGraph ? 6 : isLargeGraph ? 10 : 14;
     const fontSize = isHugeGraph ? "7" : isLargeGraph ? "9" : "11";
 
-    // Determine focused node set for focus mode
+    // Determine focused node set for focus mode (read from ref to avoid dep)
+    const currentFocusId = focusNodeIdRef.current;
     const focusedSet = new Set<number>();
-    if (focusNodeId != null) {
-      focusedSet.add(focusNodeId);
+    if (currentFocusId != null) {
+      focusedSet.add(currentFocusId);
       for (const e of edges) {
-        if (e.src_concept_id === focusNodeId) focusedSet.add(e.tgt_concept_id);
-        if (e.tgt_concept_id === focusNodeId) focusedSet.add(e.src_concept_id);
+        if (e.src_concept_id === currentFocusId) focusedSet.add(e.tgt_concept_id);
+        if (e.tgt_concept_id === currentFocusId) focusedSet.add(e.src_concept_id);
       }
     }
     const hasFocus = focusedSet.size > 0;
@@ -431,7 +436,7 @@ export function ConceptGraph({
         .duration(600)
         .call(zoomRef.current.transform, zoomIdentity.translate(tx, ty).scale(scale));
     });
-  }, [nodes, edges, width, height, focusNodeId, themeKey]);
+  }, [nodes, edges, width, height, themeKey]);
 
   useEffect(() => {
     draw();
@@ -507,6 +512,78 @@ export function ConceptGraph({
       }
     }
   }, [filteredTiers]);
+
+  // ── Focus node: zoom-to-node + dimming without simulation restart ──
+  useEffect(() => {
+    const groups = nodeGroupsRef.current;
+    const svgEl = svgRef.current;
+    const zoomBehavior = zoomRef.current;
+    if (!svgEl || !zoomBehavior || groups.length === 0) return;
+
+    const svgSel = select<SVGSVGElement, unknown>(svgEl);
+
+    if (focusNodeId == null) {
+      // Clear dimming
+      for (const { g } of groups) {
+        g.removeAttribute("opacity");
+      }
+      // Auto-fit to show full graph
+      const padding = 40;
+      const allX = groups.map(({ node }) => node.x ?? 0);
+      const allY = groups.map(({ node }) => node.y ?? 0);
+      if (allX.length > 0) {
+        const minX = Math.min(...allX) - padding;
+        const maxX = Math.max(...allX) + padding;
+        const minY = Math.min(...allY) - padding;
+        const maxY = Math.max(...allY) + padding;
+        const nodesWidth = maxX - minX;
+        const nodesHeight = maxY - minY;
+        if (nodesWidth > 0 && nodesHeight > 0) {
+          const scaleX = width / nodesWidth;
+          const scaleY = height / nodesHeight;
+          const scale = Math.min(scaleX, scaleY, 2);
+          const tx = (width - nodesWidth * scale) / 2 - minX * scale;
+          const ty = (height - nodesHeight * scale) / 2 - minY * scale;
+          svgSel
+            .transition()
+            .duration(500)
+            .call(zoomBehavior.transform, zoomIdentity.translate(tx, ty).scale(scale));
+        }
+      }
+      return;
+    }
+
+    // Find the focused node
+    const focusEntry = groups.find(({ node }) => node.id === focusNodeId);
+    if (!focusEntry) return;
+
+    // Compute neighbor set
+    const neighborSet = new Set<number>([focusNodeId]);
+    for (const e of edgesRef.current) {
+      if (e.src_concept_id === focusNodeId) neighborSet.add(e.tgt_concept_id);
+      if (e.tgt_concept_id === focusNodeId) neighborSet.add(e.src_concept_id);
+    }
+
+    // Apply dimming
+    for (const { node, g } of groups) {
+      if (neighborSet.has(node.id)) {
+        g.removeAttribute("opacity");
+      } else {
+        g.setAttribute("opacity", "0.2");
+      }
+    }
+
+    // Smooth zoom to center focused node
+    const nx = focusEntry.node.x ?? 0;
+    const ny = focusEntry.node.y ?? 0;
+    const focusScale = 1.5;
+    const tx = width / 2 - nx * focusScale;
+    const ty = height / 2 - ny * focusScale;
+    svgSel
+      .transition()
+      .duration(500)
+      .call(zoomBehavior.transform, zoomIdentity.translate(tx, ty).scale(focusScale));
+  }, [focusNodeId, width, height]);
 
   if (nodes.length === 0) {
     return <p className="status empty">No graph data yet.</p>;
