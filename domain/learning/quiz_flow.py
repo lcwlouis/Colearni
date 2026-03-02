@@ -118,12 +118,19 @@ from domain.learning.quiz_persistence import (
 from domain.learning.quiz_persistence import (
     upsert_mastery as _upsert_mastery,
 )
+from domain.learning.quiz_persistence import (
+    get_child_concept_ids as _get_child_concept_ids,
+)
+from domain.learning.quiz_persistence import (
+    lookup_concept_tier as _lookup_concept_tier,
+)
 
 MIN_ITEMS = 5
 MAX_ITEMS = 12
 PASS_SCORE = 0.75
 RETRY_HINT = "create a new level-up quiz to retry"
 MAX_GENERATION_ATTEMPTS = 3
+_CASCADABLE_TIERS = frozenset({"umbrella", "topic", "subtopic"})
 
 log = logging.getLogger("domain.learning.quiz_flow")
 _registry = PromptRegistry()
@@ -453,6 +460,15 @@ def submit_quiz(
                     score=mastery_score,
                     status=mastery_status,
                 )
+                if passed:
+                    stage = "cascade_mastery"
+                    cascaded = cascade_mastery_to_children(
+                        session,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        concept_id=int(quiz["concept_id"]),
+                        score=mastery_score,
+                    )
             stage = "commit"
             session.commit()
 
@@ -470,6 +486,8 @@ def submit_quiz(
             if update_mastery:
                 payload["mastery_status"] = mastery_status
                 payload["mastery_score"] = mastery_score
+                if passed:
+                    payload["cascaded_to"] = cascaded
             set_input_output(
                 span,
                 output_value=json.dumps(
@@ -507,6 +525,58 @@ def submit_quiz(
             if isinstance(exc, _QGE) and not isinstance(exc, QuizGradingError):
                 raise QuizGradingError(str(exc)) from exc
             raise
+
+
+# ---------------------------------------------------------------------------
+# Mastery cascade
+# ---------------------------------------------------------------------------
+
+def cascade_mastery_to_children(
+    session: Session,
+    *,
+    workspace_id: int,
+    user_id: int,
+    concept_id: int,
+    score: float,
+) -> list[int]:
+    """Cascade ``learned`` mastery to direct child concepts.
+
+    Only cascades downward when the concept tier is umbrella, topic, or
+    subtopic.  Children already marked ``learned`` are left unchanged.
+    Returns the list of child concept IDs whose mastery was cascaded.
+    """
+    tier = _lookup_concept_tier(
+        session, workspace_id=workspace_id, concept_id=concept_id,
+    )
+    if tier not in _CASCADABLE_TIERS:
+        return []
+
+    child_ids = _get_child_concept_ids(
+        session, workspace_id=workspace_id, concept_id=concept_id,
+    )
+    cascaded: list[int] = []
+    for child_id in child_ids:
+        existing = _lookup_mastery(
+            session, workspace_id=workspace_id, user_id=user_id, concept_id=child_id,
+        )
+        if existing and str(existing["status"]) == "learned":
+            continue
+        _upsert_mastery(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            concept_id=child_id,
+            score=score,
+            status="learned",
+        )
+        cascaded.append(child_id)
+
+    if cascaded:
+        log.info(
+            "mastery cascade: concept=%d tier=%s → %d children cascaded %s",
+            concept_id, tier, len(cascaded), cascaded,
+        )
+    return cascaded
 
 
 # ---------------------------------------------------------------------------

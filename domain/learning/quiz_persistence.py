@@ -268,6 +268,75 @@ def mark_quiz_graded(session: Session, *, quiz_id: int) -> None:
     )
 
 
+def lookup_concept_tier(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+) -> str | None:
+    """Return the tier of an active concept, or *None*."""
+    row = (
+        session.execute(
+            text(
+                """
+                SELECT tier
+                FROM concepts_canon
+                WHERE id = :concept_id AND workspace_id = :workspace_id AND is_active = TRUE
+                LIMIT 1
+                """
+            ),
+            {"concept_id": concept_id, "workspace_id": workspace_id},
+        )
+        .mappings()
+        .first()
+    )
+    return str(row["tier"]) if row and row["tier"] is not None else None
+
+
+def get_child_concept_ids(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int,
+) -> list[int]:
+    """Return IDs of direct child concepts via ``has_subtopic`` / ``belongs_to`` edges."""
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT DISTINCT child_id FROM (
+                    SELECT e.tgt_id AS child_id
+                    FROM edges_canon e
+                    JOIN concepts_canon c
+                      ON c.id = e.tgt_id
+                     AND c.workspace_id = e.workspace_id
+                     AND c.is_active = TRUE
+                    WHERE e.workspace_id = :workspace_id
+                      AND e.src_id = :concept_id
+                      AND e.relation_type = 'has_subtopic'
+
+                    UNION
+
+                    SELECT e.src_id AS child_id
+                    FROM edges_canon e
+                    JOIN concepts_canon c
+                      ON c.id = e.src_id
+                     AND c.workspace_id = e.workspace_id
+                     AND c.is_active = TRUE
+                    WHERE e.workspace_id = :workspace_id
+                      AND e.tgt_id = :concept_id
+                      AND e.relation_type = 'belongs_to'
+                ) children
+                """
+            ),
+            {"workspace_id": workspace_id, "concept_id": concept_id},
+        )
+        .mappings()
+        .all()
+    )
+    return [int(row["child_id"]) for row in rows]
+
+
 def upsert_mastery(
     session: Session,
     *,
