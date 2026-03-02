@@ -117,7 +117,7 @@ _SENSITIVE_MARKERS = (
     "password",
     "secret",
 )
-_MAX_VALUE_CHARS = 4096
+_MAX_VALUE_CHARS = 65536
 _PREVIEW_CHARS = 256
 
 
@@ -273,7 +273,7 @@ def set_llm_span_attributes(
     if invocation_params:
         span.set_attribute(
             LLM_INVOCATION_PARAMETERS,
-            json.dumps(dict(invocation_params), default=str)[:_MAX_VALUE_CHARS],
+            json.dumps(dict(invocation_params), default=str),
         )
 
     if messages is not None:
@@ -281,7 +281,7 @@ def set_llm_span_attributes(
         span.set_attribute("llm.input_messages.length", len(full_json))
         span.set_attribute("llm.input_messages.preview", content_preview(full_json) or "")
         if record_content_enabled():
-            span.set_attribute(LLM_INPUT_MESSAGES, full_json[:_MAX_VALUE_CHARS])
+            span.set_attribute(LLM_INPUT_MESSAGES, full_json)
 
     if response_message is not None:
         span.set_attribute("llm.output_messages.length", len(response_message))
@@ -291,7 +291,7 @@ def set_llm_span_attributes(
                 LLM_OUTPUT_MESSAGES,
                 json.dumps(
                     [{"role": "assistant", "content": response_message}], default=str
-                )[:_MAX_VALUE_CHARS],
+                ),
             )
 
     if token_usage:
@@ -339,10 +339,10 @@ def set_input_output(
         return
     if record_content_enabled():
         if input_value is not None:
-            span.set_attribute(INPUT_VALUE, input_value[:_MAX_VALUE_CHARS])
+            span.set_attribute(INPUT_VALUE, input_value)
             span.set_attribute(INPUT_MIME_TYPE, input_mime_type)
         if output_value is not None:
-            span.set_attribute(OUTPUT_VALUE, output_value[:_MAX_VALUE_CHARS])
+            span.set_attribute(OUTPUT_VALUE, output_value)
             span.set_attribute(OUTPUT_MIME_TYPE, output_mime_type)
 
 

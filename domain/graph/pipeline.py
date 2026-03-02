@@ -105,6 +105,12 @@ def build_graph_for_chunks(
         canonical_edges_upserted = 0
 
         windows = _make_graph_windows(chunks, settings.ingest_graph_chunk_size, settings.ingest_chunk_unit)
+        if span is not None:
+            print("graph.windows_count: ", len(windows))
+            for i, (chunk_id, window_text) in enumerate(windows):
+                print(f"graph.window_{i}_chunk_id: {chunk_id}")
+                print(f"graph.window_{i}_text: {window_text}")
+                print(f"*"*40)
         for window_chunk_id, window_text in windows:
             with observation_context(chunk_id=window_chunk_id), start_span(
                 "graph.resolver.chunk",

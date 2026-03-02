@@ -244,11 +244,8 @@ def ingest_text_document(
             chunk_texts=chunks,
         )
 
-    if active_settings.ingest_build_graph:
-        if graph_llm_client is None:
-            raise IngestionGraphUnavailableError(
-                "Graph builder is unavailable while APP_INGEST_BUILD_GRAPH=true."
-            )
+    # Summary runs whenever an LLM client is available
+    if graph_llm_client is not None:
         summary = generate_document_summary(
             chunks=chunks,
             llm_client=graph_llm_client,
@@ -259,6 +256,12 @@ def ingest_text_document(
                 workspace_id=request.workspace_id,
                 document_id=document.id,
                 summary=summary,
+            )
+
+    if active_settings.ingest_build_graph:
+        if graph_llm_client is None:
+            raise IngestionGraphUnavailableError(
+                "Graph builder is unavailable while APP_INGEST_BUILD_GRAPH=true."
             )
         effective_graph_embedding_provider = graph_embedding_provider or chunk_embedding_provider
         try:

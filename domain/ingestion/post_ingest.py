@@ -28,18 +28,18 @@ def generate_document_summary(
     *,
     chunks: list[str],
     llm_client: GraphLLMClient,
-    max_chunks: int = 5,
-    max_chars: int = 3000,
+    max_chunks: int = 50,
+    max_words: int = 20000,
 ) -> str | None:
     """Generate a short 2-3 sentence summary from the first few chunks."""
     if not chunks:
         return None
     sample_text = ""
     for chunk in chunks[:max_chunks]:
-        if len(sample_text) + len(chunk) > max_chars:
-            remaining = max_chars - len(sample_text)
-            if remaining > 100:
-                sample_text += chunk[:remaining]
+        if len(sample_text.split()) + len(chunk.split()) > max_words:
+            remaining = max_words - len(sample_text.split())
+            if remaining > 15:
+                sample_text += " ".join(chunk.split()[:remaining])
             break
         sample_text += chunk + "\n\n"
     if not sample_text.strip():
@@ -136,9 +136,9 @@ def run_post_ingest_tasks(
                         _log.exception("Background embedding population failed doc=%s", document_id)
                         db.rollback()
 
-            # 2) Summary + graph
-            if active_settings.ingest_build_graph and graph_llm_client is not None:
-                _log.info("post_ingest summary+graph START doc=%s", document_id)
+            # 2) Summary (runs whenever an LLM client is available)
+            if graph_llm_client is not None:
+                _log.info("post_ingest summary START doc=%s", document_id)
                 summary = generate_document_summary(
                     chunks=chunk_texts,
                     llm_client=graph_llm_client,
@@ -151,6 +151,10 @@ def run_post_ingest_tasks(
                         document_id=document_id,
                         summary=summary,
                     )
+
+            # 3) Graph extraction (only when graph building is enabled)
+            if active_settings.ingest_build_graph and graph_llm_client is not None:
+                _log.info("post_ingest graph START doc=%s", document_id)
                 effective_graph_embedding_provider = (
                     graph_embedding_provider or chunk_embedding_provider
                 )
