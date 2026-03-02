@@ -197,30 +197,31 @@ No removals expected in this track.
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
 ```text
-You are working in the CoLearni repo.
+Read docs/UX_OVERHAUL_MASTER_PLAN.md, then read docs/ux_overhaul/01_critical_fixes_plan.md.
+Begin with the next incomplete UXF slice exactly as described.
 
-STRICT INSTRUCTIONS:
+Execution loop for this child plan:
 
-Open and read docs/ux_overhaul/01_critical_fixes_plan.md now. This is the active child plan.
-Also read the master plan at docs/UX_OVERHAUL_MASTER_PLAN.md for cross-track context.
+1. Work on one UXF slice at a time.
+2. Add explicit db.commit() where needed but do not change get_db_session auto-commit middleware. Keep fixes surgical — UXG replaces the graph component entirely.
+3. Run the listed verification steps before claiming a slice complete.
+4. When a slice is complete, add:
+   - the normal Verification Block for that slice
+   - a summary of all Removal Entries added during that slice
+5. After every 2 completed UXF slices OR if context is compacted/summarized, re-open docs/UX_OVERHAUL_MASTER_PLAN.md and docs/ux_overhaul/01_critical_fixes_plan.md and restate which UXF slices remain.
+6. Continue to the next incomplete UXF slice once the previous slice is verified.
+7. When all UXF slices are complete, immediately re-open docs/UX_OVERHAUL_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
 
-You MUST implement slices in the EXACT execution order listed in this child plan.
-You MUST NOT claim a slice is complete until you produce a Verification Block with:
-Root cause
-Files changed
-What changed
-Commands run
-Manual verification steps
-Observed outcome
+Do NOT stop just because UXF is complete. UXF completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
-After every 2 slices OR if your context is compacted/summarized, re-open this child plan and restate which slices remain.
-
-Work in small commits: chore(refactor): <slice-id> <short desc>.
-If you discover a mismatch between current repo behavior and assumptions in this plan, STOP and update the plan before moving on.
+Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 
 START:
 
+Read docs/UX_OVERHAUL_MASTER_PLAN.md.
 Read docs/ux_overhaul/01_critical_fixes_plan.md.
-Begin with UXF.1 (gardener transaction commit).
+Begin with the current UXF slice in execution order exactly as described.
 Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When UXF is complete, immediately return to docs/UX_OVERHAUL_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

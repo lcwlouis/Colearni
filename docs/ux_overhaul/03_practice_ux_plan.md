@@ -224,27 +224,31 @@ npx vitest run  # from apps/web/
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
 ```text
-You are working in the CoLearni repo.
+Read docs/UX_OVERHAUL_MASTER_PLAN.md, then read docs/ux_overhaul/03_practice_ux_plan.md.
+Begin with the next incomplete UXP slice exactly as described.
 
-STRICT INSTRUCTIONS:
+Execution loop for this child plan:
 
-Open and read docs/ux_overhaul/03_practice_ux_plan.md now. This is the active child plan.
-Also read the master plan at docs/UX_OVERHAUL_MASTER_PLAN.md for cross-track context.
+1. Work on one UXP slice at a time.
+2. Level-up quizzes are NEVER retryable — only practice quizzes. Flashcard dedup fingerprints must be preserved. "Generate more" must respect the LLM exhaustion signal (has_more=false). Keep flashcard awareness bounded.
+3. Run the listed verification steps before claiming a slice complete.
+4. When a slice is complete, add:
+   - the normal Verification Block for that slice
+   - a summary of all Removal Entries added during that slice
+5. After every 2 completed UXP slices OR if context is compacted/summarized, re-open docs/UX_OVERHAUL_MASTER_PLAN.md and docs/ux_overhaul/03_practice_ux_plan.md and restate which UXP slices remain.
+6. Continue to the next incomplete UXP slice once the previous slice is verified.
+7. When all UXP slices are complete, immediately re-open docs/UX_OVERHAUL_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
 
-You MUST implement slices in the EXACT execution order listed in this child plan.
-You MUST NOT claim a slice is complete until you produce a Verification Block.
+Do NOT stop just because UXP is complete. UXP completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
-Key constraints:
-- Level-up quizzes are NEVER retryable
-- Flashcard dedup fingerprints must be preserved
-- "Generate more" must respect LLM exhaustion signal
-
-After every 2 slices, re-open this child plan and restate which slices remain.
-Work in small commits: chore(refactor): <slice-id> <short desc>.
+Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 
 START:
 
+Read docs/UX_OVERHAUL_MASTER_PLAN.md.
 Read docs/ux_overhaul/03_practice_ux_plan.md.
-Begin with UXP.1 (unified flashcard stack viewer).
+Begin with the current UXP slice in execution order exactly as described.
 Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When UXP is complete, immediately return to docs/UX_OVERHAUL_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

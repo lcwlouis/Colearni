@@ -155,32 +155,31 @@ Append removal entries here during implementation (use template from master plan
 This section is mandatory.
 
 ```text
-You are working in the {project_name} repo.
+Read {master_plan_path}, then read {child_plan_path}.
+Begin with the next incomplete {TRACK_ID} slice exactly as described.
 
-STRICT INSTRUCTIONS:
+Execution loop for this child plan:
 
-Open and read {child_plan_path} now. This is the active child plan.
-Also read the master plan at {master_plan_path} for cross-track context.
+1. Work on one {TRACK_ID} slice at a time.
+2. {track_specific_constraints}
+3. Run the listed verification steps before claiming a slice complete.
+4. When a slice is complete, add:
+   - the normal Verification Block for that slice
+   - a summary of all Removal Entries added during that slice
+5. After every 2 completed {TRACK_ID} slices OR if context is compacted/summarized, re-open {master_plan_path} and {child_plan_path} and restate which {TRACK_ID} slices remain.
+6. Continue to the next incomplete {TRACK_ID} slice once the previous slice is verified.
+7. When all {TRACK_ID} slices are complete, immediately re-open {master_plan_path}, select the next incomplete child plan, and continue in the same run.
 
-You MUST implement slices in the EXACT execution order listed in this child plan.
-You MUST NOT claim a slice is complete until you produce a Verification Block with:
-Root cause
-Files changed
-What changed
-Commands run
-Manual verification steps
-Observed outcome
+Do NOT stop just because {TRACK_ID} is complete. {TRACK_ID} completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
-Before removing or replacing any artifact, document the removal using the Removal Entry Template from the master plan.
-
-After every 2 slices OR if your context is compacted/summarized, re-open this child plan and restate which slices remain.
-
-Work in small commits: chore(refactor): <slice-id> <short desc>.
-If you discover a mismatch between current repo behavior and assumptions in this plan, STOP and update the plan before moving on.
+Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 
 START:
 
+Read {master_plan_path}.
 Read {child_plan_path}.
-Begin with the first incomplete slice.
+Begin with the current {TRACK_ID} slice in execution order exactly as described.
 Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When {TRACK_ID} is complete, immediately return to {master_plan_path} and continue with the next incomplete child plan.
 ```

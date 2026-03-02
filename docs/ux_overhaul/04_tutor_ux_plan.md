@@ -218,27 +218,31 @@ npx vitest run  # from apps/web/
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
 ```text
-You are working in the CoLearni repo.
+Read docs/UX_OVERHAUL_MASTER_PLAN.md, then read docs/ux_overhaul/04_tutor_ux_plan.md.
+Begin with the next incomplete UXT slice exactly as described.
 
-STRICT INSTRUCTIONS:
+Execution loop for this child plan:
 
-Open and read docs/ux_overhaul/04_tutor_ux_plan.md now. This is the active child plan.
-Also read the master plan at docs/UX_OVERHAUL_MASTER_PLAN.md for cross-track context.
+1. Work on one UXT slice at a time.
+2. Onboarding concept click must have a confirm step before sending (not auto-fire). Status updates must replace each other, not append — single-line animated status like ChatGPT reasoning traces. 'Thinking...' tag should show the current status string, not be a separate element.
+3. Run the listed verification steps before claiming a slice complete, including browser-visible checks where required by the plan.
+4. When a slice is complete, add:
+   - the normal Verification Block for that slice
+   - a summary of all Removal Entries added during that slice
+5. After every 2 completed UXT slices OR if context is compacted/summarized, re-open docs/UX_OVERHAUL_MASTER_PLAN.md and docs/ux_overhaul/04_tutor_ux_plan.md and restate which UXT slices remain.
+6. Continue to the next incomplete UXT slice once the previous slice is verified.
+7. When all UXT slices are complete, immediately re-open docs/UX_OVERHAUL_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
 
-You MUST implement slices in the EXACT execution order listed in this child plan.
-You MUST NOT claim a slice is complete until you produce a Verification Block.
+Do NOT stop just because UXT is complete. UXT completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
-Key constraints:
-- Onboarding concept click must have a confirm step (not auto-fire)
-- Status updates must replace each other, not append
-- "Thinking..." tag should show current status, not be separate
-
-After every 2 slices, re-open this child plan and restate which slices remain.
-Work in small commits: chore(refactor): <slice-id> <short desc>.
+Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 
 START:
 
+Read docs/UX_OVERHAUL_MASTER_PLAN.md.
 Read docs/ux_overhaul/04_tutor_ux_plan.md.
-Begin with UXT.1 (onboarding auto-send with confirm).
+Begin with the current UXT slice in execution order exactly as described.
 Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When UXT is complete, immediately return to docs/UX_OVERHAUL_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```

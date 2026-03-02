@@ -237,54 +237,42 @@ If this plan does not end with this section and the fenced prompt block below, t
 Use this single prompt for the implementation phase:
 
 ```text
-You are working in the {project_name} repo.
-
-STRICT INSTRUCTIONS:
-
-Open and read {master_plan_path} now. This file is the cross-track source of truth.
+Read {master_plan_path}.
 Select the first child plan in execution order that still has incomplete slices.
-Open and read that child plan.
-
-You MUST implement slices in the EXACT execution order listed in the child plan.
-You MUST NOT claim a slice is complete until you produce a Verification Block with:
-Root cause
-Files changed
-What changed
-Commands run
-Manual verification steps
-Observed outcome
-
-Before removing or replacing any file, function, route, schema, type, selector, compatibility shim, or docs surface, you MUST document the removal in the child plan using the Removal Entry Template from the master plan.
-
-Removal policy:
-- Prefer reversible staged removals over hard deletes.
-- If rollback would be difficult, stop and introduce a facade/shim instead of deleting immediately.
-- Do not delete public contracts without a compatibility note and rollback path.
-
-After every 2 slices OR if your context is compacted/summarized, re-open {master_plan_path} and restate which tracks and slices remain.
-
-Work in small commits: chore(refactor): <slice-id> <short desc>.
-
-If you discover a mismatch between current repo behavior and the assumptions in the plan, STOP and update the plan before moving on.
+Read that child plan and begin with its current incomplete slice exactly as described.
 
 Execution loop:
-1. Work on exactly one sub-slice at a time (PR-sized).
-2. Run the verification matrix for the slice.
-3. Produce the verification block in the child plan.
-4. Move to the next slice.
-5. After every 2 slices, re-read the master plan.
-6. When a child plan is fully complete, update the Master Status Ledger and move to the next child plan.
+
+1. Work on exactly one sub-slice at a time and keep the change set PR-sized.
+2. Preserve all constraints in {master_plan_path} and the active child plan.
+3. Run the slice verification steps before claiming completion.
+4. When a slice is complete, update:
+   - the active child plan with a Verification Block
+   - the active child plan with any Removal Entries added during that slice
+   - {master_plan_path} with the updated status ledger / remaining status note
+5. After every 2 completed slices OR if your context is compacted/summarized, re-open {master_plan_path} and the active child plan and restate which slices remain.
+6. If the active child plan still has incomplete slices, continue to the next slice.
+7. If the active child plan is complete, go back to {master_plan_path}, pick the next incomplete child plan in order, and continue.
 
 Stop only if:
-- verification fails and you cannot resolve the failure
-- the current assumptions no longer match the repository
-- a blocker requires human decision
 
-Do NOT stop because one child plan is complete. Move to the next incomplete track.
+- verification fails
+- the current repo behavior does not match plan assumptions and the plan must be updated first
+- a blocker requires user input or approval
+- completing the next slice would force a risky scope expansion
+
+Do NOT stop because one child plan is complete.
+Do NOT stop because you updated the session plan, todo list, or status ledger.
+The run is only complete when {master_plan_path} shows no remaining incomplete tracks.
+
+{project_specific_constraints}
 
 START:
 
 Read {master_plan_path}.
 Pick the first incomplete child plan in execution order.
-Begin with the first incomplete slice.
+Begin with the current slice in that child plan exactly as described.
+Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+Make sure you re-read {master_plan_path} before every move to the next child plan. It can be dynamically updated. Check the latest version and continue.
 ```

@@ -189,24 +189,31 @@ npx vitest run  # from apps/web/
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
 ```text
-You are working in the CoLearni repo.
+Read docs/UX_OVERHAUL_MASTER_PLAN.md, then read docs/ux_overhaul/05_infrastructure_plan.md.
+Begin with the next incomplete UXI slice exactly as described.
 
-STRICT INSTRUCTIONS:
+Execution loop for this child plan:
 
-Open and read docs/ux_overhaul/05_infrastructure_plan.md now. This is the active child plan.
-Also read the master plan at docs/UX_OVERHAUL_MASTER_PLAN.md for cross-track context.
+1. Work on one UXI slice at a time.
+2. LLM caching must not change response quality — only reduce latency/cost via OpenAI prefix caching. Dev stats toggle must default to OFF. Sources page changes must not break document upload or deletion flows.
+3. Run the listed verification steps before claiming a slice complete, including browser-visible checks where required by the plan.
+4. When a slice is complete, add:
+   - the normal Verification Block for that slice
+   - a summary of all Removal Entries added during that slice
+5. After every 2 completed UXI slices OR if context is compacted/summarized, re-open docs/UX_OVERHAUL_MASTER_PLAN.md and docs/ux_overhaul/05_infrastructure_plan.md and restate which UXI slices remain.
+6. Continue to the next incomplete UXI slice once the previous slice is verified.
+7. When all UXI slices are complete, immediately re-open docs/UX_OVERHAUL_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
 
-You MUST implement slices in the EXACT execution order listed in this child plan.
-You MUST NOT claim a slice is complete until you produce a Verification Block.
+Do NOT stop just because UXI is complete. UXI completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
-These slices are independent of each other but each must be verified before moving on.
-
-After every 2 slices, re-open this child plan and restate which slices remain.
-Work in small commits: chore(refactor): <slice-id> <short desc>.
+Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 
 START:
 
+Read docs/UX_OVERHAUL_MASTER_PLAN.md.
 Read docs/ux_overhaul/05_infrastructure_plan.md.
-Begin with UXI.1 (sources page polish).
+Begin with the current UXI slice in execution order exactly as described.
 Do not proceed beyond the current slice until verified.
+Continue once verified, then go back to the start of this prompt for the next slice.
+When UXI is complete, immediately return to docs/UX_OVERHAUL_MASTER_PLAN.md and continue with the next incomplete child plan.
 ```
