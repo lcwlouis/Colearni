@@ -305,10 +305,10 @@ Dependencies between tracks:
 | Track | Status | Last note |
 |---|---|---|
 | `UXF` Critical fixes | ✅ audit-passed | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
-| `UXG` Graph replacement | ✅ done | UXG.1-17 all complete — core rendering, camera, layouts, loading, legend, settings, expand/prune, tutor drawer, dark mode, layout audit, bordered fix |
+| `UXG` Graph replacement | ✅ audit-passed | UXG.1-17 all complete — core rendering, camera, layouts, loading, legend, settings, expand/prune, tutor drawer, dark mode, layout audit, bordered fix |
 | `UXP` Practice UX | ✅ audit-passed | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
-| `UXT` Tutor UX | ✅ done | UXT.1-8 all complete — onboarding, session, Socratic plumbing, tutor commands, topic-aware init, system role prompts, syntax highlighting, env flags |
-| `UXI` Infrastructure | ⚠️ partial — needs re-audit | UXI.1, UXI.4 pass. UXI.2 minimal (6 lines of logging, no prompt restructuring for caching). UXI.3 dev stats toggle was pre-existing code; commit `de09f77` only updates docs. No backend `.env` flags for dev stats or Socratic mode. UXI.5-9 pending — chunking, excerpts, gardener rework, conductor audit, Phoenix trace self-test harness. See `docs/ux_overhaul/deep_audit_report.md` |
+| `UXT` Tutor UX | ✅ audit-passed | UXT.1-8 all complete — onboarding, session, Socratic plumbing, tutor commands, topic-aware init, system role prompts, syntax highlighting, env flags |
+| `UXI` Infrastructure | ✅ audit-passed | UXI.1-9 all complete — sources polish, LLM caching, dev stats, Phoenix Info tab, chunking fix, excerpt limits, gardener rework, conductor audit, Phoenix trace harness |
 | `UXD` Documentation audit | ✅ audit-passed | All 5 slices complete (UXD.1–UXD.5) — staleness audit, API+ARCH, FRONTEND+GRAPH, PRODUCT+PLAN+PROGRESS, OBS+PROMPTS |
 
 ## Verification Block Template
