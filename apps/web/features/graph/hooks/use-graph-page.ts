@@ -109,6 +109,7 @@ export function useGraphPage() {
       setPracticeMode("none");
       setStatefulCards([]);
       setStatefulError(null);
+      setFocusNodeId(conceptId);
       Promise.all([
         apiClient.getConceptDetail(wsId, conceptId),
         apiClient.getConceptSubgraph(wsId, conceptId, {
@@ -224,7 +225,6 @@ export function useGraphPage() {
   const handleGraphSelect = useCallback(
     (id: number) => {
       selectConcept(id);
-      setFocusNodeId(id);
     },
     [selectConcept],
   );
