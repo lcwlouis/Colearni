@@ -1,4 +1,5 @@
 import { ChatResponse, CollapsibleHint } from "@/components/chat-response";
+import Link from "next/link";
 
 function WaveLabel({ text }: { text: string }) {
   return (
@@ -82,9 +83,27 @@ export function TutorTimeline({
               </button>
             ))}
           </div>
+          <div className="onboarding-divider"><span>or</span></div>
+          <div className="onboarding-actions">
+            <Link href="/graph" className="onboarding-action-btn">
+              🗺️ Browse the graph
+            </Link>
+            <Link href="/kb" className="onboarding-action-btn">
+              📄 Upload more documents
+            </Link>
+          </div>
         </div>
       ) : timeline.length === 0 ? (
-        <p className="status empty">Start chatting to build context.</p>
+        <div className="onboarding-card onboarding-card--empty">
+          <h3>Welcome to your learning space</h3>
+          <p className="onboarding-subtitle">Upload study materials to get started, or just ask a question.</p>
+          <div className="onboarding-actions">
+            <Link href="/kb" className="onboarding-action-btn onboarding-action-btn--primary">
+              📄 Upload your first document
+            </Link>
+          </div>
+          <p className="onboarding-secondary-hint">Or just start chatting below</p>
+        </div>
       ) : null}
       {timeline.map((message) => (
         <article
