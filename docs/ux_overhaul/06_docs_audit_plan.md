@@ -130,6 +130,235 @@ Exit criteria:
 - Complete staleness report covering all 9 docs
 - Each stale item linked to the relevant UX track (UXF/UXG/UXP/UXT/UXI)
 
+Verification Block - UXD.1
+
+Root cause
+- Documentation has not been updated since the UX overhaul (UXF, UXG, UXP, UXT, UXI tracks)
+
+Staleness report produced
+- 2026-03-02
+
+---
+
+#### 1. `docs/API.md` (~1,426 lines) — Staleness: LOW
+
+✅ Accurate:
+- Endpoint index is comprehensive (streaming, flashcard, practice, research, onboarding all present)
+- `POST /workspaces/{ws_id}/chat/respond/stream` streaming endpoint documented
+- Auth, workspace, KB, graph, quiz, readiness, research endpoints all match route files
+- Request/response contracts accurate for documented endpoints
+
+⚠️ Stale:
+- `GenerationTrace` fields table (in streaming/blocking response) does not include `cached_tokens` field which now exists in `core/schemas/assistant.py` **(UXI.2)**
+
+➕ Missing:
+- `cached_tokens` field in GenerationTrace documentation **(UXI.2)**
+
+---
+
+#### 2. `docs/ARCHITECTURE.md` (215 lines) — Staleness: MEDIUM
+
+✅ Accurate:
+- System overview, backend stack (FastAPI, Postgres, pgvector, FTS) correct
+- Ingestion pipeline diagram accurate
+- Query pipeline diagram accurate
+- Level-up quiz flow diagram accurate
+- Practice flow diagram accurate
+- Repo structure section accurate
+- Key interfaces section accurate
+- Observability section accurate
+- Non-goals section accurate
+
+⚠️ Stale:
+- Architecture diagram (line 45) shows `UI[Next.js Web App]` with no mention of graph rendering stack — graph now uses Sigma.js + graphology (WebGL) instead of D3 force simulation **(UXG)**
+- Repo structure (line 148-149) lists `apps/web/` only as "Next.js web app" — does not mention new graph sub-components (`sigma-graph/`, `flashcard-stack`, `quiz-history`, etc.) **(UXG, UXP, UXT)**
+
+➕ Missing:
+- Frontend graph rendering architecture: Sigma.js + graphology WebGL pipeline replacing D3 force simulation **(UXG)**
+- New frontend component categories (graph visualization, practice UX, tutor UX) **(UXG, UXP, UXT)**
+
+---
+
+#### 3. `docs/FRONTEND.md` (121 lines) — Staleness: HIGH
+
+✅ Accurate:
+- Stack versions (Next 16.1.6, React 19.2.4, TypeScript 5.6.3, vitest 4.0.18) still current
+- Commands section accurate
+- Approved patterns (App Router, React 19, linting, typecheck) all accurate
+- Anti-patterns section still accurate
+- Config files section accurate
+- Known lint warnings section accurate
+- Audit status section accurate
+
+⚠️ Stale:
+- "Current stack" table does not list new graph visualization dependencies **(UXG)**
+- D3 packages (`d3-force@^3.0.0`, `d3-selection@^3.0.0`) still in `package.json` but primary graph uses Sigma.js — doc doesn't clarify this **(UXG)**
+
+➕ Missing:
+- New dependencies: `graphology@^0.26.0`, `sigma@^3.0.2`, `@react-sigma/core@^5.0.6`, `@sigma/edge-curve@^3.1.0`, `@sigma/node-border@^3.0.0`, `minisearch@^7.2.0` **(UXG)**
+- New components section listing: `sigma-graph.tsx` + `sigma-graph/` sub-components (graph-events, graph-layout, graph-reducers), `flashcard-stack.tsx`, `quiz-history.tsx`, `quiz-viewer.tsx`, `onboarding-confirm.tsx`, `concept-chat-links.tsx` **(UXG, UXP, UXT)**
+- New hook: `use-dev-stats.ts` **(UXI.3)**
+- D3 archive note: `concept-graph.d3-archive.tsx` exists but is no longer the active graph component **(UXG)**
+
+---
+
+#### 4. `docs/GRAPH.md` (274 lines) — Staleness: LOW-MEDIUM
+
+✅ Accurate:
+- Core concepts (raw graph, canonical graph, two-layer system) correct
+- Data structures (concepts_raw, edges_raw, concepts_canon, edges_canon, provenance, merge bookkeeping) correct
+- Indexes/blocking strategies correct
+- Online resolver algorithm correct
+- Graph gardener algorithm (offline consolidation) correct
+- Budget defaults correct
+- Quality metrics correct
+- Failure & safety handling correct
+
+⚠️ Stale:
+- No mention that `get_db_session` auto-commits on clean exit — the plan text in UXF.1 described a missing-commit bug, but actual `adapters/db/dependencies.py` shows `session.commit()` on clean exit. GRAPH.md should document the transaction behavior for gardener runs **(UXF.1)**
+
+➕ Missing:
+- Orphan pruner documentation — `prune_orphan_graph` is part of the gardener pipeline (S44) and available as a query param on DELETE endpoint, but GRAPH.md doesn't mention it **(pre-existing, surfaced by UXF)**
+- Client-side graph rendering section: Sigma.js + graphology now renders the canonical graph; GRAPH.md only covers the data layer, not the visualization layer **(UXG)**
+
+---
+
+#### 5. `docs/OBSERVABILITY.md` (538 lines) — Staleness: LOW-MEDIUM
+
+✅ Accurate:
+- Quick start section accurate
+- Environment variables accurate
+- Span hierarchy diagrams accurate
+- Spans table (`start_span`/`create_span`) entries match codebase
+- OpenInference attributes on LLM spans accurate
+- Content capture policy accurate
+- Prompt metadata on LLM spans accurate
+- Correlation fields accurate
+- Retrieval span attributes accurate
+- Graph span output summaries accurate
+- Structured events table accurate
+- Phoenix operator guide accurate
+- Token accounting caveats accurate
+- Generation trace fields table (mostly accurate)
+- Stream diagnostics section accurate
+- Default (off) behavior accurate
+
+⚠️ Stale:
+- LLM span attributes table (line 136-143) does not include `llm.token_count.cached` — code now extracts `cached_tokens` from `prompt_tokens_details` in `core/observability.py` and includes it as `token_cached` in the token usage dict **(UXI.2)**
+- Generation trace fields table does not include `cached_tokens` field now present in `core/schemas/assistant.py` **(UXI.2)**
+- Token accounting caveats section doesn't mention prefix caching behavior **(UXI.2)**
+
+➕ Missing:
+- Documentation for `cached_tokens` / `token_cached` on LLM spans and in GenerationTrace **(UXI.2)**
+- Prefix caching note: how `cached_tokens > 0` indicates OpenAI automatic prefix caching hit **(UXI.2)**
+
+---
+
+#### 6. `docs/PLAN.md` (~550+ lines) — Staleness: HIGH
+
+✅ Accurate:
+- Product decisions locked section accurate (historical)
+- Data model changes section accurate (historical)
+- Core behavior changes section accurate (historical)
+
+⚠️ Stale:
+- Document is titled "WOW Release Plan" and structured as sprint-by-sprint plan — all sessions (S1-S44, S45) are completed but the document still reads as an active release plan **(all tracks)**
+- "Session 5 UX + Operability Plan (Current)" header (line ~106) — Session 5 is long completed **(pre-existing)**
+- "UX Follow-up Plan (Post Session 4)" section contains items that are done (KB upload flow, layout stabilization, backend visibility) **(pre-existing)**
+- S19 "Async ingestion lifecycle persistence" marked "Not Started" — may still be accurate but needs verification **(pre-existing)**
+- No mention of UX overhaul tracks (UXF, UXG, UXP, UXT, UXI) anywhere **(all tracks)**
+- "Frontend Plan" section at the bottom lists items that are now fully implemented **(pre-existing)**
+
+➕ Missing:
+- UX overhaul section covering UXF, UXG, UXP, UXT, UXI tracks and their completion status **(all tracks)**
+- Historical/archival marker at the top indicating this plan is largely completed **(all tracks)**
+
+---
+
+#### 7. `docs/PRODUCT_SPEC.md` (173 lines) — Staleness: MEDIUM
+
+✅ Accurate:
+- Product vision and core principles correct
+- Feature 1 (Chat tutor) correct
+- Feature 2 (Mastery gating) correct
+- Feature 3 (Level-up quiz card) correct
+- Learning state machine correct
+- Answer grounding modes correct
+- Tutor response rules correct
+- Core user flows (A, B, C, D) structurally correct
+- Non-goals correct
+- Success metrics correct
+
+⚠️ Stale:
+- Feature 4 (Practice mode) — does not describe unified flashcard stack (all cards merged into one deck), "generate more" with exhaustion detection, or quiz history with retry **(UXP)**
+- Feature 5 (Graph UI) — still describes basic graph view; does not mention Sigma.js WebGL rendering, fuzzy search (MiniSearch), layout algorithms (ForceAtlas2), camera controls, or graph-to-chat navigation **(UXG, UXT.3)**
+
+➕ Missing:
+- Onboarding confirmation step: clicking a concept topic shows a confirm card before auto-sending **(UXT.1)**
+- Streaming status display: replace-mode animation showing current generation phase **(UXT.2)**
+- Graph-to-chat navigation: "Start a chat about this topic" from graph detail panel **(UXT.3)**
+- Dev stats toggle: user-facing opt-in for generation trace display **(UXI.3)**
+- Source tier breakdown: node counts shown by tier (umbrella/topic/subtopic/granular) **(UXI.1)**
+
+---
+
+#### 8. `docs/PROGRESS.md` (~577+ lines) — Staleness: VERY HIGH
+
+✅ Accurate:
+- Historical entries (S1-S44, S45) are accurate as written
+- Session 4-7 change descriptions accurate
+- Test results sections accurate for their respective sessions
+
+⚠️ Stale:
+- Header says "Last updated: Session 14" — massively behind (codebase is well past Session 14) **(pre-existing)**
+- Slice status table only goes through S45 — no UX overhaul entries **(all tracks)**
+- "Deferred to Future PRs" section lists S14 as the only deferred item — may need updating **(pre-existing)**
+- "Remaining Incremental Work" section references S19/S20 which may be resolved **(pre-existing)**
+
+➕ Missing:
+- UX overhaul completion entries: UXF (3 slices), UXG (13 slices, 7 completed), UXP (3 slices), UXT (3 slices), UXI (3 slices) **(all tracks)**
+- Updated "Last updated" timestamp **(all tracks)**
+- Current test counts (922 pytest, 106+ vitest — up from earlier counts) **(all tracks)**
+
+---
+
+#### 9. `docs/PROMPTS.md` (279 lines) — Staleness: LOW
+
+✅ Accurate:
+- Runtime asset catalog matches prompt IDs in `core/prompting/assets/`
+- Summary by category accurate
+- Tutor agent prompts (#1-#5) accurate
+- Knowledge graph prompts (#6-#8) accurate
+- Quiz & practice prompts (#9-#12) accurate
+- Document processing prompts (#13) accurate
+- Orchestration files table accurate
+- Prompt flow diagram accurate
+- Maintenance rules accurate
+- Migration status accurate
+
+⚠️ Stale:
+- Header says "Last updated: Prompt Refactor P9" — should reference current state **(pre-existing)**
+- No mention of prompt restructuring for OpenAI prefix caching (static prefix first, dynamic content last) **(UXI.2)**
+
+➕ Missing:
+- Prefix caching note: prompts are now structured with stable static prefixes (>1024 tokens) to leverage OpenAI automatic prefix caching **(UXI.2)**
+
+---
+
+#### Summary — Files ranked by staleness (most → least work needed)
+
+| Rank | File | Staleness | Primary UX Tracks |
+|---|---|---|---|
+| 1 | `docs/PROGRESS.md` | VERY HIGH | All (UXF, UXG, UXP, UXT, UXI) |
+| 2 | `docs/PLAN.md` | HIGH | All (needs archival + UX overhaul section) |
+| 3 | `docs/FRONTEND.md` | HIGH | UXG (new deps + components), UXP, UXT, UXI |
+| 4 | `docs/PRODUCT_SPEC.md` | MEDIUM | UXP, UXG, UXT, UXI |
+| 5 | `docs/ARCHITECTURE.md` | MEDIUM | UXG (graph rendering), UXP, UXT |
+| 6 | `docs/OBSERVABILITY.md` | LOW-MEDIUM | UXI.2 (cached_tokens) |
+| 7 | `docs/GRAPH.md` | LOW-MEDIUM | UXF.1, UXG (rendering), S44 (orphan pruner) |
+| 8 | `docs/PROMPTS.md` | LOW | UXI.2 (prefix caching note) |
+| 9 | `docs/API.md` | LOW | UXI.2 (cached_tokens in trace) |
+
 ### UXD.2. Update API.md and ARCHITECTURE.md
 
 Purpose:
