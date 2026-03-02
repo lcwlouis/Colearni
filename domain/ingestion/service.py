@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 
 from adapters.db.chunks import (
@@ -176,6 +177,7 @@ def ingest_text_document(
     settings: Settings | None = None,
 ) -> IngestionResult:
     """Ingest a .md/.txt/.pdf payload and persist document/chunks rows."""
+    log = logging.getLogger(__name__)
     active_settings = settings or get_settings()
     parsed, content_hash = _parse_and_hash(request)
 
@@ -186,6 +188,15 @@ def ingest_text_document(
     )
     if not chunks:
         raise IngestionValidationError("Document produced no chunks after normalization.")
+
+    log.info(
+        "Chunked '%s': %d chars → %d chunks (size=%d, overlap=%d)",
+        request.filename,
+        len(parsed.normalized_text),
+        len(chunks),
+        active_settings.ingest_vector_chunk_size,
+        active_settings.ingest_vector_chunk_overlap,
+    )
 
     document, existing_result = _dedup_or_insert(
         db,
@@ -288,6 +299,7 @@ def ingest_text_document_fast(
     Skips embeddings, summary, and graph extraction so the caller can run them
     in a background task via :func:`run_post_ingest_tasks`.
     """
+    log = logging.getLogger(__name__)
     active_settings = settings or get_settings()
     parsed, content_hash = _parse_and_hash(request)
 
@@ -298,6 +310,15 @@ def ingest_text_document_fast(
     )
     if not chunks:
         raise IngestionValidationError("Document produced no chunks after normalization.")
+
+    log.info(
+        "Chunked '%s': %d chars → %d chunks (size=%d, overlap=%d)",
+        request.filename,
+        len(parsed.normalized_text),
+        len(chunks),
+        active_settings.ingest_vector_chunk_size,
+        active_settings.ingest_vector_chunk_overlap,
+    )
 
     document, existing_result = _dedup_or_insert(
         db,

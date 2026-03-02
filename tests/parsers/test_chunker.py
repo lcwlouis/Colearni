@@ -29,3 +29,26 @@ def test_chunk_text_deterministic_rejects_invalid_config() -> None:
         chunk_text_deterministic("hello", chunk_size=10, overlap=10)
     with pytest.raises(ValueError):
         chunk_text_deterministic("hello", chunk_size=10, overlap=-1)
+
+
+def test_prefers_paragraph_break_over_space() -> None:
+    """Paragraph breaks should be preferred over later spaces."""
+    para1 = "A" * 60
+    para2 = "B" * 30 + " " + "C" * 8
+    text = f"{para1}\n\n{para2}"
+    chunks = chunk_text_deterministic(text, chunk_size=100, overlap=10)
+    # First chunk should end at the paragraph break, not the later space
+    assert chunks[0] == para1
+
+
+def test_prefers_sentence_end_over_space() -> None:
+    """Sentence endings ('. ') should be preferred over later spaces."""
+    sentence = "X" * 55 + ". "
+    tail = "Y" * 30 + " " + "Z" * 30
+    text = sentence + tail
+    chunks = chunk_text_deterministic(text, chunk_size=100, overlap=10)
+    assert chunks[0].endswith(".")
+
+
+def test_empty_input_returns_empty_list() -> None:
+    assert chunk_text_deterministic("", chunk_size=100, overlap=10) == []

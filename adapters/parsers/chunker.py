@@ -3,6 +3,30 @@
 from __future__ import annotations
 
 
+def _find_best_break(text: str, start: int, hard_end: int, min_offset: int) -> int:
+    """Find the best split point in *text[start:hard_end]*.
+
+    Priority: paragraph break (``\\n\\n``) > line break (``\\n``) > sentence
+    end (``. `` / ``? `` / ``! ``) > space.  Returns the absolute index
+    after the break character, or *hard_end* if no usable break is found.
+    """
+    region = text[start:hard_end]
+    for sep in ("\n\n", "\n"):
+        pos = region.rfind(sep)
+        if pos >= min_offset:
+            return start + pos + len(sep)
+    # Sentence-end heuristic: ". " or "? " or "! "
+    for ending in (". ", "? ", "! "):
+        pos = region.rfind(ending)
+        if pos >= min_offset:
+            return start + pos + len(ending)
+    # Fallback: space
+    pos = region.rfind(" ")
+    if pos >= min_offset:
+        return start + pos + 1
+    return hard_end
+
+
 def chunk_text_deterministic(
     text: str,
     *,
@@ -27,17 +51,11 @@ def chunk_text_deterministic(
 
     while start < text_len:
         hard_end = min(start + chunk_size, text_len)
-        end = hard_end
 
         if hard_end < text_len:
-            search_region = text[start:hard_end]
-            split_offset = max(
-                search_region.rfind("\n\n"),
-                search_region.rfind("\n"),
-                search_region.rfind(" "),
-            )
-            if split_offset >= min_break_size:
-                end = start + split_offset + 1
+            end = _find_best_break(text, start, hard_end, min_break_size)
+        else:
+            end = hard_end
 
         chunk = text[start:end].strip()
         if chunk:
