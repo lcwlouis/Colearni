@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useMemo, useState, useEffect, useCallback } from "react";
+import { LayoutControls } from "@/components/sigma-graph/layout-controls";
 import { SigmaContainer } from "@react-sigma/core";
 import "@react-sigma/core/lib/style.css";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
@@ -53,7 +54,8 @@ export default function SigmaGraph({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-  const [layout] = useState<LayoutType>("forceatlas2");
+  const [layout, setLayout] = useState<LayoutType>("forceatlas2");
+  const [isLayoutRunning, setIsLayoutRunning] = useState(false);
 
   // Build graphology instance from API data (UXG.2)
   const graph = useMemo(
@@ -126,7 +128,7 @@ export default function SigmaGraph({
         style={{ width: "100%", height: "100%" }}
         settings={DEFAULT_SIGMA_SETTINGS}
       >
-        <GraphLayout layout={layout} />
+        <GraphLayout layout={layout} isRunning={isLayoutRunning} onAutoStop={() => setIsLayoutRunning(false)} />
         <GraphReducers
           selectedId={selectedId}
           hoveredNode={hoveredNode}
@@ -142,6 +144,12 @@ export default function SigmaGraph({
         />
         <CameraControls containerRef={containerRef} />
       </SigmaContainer>
+      <LayoutControls
+        layout={layout}
+        onLayoutChange={setLayout}
+        isRunning={isLayoutRunning}
+        onIsRunningChange={setIsLayoutRunning}
+      />
     </div>
   );
 }
