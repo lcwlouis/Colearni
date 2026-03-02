@@ -11,6 +11,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@react-sigma/core": "^5.0.6",
+    "@react-sigma/layout-circular": "^5.0.6",
+    "@react-sigma/layout-force": "^5.0.6",
+    "@react-sigma/layout-forceatlas2": "^5.0.6",
+    "@react-sigma/layout-noverlap": "^5.0.6",
+    "@sigma/edge-curve": "^3.1.0",
+    "@sigma/node-border": "^3.0.0",
     "@types/d3-selection": "^3.0.11",
     "@types/d3-transition": "^3.0.9",
     "@types/d3-zoom": "^3.0.8",
@@ -18,14 +25,17 @@
     "d3-selection": "^3.0.0",
     "d3-transition": "^3.0.1",
     "d3-zoom": "^3.0.0",
+    "graphology": "^0.26.0",
     "katex": "^0.16.33",
     "lucide-react": "^0.575.0",
+    "minisearch": "^7.2.0",
     "next": "16.1.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
-    "remark-math": "^6.0.0"
+    "remark-math": "^6.0.0",
+    "sigma": "^3.0.2"
   },
   "devDependencies": {
     "@types/d3-force": "^3.0.10",
@@ -33,6 +43,7 @@
     "@types/node": "20.17.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/seedrandom": "^3.0.8",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "typescript": "5.6.3",
