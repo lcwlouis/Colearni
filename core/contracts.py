@@ -91,6 +91,7 @@ class TutorTextStream:
         completion_tokens: int | None = None,
         total_tokens: int | None = None,
         reasoning_tokens: int | None = None,
+        cached_tokens: int | None = None,
     ) -> None:
         """Called by the provider adapter after streaming completes."""
         if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
@@ -101,6 +102,7 @@ class TutorTextStream:
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
                 "reasoning_tokens": reasoning_tokens,
+                "cached_tokens": cached_tokens,
             }
         )
 

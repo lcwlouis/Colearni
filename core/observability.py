@@ -453,10 +453,16 @@ def extract_token_usage(payload: Mapping[str, object]) -> dict[str, int | None]:
     total = _coerce_int(usage_payload.get("total_tokens"))
     if total is None and prompt is not None and completion is not None:
         total = prompt + completion
+    cached: int | None = None
+    prompt_details = usage_payload.get("prompt_tokens_details")
+    if isinstance(prompt_details, Mapping):
+        cached = _coerce_int(prompt_details.get("cached_tokens"))
+
     return {
         "token_prompt": prompt,
         "token_completion": completion,
         "token_total": total,
+        "token_cached": cached,
     }
 
 

@@ -350,6 +350,7 @@ class _BaseGraphLLMClient(ABC):
             completion_tokens=usage.get("token_completion"),
             total_tokens=usage.get("token_total"),
             reasoning_tokens=reasoning_tokens,
+            cached_tokens=usage.get("token_cached"),
         )
 
         response_text = "".join(collected_text)
@@ -475,6 +476,7 @@ class _BaseGraphLLMClient(ABC):
             completion_tokens=usage.get("token_completion"),
             total_tokens=usage.get("token_total"),
             reasoning_tokens=reasoning,
+            cached_tokens=usage.get("token_cached"),
             reasoning_requested=self._reasoning_enabled,
             reasoning_supported=supported,
             reasoning_used=used,
