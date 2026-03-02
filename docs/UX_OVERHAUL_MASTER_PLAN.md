@@ -123,6 +123,7 @@ What is materially missing:
 - `UXP` Practice UX — unified flashcard viewer + quiz history browser
 - `UXT` Tutor UX — onboarding auto-send, streaming status, graph-chat integration
 - `UXI` Infrastructure — sources page, LLM caching, dev stats toggle
+- `UXD` Documentation audit — verify all key docs reflect current implementation
 
 ## Child Plan Map
 
@@ -133,6 +134,7 @@ What is materially missing:
 | `UXP` Practice UX | `docs/ux_overhaul/03_practice_ux_plan.md` | ✅ planned |
 | `UXT` Tutor UX | `docs/ux_overhaul/04_tutor_ux_plan.md` | ✅ planned |
 | `UXI` Infrastructure | `docs/ux_overhaul/05_infrastructure_plan.md` | ✅ planned |
+| `UXD` Documentation audit | `docs/ux_overhaul/06_docs_audit_plan.md` | ✅ planned |
 
 ## Decision Log
 
@@ -243,6 +245,19 @@ Supporting improvements:
 - **LLM prompt caching**: Structure messages for prefix caching, log cache hits
 - **Dev stats toggle**: User-controllable generation trace visibility
 
+### UXD. Documentation Audit
+
+Audit and update all key documentation files to reflect the current state of the codebase after the UX overhaul:
+- **API.md**: Verify all endpoints documented, especially new/changed ones from UXF, UXP, UXT
+- **ARCHITECTURE.md**: Update if graph component architecture changed (D3 → Sigma.js), new state management patterns
+- **FRONTEND.md**: Update component inventory, dependency list (new Sigma.js/graphology packages)
+- **GRAPH.md**: Update gardener section (now commits), graph rendering architecture
+- **OBSERVABILITY.md**: Verify trace/span documentation still accurate
+- **PLAN.md**: Mark completed items, archive stale sections
+- **PRODUCT_SPEC.md**: Update feature descriptions to match new UX
+- **PROGRESS.md**: Update implementation progress with UX overhaul completion
+- **PROMPTS.md**: Verify prompt inventory matches current templates
+
 ## Cross-Track Execution Order
 
 Tracks should be executed in this order. Each track's child plan defines its internal slice order.
@@ -252,6 +267,7 @@ Tracks should be executed in this order. Each track's child plan defines its int
 3. `UXP` Practice UX — THIRD because it builds on top of the graph detail panel (works regardless of graph engine)
 4. `UXT` Tutor UX — FOURTH because it's independent of graph work
 5. `UXI` Infrastructure — LAST because it's lowest priority and fully independent
+6. `UXD` Documentation audit — FINAL because it documents the finished state
 
 Dependencies between tracks:
 - `UXG` is independent — the graph replacement doesn't depend on other tracks
@@ -260,7 +276,7 @@ Dependencies between tracks:
 - `UXI` is independent
 - `UXF` should go first as a quick win, but other tracks don't technically depend on it
 
-**Parallel-safe**: UXP, UXT, and UXI can run in parallel after UXF is done. UXG is self-contained.
+**Parallel-safe**: UXP, UXT, and UXI can run in parallel after UXF is done. UXG is self-contained. UXD should run after all implementation tracks are complete.
 
 ## Master Status Ledger
 
@@ -271,6 +287,7 @@ Dependencies between tracks:
 | `UXP` Practice UX | 🔄 pending | Not started — flashcard stack, quiz history |
 | `UXT` Tutor UX | 🔄 pending | Not started — onboarding, status, chat integration |
 | `UXI` Infrastructure | 🔄 pending | Not started — sources, caching, dev stats |
+| `UXD` Documentation audit | 🔄 pending | Not started — audit API, ARCHITECTURE, FRONTEND, GRAPH, OBSERVABILITY, PLAN, PRODUCT_SPEC, PROGRESS, PROMPTS |
 
 ## Verification Block Template
 
