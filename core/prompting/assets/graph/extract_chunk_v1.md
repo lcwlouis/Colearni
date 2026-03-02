@@ -17,13 +17,14 @@ Extract durable learning concepts and meaningful relationships from one chunk of
 5. Return valid JSON only.
 
 ---Concept tier glossary---
-Optionally classify each concept into one of four tiers:
+You MUST assign exactly one tier to every concept:
 - `umbrella`: Broad domain or discipline (e.g., "Machine Learning", "Thermodynamics")
 - `topic`: A major subject within an umbrella (e.g., "Supervised Learning", "Heat Transfer")
 - `subtopic`: A specific aspect of a topic (e.g., "Gradient Descent", "Conduction")
 - `granular`: A very specific detail, formula, or technique (e.g., "Adam optimizer learning rate decay")
 
-Only set `tier` when you are confident. If uncertain, omit the field entirely.
+If uncertain, default to `granular`.
+If a concept describes an action or process rather than a thing or idea, consider whether it belongs as an edge description instead of a concept.
 
 ---Structural hierarchy edges---
 In addition to semantic edges, you may emit structural hierarchy edges that encode the concept tier tree:

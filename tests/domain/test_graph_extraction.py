@@ -104,3 +104,61 @@ def test_extract_raw_graph_rejects_invalid_schema() -> None:
             concept_description_max_chars=500,
             edge_description_max_chars=300,
         )
+
+
+def test_extract_concept_without_tier_gets_granular_fallback() -> None:
+    """A concept with no tier should default to 'granular'."""
+    llm = StubExtractionLLM(
+        {
+            "concepts": [
+                {"name": "Ohm's Law", "context_snippet": "V=IR", "description": "Voltage equals current times resistance"},
+            ],
+            "edges": [],
+        }
+    )
+    extraction = extract_raw_graph_from_chunk(
+        llm_client=llm,
+        chunk_text="Ohm's Law states V=IR.",
+        concept_description_max_chars=500,
+        edge_description_max_chars=300,
+    )
+    assert len(extraction.concepts) == 1
+    assert extraction.concepts[0].tier == "granular"
+
+
+def test_extract_concept_with_invalid_tier_gets_granular_fallback() -> None:
+    """A concept with an invalid tier value should default to 'granular'."""
+    llm = StubExtractionLLM(
+        {
+            "concepts": [
+                {"name": "Quantum", "context_snippet": "ctx", "description": "desc", "tier": "big_idea"},
+            ],
+            "edges": [],
+        }
+    )
+    extraction = extract_raw_graph_from_chunk(
+        llm_client=llm,
+        chunk_text="chunk",
+        concept_description_max_chars=500,
+        edge_description_max_chars=300,
+    )
+    assert extraction.concepts[0].tier == "granular"
+
+
+def test_extract_concept_with_valid_tier_passes_through() -> None:
+    """A concept with a valid tier should keep its tier unchanged."""
+    llm = StubExtractionLLM(
+        {
+            "concepts": [
+                {"name": "ML", "context_snippet": "ctx", "description": "desc", "tier": "umbrella"},
+            ],
+            "edges": [],
+        }
+    )
+    extraction = extract_raw_graph_from_chunk(
+        llm_client=llm,
+        chunk_text="chunk",
+        concept_description_max_chars=500,
+        edge_description_max_chars=300,
+    )
+    assert extraction.concepts[0].tier == "umbrella"

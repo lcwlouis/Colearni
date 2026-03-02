@@ -76,7 +76,7 @@ def extract_raw_graph_from_chunk(
                 _MAX_CONTEXT_SNIPPET_CHARS,
             ),
             description=truncate_text(concept.description, concept_description_max_chars),
-            tier=concept.tier if concept.tier in VALID_TIERS else None,
+            tier=concept.tier if concept.tier in VALID_TIERS else "granular",
         )
         existing = concept_by_alias.get(alias_norm)
         if existing is None:

@@ -39,12 +39,31 @@ def dedupe_keywords(keywords: list[str]) -> list[str]:
 
 VALID_TIERS: frozenset[str] = frozenset({"umbrella", "topic", "subtopic", "granular"})
 
+DEFAULT_TIER: str = "granular"
+
 _TIER_RANK: dict[str, int] = {"umbrella": 1, "topic": 2, "subtopic": 3, "granular": 4}
 
 
 def tier_rank(tier: str | None) -> int:
     """Return specificity rank for a tier value (higher = more specific, 0 = unknown/None)."""
     return _TIER_RANK.get(tier or "", 0)
+
+
+def build_tier_inference_prompt(
+    concept_name: str,
+    description: str,
+    neighbor_names: list[str],
+) -> str:
+    """Build a short prompt asking the LLM to classify a concept into a tier."""
+    neighbors_text = ", ".join(neighbor_names[:10]) if neighbor_names else "(none)"
+    return (
+        "Classify the following concept into exactly one tier: "
+        "umbrella, topic, subtopic, or granular.\n\n"
+        f"Concept: {concept_name}\n"
+        f"Description: {description or '(no description)'}\n"
+        f"Neighbor concepts: {neighbors_text}\n\n"
+        "Respond with a single word: umbrella, topic, subtopic, or granular."
+    )
 
 
 @dataclass(frozen=True, slots=True)

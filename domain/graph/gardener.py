@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from adapters.db import graph_repository
 from core.contracts import GraphLLMClient
+from domain.graph.orphan_pruner import prune_orphan_graph_nodes
 from core.observability import (
     SPAN_KIND_CHAIN,
     emit_event,
@@ -21,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from domain.graph.types import CanonicalCandidate, normalize_alias, tier_rank
+from domain.graph.types import CanonicalCandidate, DEFAULT_TIER, VALID_TIERS, build_tier_inference_prompt, normalize_alias, tier_rank
 
 _GARDENER_REASON = "gardener_cluster_merge"
 
@@ -95,6 +96,9 @@ class GardenerRunResult:
     llm_calls: int
     stopped_by_cluster_budget: bool
     stopped_by_llm_budget: bool
+    pruned_concepts: int = 0
+    pruned_edges: int = 0
+    tiers_backfilled: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +184,14 @@ def run_graph_gardener(
             max_llm_calls_per_run=budgets.max_llm_calls_per_run,
             max_clusters_per_run=budgets.max_clusters_per_run,
         )
+        # --- Tier backfill pass: fix NULL-tier concepts before clustering ---
+        tiers_backfilled = _backfill_null_tiers(
+            session=session,
+            workspace_id=workspace_id,
+            llm_client=llm_client,
+            budgets=budgets,
+            limit=effective_max_dirty_nodes,
+        )
         seeds = graph_repository.list_gardener_seed_concepts(
             session,
             workspace_id=workspace_id,
@@ -193,9 +205,10 @@ def run_graph_gardener(
                 clusters_processed=0,
                 clusters_skipped=0,
                 merges_applied=0,
-                llm_calls=0,
+                llm_calls=budgets.llm_calls,
                 stopped_by_cluster_budget=False,
                 stopped_by_llm_budget=False,
+                tiers_backfilled=tiers_backfilled,
             )
 
         seed_ids = {seed.id for seed in seeds}
@@ -367,6 +380,7 @@ def run_graph_gardener(
             max_llm_calls_per_run=budgets.max_llm_calls_per_run,
             max_clusters_per_run=budgets.max_clusters_per_run,
         )
+        prune_result = prune_orphan_graph_nodes(session, workspace_id=workspace_id)
         result = GardenerRunResult(
             seed_nodes_selected=len(seeds),
             clusters_total=len(clusters),
@@ -376,6 +390,9 @@ def run_graph_gardener(
             llm_calls=budgets.llm_calls,
             stopped_by_cluster_budget=stopped_by_cluster_budget,
             stopped_by_llm_budget=stopped_by_llm_budget,
+            pruned_concepts=prune_result["pruned_concepts"],
+            pruned_edges=prune_result["pruned_edges"],
+            tiers_backfilled=tiers_backfilled,
         )
         if span is not None:
             span.set_attribute("graph.seed_nodes", len(seeds))
@@ -396,6 +413,56 @@ def run_graph_gardener(
                 ),
             )
         return result
+
+
+def _backfill_null_tiers(
+    *,
+    session: Session,
+    workspace_id: int,
+    llm_client: GraphLLMClient,
+    budgets: GardenerBudgets,
+    limit: int,
+) -> int:
+    """Infer and set tier for concepts with tier IS NULL. Returns count of backfilled concepts."""
+    null_tier_concepts = graph_repository.list_null_tier_concepts(
+        session, workspace_id=workspace_id, limit=limit,
+    )
+    backfilled = 0
+    for concept in null_tier_concepts:
+        if not budgets.can_call_llm():
+            break
+        budgets.register_llm_call()
+        neighbor_names = graph_repository.list_neighbor_names(
+            session, workspace_id=workspace_id, concept_id=concept.id,
+        )
+        prompt = build_tier_inference_prompt(
+            concept_name=concept.canonical_name,
+            description=concept.description,
+            neighbor_names=neighbor_names,
+        )
+        try:
+            raw = llm_client.generate_tutor_text(prompt=prompt).strip().lower()
+            tier = raw if raw in VALID_TIERS else DEFAULT_TIER
+        except Exception:
+            tier = DEFAULT_TIER
+        session.execute(
+            text(
+                "UPDATE concepts_canon SET tier = :tier, updated_at = now()"
+                " WHERE workspace_id = :workspace_id AND id = :concept_id"
+            ),
+            {"tier": tier, "workspace_id": workspace_id, "concept_id": concept.id},
+        )
+        backfilled += 1
+        emit_event(
+            "graph.gardener.tier_backfill",
+            status="info",
+            component="graph",
+            operation="graph.gardener.run",
+            workspace_id=workspace_id,
+            concept_id=concept.id,
+            inferred_tier=tier,
+        )
+    return backfilled
 
 
 def _candidate_blocking(

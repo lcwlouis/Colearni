@@ -11,6 +11,7 @@ from core.contracts import GraphLLMClient
 from core.observability import configure_observability, set_event_sink
 from core.settings import get_settings
 from domain.graph import gardener
+from domain.graph import orphan_pruner
 
 
 class StubGardenerLLM(GraphLLMClient):
@@ -93,6 +94,11 @@ def test_gardener_stops_when_llm_budget_is_zero(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(
         graph_repository,
+        "list_null_tier_concepts",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        graph_repository,
         "list_gardener_seed_concepts",
         lambda *args, **kwargs: [seed_a, seed_b],
     )
@@ -109,6 +115,16 @@ def test_gardener_stops_when_llm_budget_is_zero(monkeypatch: pytest.MonkeyPatch)
         graph_repository,
         "set_canonical_concept_dirty",
         lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        orphan_pruner,
+        "prune_orphan_graph_nodes",
+        lambda *args, **kwargs: {"pruned_concepts": 0, "pruned_edges": 0},
+    )
+    monkeypatch.setattr(
+        gardener,
+        "prune_orphan_graph_nodes",
+        lambda *args, **kwargs: {"pruned_concepts": 0, "pruned_edges": 0},
     )
 
     settings = get_settings().model_copy(
@@ -165,6 +181,11 @@ def test_gardener_stops_when_cluster_budget_is_hit(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(
         graph_repository,
+        "list_null_tier_concepts",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        graph_repository,
         "list_gardener_seed_concepts",
         lambda *args, **kwargs: seeds,
     )
@@ -197,6 +218,16 @@ def test_gardener_stops_when_cluster_budget_is_hit(monkeypatch: pytest.MonkeyPat
         graph_repository,
         "set_canonical_concept_dirty",
         lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        orphan_pruner,
+        "prune_orphan_graph_nodes",
+        lambda *args, **kwargs: {"pruned_concepts": 0, "pruned_edges": 0},
+    )
+    monkeypatch.setattr(
+        gardener,
+        "prune_orphan_graph_nodes",
+        lambda *args, **kwargs: {"pruned_concepts": 0, "pruned_edges": 0},
     )
 
     def _record_merge(*args, **kwargs):  # noqa: ANN001, ANN202
@@ -389,3 +420,148 @@ def test_execute_merge_runs_required_bookkeeping(monkeypatch: pytest.MonkeyPatch
         "deactivate",
         "set_dirty",
     ]
+
+
+class TierInferenceLLM(StubGardenerLLM):
+    """LLM stub that returns a tier string from generate_tutor_text."""
+
+    def __init__(self, tier_response: str = "topic") -> None:
+        super().__init__({"decision": "CREATE_NEW", "confidence": 1.0})
+        self._tier_response = tier_response
+
+    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any = None) -> str:
+        self.calls += 1
+        return self._tier_response
+
+
+def test_gardener_backfills_null_tier_concepts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gardener run should backfill NULL-tier concepts before clustering."""
+    events: list[dict[str, Any]] = []
+    set_event_sink(events)
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
+    null_tier_concept = _concept(99, name="Reading a sector")
+    llm = TierInferenceLLM(tier_response="granular")
+    tier_updates: list[dict[str, Any]] = []
+
+    class MockSession:
+        def execute(self, stmt: Any, params: Any = None) -> Any:
+            tier_updates.append(params)
+
+    monkeypatch.setattr(
+        graph_repository,
+        "list_null_tier_concepts",
+        lambda *args, **kwargs: [null_tier_concept],
+    )
+    monkeypatch.setattr(
+        graph_repository,
+        "list_neighbor_names",
+        lambda *args, **kwargs: ["Disk I/O", "File System"],
+    )
+    monkeypatch.setattr(
+        graph_repository,
+        "list_gardener_seed_concepts",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        gardener,
+        "prune_orphan_graph_nodes",
+        lambda *args, **kwargs: {"pruned_concepts": 0, "pruned_edges": 0},
+    )
+
+    settings = get_settings().model_copy(
+        update={
+            "gardener_max_llm_calls_per_run": 10,
+            "gardener_max_clusters_per_run": 10,
+            "gardener_max_dirty_nodes_per_run": 50,
+            "gardener_recent_window_days": 7,
+        }
+    )
+    result = gardener.run_graph_gardener(
+        MockSession(),  # type: ignore[arg-type]
+        workspace_id=1,
+        llm_client=llm,
+        settings=settings,
+    )
+
+    assert result.tiers_backfilled == 1
+    assert result.llm_calls == 1
+    assert len(tier_updates) == 1
+    assert tier_updates[0]["tier"] == "granular"
+    assert tier_updates[0]["concept_id"] == 99
+    backfill_events = [
+        e for e in events if e["event_name"] == "graph.gardener.tier_backfill"
+    ]
+    assert len(backfill_events) == 1
+    assert backfill_events[0]["inferred_tier"] == "granular"
+    set_event_sink(None)
+
+
+def test_gardener_backfill_respects_llm_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tier backfill should stop when the LLM budget is exhausted."""
+    set_event_sink([])
+    configure_observability(
+        get_settings().model_copy(
+            update={
+                "observability_enabled": True,
+                "observability_otlp_endpoint": None,
+                "observability_service_name": "colearni-test",
+            }
+        )
+    )
+    concepts_with_no_tier = [
+        _concept(i, name=f"Concept {i}") for i in range(1, 6)
+    ]
+    llm = TierInferenceLLM(tier_response="subtopic")
+
+    class MockSession:
+        def execute(self, stmt: Any, params: Any = None) -> Any:
+            pass
+
+    monkeypatch.setattr(
+        graph_repository,
+        "list_null_tier_concepts",
+        lambda *args, **kwargs: concepts_with_no_tier,
+    )
+    monkeypatch.setattr(
+        graph_repository,
+        "list_neighbor_names",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        graph_repository,
+        "list_gardener_seed_concepts",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        gardener,
+        "prune_orphan_graph_nodes",
+        lambda *args, **kwargs: {"pruned_concepts": 0, "pruned_edges": 0},
+    )
+
+    settings = get_settings().model_copy(
+        update={
+            "gardener_max_llm_calls_per_run": 2,
+            "gardener_max_clusters_per_run": 10,
+            "gardener_max_dirty_nodes_per_run": 50,
+            "gardener_recent_window_days": 7,
+        }
+    )
+    result = gardener.run_graph_gardener(
+        MockSession(),  # type: ignore[arg-type]
+        workspace_id=1,
+        llm_client=llm,
+        settings=settings,
+    )
+
+    # Only 2 out of 5 should be backfilled due to budget
+    assert result.tiers_backfilled == 2
+    assert result.llm_calls == 2
+    set_event_sink(None)

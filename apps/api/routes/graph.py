@@ -154,4 +154,7 @@ def run_gardener(
         merges_applied=result.merges_applied,
         clusters_processed=result.clusters_processed,
         llm_calls=result.llm_calls,
+        pruned_concepts=result.pruned_concepts,
+        pruned_edges=result.pruned_edges,
+        tiers_backfilled=result.tiers_backfilled,
     )

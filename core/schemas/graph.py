@@ -116,3 +116,6 @@ class GardenerRunResponse(BaseModel):
     merges_applied: int
     clusters_processed: int
     llm_calls: int
+    pruned_concepts: int = 0
+    pruned_edges: int = 0
+    tiers_backfilled: int = 0
