@@ -286,12 +286,12 @@ Dependencies between tracks:
 
 | Track | Status | Last note |
 |---|---|---|
-| `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
-| `UXG` Graph replacement | 🟢 done | All 13 slices complete (UXG.1–UXG.13) — Sigma.js core + camera, layouts, loading, legend, settings, expand/prune |
-| `UXP` Practice UX | 🟢 done | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
-| `UXT` Tutor UX | 🟢 done | All 4 slices complete (UXT.1–UXT.4) — onboarding confirm, status replace-mode, graph-chat nav, Socratic passthrough |
-| `UXI` Infrastructure | 🟢 done | All 4 slices complete (UXI.1–UXI.4) — sources polish, LLM caching, dev stats, Phoenix Info tab |
-| `UXD` Documentation audit | 🟢 done | All 5 slices complete (UXD.1–UXD.5) — staleness audit, API+ARCH, FRONTEND+GRAPH, PRODUCT+PLAN+PROGRESS, OBS+PROMPTS |
+| `UXF` Critical fixes | ✅ audit-passed | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
+| `UXG` Graph replacement | ✅ audit-passed | All 13 slices complete (UXG.1–UXG.13) — Sigma.js core + camera, layouts, loading, legend, settings, expand/prune |
+| `UXP` Practice UX | ✅ audit-passed | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
+| `UXT` Tutor UX | ✅ audit-passed | All 4 slices complete (UXT.1–UXT.4) — onboarding confirm, status replace-mode, graph-chat nav, Socratic passthrough |
+| `UXI` Infrastructure | ✅ audit-passed | All 4 slices complete (UXI.1–UXI.4) — sources polish, LLM caching, dev stats, Phoenix Info tab |
+| `UXD` Documentation audit | ✅ audit-passed | All 5 slices complete (UXD.1–UXD.5) — staleness audit, API+ARCH, FRONTEND+GRAPH, PRODUCT+PLAN+PROGRESS, OBS+PROMPTS |
 
 ## Verification Block Template
 
