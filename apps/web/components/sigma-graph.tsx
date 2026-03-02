@@ -7,6 +7,8 @@ import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 import { buildGraphologyGraph } from "@/lib/graph/transform";
 import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/sigma-settings";
 import { GraphReducers } from "@/components/sigma-graph/graph-reducers";
+import { GraphLayout } from "@/components/sigma-graph/graph-layout";
+import type { LayoutType } from "@/components/sigma-graph/graph-layout";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
 type Props = {
@@ -30,7 +32,7 @@ type Props = {
  * UXG.2: node/edge population, mastery colours, tier sizing.
  * UXG.3: core rendering with visual programs and reducers.
  * Future slices will add:
- *   UXG.4  – ForceAtlas2 layout
+ *   UXG.4  – ForceAtlas2 layout ✅
  *   UXG.5  – drag, zoom-to-fit, reset-view, onSelect, onBackgroundClick
  */
 export default function SigmaGraph({
@@ -48,6 +50,7 @@ export default function SigmaGraph({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [layout] = useState<LayoutType>("forceatlas2");
 
   // Build graphology instance from API data (UXG.2)
   const graph = useMemo(
@@ -81,6 +84,7 @@ export default function SigmaGraph({
         style={{ width: "100%", height: "100%" }}
         settings={DEFAULT_SIGMA_SETTINGS}
       >
+        <GraphLayout layout={layout} />
         <GraphReducers
           selectedId={selectedId}
           hoveredNode={hoveredNode}
