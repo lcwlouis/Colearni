@@ -295,8 +295,17 @@ export function GraphVizPanel({
           searchHighlight={debouncedGraphSearch}
           onResetViewReady={handleResetViewReady}
           filteredTiers={filteredTiers}
+          isLoading={phase === "loading_list" || phase === "loading_detail"}
         />
-      ) : null}
+      ) : (
+        <SigmaGraph
+          nodes={[]}
+          edges={[]}
+          onSelect={handleGraphSelect}
+          onBackgroundClick={handleGraphBgClick}
+          isLoading={phase === "loading_list" || phase === "loading_detail"}
+        />
+      )}
     </section>
   );
 }

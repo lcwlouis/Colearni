@@ -13,6 +13,8 @@ import { GraphLayout } from "@/components/sigma-graph/graph-layout";
 import type { LayoutType } from "@/components/sigma-graph/graph-layout";
 import { GraphEvents } from "@/components/sigma-graph/graph-events";
 import { CameraControls } from "@/components/sigma-graph/camera-controls";
+import { GraphSkeleton } from "@/components/sigma-graph/graph-skeleton";
+import { EmptyState } from "@/components/sigma-graph/empty-state";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
 type Props = {
@@ -27,6 +29,7 @@ type Props = {
   searchHighlight?: string;
   onResetViewReady?: (resetFn: () => void) => void;
   filteredTiers?: ReadonlySet<string>;
+  isLoading?: boolean;
 };
 
 /**
@@ -51,6 +54,7 @@ export default function SigmaGraph({
   searchHighlight,
   onResetViewReady,
   filteredTiers,
+  isLoading,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
@@ -105,8 +109,11 @@ export default function SigmaGraph({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  if (nodes.length === 0) {
-    return <p style={{ color: "var(--muted)" }}>No graph data yet.</p>;
+  if (isLoading && nodes.length === 0) {
+    return <GraphSkeleton />;
+  }
+  if (!isLoading && nodes.length === 0) {
+    return <EmptyState />;
   }
 
   return (
@@ -121,6 +128,7 @@ export default function SigmaGraph({
         minHeight: 200,
         position: "relative",
         outline: "none",
+        animation: "fadeIn 0.3s ease-in",
       }}
     >
       <SigmaContainer
