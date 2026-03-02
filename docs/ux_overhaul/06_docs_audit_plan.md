@@ -526,11 +526,43 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 
 ## Execution Order (Update After Each Run)
 
-1. `UXD.1` Audit and flag stale sections
-2. `UXD.2` Update API.md and ARCHITECTURE.md
-3. `UXD.3` Update FRONTEND.md and GRAPH.md
-4. `UXD.4` Update PRODUCT_SPEC.md, PLAN.md, PROGRESS.md
-5. `UXD.5` Update OBSERVABILITY.md and PROMPTS.md
+1. `UXD.1` Audit and flag stale sections ✅
+2. `UXD.2` Update API.md and ARCHITECTURE.md ✅ (pre-existing)
+3. `UXD.3` Update FRONTEND.md and GRAPH.md ✅
+4. `UXD.4` Update PRODUCT_SPEC.md, PLAN.md, PROGRESS.md ✅
+5. `UXD.5` Update OBSERVABILITY.md and PROMPTS.md ✅ (pre-existing)
+
+### Verification Block — UXD.2
+
+- **Root cause**: Already implemented. `API.md` has `cached_tokens` in GenerationTrace table. `ARCHITECTURE.md` has Sigma.js+graphology rendering, expanded repo structure, and frontend graph rendering subsection.
+- **Files changed**: None (pre-existing)
+- **What changed**: N/A
+- **Commands run**: `grep -n "cached_tokens" docs/API.md`, `grep -n "Sigma\|graphology" docs/ARCHITECTURE.md`
+- **Observed outcome**: All items present
+
+### Verification Block — UXD.3
+
+- **Root cause**: FRONTEND.md missing new graph deps and components. GRAPH.md missing orphan pruner and transaction behavior notes.
+- **Files changed**: `docs/FRONTEND.md`, `docs/GRAPH.md`
+- **What changed**: Added 6 new graph dependencies, 8 sigma-graph sub-components, hooks section with use-dev-stats, D3 archive note to FRONTEND.md. Added transaction auto-commit note, orphan pruner section, and client-side rendering section to GRAPH.md.
+- **Commands run**: `grep -n "graphology\|sigma\|minisearch" docs/FRONTEND.md`, `grep -n "Sigma\|orphan\|auto-commit" docs/GRAPH.md`
+- **Observed outcome**: All items present and verified
+
+### Verification Block — UXD.4
+
+- **Root cause**: PRODUCT_SPEC.md missing updated practice and graph features. PLAN.md had stale "Current" labels. PROGRESS.md missing UX overhaul entries.
+- **Files changed**: `docs/PRODUCT_SPEC.md`, `docs/PLAN.md`, `docs/PROGRESS.md`
+- **What changed**: Added Feature 5a/5b (Sigma.js, MiniSearch) to PRODUCT_SPEC. Changed "(Current)" to "(Completed)" in PLAN.md. Added UX overhaul completion entries to PROGRESS.md.
+- **Commands run**: Verified commit output
+- **Observed outcome**: All three files updated accurately
+
+### Verification Block — UXD.5
+
+- **Root cause**: Already implemented. OBSERVABILITY.md has `llm.token_count.cached`, `cached_tokens` in GenerationTrace, and prefix caching caveat. PROMPTS.md has updated header and "Prefix Caching Layout" section.
+- **Files changed**: None (pre-existing)
+- **What changed**: N/A
+- **Commands run**: `grep -n "cached_tokens\|prefix cach" docs/OBSERVABILITY.md`, `grep -n "cach\|prefix" docs/PROMPTS.md`
+- **Observed outcome**: All items present
 
 ## Verification Matrix
 

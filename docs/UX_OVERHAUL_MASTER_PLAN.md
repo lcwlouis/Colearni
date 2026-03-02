@@ -291,7 +291,7 @@ Dependencies between tracks:
 | `UXP` Practice UX | 🟢 done | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
 | `UXT` Tutor UX | 🟢 done | All 4 slices complete (UXT.1–UXT.4) — onboarding confirm, status replace-mode, graph-chat nav, Socratic passthrough |
 | `UXI` Infrastructure | 🟢 done | All 4 slices complete (UXI.1–UXI.4) — sources polish, LLM caching, dev stats, Phoenix Info tab |
-| `UXD` Documentation audit | 🔄 in progress | UXD.1 ✅ done (audit report). UXD.2–UXD.5 🔲 pending |
+| `UXD` Documentation audit | 🟢 done | All 5 slices complete (UXD.1–UXD.5) — staleness audit, API+ARCH, FRONTEND+GRAPH, PRODUCT+PLAN+PROGRESS, OBS+PROMPTS |
 
 ## Verification Block Template
 
