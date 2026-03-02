@@ -15,6 +15,8 @@ import { GraphEvents } from "@/components/sigma-graph/graph-events";
 import { CameraControls } from "@/components/sigma-graph/camera-controls";
 import { GraphSkeleton } from "@/components/sigma-graph/graph-skeleton";
 import { EmptyState } from "@/components/sigma-graph/empty-state";
+import { GraphLegend } from "@/components/sigma-graph/graph-legend";
+import { StatusBar } from "@/components/sigma-graph/status-bar";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
 type Props = {
@@ -158,6 +160,8 @@ export default function SigmaGraph({
         isRunning={isLayoutRunning}
         onIsRunningChange={setIsLayoutRunning}
       />
+      <GraphLegend />
+      <StatusBar nodes={nodes} edges={edges} selectedId={selectedId} filteredTiers={filteredTiers} />
     </div>
   );
 }

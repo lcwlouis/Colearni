@@ -1,0 +1,41 @@
+.bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--text, #333);
+  background: color-mix(in srgb, var(--surface, #fff) 70%, transparent);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid var(--line, #e0e0e0);
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.75;
+}
+
+.separator {
+  width: 1px;
+  height: 12px;
+  background: var(--line, #e0e0e0);
+  flex-shrink: 0;
+}
+
+.selected {
+  margin-left: auto;
+  font-weight: 600;
+  opacity: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
