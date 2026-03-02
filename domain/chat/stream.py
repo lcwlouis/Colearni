@@ -360,7 +360,8 @@ def _stream_inner(
         # ── Socratic interactive tutor protocol ──
         tutor_state = get_tutor_state(request.session_id)
         if not tutor_state.active:
-            tutor_state.init_relation_concept()
+            topic = resolved_name or request.query
+            tutor_state.init_concept(topic)
 
         # Parse and apply any user command
         cmd = parse_command(request.query)

@@ -68,11 +68,7 @@ class TutorState(BaseModel):
 
     def init_relation_concept(self) -> None:
         """Initialize state for the 'Relation' concept demo."""
-        self.active = True
-        self.concept = "Relation"
-        self.bloom = "Remember"
-        self.bloom_step = 1
-        self.step = 1
+        self.init_concept("Relation")
         self.table_name = "Students"
         self.table_columns = ["sid", "name", "major", "gpa"]
         self.table_rows = [
@@ -80,6 +76,22 @@ class TutorState(BaseModel):
             ["102", "Bob", "Math", "3.5"],
             ["103", "Carol", "CS", "3.9"],
         ]
+
+    def init_concept(self, topic: str) -> None:
+        """Initialize state for any concept topic.
+
+        Sets up a fresh Socratic session. The micro-world table is left
+        empty so the LLM can populate it with topic-appropriate examples.
+        Use ``init_relation_concept()`` for the legacy demo preset.
+        """
+        self.active = True
+        self.concept = topic
+        self.bloom = "Remember"
+        self.bloom_step = 1
+        self.step = 1
+        self.table_name = ""
+        self.table_columns = []
+        self.table_rows = []
         self.duplicates_mode = False
         self.nulls_mode = False
         self.misconceptions_detected = []

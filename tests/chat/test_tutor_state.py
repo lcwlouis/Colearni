@@ -28,6 +28,36 @@ class TestTutorState:
         assert len(state.table_columns) == 4
         assert len(state.table_rows) == 3
 
+    def test_init_concept_generic(self):
+        state = TutorState()
+        state.init_concept("B-Trees")
+        assert state.active is True
+        assert state.concept == "B-Trees"
+        assert state.table_name == ""
+        assert state.table_columns == []
+        assert state.table_rows == []
+        assert state.bloom == "Remember"
+        assert state.step == 1
+
+    def test_init_concept_different_topics(self):
+        for topic in ["SQL Joins", "Database Engine Internals", "Normalization"]:
+            state = TutorState()
+            state.init_concept(topic)
+            assert state.active is True
+            assert state.concept == topic
+
+    def test_init_concept_resets_state(self):
+        state = TutorState()
+        state.init_relation_concept()
+        state.step = 3
+        state.bloom = "Apply"
+        state.misconceptions_detected = ["wrong"]
+        state.init_concept("Indexing")
+        assert state.step == 1
+        assert state.bloom == "Remember"
+        assert state.misconceptions_detected == []
+        assert state.concept == "Indexing"
+
     def test_step_checklist(self):
         state = TutorState()
         state.init_relation_concept()
