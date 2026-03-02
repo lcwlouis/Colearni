@@ -75,9 +75,18 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
       return result;
     });
 
-    sigma.refresh();
+    // Defer refresh to next tick — programs may not be registered yet
+    // when navigating to graph page from another route (fresh Sigma instance).
+    const rafId = requestAnimationFrame(() => {
+      try {
+        sigma.refresh();
+      } catch {
+        // Swallow "no suitable program" if still initializing
+      }
+    });
 
     return () => {
+      cancelAnimationFrame(rafId);
       sigma.setSetting("nodeReducer", null);
       sigma.setSetting("edgeReducer", null);
     };
