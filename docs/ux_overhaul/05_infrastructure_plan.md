@@ -413,9 +413,9 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 4. `UXI.4` Phoenix Info tab: system prompts & output in LLM traces ✅
 5. `UXI.5` Fix document chunking pipeline ✅
 6. `UXI.6` Fix truncated source excerpts in prompts ✅
-7. `UXI.7` Rework gardener design 🔲
-8. `UXI.8` Audit and fix conductor/intent classifier 🔲
-9. `UXI.9` Phoenix trace self-test harness 🔲
+7. `UXI.7` Rework gardener design ✅
+8. `UXI.8` Audit and fix conductor/intent classifier ✅
+9. `UXI.9` Phoenix trace self-test harness ✅
 
 ### Verification Block — UXI.1
 
@@ -482,6 +482,36 @@ npx vitest run  # from apps/web/
 - **Commands run**: `PYTHONPATH=. pytest -q` → 982 passed, 1 failed (pre-existing Phoenix)
 - **Manual verification steps**: Verified `load_generation_context` now returns up to 10 chunks of 1000 chars each (max ~10K chars of source material vs previous ~900). Verified chat history provides 500 chars per message.
 - **Observed outcome**: All exit criteria met — source material in prompts is now sufficient for concept-specific generation.
+- **Removal Entries**: None
+
+### Verification Block — UXI.7
+
+- **Root cause**: `_cluster_llm_decision()` passed only concept name, description, and aliases to the disambiguation LLM — no tier, mastery, provenance, or edge context. No protection against pruning concepts with learning progress.
+- **Files changed**: `domain/graph/gardener.py`, `adapters/db/graph/provenance.py`, `adapters/db/mastery.py`, `tests/domain/test_graph_gardener.py`
+- **What changed**: (1) Added `count_provenance_for_concepts()` to provenance.py. (2) Added `get_mastered_concept_ids()` to mastery.py. (3) Extended `_ClusterConcept` with `has_mastery`, `provenance_count`, `neighbor_names`. (4) Enriched LLM disambiguation candidates with tier, mastery, provenance, neighbors. (5) Added mastery protection in merge loop. (6) Added `_patch_enrichment()` test helper.
+- **Commands run**: `PYTHONPATH=. pytest -q` → 982 passed, 1 failed (pre-existing Phoenix)
+- **Manual verification steps**: Verified gardener LLM now receives richer context. Verified mastery protection skips merge for concepts with learning progress.
+- **Observed outcome**: All exit criteria met — gardener has full context, learned concepts protected.
+- **Removal Entries**: None
+
+### Verification Block — UXI.8
+
+- **Root cause**: Audit-only slice. Needed to verify the conductor/intent classifier LLM call is consumed downstream.
+- **Files changed**: None
+- **What changed**: N/A — audit confirmed the system is working correctly. `run_query_analysis()` → `QueryAnalysis` → `build_turn_plan()` drives retrieval, teaching strategy, and quiz flow. Prompt asset is complete (37 lines).
+- **Commands run**: `PYTHONPATH=. pytest tests/domain/test_query_analyzer.py tests/domain/test_turn_plan.py -q` → 36 passed
+- **Manual verification steps**: Traced full flow from query analysis through turn planning to stream execution. All downstream consumers verified.
+- **Observed outcome**: Conductor is properly integrated. No wasted LLM calls.
+- **Removal Entries**: None
+
+### Verification Block — UXI.9
+
+- **Root cause**: Audit harness was planned but already implemented in a prior session. Script and tests existed but weren't documented in OBSERVABILITY.md.
+- **Files changed**: `docs/OBSERVABILITY.md`
+- **What changed**: Added "Phoenix Trace Audit" section to OBSERVABILITY.md documenting `scripts/phoenix_trace_audit.py` CLI and `tests/integration/test_phoenix_traces.py` integration tests.
+- **Commands run**: `PYTHONPATH=. pytest -q` → 982 passed (Phoenix test auto-skips). Verified script imports correctly.
+- **Manual verification steps**: Confirmed `scripts/phoenix_trace_audit.py` has all required checks (system role, stubs, input/output values, token counts, truncation, source material). Confirmed `tests/integration/test_phoenix_traces.py` has 7 test classes covering all audit categories. Auto-skip works when Phoenix unavailable.
+- **Observed outcome**: All exit criteria met — script exists, tests exist, documentation added.
 - **Removal Entries**: None
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)

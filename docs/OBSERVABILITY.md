@@ -538,3 +538,20 @@ When `APP_OBSERVABILITY_ENABLED=false` (the default):
 - `create_span()` returns `None` — safe for streaming generators.
 - `configure_observability()` skips all OTel SDK initialization.
 - **No network connections** are made to any collector or Phoenix instance.
+
+---
+
+## Phoenix Trace Audit
+
+Automated verification of LLM trace correctness:
+
+```bash
+# CLI audit (requires running Phoenix)
+python scripts/phoenix_trace_audit.py --last-n 20
+python scripts/phoenix_trace_audit.py --json --fail-on-critical
+
+# Integration tests (auto-skip if Phoenix is not available)
+pytest tests/integration/test_phoenix_traces.py -v
+```
+
+The audit checks every LLM span for: system prompt in correct role, non-stub system messages, `input.value`/`output.value` populated, token counts, truncation markers, and sufficient source material.
