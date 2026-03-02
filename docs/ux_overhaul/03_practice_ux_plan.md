@@ -284,7 +284,33 @@ npx vitest run  # from apps/web/
 
 ## Removal Ledger
 
-{Append entries during implementation — old activity panel components may be refactored}
+### Removal Entry — UXP.4
+
+**Removed artifact**
+- Inline "Flashcards" and "Practice quiz" buttons in `graph-detail-panel.tsx`
+- Inline `StatefulFlashcardList` rendering
+- Inline `PracticeQuizCard` rendering
+- Inline flashcard error state display
+- `<details>/<summary>` collapsible sections for Flashcards, Quizzes, and Chat
+
+**Reason for removal**
+- Duplicate functionality — FlashcardStack and QuizHistory in tabbed sections provide the same and better UX
+- Collapsible sections replaced with always-visible tabs per user preference
+
+**Replacement**
+- Tabbed section with three tabs: Flashcards (FlashcardStack), Quizzes (QuizHistory), 💬 Chat (ConceptChatLinks)
+
+**Reverse path**
+- `git revert` the commit
+
+**Compatibility impact**
+- Internal only — all props still accepted in `GraphDetailPanelProps` interface; no upstream callers break
+
+**Verification**
+- FlashcardStack in Flashcards tab works identically
+- QuizHistory with retry in Quizzes tab works identically
+- Chat tab renders ConceptChatLinks identically
+- ConceptActivityPanel remains below tabs
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 

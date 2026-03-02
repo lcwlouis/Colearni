@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { AsyncState } from "@/components/async-state";
 import { FlashcardStack } from "./flashcard-stack";
 import { QuizHistory } from "./quiz-history";
@@ -79,6 +80,7 @@ export function GraphDetailPanel({
   onRetryQuiz,
   onOpenFlashcardRun,
 }: GraphDetailPanelProps) {
+  const [activeTab, setActiveTab] = useState<"flashcards" | "quizzes" | "chat">("flashcards");
   const { phase, selectedDetail, luckyPick, error } = state;
   const pick = luckyPick?.pick as
     | (JsonObject & {
@@ -174,118 +176,56 @@ export function GraphDetailPanel({
               marginTop: "0.25rem",
             }}
           >
-            <div className="button-row" style={{ marginBottom: "0.75rem" }}>
-              <button
-                type="button"
-                className={practiceMode === "flashcards" ? "" : "secondary"}
-                onClick={loadStatefulFlashcards}
-                disabled={statefulLoading}
-              >
-                {statefulLoading ? "Generating..." : "Flashcards"}
-              </button>
-              <button
-                type="button"
-                className={practiceMode === "quiz" ? "" : "secondary"}
-                onClick={loadQuiz}
-                disabled={practiceState.phase === "loading_quiz"}
-              >
-                {practiceState.phase === "loading_quiz"
-                  ? "Creating..."
-                  : "Practice quiz"}
-              </button>
-              {practiceMode !== "none" && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => {
-                    dispatchPractice({ type: "reset" });
-                    setPracticeMode("none");
-                    setStatefulCards([]);
-                  }}
-                  style={{ marginLeft: "auto" }}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-
-            {practiceMode === "flashcards" && statefulCards.length > 0 ? (
-              <div className="stack" style={{ gap: "1rem" }}>
-                <StatefulFlashcardList
-                  flashcards={statefulCards}
-                  conceptName={statefulConceptName}
-                  onRate={handleRate}
-                  ratingInFlight={ratingInFlight}
-                />
-                <div className="button-row">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={statefulLoading}
-                    onClick={loadStatefulFlashcards}
-                  >
-                    Generate more
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            {practiceState.quiz ||
-            practiceState.phase === "loading_quiz" ||
-            (practiceState.phase === "error" && practiceMode === "quiz") ? (
-              <PracticeQuizCard
-                state={practiceState}
-                onAnswerChange={(id, v) =>
-                  dispatchPractice({ type: "answer", item_id: id, answer: v })
-                }
-                onSubmitQuiz={submitQuiz}
-                onReset={() => dispatchPractice({ type: "reset" })}
-                onNextQuiz={handleNextQuiz}
-              />
-            ) : null}
-
-            {practiceMode === "flashcards" && statefulError ? (
-              <p className="status error">{statefulError}</p>
-            ) : null}
-
             {selectedDetail && wsId ? (
-              <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
-                <details>
-                  <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.95rem" }}>Flashcards</summary>
+              <>
+                <div style={{ display: "flex", borderBottom: "2px solid var(--line)", marginBottom: "0.75rem" }}>
+                  {(["flashcards", "quizzes", "chat"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setActiveTab(tab)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        borderBottom: activeTab === tab ? "2px solid var(--accent, #4338ca)" : "2px solid transparent",
+                        padding: "0.5rem 1rem",
+                        fontWeight: activeTab === tab ? 600 : 400,
+                        cursor: "pointer",
+                        fontSize: "0.9rem",
+                        color: activeTab === tab ? "var(--accent, #4338ca)" : "inherit",
+                        marginBottom: "-2px",
+                      }}
+                    >
+                      {tab === "flashcards" ? "Flashcards" : tab === "quizzes" ? "Quizzes" : "💬 Chat"}
+                    </button>
+                  ))}
+                </div>
+
+                {activeTab === "flashcards" && (
                   <FlashcardStack
                     workspaceId={wsId}
                     conceptId={selectedDetail.concept.concept_id}
                     conceptName={selectedDetail.concept.canonical_name}
                     onGenerateFlashcards={loadStatefulFlashcards}
                   />
-                </details>
-              </div>
-            ) : null}
+                )}
 
-            {selectedDetail && wsId ? (
-              <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
-                <details>
-                  <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.95rem" }}>Quizzes</summary>
+                {activeTab === "quizzes" && (
                   <QuizHistory
                     workspaceId={wsId}
                     conceptId={selectedDetail.concept.concept_id}
                     onCreateQuiz={loadQuiz}
                   />
-                </details>
-              </div>
-            ) : null}
+                )}
 
-            {selectedDetail && (
-              <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
-                <details>
-                  <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.95rem" }}>💬 Chat</summary>
+                {activeTab === "chat" && (
                   <ConceptChatLinks
                     conceptName={selectedDetail.concept.canonical_name}
                     conceptId={selectedDetail.concept.concept_id}
                   />
-                </details>
-              </div>
-            )}
+                )}
+              </>
+            ) : null}
 
             {conceptActivity ? (
               <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.75rem", marginTop: "0.5rem" }}>
