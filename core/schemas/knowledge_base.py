@@ -18,6 +18,10 @@ class KBDocumentSummary(BaseModel):
     ingestion_status: Literal["pending", "ingested"]
     graph_status: Literal["disabled", "pending", "extracting", "extracted", "failed"]
     graph_concept_count: int = Field(ge=0)
+    tier_umbrella_count: int = Field(ge=0, default=0)
+    tier_topic_count: int = Field(ge=0, default=0)
+    tier_subtopic_count: int = Field(ge=0, default=0)
+    tier_granular_count: int = Field(ge=0, default=0)
     created_at: datetime
     error_message: str | None = None
 

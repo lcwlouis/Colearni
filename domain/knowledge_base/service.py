@@ -51,6 +51,10 @@ def list_documents(
                 ingestion_status=row["ingestion_status"] or "pending",
                 graph_status=_effective_graph_status(row.get("graph_status")),
                 graph_concept_count=int(row["graph_concept_count"]),
+                tier_umbrella_count=int(row.get("tier_umbrella_count", 0)),
+                tier_topic_count=int(row.get("tier_topic_count", 0)),
+                tier_subtopic_count=int(row.get("tier_subtopic_count", 0)),
+                tier_granular_count=int(row.get("tier_granular_count", 0)),
                 created_at=row["created_at"],
                 error_message=str(row["error_message"]) if row.get("error_message") else None,
             )

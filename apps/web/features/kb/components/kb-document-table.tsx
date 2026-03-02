@@ -56,7 +56,18 @@ export function KBDocumentTable({
                 >
                   {doc.graph_status === "extracting" ? "Extracting…" : doc.graph_status}
                 </span>
-                <span className="kb-meta">{doc.graph_concept_count} concepts</span>
+                {doc.graph_concept_count > 0 && (doc.tier_umbrella_count > 0 || doc.tier_topic_count > 0 || doc.tier_subtopic_count > 0 || doc.tier_granular_count > 0) ? (
+                  <span className="kb-meta">
+                    {[
+                      doc.tier_umbrella_count > 0 && `${doc.tier_umbrella_count} umbrella`,
+                      doc.tier_topic_count > 0 && `${doc.tier_topic_count} topic`,
+                      doc.tier_subtopic_count > 0 && `${doc.tier_subtopic_count} subtopic`,
+                      doc.tier_granular_count > 0 && `${doc.tier_granular_count} granular`,
+                    ].filter(Boolean).join(" · ")}
+                  </span>
+                ) : (
+                  <span className="kb-meta">{doc.graph_concept_count} concepts</span>
+                )}
               </td>
               <td>{doc.chunk_count}</td>
               <td>{new Date(doc.created_at).toLocaleDateString()}</td>

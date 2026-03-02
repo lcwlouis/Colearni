@@ -29,10 +29,15 @@ def list_documents_with_counts(
                     d.graph_status,
                     d.error_message,
                     COUNT(DISTINCT c.id) AS chunk_count,
-                    COUNT(DISTINCT CASE WHEN p.target_type = 'concept' THEN p.target_id END) AS graph_concept_count
+                    COUNT(DISTINCT CASE WHEN p.target_type = 'concept' THEN p.target_id END) AS graph_concept_count,
+                    COUNT(DISTINCT CASE WHEN p.target_type = 'concept' AND cc.tier = 'umbrella' THEN p.target_id END) AS tier_umbrella_count,
+                    COUNT(DISTINCT CASE WHEN p.target_type = 'concept' AND cc.tier = 'topic' THEN p.target_id END) AS tier_topic_count,
+                    COUNT(DISTINCT CASE WHEN p.target_type = 'concept' AND cc.tier = 'subtopic' THEN p.target_id END) AS tier_subtopic_count,
+                    COUNT(DISTINCT CASE WHEN p.target_type = 'concept' AND cc.tier = 'granular' THEN p.target_id END) AS tier_granular_count
                 FROM documents d
                 LEFT JOIN chunks c ON c.document_id = d.id AND c.workspace_id = d.workspace_id
                 LEFT JOIN provenance p ON p.chunk_id = c.id AND p.workspace_id = d.workspace_id
+                LEFT JOIN concepts_canon cc ON p.target_type = 'concept' AND cc.id = p.target_id AND cc.workspace_id = d.workspace_id
                 WHERE d.workspace_id = :workspace_id
                 GROUP BY d.id
                 ORDER BY d.created_at DESC

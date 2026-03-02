@@ -432,6 +432,10 @@ export interface KBDocumentSummary {
   ingestion_status: "pending" | "ingested";
   graph_status: "disabled" | "pending" | "extracting" | "extracted" | "failed";
   graph_concept_count: number;
+  tier_umbrella_count: number;
+  tier_topic_count: number;
+  tier_subtopic_count: number;
+  tier_granular_count: number;
   created_at: string;
   error_message: string | null;
 }
