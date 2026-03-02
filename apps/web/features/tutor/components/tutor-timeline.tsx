@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { ChatResponse, CollapsibleHint } from "@/components/chat-response";
 import Link from "next/link";
+import { OnboardingConfirm } from "./onboarding-confirm";
 
 function WaveLabel({ text }: { text: string }) {
   return (
@@ -17,7 +19,7 @@ function WaveLabel({ text }: { text: string }) {
   );
 }
 import { MarkdownContent } from "@/components/markdown-content";
-import type { ActionCTA, GraphConceptSummary, OnboardingStatusResponse } from "@/lib/api/types";
+import type { ActionCTA, GraphConceptSummary, OnboardingStatusResponse, OnboardingSuggestedTopic } from "@/lib/api/types";
 import type { ActivityStep, ChatPhase, TimelineMessage } from "../types";
 import { PHASE_LABELS } from "../types";
 
@@ -33,6 +35,7 @@ interface TutorTimelineProps {
   setCurrentConcept: (concept: GraphConceptSummary | null) => void;
   setSuggestedConceptId: (id: number | null) => void;
   setQuery: (query: string) => void;
+  onSend: (text: string) => void;
   onCtaClick?: (cta: ActionCTA) => void;
 }
 
@@ -48,8 +51,10 @@ export function TutorTimeline({
   setCurrentConcept,
   setSuggestedConceptId,
   setQuery,
+  onSend,
   onCtaClick,
 }: TutorTimelineProps) {
+  const [confirmTopic, setConfirmTopic] = useState<OnboardingSuggestedTopic | null>(null);
   return (
     <div className="chat-timeline" aria-live="polite">
       {timeline.length === 0 && onboarding && onboarding.has_documents && onboarding.suggested_topics.length > 0 ? (
@@ -63,10 +68,7 @@ export function TutorTimeline({
                 type="button"
                 className="onboarding-chip"
                 onClick={() => {
-                  const matched = concepts.find((c) => c.concept_id === topic.concept_id);
-                  if (matched) setCurrentConcept(matched);
-                  setSuggestedConceptId(topic.concept_id);
-                  setQuery(`Teach me about ${topic.canonical_name}`);
+                  setConfirmTopic(topic);
                 }}
               >
                 <span className="chip-name">
@@ -83,6 +85,19 @@ export function TutorTimeline({
               </button>
             ))}
           </div>
+          {confirmTopic ? (
+            <OnboardingConfirm
+              conceptName={confirmTopic.canonical_name}
+              onConfirm={() => {
+                const matched = concepts.find((c) => c.concept_id === confirmTopic.concept_id);
+                if (matched) setCurrentConcept(matched);
+                setSuggestedConceptId(confirmTopic.concept_id);
+                setConfirmTopic(null);
+                onSend(`Teach me about ${confirmTopic.canonical_name}`);
+              }}
+              onCancel={() => setConfirmTopic(null)}
+            />
+          ) : null}
           <div className="onboarding-divider"><span>or</span></div>
           <div className="onboarding-actions">
             <Link href="/graph" className="onboarding-action-btn">

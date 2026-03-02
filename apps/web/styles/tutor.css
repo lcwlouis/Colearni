@@ -763,3 +763,56 @@
   0%, 100% { opacity: 0.7; }
   50% { opacity: 1; }
 }
+
+/* ===== Onboarding Confirm Card ===== */
+.onboarding-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  margin-top: 1rem;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.onboarding-confirm__prompt {
+  font-size: 1rem;
+  color: var(--text);
+  text-align: center;
+}
+
+.onboarding-confirm__actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.onboarding-confirm__btn {
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  cursor: pointer;
+  border: 1px solid var(--line);
+}
+
+.onboarding-confirm__btn--primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.onboarding-confirm__btn--primary:hover {
+  background: var(--accent-hover);
+}
+
+.onboarding-confirm__btn--secondary {
+  background: var(--bg);
+  color: var(--text);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

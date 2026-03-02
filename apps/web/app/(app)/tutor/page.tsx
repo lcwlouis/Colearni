@@ -112,6 +112,7 @@ export default function TutorPage() {
           setCurrentConcept={t.setCurrentConcept}
           setSuggestedConceptId={t.setSuggestedConceptId}
           setQuery={t.setQuery}
+          onSend={(text: string) => void t.onSubmitChat(text)}
           onCtaClick={handleCtaClick}
         />
 
