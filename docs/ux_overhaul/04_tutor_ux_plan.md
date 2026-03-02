@@ -69,6 +69,10 @@ What this track changes:
 - `UXT.2` Streaming status replace-mode animation
 - `UXT.3` Graph-to-chat navigation
 - `UXT.4` Fix Socratic tutor protocol passthrough
+- `UXT.5` Parameterize Socratic concept initialization (topic-aware)
+- `UXT.6` Move prompt templates into system role (prompt builder rework)
+- `UXT.7` Add syntax highlighting to markdown renderer
+- `UXT.8` Backend `.env` flags for Socratic mode and dev stats
 
 ## Decision Log
 
@@ -237,6 +241,202 @@ Exit criteria:
 - No regression in normal (non-Socratic) chat flow
 - Route-level test covering the passthrough
 
+### UXT.5. Parameterize Socratic concept initialization (topic-aware)
+
+Purpose:
+- `init_relation_concept()` hardcodes "Relation" as the concept with a fixed Students table.
+  When a user asks about "Database Engine Internals" or any other topic, the tutor state is
+  initialized with the wrong concept. The Socratic tutor must adapt to the user's selected topic.
+
+Root cause:
+- `core/schemas/tutor_state.py:69-86` — `init_relation_concept()` takes no arguments and
+  hardcodes concept, table_name, table_columns, and rows.
+- `domain/chat/stream.py:362-363` — calls `init_relation_concept()` unconditionally when
+  `tutor_state.active` is False.
+
+Files involved:
+- `core/schemas/tutor_state.py` — Add `init_concept(topic: str, ...)` method that sets concept
+  name from the user's topic and creates an appropriate micro-world example.
+- `domain/chat/stream.py` — Pass `request.query` or the resolved concept name to initialization.
+- `domain/chat/tutor_commands.py` — May need to handle concept-specific command context.
+
+Implementation steps:
+1. Add `init_concept(topic: str)` method to `TutorState` that:
+   - Sets `concept` to the user's topic
+   - Creates a sensible default micro-world table (or leaves it empty for the LLM to populate)
+   - Falls back to the "Relation/Students" example only when topic is literally "Relation"
+2. Update `stream.py:362-363` to call `init_concept(topic)` with the user's query or the
+   resolved concept's canonical name.
+3. Update the Socratic prompt template to include the user's actual topic in the STATE block.
+4. Add tests for topic-aware initialization (at least 3 different topics).
+
+Verification:
+- `PYTHONPATH=. pytest -q` — all tests pass
+- Manual: enable Socratic mode → ask about "B-Trees" → tutor initializes with B-Tree concept,
+  not "Relation"
+- Manual: ask about "SQL Joins" → tutor uses appropriate table example
+
+Exit criteria:
+- Socratic tutor adapts concept and micro-world to the user's selected topic
+- "Relation" is just one possible topic, not hardcoded
+- Existing Socratic tests still pass
+
+### UXT.6. Move prompt templates into system role (prompt builder rework)
+
+Purpose:
+- The entire detailed prompt template (3KB+ of Socratic protocol, non-negotiable rules,
+  7-section format, evidence, document summaries) is placed in `role: user` while `role: system`
+  contains only a 12-word stub. This degrades model instruction-following, prefix caching, and
+  makes Phoenix traces misleading.
+- Audit details: `docs/ux_overhaul/deep_audit_report.md` Issue 2
+
+Root cause:
+- `adapters/llm/providers.py:202-205` builds messages as:
+  ```python
+  messages = [
+      {"role": "system", "content": "You are a grounded tutor. ..."},  # 12-word stub
+      {"role": "user", "content": prompt},  # 3KB+ detailed template + user query
+  ]
+  ```
+- `domain/chat/prompt_kit.py` — `build_full_tutor_prompt_with_meta()` and
+  `build_socratic_interactive_prompt()` both return a single string (the full template with
+  embedded user query), which then gets placed into `role: user`.
+
+Files involved:
+- `domain/chat/prompt_kit.py` — Refactor prompt builders to return `(system_prompt, user_prompt)`
+  tuple instead of a single string. The system_prompt should contain:
+  - Role definition
+  - Non-negotiable rules
+  - Response protocol/format
+  - Current tutor state
+  The user_prompt should contain:
+  - The actual user query
+  - Any command context
+  - Evidence/citations specific to this turn
+- `adapters/llm/providers.py` — Update `_call_with_observability()` and streaming paths to
+  accept separate system and user messages.
+- `core/observability.py` — Verify `set_llm_span_attributes()` correctly reflects the new
+  message structure in Phoenix traces.
+
+Implementation steps:
+1. Audit ALL prompt builder functions in `prompt_kit.py` — identify every path that builds
+   prompts (tutor, socratic, mastery, flashcard, quiz, etc.)
+2. Refactor each to return a `PromptMessages` dataclass with `system: str` and `user: str` fields.
+3. Update `adapters/llm/providers.py` to use the new structure:
+   ```python
+   messages = [
+       {"role": "system", "content": prompt_result.system},
+       {"role": "user", "content": prompt_result.user},
+   ]
+   ```
+4. Verify Phoenix traces now show the detailed prompt in `[system]` and only the user query +
+   evidence in `[user]`.
+5. Update existing tests for new return type.
+
+Self-audit review requirements:
+- The self-audit MUST verify that Phoenix traces show the correct role assignment by examining
+  the actual `llm.input_messages` attribute on at least one LLM span.
+- The self-audit MUST verify that the system prompt is stable across turns (same concept,
+  different queries) to enable OpenAI prefix caching.
+- The self-audit MUST check ALL LLM call sites, not just the tutor — gardener, mastery,
+  flashcard, quiz, graph extraction all use prompts.
+
+Verification:
+- `PYTHONPATH=. pytest -q` — all tests pass
+- Manual: send a tutor message → open Phoenix → LLM span → verify `[system]` contains the
+  full protocol template, `[user]` contains only the user query + evidence
+- Manual: send two messages about the same concept → verify system prompt is identical between
+  turns (prefix caching compatible)
+
+Exit criteria:
+- ALL prompt templates are in `role: system`, not `role: user`
+- User messages contain only the actual user query + turn-specific context
+- Phoenix traces accurately reflect the role structure
+- Existing tests pass
+
+### UXT.7. Add syntax highlighting to markdown renderer
+
+Purpose:
+- Code blocks in chat responses render as plain monospace text without language-specific syntax
+  highlighting. For a tutor app teaching programming and database concepts, this is a meaningful
+  UX gap.
+
+Root cause:
+- `apps/web/components/markdown-content.tsx` uses `react-markdown` but has no syntax highlighting
+  plugin installed. No `rehype-highlight`, `shiki`, or `prismjs` dependency.
+
+Files involved:
+- `apps/web/components/markdown-content.tsx` — Add syntax highlighting plugin
+- `apps/web/package.json` — Add `rehype-highlight` or `shiki` dependency
+- CSS — Include highlight.js theme or shiki styles
+
+Implementation steps:
+1. Install a syntax highlighting package. Prefer `rehype-highlight` (lightweight, uses
+   highlight.js) over `shiki` (heavier but better quality):
+   ```bash
+   npm install rehype-highlight highlight.js
+   ```
+2. Import and add `rehypeHighlight` to the `rehypePlugins` array in `react-markdown`.
+3. Import a highlight.js CSS theme (e.g., `github-dark` for dark mode, `github` for light).
+4. Verify code blocks with language hints (```sql, ```python, ```typescript) render with colors.
+5. Test code blocks without language hints still render as plain monospace.
+
+Verification:
+- `npx vitest run` — frontend tests pass
+- Manual: send a message that includes a SQL code block → verify syntax highlighting
+- Manual: send a message with a Python code block → verify highlighting
+- Manual: send a message with an unlabeled code block → renders as monospace (no crash)
+
+Exit criteria:
+- Fenced code blocks with language hints have syntax highlighting
+- At least SQL, Python, JavaScript/TypeScript highlighted correctly
+- No visual regression in other markdown elements
+
+### UXT.8. Backend `.env` flags for Socratic mode and dev stats
+
+Purpose:
+- The Socratic toggle and dev stats toggle are frontend-only (`useState` and `localStorage`
+  respectively). The user wants backend `.env` control so these features can be configured at
+  deployment time, not in the browser.
+
+Root cause:
+- `apps/web/features/tutor/hooks/use-tutor-page.ts:26` — `useState(false)` for Socratic
+- `apps/web/lib/hooks/use-dev-stats.ts` — `localStorage` for dev stats
+- No backend settings control these features
+
+Files involved:
+- `core/config.py` (or `core/settings.py`) — Add settings:
+  - `APP_SOCRATIC_MODE_DEFAULT: bool = False` — whether Socratic is ON by default
+  - `APP_INCLUDE_DEV_STATS: bool = False` — whether to include `generation_trace` in responses
+- `apps/api/routes/chat.py` — Conditionally include/exclude `generation_trace` based on setting
+- `apps/api/routes/settings.py` (or equivalent) — Expose a `/settings/features` endpoint that
+  returns the backend feature flag values so the frontend can read defaults
+- `apps/web/` — Read feature defaults from the backend settings endpoint on app load
+
+Implementation steps:
+1. Add `APP_SOCRATIC_MODE_DEFAULT` and `APP_INCLUDE_DEV_STATS` to the backend settings model.
+2. Create or update a `/settings/features` endpoint that returns:
+   ```json
+   { "socratic_mode_default": true, "include_dev_stats": false }
+   ```
+3. In chat response routes: if `APP_INCLUDE_DEV_STATS=false`, strip `generation_trace` from
+   the response envelope before sending.
+4. On the frontend: fetch feature flags on app load, use as initial values for the toggles.
+5. Remove the frontend-only Socratic button (or change it to respect the backend default).
+6. Remove the frontend-only dev stats toggle if it's now fully backend-controlled, or keep it
+   as an override.
+
+Verification:
+- `PYTHONPATH=. pytest -q` — backend tests pass
+- `npx vitest run` — frontend tests pass
+- Manual: set `APP_SOCRATIC_MODE_DEFAULT=true` in `.env` → Socratic mode active by default
+- Manual: set `APP_INCLUDE_DEV_STATS=false` in `.env` → `generation_trace` not in API response
+
+Exit criteria:
+- Both features controllable via `.env`
+- Frontend reads backend defaults
+- Existing behavior preserved when env vars are not set (backwards compatible)
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -256,6 +456,10 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 2. `UXT.2` Streaming status replace-mode animation ✅ (pre-existing)
 3. `UXT.3` Graph-to-chat navigation ✅
 4. `UXT.4` Fix Socratic tutor protocol passthrough ✅ (pre-existing)
+5. `UXT.5` Parameterize Socratic concept initialization 🔲
+6. `UXT.6` Move prompt templates into system role 🔲
+7. `UXT.7` Add syntax highlighting to markdown renderer 🔲
+8. `UXT.8` Backend `.env` flags for Socratic mode and dev stats 🔲
 
 ### Verification Block — UXT.1
 
@@ -307,32 +511,60 @@ npx vitest run  # from apps/web/
 
 ```text
 Read docs/UX_OVERHAUL_MASTER_PLAN.md, then read docs/ux_overhaul/04_tutor_ux_plan.md.
+Also read docs/ux_overhaul/deep_audit_report.md for context on what was found during the deep audit.
 Begin with the next incomplete UXT slice exactly as described.
 
 Execution loop for this child plan:
 
 1. Work on one UXT slice at a time.
-2. Onboarding concept click must have a confirm step before sending (not auto-fire). Status updates must replace each other, not append — single-line animated status like ChatGPT reasoning traces. 'Thinking...' tag should show the current status string, not be a separate element.
-3. Run the listed verification steps before claiming a slice complete, including browser-visible checks where required by the plan.
-4. When a slice is complete, add:
+2. Key constraints:
+   - Onboarding concept click must have a confirm step before sending (not auto-fire).
+   - Status updates must replace each other, not append — single-line animated status.
+   - Socratic tutor MUST adapt to the user's selected topic — do NOT hardcode "Relation".
+   - ALL prompt templates must go into role:system, NOT role:user. The user message should
+     contain ONLY the user's actual query and turn-specific context (evidence, command context).
+   - Syntax highlighting is REQUIRED for code blocks in the markdown renderer.
+   - Socratic mode and dev stats toggles MUST be controllable via backend .env variables,
+     not frontend-only state. The frontend should read defaults from a backend settings endpoint.
+   - For UXT.6 (prompt builder rework): audit ALL prompt builder functions, not just the tutor.
+     Every LLM call site (tutor, gardener, mastery, flashcard, quiz, graph extraction) must
+     have correct system/user role assignment.
+3. Run the listed verification steps before claiming a slice complete, including browser-visible
+   checks where required by the plan.
+4. BEHAVIORAL VERIFICATION (mandatory for every slice):
+   - Trace the full code path: user action → frontend → API route → domain logic → response
+   - Verify NO Pydantic silent field drops (check API schema matches frontend request)
+   - Verify route handlers forward ALL fields to domain layer
+   - Verify domain logic USES the forwarded fields (not dead code paths)
+   - For prompts: verify Phoenix traces show correct system/user role assignment
+5. When a slice is complete, add:
    - the normal Verification Block for that slice
    - a summary of all Removal Entries added during that slice
-5. After every 2 completed UXT slices OR if context is compacted/summarized, re-open docs/UX_OVERHAUL_MASTER_PLAN.md and docs/ux_overhaul/04_tutor_ux_plan.md and restate which UXT slices remain.
-6. Continue to the next incomplete UXT slice once the previous slice is verified.
-7. When all UXT slices are complete, immediately re-open docs/UX_OVERHAUL_MASTER_PLAN.md, select the next incomplete child plan, and continue in the same run.
+6. After every 2 completed UXT slices OR if context is compacted/summarized, re-open
+   docs/UX_OVERHAUL_MASTER_PLAN.md and docs/ux_overhaul/04_tutor_ux_plan.md and restate
+   which UXT slices remain.
+7. Continue to the next incomplete UXT slice once the previous slice is verified.
+8. When all UXT slices are complete, immediately re-open docs/UX_OVERHAUL_MASTER_PLAN.md,
+   select the next incomplete child plan, and continue in the same run.
 
-Do NOT stop just because UXT is complete. UXT completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
+Do NOT stop just because UXT is complete. UXT completion is only a checkpoint unless the
+master status ledger shows no remaining incomplete tracks.
 
-If this child plan is being revisited during an audit cycle, only work on slices marked as "reopened". Produce audit-prefixed Verification Blocks. Do not re-examine slices that passed the audit.
+If this child plan is being revisited during an audit cycle, only work on slices marked as
+"reopened". Produce audit-prefixed Verification Blocks. Do not re-examine slices that passed
+the audit.
 
-Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
+Stop only if verification fails, the code no longer matches plan assumptions, a blocker
+requires user input, or the next slice would widen scope beyond this plan.
 
 START:
 
 Read docs/UX_OVERHAUL_MASTER_PLAN.md.
 Read docs/ux_overhaul/04_tutor_ux_plan.md.
+Read docs/ux_overhaul/deep_audit_report.md.
 Begin with the current UXT slice in execution order exactly as described.
 Do not proceed beyond the current slice until verified.
 Continue once verified, then go back to the start of this prompt for the next slice.
-When UXT is complete, immediately return to docs/UX_OVERHAUL_MASTER_PLAN.md and continue with the next incomplete child plan.
+When UXT is complete, immediately return to docs/UX_OVERHAUL_MASTER_PLAN.md and continue
+with the next incomplete child plan.
 ```

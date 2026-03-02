@@ -254,6 +254,24 @@ while AUDIT_CYCLE < MAX_AUDIT_CYCLES:
        d. No dead imports, unused variables, or orphaned test stubs
        e. Cross-slice integration: does this slice's output still work
           with what later slices built on top of it?
+       f. BEHAVIORAL AUDIT (DO NOT SKIP): For each feature-facing slice,
+          trace the full code path from user action → frontend → API route
+          → domain logic → response. Verify:
+          - The API schema accepts all required fields (no Pydantic silent drops)
+          - Route handlers forward ALL fields to domain layer (no missing kwargs)
+          - Domain logic actually uses the forwarded fields (not dead code)
+          - The response includes expected data (not stubs or hardcoded values)
+          - If a feature has a toggle, verify: default state, persistence
+            mechanism, and that toggling actually changes behavior
+       g. PROMPT AUDIT (for any LLM-facing slice): Open the prompt template
+          and verify:
+          - System vs user role assignment is correct (instructions in system,
+            user query in user)
+          - Template variables are actually populated (not placeholders)
+          - The prompt produces the expected output format
+       h. OBSERVABILITY AUDIT: For any slice that touches tracing, verify
+          traces show correct data in the expected panels, not just in
+          attributes.
     3. Run the full Verification Matrix (all test suites, typecheck, lint).
     4. Produce an Audit Report:
        - Cycle number

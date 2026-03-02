@@ -289,8 +289,8 @@ Dependencies between tracks:
 | `UXF` Critical fixes | ✅ audit-passed | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
 | `UXG` Graph replacement | ✅ audit-passed | All 13 slices complete (UXG.1–UXG.13) — Sigma.js core + camera, layouts, loading, legend, settings, expand/prune |
 | `UXP` Practice UX | ✅ audit-passed | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
-| `UXT` Tutor UX | ✅ audit-passed | All 4 slices complete (UXT.1–UXT.4) — onboarding confirm, status replace-mode, graph-chat nav, Socratic passthrough |
-| `UXI` Infrastructure | ✅ audit-passed | All 4 slices complete (UXI.1–UXI.4) — sources polish, LLM caching, dev stats, Phoenix Info tab |
+| `UXT` Tutor UX | ⚠️ partial — needs re-audit | UXT.1-3 pass. UXT.4 Socratic passthrough plumbing works BUT: (1) `init_relation_concept()` hardcodes "Relation" concept — no topic adaptation, (2) entire prompt template placed in `role:user` instead of `role:system`, (3) Socratic toggle not persisted and no `.env` flag. See `docs/ux_overhaul/deep_audit_report.md` |
+| `UXI` Infrastructure | ⚠️ partial — needs re-audit | UXI.1, UXI.4 pass. UXI.2 minimal (6 lines of logging, no prompt restructuring for caching). UXI.3 dev stats toggle was pre-existing code; commit `de09f77` only updates docs. No backend `.env` flags for dev stats or Socratic mode. See `docs/ux_overhaul/deep_audit_report.md` |
 | `UXD` Documentation audit | ✅ audit-passed | All 5 slices complete (UXD.1–UXD.5) — staleness audit, API+ARCH, FRONTEND+GRAPH, PRODUCT+PLAN+PROGRESS, OBS+PROMPTS |
 
 ## Verification Block Template
@@ -368,6 +368,24 @@ while AUDIT_CYCLE < MAX_AUDIT_CYCLES:
        d. No dead imports, unused variables, or orphaned test stubs
        e. Cross-slice integration: does this slice's output still work
           with what later slices built on top of it?
+       f. BEHAVIORAL AUDIT (DO NOT SKIP): For each feature-facing slice,
+          trace the full code path from user action → frontend → API route
+          → domain logic → response. Verify:
+          - The API schema accepts all required fields (no Pydantic silent drops)
+          - Route handlers forward ALL fields to domain layer (no missing kwargs)
+          - Domain logic actually uses the forwarded fields (not dead code)
+          - The response includes expected data (not stubs or hardcoded values)
+          - If a feature has a toggle, verify: default state, persistence
+            mechanism, and that toggling actually changes behavior
+       g. PROMPT AUDIT (for any LLM-facing slice): Open the prompt template
+          and verify:
+          - System vs user role assignment is correct (instructions in system,
+            user query in user)
+          - Template variables are actually populated (not placeholders)
+          - The prompt produces the expected output format
+       h. OBSERVABILITY AUDIT: For any slice that touches tracing, verify
+          Phoenix traces show correct data in the Info tab (input.value /
+          output.value), not just in attributes.
     3. Run the full Verification Matrix:
        - PYTHONPATH=. pytest -q
        - npx vitest run (from apps/web/)
