@@ -17,6 +17,32 @@ export function FlashcardStack({ workspaceId, conceptId, conceptName, onGenerate
   const [currentIndex, setCurrentIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [exhausted, setExhausted] = useState(false);
+  const [exhaustedReason, setExhaustedReason] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const generateMore = async () => {
+    setGenerating(true);
+    try {
+      const res = await apiClient.generateStatefulFlashcards(workspaceId, { concept_id: conceptId });
+      setCards(prev => {
+        const seen = new Set(prev.map(c => c.flashcard_id));
+        const newCards = res.flashcards.filter(c => !seen.has(c.flashcard_id));
+        const merged = [...prev, ...newCards];
+        // Navigate to first new card after render
+        setTimeout(() => setCurrentIndex(prev.length), 0);
+        return merged;
+      });
+      if (!res.has_more) {
+        setExhausted(true);
+        setExhaustedReason(res.exhausted_reason);
+      }
+      setFlipped(false);
+    } catch (err) {
+      console.error("Failed to generate more flashcards:", err);
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +132,21 @@ export function FlashcardStack({ workspaceId, conceptId, conceptName, onGenerate
         <button type="button" onClick={prev} disabled={currentIndex === 0}>← Prev</button>
         <button type="button" onClick={next} disabled={currentIndex === cards.length - 1}>Next →</button>
       </div>
+
+      {exhausted ? (
+        <div className="flashcard-stack__exhausted">
+          All content for this concept has been covered ✓
+          {exhaustedReason && <div>{exhaustedReason}</div>}
+        </div>
+      ) : generating ? (
+        <div className="flashcard-stack__generate">
+          <span style={{ color: "var(--muted)" }}>Generating new flashcards…</span>
+        </div>
+      ) : (
+        <div className="flashcard-stack__generate">
+          <button type="button" onClick={generateMore}>Generate more</button>
+        </div>
+      )}
     </div>
   );
 }
