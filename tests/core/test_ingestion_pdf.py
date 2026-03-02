@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 from adapters.db.documents import DocumentRow
+from adapters.parsers.chunker import chunk_text_deterministic
+from adapters.parsers.text import parse_text_payload
 from core.ingestion import IngestionRequest, IngestionValidationError, ingest_text_document
 from core.settings import get_settings
 from pypdf import PdfWriter
@@ -175,3 +177,120 @@ def test_ingest_non_extractable_pdf_fails_with_clear_message(monkeypatch: Any) -
         )
 
     assert session.commit_calls == 0
+
+
+def _build_multipage_pdf_bytes(page_count: int, chars_per_page: int = 500) -> bytes:
+    """Build a PDF with *page_count* pages, each containing *chars_per_page* of text."""
+    writer = PdfWriter()
+    for i in range(page_count):
+        page_text = f"Page {i + 1}. " + "x" * (chars_per_page - len(f"Page {i + 1}. "))
+        # Create a page with actual text content via pypdf annotation
+        writer.add_blank_page(width=612, height=792)
+    output = BytesIO()
+    writer.write(output)
+    raw = output.getvalue()
+
+    # pypdf's add_blank_page doesn't embed text, so build pages manually.
+    # Use a simple raw-PDF builder that embeds text streams.
+    return _build_raw_multipage_pdf(page_count, chars_per_page)
+
+
+def _build_raw_multipage_pdf(page_count: int, chars_per_page: int) -> bytes:
+    """Construct a raw PDF with extractable text on every page."""
+    # Object 1: Catalog
+    # Object 2: Pages
+    # Object 3: Font
+    # Objects 4..4+2*page_count-1: Page + Contents pairs
+
+    page_obj_ids: list[int] = []
+    objects: list[str] = []
+
+    # Catalog
+    objects.append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+    # Font
+    objects.append(
+        "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+    )
+
+    next_id = 4
+    for i in range(page_count):
+        page_id = next_id
+        contents_id = next_id + 1
+        next_id += 2
+        page_obj_ids.append(page_id)
+
+        text_body = f"Page {i + 1} content. " + "a" * max(0, chars_per_page - len(f"Page {i + 1} content. "))
+        # Split into lines of ~70 chars for the PDF stream (Tj limit)
+        lines: list[str] = []
+        pos = 0
+        y = 720
+        while pos < len(text_body):
+            segment = text_body[pos : pos + 70]
+            # Escape parens for PDF string
+            segment = segment.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+            lines.append(f"({segment}) Tj\n0 -14 Td")
+            pos += 70
+            y -= 14
+        stream = "BT\n/F1 12 Tf\n72 720 Td\n" + "\n".join(lines) + "\nET\n"
+        stream_bytes = stream.encode("latin-1")
+
+        objects.append(
+            f"{page_id} 0 obj\n"
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {contents_id} 0 R >>\n"
+            f"endobj\n"
+        )
+        objects.append(
+            f"{contents_id} 0 obj\n<< /Length {len(stream_bytes)} >>\nstream\n"
+            f"{stream}endstream\nendobj\n"
+        )
+
+    # Pages object (object 2)
+    kids = " ".join(f"{pid} 0 R" for pid in page_obj_ids)
+    pages_obj = f"2 0 obj\n<< /Type /Pages /Kids [{kids}] /Count {page_count} >>\nendobj\n"
+    objects.insert(1, pages_obj)  # Insert after catalog
+
+    header = "%PDF-1.4\n"
+    body = ""
+    offsets: list[int] = [0]
+    current = len(header.encode("latin-1"))
+    for obj in objects:
+        offsets.append(current)
+        body += obj
+        current += len(obj.encode("latin-1"))
+
+    xref_start = current
+    xref = f"xref\n0 {len(offsets)}\n0000000000 65535 f \n"
+    xref += "".join(f"{offset:010d} 00000 n \n" for offset in offsets[1:])
+    trailer = (
+        f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\n"
+        f"startxref\n{xref_start}\n%%EOF\n"
+    )
+    return (header + body + xref + trailer).encode("latin-1")
+
+
+def test_multipage_pdf_produces_reasonable_chunk_count() -> None:
+    """A multi-page PDF with ~500 chars/page should produce proportional chunks."""
+    page_count = 10
+    chars_per_page = 500
+    pdf_bytes = _build_raw_multipage_pdf(page_count, chars_per_page)
+
+    parsed = parse_text_payload(
+        raw_bytes=pdf_bytes,
+        filename="multipage.pdf",
+        content_type="application/pdf",
+    )
+
+    total_extracted = len(parsed.normalized_text)
+    # Verify we actually extracted substantial text (not just 2000 chars for 10 pages)
+    assert total_extracted > page_count * 100, (
+        f"Expected >{page_count * 100} chars from {page_count}-page PDF, "
+        f"got {total_extracted}"
+    )
+
+    chunks = chunk_text_deterministic(parsed.normalized_text, chunk_size=1000, overlap=150)
+    # With ~5000 chars total and 1000-char chunks, we expect at least 4 chunks
+    expected_min = max(1, total_extracted // 1000)
+    assert len(chunks) >= expected_min, (
+        f"Expected ≥{expected_min} chunks from {total_extracted} chars, got {len(chunks)}"
+    )

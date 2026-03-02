@@ -19,9 +19,10 @@ import type { SlideOverTab } from "../components/tutor-slide-over";
 export function useTutorPage() {
   const { user, isLoading: authLoading, activeWorkspaceId } = useRequireAuth();
   const wsId = activeWorkspaceId ?? undefined;
-  const { activeSessionId, startNewSession, refreshSessions } = useChatSession();
+  const { activeSessionId, setActiveSessionId, startNewSession, refreshSessions } = useChatSession();
   const searchParams = useSearchParams();
   const topicParam = searchParams.get("topic");
+  const sessionParam = searchParams.get("session");
 
   const [grounding_mode, setGroundingMode] = useState<GroundingMode>("hybrid");
   const [tutorProtocol, setTutorProtocol] = useState(false);
@@ -188,6 +189,13 @@ export function useTutorPage() {
       setQuery(`Teach me about ${topicParam}`);
     }
   }, [topicParam, setQuery]);
+
+  // Navigate to a specific chat session when ?session= param is present
+  useEffect(() => {
+    if (sessionParam) {
+      setActiveSessionId(sessionParam);
+    }
+  }, [sessionParam, setActiveSessionId]);
 
   // Reset level-up when session changes and no active session
   useEffect(() => {

@@ -29,7 +29,7 @@ export function SettingsPanel({ onLayoutChange }: Props) {
         aria-label="Graph settings"
         title="Graph settings"
       >
-        ⚙
+        Settings
       </button>
 
       {open && (

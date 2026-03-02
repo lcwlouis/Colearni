@@ -139,7 +139,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
-        const chatParam = urlParams.get("chat");
+        const chatParam = urlParams.get("chat") || urlParams.get("session");
         if (chatParam) {
             setActiveSessionId(chatParam);
         }

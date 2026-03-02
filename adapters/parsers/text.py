@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass
 from io import BytesIO
 
 from pypdf import PdfReader
+
+logger = logging.getLogger(__name__)
 
 _MARKDOWN_EXTENSIONS = {".md"}
 _TEXT_EXTENSIONS = {".txt"}
@@ -63,6 +66,14 @@ def parse_text_payload(
             ) from exc
 
     normalized = normalize_text(decoded)
+    if decoded:
+        before_len = len(decoded)
+        after_len = len(normalized)
+        logger.info(
+            "Text normalization: %d chars → %d chars (%.1f%% retained)",
+            before_len, after_len,
+            (after_len / before_len * 100) if before_len else 0,
+        )
     return ParsedTextDocument(
         normalized_text=normalized,
         mime_type=mime_type,
@@ -73,11 +84,36 @@ def parse_text_payload(
 def _extract_pdf_text(raw_bytes: bytes) -> str:
     try:
         reader = PdfReader(BytesIO(raw_bytes))
-        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
     except Exception as exc:
         raise UnsupportedTextDocumentError(
             "Failed to parse PDF payload. Ensure the file is a valid, unencrypted PDF."
         ) from exc
+
+    page_count = len(reader.pages)
+    page_texts: list[str] = []
+    total_chars = 0
+
+    for page_num, page in enumerate(reader.pages):
+        text = page.extract_text() or ""
+        char_count = len(text)
+        total_chars += char_count
+        if not text:
+            logger.warning("PDF page %d/%d returned no extractable text", page_num + 1, page_count)
+        page_texts.append(text)
+
+    avg_chars = total_chars / page_count if page_count else 0
+    logger.info(
+        "PDF text extraction: %d pages, %d total chars, %.0f avg chars/page",
+        page_count, total_chars, avg_chars,
+    )
+    if page_count and avg_chars < 100:
+        logger.warning(
+            "Suspiciously low text yield from PDF: %d pages but only %.0f avg chars/page "
+            "(expected ≥100). The PDF may be image-based or have non-extractable text.",
+            page_count, avg_chars,
+        )
+
+    return "\n\n".join(page_texts)
 
 
 def _resolve_mime_type(*, filename: str | None, content_type: str | None) -> str:
