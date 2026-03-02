@@ -38,7 +38,7 @@ class IntegrationGardenerLLM(GraphLLMClient):
             "confidence": 0.92,
         }
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         return prompt
 
 

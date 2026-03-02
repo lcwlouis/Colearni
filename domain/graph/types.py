@@ -53,17 +53,20 @@ def build_tier_inference_prompt(
     concept_name: str,
     description: str,
     neighbor_names: list[str],
-) -> str:
-    """Build a short prompt asking the LLM to classify a concept into a tier."""
-    neighbors_text = ", ".join(neighbor_names[:10]) if neighbor_names else "(none)"
-    return (
+) -> tuple[str, str]:
+    """Build a (system, user) prompt pair for tier classification."""
+    system = (
         "Classify the following concept into exactly one tier: "
         "umbrella, topic, subtopic, or granular.\n\n"
-        f"Concept: {concept_name}\n"
-        f"Description: {description or '(no description)'}\n"
-        f"Neighbor concepts: {neighbors_text}\n\n"
         "Respond with a single word: umbrella, topic, subtopic, or granular."
     )
+    neighbors_text = ", ".join(neighbor_names[:10]) if neighbor_names else "(none)"
+    user = (
+        f"Concept: {concept_name}\n"
+        f"Description: {description or '(no description)'}\n"
+        f"Neighbor concepts: {neighbors_text}"
+    )
+    return system, user
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,15 +114,17 @@ class CanonicalCandidate:
 
 @dataclass(frozen=True, slots=True)
 class ResolverDecision:
-    """Final merge/create decision for one raw concept."""
+    """Final merge/create/link decision for one raw concept."""
 
-    decision: Literal["MERGE_INTO", "CREATE_NEW"]
+    decision: Literal["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]
     merge_into_id: int | None
     confidence: float
     method: Literal["exact", "lexical", "vector", "llm", "fallback"]
     alias_to_add: str | None = None
     proposed_description: str | None = None
     llm_used: bool = False
+    link_to_id: int | None = None
+    link_relation_type: str | None = None
 
 
 @dataclass(slots=True)

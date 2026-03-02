@@ -39,17 +39,17 @@ def try_social_response(
         return None
     persona = get_persona(settings.tutor_persona)
     if social_llm is not None:
-        social_prompt = (
+        system_prompt = (
             f"{persona.get('system_prefix', '')}\n\n"
             "The user sent a casual/social message. Respond naturally and warmly "
-            "as the CoLearni tutor (1-2 sentences). Stay in character.\n\n"
-            f"USER: {query}"
+            "as the CoLearni tutor (1-2 sentences). Stay in character."
         )
         try:
             with observation_context(component="chat", operation="chat.social"):
                 social_text = social_llm.generate_tutor_text(
-                    prompt=social_prompt,
+                    prompt=query,
                     prompt_meta=_SOCIAL_PROMPT_META,
+                    system_prompt=system_prompt,
                 ).strip()
         except (RuntimeError, ValueError):
             social_text = ""

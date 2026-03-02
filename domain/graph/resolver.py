@@ -70,16 +70,20 @@ class ResolverConfig:
 class _DisambiguationPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    decision: Literal["MERGE_INTO", "CREATE_NEW"]
+    decision: Literal["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]
     merge_into_id: int | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     alias_to_add: str | None = None
     proposed_description: str | None = None
+    link_to_id: int | None = None
+    link_relation_type: str | None = None
 
     @model_validator(mode="after")
     def validate_merge_id(self) -> _DisambiguationPayload:
         if self.decision == "MERGE_INTO" and self.merge_into_id is None:
             raise ValueError("merge_into_id is required when decision=MERGE_INTO")
+        if self.decision == "LINK_ONLY" and self.link_to_id is None:
+            raise ValueError("link_to_id is required when decision=LINK_ONLY")
         return self
 
 
@@ -369,6 +373,19 @@ class OnlineResolver:
                 llm_used=True,
             )
 
+        if payload.decision == "LINK_ONLY" and payload.link_to_id in candidate_ids:
+            return ResolverDecision(
+                decision="LINK_ONLY",
+                merge_into_id=None,
+                confidence=payload.confidence,
+                method="llm",
+                alias_to_add=payload.alias_to_add,
+                proposed_description=payload.proposed_description,
+                llm_used=True,
+                link_to_id=payload.link_to_id,
+                link_relation_type=payload.link_relation_type or "related_to",
+            )
+
         return ResolverDecision(
             decision="CREATE_NEW",
             merge_into_id=None,
@@ -426,6 +443,7 @@ class OnlineResolver:
                     used_llm=decision.llm_used,
                 )
 
+        # CREATE_NEW or LINK_ONLY both create a new canonical concept
         created_concept, was_created = self._create_or_reuse_canonical(
             workspace_id=workspace_id,
             chunk_id=chunk_id,
@@ -448,6 +466,23 @@ class OnlineResolver:
             target_id=created_concept.id,
             chunk_id=chunk_id,
         )
+
+        # LINK_ONLY: also create an edge between the new concept and the target
+        if decision.decision == "LINK_ONLY" and decision.link_to_id is not None:
+            relation = decision.link_relation_type or "related_to"
+            graph_repository.upsert_canonical_edge(
+                self._session,
+                workspace_id=workspace_id,
+                src_id=created_concept.id,
+                tgt_id=decision.link_to_id,
+                relation_type=relation,
+                description=f"{raw_concept.name} is related to candidate #{decision.link_to_id}",
+                keywords=[],
+                delta_weight=1.0,
+                weight_cap=self._config.edge_weight_cap,
+                edge_description_max_chars=self._config.edge_description_max_chars,
+            )
+
         return ResolvedConcept(
             concept_id=created_concept.id,
             created=was_created,

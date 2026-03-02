@@ -159,7 +159,7 @@ class _FakeLLM:
     def __init__(self, response: str | Exception) -> None:
         self._response = response
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta: object = None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta: object = None, system_prompt: str | None = None) -> str:
         if isinstance(self._response, Exception):
             raise self._response
         return self._response

@@ -44,9 +44,11 @@ def generate_document_summary(
         sample_text += chunk + "\n\n"
     if not sample_text.strip():
         return None
-    prompt, prompt_meta = _build_document_summary_prompt(sample_text.strip())
+    system_prompt, prompt, prompt_meta = _build_document_summary_prompt(sample_text.strip())
     try:
-        summary = llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta).strip()
+        summary = llm_client.generate_tutor_text(
+            prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt
+        ).strip()
         if summary and len(summary) > 10:
             return summary[:500]
     except (RuntimeError, ValueError):
@@ -204,17 +206,18 @@ def run_post_ingest_tasks(
         db.close()
 
 
-def _build_document_summary_prompt(sample_text: str) -> tuple[str, Any]:
-    """Build the document summary prompt from asset or inline fallback."""
+def _build_document_summary_prompt(sample_text: str) -> tuple[str, str, Any]:
+    """Return (system_prompt, user_prompt, prompt_meta)."""
+    system_prompt = (
+        "You are a document summarizer for a learning platform. "
+        "Summarize document excerpts in 2-3 concise sentences. "
+        "Focus on the main topics and key concepts covered."
+    )
     try:
-        return _registry.render_with_meta("document_document_summary_v1", {
+        user_prompt, prompt_meta = _registry.render_with_meta("document_document_summary_v1", {
             "chunks": sample_text,
         })
+        return system_prompt, user_prompt, prompt_meta
     except Exception:
         _log.debug("asset render failed for document_summary_v1, using inline fallback")
-        return (
-            "Summarize the following document excerpt in 2-3 concise sentences. "
-            "Focus on the main topics and key concepts covered.\n\n"
-            f"DOCUMENT EXCERPT:\n{sample_text}\n\n"
-            "SUMMARY:"
-        ), None
+        return system_prompt, f"DOCUMENT EXCERPT:\n{sample_text}", None

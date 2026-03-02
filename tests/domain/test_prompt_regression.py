@@ -26,7 +26,9 @@ EXPECTED_PROMPT_IDS = [
     "tutor_direct_v1",
     "routing_query_analyzer_v1",
     "graph_extract_chunk_v1",
+    "graph_extract_chunk_v1_system",
     "graph_disambiguate_v1",
+    "graph_disambiguate_v1_system",
     "graph_merge_summary_v1",
     "graph_repair_json_v1",
     "assessment_levelup_generate_v1",
@@ -60,7 +62,7 @@ REQUIRED_SECTIONS = {
     "tutor_direct_v1": ["direct", "mastery"],
     "assessment_levelup_generate_v1": ["mastery", "item_type", "rubric_keywords"],
     "assessment_levelup_grade_v1": ["_generation_context", "score", "critical_misconception"],
-    "graph_extract_chunk_v1": ["concept", "relationship"],
+    "graph_extract_chunk_v1_system": ["concept", "relationship"],
     "document_document_summary_v1": ["500", "plain text"],
     "suggestion_suggestion_hook_v1": ["do not choose", "hook"],
 }

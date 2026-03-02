@@ -23,6 +23,12 @@ RequestedMode = Literal["socratic", "direct", "unknown"]
 
 _PROMPT_ID = "routing_query_analyzer_v1"
 
+_QUERY_ANALYZER_SYSTEM = (
+    "You are a query analysis component for Colearni's conductor. "
+    "Classify the learner's request so the system can choose the right response path. "
+    "Do not answer the learner's question. Return valid JSON only."
+)
+
 
 @dataclass(frozen=True)
 class QueryAnalysis:
@@ -123,6 +129,7 @@ def run_query_analysis(
     try:
         raw_text = llm_client.generate_tutor_text(
             prompt=prompt_text, prompt_meta=prompt_meta,
+            system_prompt=_QUERY_ANALYZER_SYSTEM,
         )
     except (RuntimeError, ValueError) as exc:
         log.warning("query analysis LLM call failed: %s", exc)

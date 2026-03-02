@@ -41,7 +41,13 @@ class GraphLLMClient(Protocol):
     ) -> Mapping[str, Any]:
         """Choose merge target vs create-new from bounded candidate set."""
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None) -> str:
+    def generate_tutor_text(
+        self,
+        *,
+        prompt: str,
+        prompt_meta: Any | None = None,
+        system_prompt: str | None = None,
+    ) -> str:
         """Generate tutor-facing response text from an instruction prompt."""
 
 

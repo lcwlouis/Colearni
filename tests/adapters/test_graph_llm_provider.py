@@ -60,9 +60,12 @@ class TestExtractRawGraphPrompt:
             response={"concepts": [], "edges": []}
         )
         client.extract_raw_graph(chunk_text="test chunk")
+        system_msg = client._last_messages[0]["content"]
         user_msg = client._last_messages[-1]["content"]
-        # Asset-backed prompt should have structured sections
-        assert "knowledge graph" in user_msg.lower() or "CHUNK:" in user_msg
+        # System message should have the extraction instructions
+        assert "knowledge graph" in system_msg.lower()
+        # User message should contain the chunk text
+        assert "test chunk" in user_msg
 
     def test_empty_extraction_returns_empty(self) -> None:
         client = _StubGraphLLMClient(
@@ -113,7 +116,7 @@ class TestDisambiguatePrompt:
         assert "DNA Replication" in user_msg
 
     def test_create_new_bias_in_prompt(self) -> None:
-        """Asset prompt should mention CREATE_NEW as the safe default."""
+        """Asset system prompt should mention CREATE_NEW as the safe default."""
         client = _StubGraphLLMClient(
             response={
                 "decision": "CREATE_NEW",
@@ -128,5 +131,5 @@ class TestDisambiguatePrompt:
             context_snippet="test",
             candidates=[],
         )
-        user_msg = client._last_messages[-1]["content"]
-        assert "CREATE_NEW" in user_msg
+        system_msg = client._last_messages[0]["content"]
+        assert "CREATE_NEW" in system_msg

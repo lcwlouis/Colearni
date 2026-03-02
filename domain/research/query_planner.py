@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _MAX_QUERIES_PER_PLAN = 8
 _MAX_CANDIDATES_PER_PLAN = 25
 
-_QUERY_PLANNER_PROMPT = """\
+_QUERY_PLANNER_SYSTEM = """\
 You are a research query planner for a learning copilot.
 
 Given the approved topic and its subtopics, generate up to {max_queries} search
@@ -37,12 +37,12 @@ For each query, specify:
 - "source_class": one of "paper", "article", "docs", "tutorial", "expert_post", "update", "other"
 - "max_results": integer (1-10)
 
+Respond ONLY with a JSON array of query objects."""
+
+_QUERY_PLANNER_USER = """\
 Topic: {topic}
 Subtopics: {subtopics}
-Source preferences: {source_classes}
-
-Respond ONLY with a JSON array of query objects.
-"""
+Source preferences: {source_classes}"""
 
 
 def build_query_plan(
@@ -72,13 +72,13 @@ def _llm_query_plan(
     max_queries: int,
 ) -> ResearchQueryPlan:
     """Use LLM to generate a structured query plan."""
-    prompt = _QUERY_PLANNER_PROMPT.format(
+    system = _QUERY_PLANNER_SYSTEM.format(max_queries=max_queries)
+    prompt = _QUERY_PLANNER_USER.format(
         topic=proposal.topic,
         subtopics=", ".join(proposal.subtopics) or "(none)",
         source_classes=", ".join(proposal.source_classes) or "(any)",
-        max_queries=max_queries,
     )
-    raw = llm_client.generate_tutor_text(prompt=prompt, prompt_meta=None)
+    raw = llm_client.generate_tutor_text(prompt=prompt, prompt_meta=None, system_prompt=system)
     queries = _parse_queries(raw, max_queries=max_queries)
 
     return ResearchQueryPlan(

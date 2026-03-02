@@ -35,7 +35,7 @@ def build_tutor_response_text(
     llm_client: GraphLLMClient | None,
 ) -> str:
     style = resolve_tutor_style(mastery_status=mastery_status)
-    prompt = build_tutor_prompt(
+    system_prompt, user_prompt = _build_tutor_prompt_parts(
         query=query,
         evidence=evidence,
         style=style,
@@ -43,7 +43,10 @@ def build_tutor_response_text(
     )
     if llm_client is not None:
         try:
-            text = llm_client.generate_tutor_text(prompt=prompt).strip()
+            text = llm_client.generate_tutor_text(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+            ).strip()
         except (RuntimeError, ValueError):
             text = ""
         if text:
@@ -59,6 +62,20 @@ def build_tutor_prompt(
     grounding_mode: GroundingMode,
 ) -> str:
     """Build a tutor prompt using file-based assets with inline fallback."""
+    system, user = _build_tutor_prompt_parts(
+        query=query, evidence=evidence, style=style, grounding_mode=grounding_mode,
+    )
+    return f"{system}\n\n{user}"
+
+
+def _build_tutor_prompt_parts(
+    *,
+    query: str,
+    evidence: Sequence[EvidenceItem],
+    style: TutorStyle,
+    grounding_mode: GroundingMode,
+) -> tuple[str, str]:
+    """Build tutor prompt separated into (system, user) parts."""
     lines = [
         f"- e{index}: {_truncate(' '.join(item.content.split()), limit=240)}"
         for index, item in enumerate(evidence[:3], start=1)
@@ -68,7 +85,7 @@ def build_tutor_prompt(
     asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
     strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
     try:
-        return _registry.render(asset_id, {
+        rendered = _registry.render(asset_id, {
             "strict_grounded_mode": strict_grounded_mode,
             "mastery_status": "learned" if style == "direct" else "locked",
             "document_summaries": "(none)",
@@ -79,10 +96,14 @@ def build_tutor_prompt(
             "evidence_block": evidence_block,
             "query": query,
         })
+        parts = rendered.split("\n---Inputs---\n", maxsplit=1)
+        if len(parts) == 2:
+            return parts[0].strip(), parts[1].strip()
+        return rendered, ""
     except Exception:
         log.debug("asset render failed for %s, using inline fallback", asset_id)
-        return _build_tutor_prompt_inline(
-            query=query, evidence_block=evidence_block, style=style
+        return _build_tutor_prompt_inline_parts(
+            query=query, evidence_block=evidence_block, style=style,
         )
 
 
@@ -90,7 +111,17 @@ def _build_tutor_prompt_inline(
     *, query: str, evidence_block: str, style: TutorStyle
 ) -> str:
     """Inline fallback for tutor prompt assembly (pre-P2 behavior)."""
-    rules = (
+    system, user = _build_tutor_prompt_inline_parts(
+        query=query, evidence_block=evidence_block, style=style,
+    )
+    return f"{system}\n\n{user}"
+
+
+def _build_tutor_prompt_inline_parts(
+    *, query: str, evidence_block: str, style: TutorStyle
+) -> tuple[str, str]:
+    """Inline fallback returning (system, user) parts."""
+    system = (
         "STYLE: socratic\n"
         "Do not provide the final answer directly.\n"
         "Ask one guiding question first, then give a brief hint and a next step."
@@ -101,7 +132,8 @@ def _build_tutor_prompt_inline(
             "Be concise and grounded in the cited evidence."
         )
     )
-    return f"{rules}\n\nUSER_QUESTION: {query}\n\nEVIDENCE:\n{evidence_block}"
+    user = f"USER_QUESTION: {query}\n\nEVIDENCE:\n{evidence_block}"
+    return system, user
 
 
 def _fallback_text(*, query: str, evidence: Sequence[EvidenceItem], style: TutorStyle) -> str:

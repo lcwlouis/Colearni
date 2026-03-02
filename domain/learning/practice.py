@@ -107,7 +107,7 @@ def generate_practice_flashcards(
     context["existing_flashcards"] = _load_existing_flashcard_content(
         session, workspace_id=workspace_id, concept_id=concept_id,
     )
-    prompt, prompt_meta = _build_flashcard_prompt(card_count=card_count, context=context)
+    prompt, prompt_meta, sys_prompt = _build_flashcard_prompt(card_count=card_count, context=context)
     with observation_context(
         component="practice",
         operation="practice.flashcards.generate",
@@ -123,7 +123,7 @@ def generate_practice_flashcards(
             span.set_attribute("concept.id", concept_id)
             set_span_summary(span, input_summary=context["concept_name"])
         payload = _parse_json(
-            llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta),
+            llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=sys_prompt),
             "Flashcard generation response is not valid JSON.",
         )
         if span is not None:
@@ -184,7 +184,7 @@ def create_practice_quiz(
     if llm_client is None:
         items = _fallback_practice_items(context=context, question_count=generation_count)
     else:
-        prompt, prompt_meta = _build_practice_quiz_prompt(
+        prompt, prompt_meta, sys_prompt = _build_practice_quiz_prompt(
             question_count=generation_count, context=context,
         )
         with observation_context(
@@ -205,6 +205,7 @@ def create_practice_quiz(
                 llm_client=llm_client,
                 prompt=prompt,
                 prompt_meta=prompt_meta,
+                system_prompt=sys_prompt,
                 context=context,
                 question_count=generation_count,
             )
@@ -365,6 +366,7 @@ def _generate_practice_items_with_retries(
     llm_client: GraphLLMClient,
     prompt: str,
     prompt_meta: Any | None = None,
+    system_prompt: str | None = None,
     context: dict[str, Any],
     question_count: int,
 ) -> list[dict[str, Any]]:
@@ -376,6 +378,7 @@ def _generate_practice_items_with_retries(
                 try:
                     llm_text = llm_client.generate_tutor_text(
                         prompt=retry_prompt, prompt_meta=prompt_meta,
+                        system_prompt=system_prompt,
                     )
                 except Exception:
                     return _fallback_practice_items(
@@ -639,7 +642,7 @@ def generate_stateful_flashcards(
     # Ask for extra cards to compensate for dedup
     request_count = card_count + min(len(existing_fps), card_count)
 
-    prompt, prompt_meta = _build_flashcard_prompt(card_count=request_count, context=context)
+    prompt, prompt_meta, sys_prompt = _build_flashcard_prompt(card_count=request_count, context=context)
     with observation_context(
         component="practice",
         operation="practice.flashcards.generate_stateful",
@@ -655,7 +658,7 @@ def generate_stateful_flashcards(
             span.set_attribute("concept.id", concept_id)
             set_span_summary(span, input_summary=context["concept_name"])
         payload = _parse_json(
-            llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta),
+            llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=sys_prompt),
             "Flashcard generation response is not valid JSON.",
         )
         if span is not None:
@@ -1056,28 +1059,32 @@ def _serialize_flashcard_run_row(row: Any) -> dict[str, Any]:
     }
 
 
-def _build_practice_quiz_prompt(*, question_count: int, context: dict[str, Any]) -> tuple[str, Any]:
+def _build_practice_quiz_prompt(*, question_count: int, context: dict[str, Any]) -> tuple[str, Any, str | None]:
     """Build the practice quiz generation prompt from asset or inline fallback."""
     try:
-        return _registry.render_with_meta("practice_practice_quiz_generate_v1", {
+        prompt, meta = _registry.render_with_meta("practice_practice_quiz_generate_v1", {
             "question_count": str(question_count),
             "context_json": json.dumps(context, ensure_ascii=True),
             "novelty_seed": str(uuid.uuid4()),
         })
+        return prompt, meta, None
     except Exception:
         log.debug("asset render failed for practice_quiz_generate_v1, using inline fallback")
-        return (
+        system = (
             "Return JSON practice quiz only. "
             "Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\",\"prompt\":\"...\","
             "\"payload\":{...}}]}\n"
-            "Include at least one short_answer and one mcq.\n"
+            "Include at least one short_answer and one mcq."
+        )
+        user = (
             f"QUESTION_COUNT: {question_count}\n"
             f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}\n"
             f"IMPORTANT: Generate completely novel and creative questions. Random seed: {uuid.uuid4()}"
-        ), None
+        )
+        return user, None, system
 
 
-def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> tuple[str, Any]:
+def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> tuple[str, Any, str | None]:
     """Build the flashcard generation prompt from asset or inline fallback."""
     existing = context.get("existing_flashcards", [])
     if existing:
@@ -1087,11 +1094,12 @@ def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> tupl
         existing_text = "None yet."
 
     try:
-        return _registry.render_with_meta("practice_practice_flashcards_generate_v1", {
+        prompt, meta = _registry.render_with_meta("practice_practice_flashcards_generate_v1", {
             "card_count": str(card_count),
             "context_json": json.dumps(context, ensure_ascii=True),
             "existing_flashcards_text": existing_text,
         })
+        return prompt, meta, None
     except Exception:
         log.debug("asset render failed for practice_flashcards_generate_v1, using inline fallback")
         dedup_block = ""
@@ -1102,11 +1110,14 @@ def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> tupl
                 "Generate entirely new questions covering different aspects.\n"
                 f"{existing_text}\n"
             )
-        return (
+        system = (
             "Return JSON flashcards only. "
             "Schema: {\"flashcards\":[{\"front\":\"...\",\"back\":\"...\","
-            "\"hint\":\"...\"}]}\n"
+            "\"hint\":\"...\"}]}"
+            f"{dedup_block}"
+        )
+        user = (
             f"CARD_COUNT: {card_count}\n"
             f"CONTEXT_JSON: {json.dumps(context, ensure_ascii=True)}"
-            f"{dedup_block}"
-        ), None
+        )
+        return user, None, system

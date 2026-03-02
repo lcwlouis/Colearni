@@ -34,10 +34,8 @@ class StubGardenerLLM(GraphLLMClient):
         self.calls += 1
         return self._payload
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         return prompt
-
-
 def _concept(
     concept_id: int,
     *,
@@ -450,7 +448,7 @@ class TierInferenceLLM(StubGardenerLLM):
         super().__init__({"decision": "CREATE_NEW", "confidence": 1.0})
         self._tier_response = tier_response
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any = None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta: Any = None, system_prompt: str | None = None) -> str:
         self.calls += 1
         return self._tier_response
 

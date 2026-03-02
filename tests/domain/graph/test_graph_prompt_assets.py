@@ -37,7 +37,29 @@ class TestGraphExtractChunkAsset:
     def test_empty_chunk_renders(self) -> None:
         reg = PromptRegistry(assets_dir=ASSETS_DIR)
         result = reg.render("graph_extract_chunk_v1", {"chunk_text": ""})
-        assert "CHUNK:" in result
+        assert "text chunk" in result
+
+
+class TestGraphExtractChunkSystemAsset:
+    """Test the graph_extract_chunk_v1_system prompt asset."""
+
+    def test_loads_successfully(self) -> None:
+        reg = PromptRegistry(assets_dir=ASSETS_DIR)
+        asset = reg.get("graph_extract_chunk_v1_system")
+        assert asset.meta.task_type == TaskType.GRAPH
+        assert asset.meta.output_format == "json"
+
+    def test_contains_system_instructions(self) -> None:
+        reg = PromptRegistry(assets_dir=ASSETS_DIR)
+        result = reg.render("graph_extract_chunk_v1_system", {})
+        assert "knowledge graph" in result.lower()
+        assert "concepts" in result
+        assert "edges" in result
+
+    def test_no_placeholders(self) -> None:
+        reg = PromptRegistry(assets_dir=ASSETS_DIR)
+        asset = reg.get("graph_extract_chunk_v1_system")
+        assert len(asset.placeholders) == 0
 
 
 class TestGraphDisambiguateAsset:
@@ -57,13 +79,33 @@ class TestGraphDisambiguateAsset:
             "candidates_json": '[{"id": 1, "name": "DNA Replication"}]',
         })
         assert "DNA replication" in result
-        assert "CREATE_NEW" in result
-        assert "MERGE_INTO" in result
+        assert "RAW_NAME" in result
 
     def test_placeholders(self) -> None:
         reg = PromptRegistry(assets_dir=ASSETS_DIR)
         asset = reg.get("graph_disambiguate_v1")
         assert asset.placeholders == frozenset({"raw_name", "context_snippet", "candidates_json"})
+
+
+class TestGraphDisambiguateSystemAsset:
+    """Test the graph_disambiguate_v1_system prompt asset."""
+
+    def test_loads_successfully(self) -> None:
+        reg = PromptRegistry(assets_dir=ASSETS_DIR)
+        asset = reg.get("graph_disambiguate_v1_system")
+        assert asset.meta.task_type == TaskType.GRAPH
+        assert asset.meta.output_format == "json"
+
+    def test_contains_system_instructions(self) -> None:
+        reg = PromptRegistry(assets_dir=ASSETS_DIR)
+        result = reg.render("graph_disambiguate_v1_system", {})
+        assert "CREATE_NEW" in result
+        assert "MERGE_INTO" in result
+
+    def test_no_placeholders(self) -> None:
+        reg = PromptRegistry(assets_dir=ASSETS_DIR)
+        asset = reg.get("graph_disambiguate_v1_system")
+        assert len(asset.placeholders) == 0
 
 
 class TestGraphMergeSummaryAsset:

@@ -77,13 +77,15 @@ _RAW_GRAPH_SCHEMA: dict[str, object] = {
 _DISAMBIGUATION_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
-        "decision": {"type": "string", "enum": ["MERGE_INTO", "CREATE_NEW"]},
+        "decision": {"type": "string", "enum": ["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]},
         "confidence": {"type": "number"},
         "merge_into_id": {"type": ["integer", "null"]},
         "alias_to_add": {"type": ["string", "null"]},
         "proposed_description": {"type": ["string", "null"]},
+        "link_to_id": {"type": ["integer", "null"]},
+        "link_relation_type": {"type": ["string", "null"]},
     },
-    "required": ["decision", "confidence", "merge_into_id", "alias_to_add", "proposed_description"],
+    "required": ["decision", "confidence", "merge_into_id", "alias_to_add", "proposed_description", "link_to_id", "link_relation_type"],
     "additionalProperties": False,
 }
 
@@ -123,17 +125,27 @@ class _BaseGraphLLMClient(ABC):
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         prompt_meta = None
+        system_prompt = None
         try:
+            system_prompt, _ = _registry.render_with_meta(
+                "graph_extract_chunk_v1_system", {}
+            )
             prompt, prompt_meta = _registry.render_with_meta(
                 "graph_extract_chunk_v1", {"chunk_text": chunk_text}
             )
         except Exception:
+            system_prompt = (
+                "You are a knowledge graph extraction component for a learning system. "
+                "Extract durable learning concepts and meaningful relationships from study material. "
+                "Return valid JSON only."
+            )
             prompt = f"Extract concept+edge JSON from this chunk.\n\nCHUNK:\n{chunk_text}"
         return self._chat_json(
             schema_name="graph_raw_extraction",
             schema=_RAW_GRAPH_SCHEMA,
             prompt=prompt,
             prompt_meta=prompt_meta,
+            system_prompt=system_prompt,
         )
 
     def disambiguate(
@@ -145,13 +157,22 @@ class _BaseGraphLLMClient(ABC):
     ) -> Mapping[str, Any]:
         candidates_json = json.dumps(list(candidates), ensure_ascii=True)
         prompt_meta = None
+        system_prompt = None
         try:
+            system_prompt, _ = _registry.render_with_meta(
+                "graph_disambiguate_v1_system", {}
+            )
             prompt, prompt_meta = _registry.render_with_meta("graph_disambiguate_v1", {
                 "raw_name": raw_name,
                 "context_snippet": context_snippet or "",
                 "candidates_json": candidates_json,
             })
         except Exception:
+            system_prompt = (
+                "You are a conservative graph resolver. "
+                "Decide whether a raw concept should merge into an existing canonical concept or create a new one. "
+                "Return valid JSON only."
+            )
             prompt = (
                 "Choose MERGE_INTO or CREATE_NEW.\n"
                 f"RAW_NAME: {raw_name}\n"
@@ -163,6 +184,7 @@ class _BaseGraphLLMClient(ABC):
             schema=_DISAMBIGUATION_SCHEMA,
             prompt=prompt,
             prompt_meta=prompt_meta,
+            system_prompt=system_prompt,
         )
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> str:
@@ -405,9 +427,11 @@ class _BaseGraphLLMClient(ABC):
         schema: dict[str, object],
         prompt: str,
         prompt_meta: Any | None = None,
+        system_prompt: str | None = None,
     ) -> dict[str, Any]:
+        system_content = system_prompt or "Return only JSON that satisfies the provided schema."
         messages = [
-            {"role": "system", "content": "Return only JSON that satisfies the provided schema."},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": prompt},
         ]
         response_format = {

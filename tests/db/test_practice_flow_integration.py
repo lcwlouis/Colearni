@@ -25,7 +25,7 @@ class PracticeLLM:
             )
         )
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         if "CARD_COUNT:" in prompt:
             count = self._count(prompt, "CARD_COUNT:")
             cards = [{"front": "f", "back": "b", "hint": str(i)} for i in range(count)]
@@ -51,7 +51,7 @@ class FlakyPracticeLLM(PracticeLLM):
     def __init__(self) -> None:
         self.quiz_calls = 0
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         if "QUESTION_COUNT:" in prompt:
             self.quiz_calls += 1
             if self.quiz_calls == 1:
@@ -65,16 +65,16 @@ class FlakyPracticeLLM(PracticeLLM):
                         ]
                     }
                 )
-        return super().generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta)
+        return super().generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)
 
 
 class ExplodingPracticeLLM:
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         raise RuntimeError("synthetic llm failure")
 
 
 class UniqueFlashcardLLM(PracticeLLM):
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         if "CARD_COUNT:" in prompt:
             count = self._count(prompt, "CARD_COUNT:")
             cards = [
@@ -82,7 +82,7 @@ class UniqueFlashcardLLM(PracticeLLM):
                 for idx in range(count)
             ]
             return json.dumps({"flashcards": cards})
-        return super().generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta)
+        return super().generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)
 
 
 def _short_item() -> dict[str, Any]:

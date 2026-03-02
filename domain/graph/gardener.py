@@ -476,13 +476,15 @@ def _backfill_null_tiers(
         neighbor_names = graph_repository.list_neighbor_names(
             session, workspace_id=workspace_id, concept_id=concept.id,
         )
-        prompt = build_tier_inference_prompt(
+        prompt_sys, prompt_user = build_tier_inference_prompt(
             concept_name=concept.canonical_name,
             description=concept.description,
             neighbor_names=neighbor_names,
         )
         try:
-            raw = llm_client.generate_tutor_text(prompt=prompt).strip().lower()
+            raw = llm_client.generate_tutor_text(
+                prompt=prompt_user, system_prompt=prompt_sys,
+            ).strip().lower()
             tier = raw if raw in VALID_TIERS else DEFAULT_TIER
         except Exception:
             tier = DEFAULT_TIER

@@ -24,7 +24,7 @@ class DeterministicQuizGrader:
         self.calls = 0
         self.last_prompt: str | None = None
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None) -> str:
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         self.calls += 1
         self.last_prompt = prompt
         marker = "ITEM_IDS_JSON:"

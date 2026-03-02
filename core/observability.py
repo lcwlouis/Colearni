@@ -362,10 +362,10 @@ def set_span_summary(
     if span is None:
         return
     if input_summary is not None:
-        span.set_attribute(INPUT_VALUE, input_summary[:_MAX_VALUE_CHARS])
+        span.set_attribute(INPUT_VALUE, input_summary)
         span.set_attribute(INPUT_MIME_TYPE, "text/plain")
     if output_summary is not None:
-        span.set_attribute(OUTPUT_VALUE, output_summary[:_MAX_VALUE_CHARS])
+        span.set_attribute(OUTPUT_VALUE, output_summary)
         span.set_attribute(OUTPUT_MIME_TYPE, "text/plain")
 
 
@@ -565,7 +565,7 @@ def _sanitize_value(key: str, value: Any) -> Any:
     if isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
-        return value[:_MAX_VALUE_CHARS]
+        return value
     if isinstance(value, Mapping):
         payload = _sanitize_mapping(value)
         return _truncate_json(payload)
