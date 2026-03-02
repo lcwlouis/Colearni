@@ -222,6 +222,7 @@ export function GraphDetailPanel({
                   <ConceptChatLinks
                     conceptName={selectedDetail.concept.canonical_name}
                     conceptId={selectedDetail.concept.concept_id}
+                    workspaceId={wsId}
                   />
                 )}
               </>
