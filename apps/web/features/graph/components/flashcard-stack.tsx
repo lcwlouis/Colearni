@@ -112,19 +112,24 @@ export function FlashcardStack({ workspaceId, conceptId, conceptName, onGenerate
         {currentIndex + 1} / {cards.length}
       </div>
 
-      <div
-        className={`flashcard-stack__card ${flipped ? "flashcard-stack__card--flipped" : ""}`}
-        onClick={() => setFlipped(f => !f)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if (e.key === " ") { e.preventDefault(); setFlipped(f => !f); } }}
-      >
-        <div className="flashcard-stack__face flashcard-stack__front">
-          {card.front}
-        </div>
-        <div className="flashcard-stack__face flashcard-stack__back">
-          {card.back}
-          {card.hint && <p className="flashcard-stack__hint">💡 {card.hint}</p>}
+      <div className="flashcard-stack__stage">
+        <div
+          className={`flashcard-stack__card ${flipped ? "flashcard-stack__card--flipped" : ""}`}
+          onClick={() => setFlipped(f => !f)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === " ") { e.preventDefault(); setFlipped(f => !f); } }}
+        >
+          <div className="flashcard-stack__card-inner">
+            <div className="flashcard-stack__face flashcard-stack__front">
+              <p className="flashcard-stack__front-text">{card.front}</p>
+              <span className="flashcard-stack__tap-hint">Tap to flip</span>
+            </div>
+            <div className="flashcard-stack__face flashcard-stack__back">
+              <p className="flashcard-stack__back-text">{card.back}</p>
+              {card.hint && <p className="flashcard-stack__hint">💡 {card.hint}</p>}
+            </div>
+          </div>
         </div>
       </div>
 
