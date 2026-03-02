@@ -38,7 +38,7 @@ Backend and infrastructure improvements that support the UX but aren't user-faci
 
 ## Executive Summary
 
-Three independent slices:
+Nine slices:
 1. **Sources page polish**: Fix hover cursor on upload button, change "concepts" count to show node tier breakdown
 2. **LLM prompt caching**: Implement OpenAI prefix caching support for repeated system prompts
 3. **Dev stats toggle**: Add a localStorage-based toggle so users can opt into seeing generation traces
@@ -47,6 +47,7 @@ Three independent slices:
 6. **Source excerpts in prompts**: Fix truncated source material (3 chunks × 300 chars) in quiz/flashcard generation prompts
 7. **Gardener rework**: Enhance gardener with document provenance, edges, mastery protection, and batched disambiguation
 8. **Conductor/intent audit**: Verify or remove the intent classifier LLM call that may not influence downstream behavior
+9. **Phoenix trace self-test harness**: Automated test harness that queries Phoenix GraphQL API to verify trace correctness programmatically
 
 ## Non-Negotiable Constraints
 
@@ -70,6 +71,7 @@ Three independent slices:
 - `UXI.6` Fix truncated source excerpts in prompts
 - `UXI.7` Rework gardener design
 - `UXI.8` Audit and fix conductor/intent classifier
+- `UXI.9` Phoenix trace self-test harness
 
 ## Decision Log
 
@@ -341,6 +343,55 @@ Exit criteria:
 - No wasted LLM calls
 - Prompt not truncated
 
+### UXI.9. Phoenix trace self-test harness
+
+Purpose:
+- Create an automated test harness that exercises real API flows and then queries Phoenix's GraphQL API to verify trace correctness. This replaces the shallow "just run pytest" self-audit with real behavioral verification.
+
+Root cause:
+- The self-audit protocol was too shallow — it only ran tests and checked for TODOs. It couldn't verify that:
+  - System prompts are in the correct role
+  - Prompt templates aren't truncated
+  - Source material excerpts are sufficient
+  - The full document content is chunked and ingested
+  - Token counts are reasonable
+
+Files involved:
+- `scripts/phoenix_trace_audit.py` (new) — standalone script that:
+  1. Waits for Phoenix to be available at configured endpoint
+  2. Queries recent spans via GraphQL
+  3. For each LLM span, asserts:
+     a. `input.value` is populated (not empty)
+     b. `output.value` is populated
+     c. `llm.input_messages` contains at least one `role: system` message with >100 chars
+     d. The system message is NOT a tiny stub (>200 chars)
+     e. The user message contains the actual user query
+     f. Token counts are present and reasonable (prompt > 0, completion > 0)
+     g. No truncation markers in the prompt (no `... (len=` in the actual sent content)
+  4. For chain spans, verifies parent-child relationships
+  5. Outputs a report: PASS/FAIL per span with details
+- `tests/integration/test_phoenix_traces.py` (new) — pytest wrapper that:
+  1. Skips if Phoenix is not running
+  2. Optionally triggers a test chat message via TestClient
+  3. Waits a few seconds for trace propagation
+  4. Queries Phoenix and runs assertions
+  5. Can be included in CI when Phoenix is available
+
+Implementation steps:
+1. Create `scripts/phoenix_trace_audit.py` as a standalone CLI tool:
+   ```python
+   python scripts/phoenix_trace_audit.py --endpoint http://localhost:6006 --last-n 10
+   ```
+2. Create `tests/integration/test_phoenix_traces.py` with pytest markers
+3. Add the script to the self-audit convergence protocol as an automated step
+4. Document in `docs/OBSERVABILITY.md`
+
+Exit criteria:
+- Script can query Phoenix and verify trace structure
+- Detects the known issues (system prompt in wrong role, truncated excerpts)
+- Can be run by agents as part of self-audit
+- Integrated into self-audit convergence protocol
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -364,6 +415,7 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 6. `UXI.6` Fix truncated source excerpts in prompts 🔲
 7. `UXI.7` Rework gardener design 🔲
 8. `UXI.8` Audit and fix conductor/intent classifier 🔲
+9. `UXI.9` Phoenix trace self-test harness 🔲
 
 ### Verification Block — UXI.1
 

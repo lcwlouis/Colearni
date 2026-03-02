@@ -164,6 +164,7 @@ What is materially missing:
 24. **Source excerpts (UXI.6)**: Increase chunk limit and per-chunk size in quiz/flashcard generation context. Summarize chat history instead of raw-dumping.
 25. **Gardener rework (UXI.7)**: Enhance gardener with document provenance, edges, tiers, mastery protection. Batch disambiguation calls. Prune orphaned concepts.
 26. **Conductor audit (UXI.8)**: Verify intent classifier LLM call is consumed downstream or remove it. No wasted LLM calls.
+27. **Phoenix trace self-test (UXI.9)**: Create `scripts/phoenix_trace_audit.py` and `tests/integration/test_phoenix_traces.py` to verify trace correctness via Phoenix GraphQL API. Catches wrong role assignment, truncated prompts, missing source material.
 
 ## Deferred Follow-On Scope
 
@@ -264,6 +265,7 @@ Supporting improvements:
 - **Source excerpts**: Fix truncated source material in quiz/flashcard generation prompts
 - **Gardener rework**: Enhanced context (provenance, edges, mastery protection, batched disambiguation)
 - **Conductor audit**: Verify or remove intent classifier LLM call
+- **Phoenix trace self-test harness**: Automated harness querying Phoenix GraphQL to verify trace correctness
 
 ### UXD. Documentation Audit
 
@@ -286,7 +288,7 @@ Tracks should be executed in this order. Each track's child plan defines its int
 2. `UXG` Graph replacement (UXG.1-13 ✅, UXG.14-17 🔲) — SECOND because it's the largest and subsumes graph UX issues
 3. `UXP` Practice UX — THIRD because it builds on top of the graph detail panel (works regardless of graph engine)
 4. `UXT` Tutor UX — FOURTH because it's independent of graph work
-5. `UXI` Infrastructure (UXI.1-4 ✅, UXI.5-8 🔲) — FIFTH because infrastructure improvements support quality
+5. `UXI` Infrastructure (UXI.1-4 ✅, UXI.5-9 🔲) — FIFTH because infrastructure improvements support quality
 6. `UXD` Documentation audit — FINAL because it documents the finished state
 
 Dependencies between tracks:
@@ -306,7 +308,7 @@ Dependencies between tracks:
 | `UXG` Graph replacement | ⚠️ partial | UXG.1-13 done, UXG.14-17 pending — tutor drawer, dark mode, layout review, bordered fix |
 | `UXP` Practice UX | ✅ audit-passed | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
 | `UXT` Tutor UX | ⚠️ partial — needs re-audit | UXT.1-3 pass. UXT.4 Socratic passthrough plumbing works BUT: (1) `init_relation_concept()` hardcodes "Relation" concept — no topic adaptation, (2) entire prompt template placed in `role:user` instead of `role:system`, (3) Socratic toggle not persisted and no `.env` flag. See `docs/ux_overhaul/deep_audit_report.md` |
-| `UXI` Infrastructure | ⚠️ partial — needs re-audit | UXI.1, UXI.4 pass. UXI.2 minimal (6 lines of logging, no prompt restructuring for caching). UXI.3 dev stats toggle was pre-existing code; commit `de09f77` only updates docs. No backend `.env` flags for dev stats or Socratic mode. UXI.5-8 pending — chunking, excerpts, gardener rework, conductor audit. See `docs/ux_overhaul/deep_audit_report.md` |
+| `UXI` Infrastructure | ⚠️ partial — needs re-audit | UXI.1, UXI.4 pass. UXI.2 minimal (6 lines of logging, no prompt restructuring for caching). UXI.3 dev stats toggle was pre-existing code; commit `de09f77` only updates docs. No backend `.env` flags for dev stats or Socratic mode. UXI.5-9 pending — chunking, excerpts, gardener rework, conductor audit, Phoenix trace self-test harness. See `docs/ux_overhaul/deep_audit_report.md` |
 | `UXD` Documentation audit | ✅ audit-passed | All 5 slices complete (UXD.1–UXD.5) — staleness audit, API+ARCH, FRONTEND+GRAPH, PRODUCT+PLAN+PROGRESS, OBS+PROMPTS |
 
 ## Verification Block Template
@@ -406,6 +408,7 @@ while AUDIT_CYCLE < MAX_AUDIT_CYCLES:
        - PYTHONPATH=. pytest -q
        - npx vitest run (from apps/web/)
        - npm --prefix apps/web run typecheck
+       - Run `python scripts/phoenix_trace_audit.py` if Phoenix is available
     4. Produce an Audit Report:
        - Cycle number
        - Slices re-examined
