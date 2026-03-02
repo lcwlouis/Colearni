@@ -1,6 +1,6 @@
 # CoLearni UX Overhaul — Master Plan (READ THIS OFTEN)
 
-Last updated: 2026-03-02
+Last updated: 2026-03-03
 
 Archive snapshots:
 - `docs/UX_SPRINT2_PLAN.md` (superseded single-file plan — slices UX1–UX8)
@@ -119,7 +119,7 @@ What is materially missing:
 ## Remaining Track IDs
 
 - `UXF` Critical fixes — gardener commit, graph selection bugs (quick wins)
-- `UXG` Graph visualization replacement — port LightRAG Sigma.js graph (13 slices)
+- `UXG` Graph visualization replacement — port LightRAG Sigma.js graph (17 slices)
 - `UXP` Practice UX — unified flashcard viewer + quiz history browser
 - `UXT` Tutor UX — onboarding auto-send, streaming status, graph-chat integration
 - `UXI` Infrastructure — sources page, LLM caching, dev stats toggle
@@ -156,6 +156,14 @@ What is materially missing:
 16. **Practice panel layout**: Remove duplicate inline flashcard/quiz buttons. Convert collapsible dropdowns to tabs or always-visible sections. User prefers avoiding dropdowns.
 17. **Design porting**: Port original flashcard flip-card design and quiz marking design into the new unified components for visual consistency.
 18. **Graph chat list**: Show existing chats for a concept in the graph detail panel, not just "start new chat".
+19. **Tutor slide-over merge (UXG.14)**: Merge tutor-graph-drawer and tutor-quiz-drawer into a single slide-over with tabs (Graph, Level-up, Practice). Port FlashcardStack and QuizHistory into the Practice tab.
+20. **Graph dark mode (UXG.15)**: Create useGraphTheme() hook to derive sigma graph colors from data-theme attribute. No more hardcoded hex colors.
+21. **Tier filter fix (UXG.16)**: Tier filters must actually remove nodes from layout computation, not just set hidden=true. Each layout algorithm must produce visual output matching its name.
+22. **Bordered program fix (UXG.17)**: Resolve persistent "could not find a suitable program for node type 'bordered'" error by ensuring NodeBorderProgram is registered before reducers fire.
+23. **Chunking pipeline (UXI.5)**: Switch from character-based to boundary-aware chunking. No silent truncation of PDFs.
+24. **Source excerpts (UXI.6)**: Increase chunk limit and per-chunk size in quiz/flashcard generation context. Summarize chat history instead of raw-dumping.
+25. **Gardener rework (UXI.7)**: Enhance gardener with document provenance, edges, tiers, mastery protection. Batch disambiguation calls. Prune orphaned concepts.
+26. **Conductor audit (UXI.8)**: Verify intent classifier LLM call is consumed downstream or remove it. No wasted LLM calls.
 
 ## Deferred Follow-On Scope
 
@@ -218,6 +226,10 @@ Current remaining hotspots:
 | `apps/web/features/tutor/components/tutor-timeline.tsx` | Onboarding + status animation (UXT) |
 | `apps/web/styles/base.css` | `button:disabled { cursor: wait }` bug |
 | `adapters/llm/providers.py` | No prompt caching instrumentation |
+| `adapters/parsers/chunker.py` | Character-based chunking truncates PDFs (UXI.5) |
+| `domain/learning/quiz_persistence.py` | Source excerpts truncated to 3×300 chars (UXI.6) |
+| `adapters/db/graph/gardener.py` | Gardener lacks context for informed pruning (UXI.7) |
+| `domain/chat/stream.py` | Intent classifier result may not be consumed (UXI.8) |
 
 ## Remaining Work Overview
 
@@ -227,7 +239,7 @@ Quick wins that unblock other tracks. Fix the gardener transaction commit bug (d
 
 ### UXG. Graph Visualization Replacement
 
-Replace the D3 force simulation (`concept-graph.tsx`) with a Sigma.js + graphology-based graph component, following `docs/lightrag-graph-porting-guide.md`. This is the largest track (13 slices): new rendering pipeline, layout algorithms, interaction model, search, and visual styling. Inherently fixes flicker, selection highlighting, and overall graph UX quality. UXG.1–7 cover core rendering, data binding, interaction, search, styling, subgraph, and detail-panel wiring. UXG.8–13 add camera controls, extended layouts, loading states, legend/status bar, settings panel, and node expand/prune.
+Replace the D3 force simulation (`concept-graph.tsx`) with a Sigma.js + graphology-based graph component, following `docs/lightrag-graph-porting-guide.md`. This is the largest track (17 slices): new rendering pipeline, layout algorithms, interaction model, search, and visual styling. Inherently fixes flicker, selection highlighting, and overall graph UX quality. UXG.1–7 cover core rendering, data binding, interaction, search, styling, subgraph, and detail-panel wiring. UXG.8–13 add camera controls, extended layouts, loading states, legend/status bar, settings panel, and node expand/prune. UXG.14–17 address user feedback: tutor drawer unification, dark/light mode, layout/filter accuracy, and bordered node program fix.
 
 ### UXP. Practice UX
 
@@ -248,6 +260,10 @@ Supporting improvements:
 - **Sources page**: Fix upload cursor bug + add per-document tier breakdown
 - **LLM prompt caching**: Structure messages for prefix caching, log cache hits
 - **Dev stats toggle**: User-controllable generation trace visibility
+- **Document chunking pipeline**: Fix character-based chunking that truncates PDFs
+- **Source excerpts**: Fix truncated source material in quiz/flashcard generation prompts
+- **Gardener rework**: Enhanced context (provenance, edges, mastery protection, batched disambiguation)
+- **Conductor audit**: Verify or remove intent classifier LLM call
 
 ### UXD. Documentation Audit
 
@@ -267,10 +283,10 @@ Audit and update all key documentation files to reflect the current state of the
 Tracks should be executed in this order. Each track's child plan defines its internal slice order.
 
 1. `UXF` Critical fixes — FIRST because gardener commit bug is data integrity
-2. `UXG` Graph replacement — SECOND because it's the largest and subsumes graph UX issues
+2. `UXG` Graph replacement (UXG.1-13 ✅, UXG.14-17 🔲) — SECOND because it's the largest and subsumes graph UX issues
 3. `UXP` Practice UX — THIRD because it builds on top of the graph detail panel (works regardless of graph engine)
 4. `UXT` Tutor UX — FOURTH because it's independent of graph work
-5. `UXI` Infrastructure — LAST because it's lowest priority and fully independent
+5. `UXI` Infrastructure (UXI.1-4 ✅, UXI.5-8 🔲) — FIFTH because infrastructure improvements support quality
 6. `UXD` Documentation audit — FINAL because it documents the finished state
 
 Dependencies between tracks:
@@ -287,10 +303,10 @@ Dependencies between tracks:
 | Track | Status | Last note |
 |---|---|---|
 | `UXF` Critical fixes | ✅ audit-passed | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
-| `UXG` Graph replacement | ✅ audit-passed | All 13 slices complete (UXG.1–UXG.13) — Sigma.js core + camera, layouts, loading, legend, settings, expand/prune |
+| `UXG` Graph replacement | ⚠️ partial | UXG.1-13 done, UXG.14-17 pending — tutor drawer, dark mode, layout review, bordered fix |
 | `UXP` Practice UX | ✅ audit-passed | All 5 slices complete (UXP.1–UXP.5) — unified stack, generate-more, quiz history, layout cleanup, design port |
 | `UXT` Tutor UX | ⚠️ partial — needs re-audit | UXT.1-3 pass. UXT.4 Socratic passthrough plumbing works BUT: (1) `init_relation_concept()` hardcodes "Relation" concept — no topic adaptation, (2) entire prompt template placed in `role:user` instead of `role:system`, (3) Socratic toggle not persisted and no `.env` flag. See `docs/ux_overhaul/deep_audit_report.md` |
-| `UXI` Infrastructure | ⚠️ partial — needs re-audit | UXI.1, UXI.4 pass. UXI.2 minimal (6 lines of logging, no prompt restructuring for caching). UXI.3 dev stats toggle was pre-existing code; commit `de09f77` only updates docs. No backend `.env` flags for dev stats or Socratic mode. See `docs/ux_overhaul/deep_audit_report.md` |
+| `UXI` Infrastructure | ⚠️ partial — needs re-audit | UXI.1, UXI.4 pass. UXI.2 minimal (6 lines of logging, no prompt restructuring for caching). UXI.3 dev stats toggle was pre-existing code; commit `de09f77` only updates docs. No backend `.env` flags for dev stats or Socratic mode. UXI.5-8 pending — chunking, excerpts, gardener rework, conductor audit. See `docs/ux_overhaul/deep_audit_report.md` |
 | `UXD` Documentation audit | ✅ audit-passed | All 5 slices complete (UXD.1–UXD.5) — staleness audit, API+ARCH, FRONTEND+GRAPH, PRODUCT+PLAN+PROGRESS, OBS+PROMPTS |
 
 ## Verification Block Template

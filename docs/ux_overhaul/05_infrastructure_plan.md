@@ -43,6 +43,10 @@ Three independent slices:
 2. **LLM prompt caching**: Implement OpenAI prefix caching support for repeated system prompts
 3. **Dev stats toggle**: Add a localStorage-based toggle so users can opt into seeing generation traces
 4. **Phoenix Info tab observability**: Make system prompts and LLM output visible in the Phoenix Info tab for every LLM trace (not just buried in attributes)
+5. **Document chunking pipeline**: Fix character-based chunking that cuts mid-sentence and silently truncates PDFs
+6. **Source excerpts in prompts**: Fix truncated source material (3 chunks × 300 chars) in quiz/flashcard generation prompts
+7. **Gardener rework**: Enhance gardener with document provenance, edges, mastery protection, and batched disambiguation
+8. **Conductor/intent audit**: Verify or remove the intent classifier LLM call that may not influence downstream behavior
 
 ## Non-Negotiable Constraints
 
@@ -62,6 +66,10 @@ Three independent slices:
 - `UXI.2` LLM prompt caching
 - `UXI.3` Dev stats toggle
 - `UXI.4` Phoenix Info tab: system prompts & output in LLM traces
+- `UXI.5` Fix document chunking pipeline
+- `UXI.6` Fix truncated source excerpts in prompts
+- `UXI.7` Rework gardener design
+- `UXI.8` Audit and fix conductor/intent classifier
 
 ## Decision Log
 
@@ -209,6 +217,130 @@ Exit criteria:
 - Output message visible in the Info tab
 - Existing tests pass (no regressions)
 
+### UXI.5. Fix document chunking pipeline
+
+Purpose:
+- Current character-based chunking (1000 chars, 150 overlap) cuts documents mid-sentence and mid-slide, causing partial document ingestion. Only a few slides of a PDF are processed.
+
+Root cause:
+- `adapters/parsers/chunker.py` `chunk_text_deterministic()` uses character-based splitting. For PDFs with slide boundaries, this can cut in the middle of content. Also, the ingestion pipeline may be dropping chunks after a certain point.
+
+Files involved:
+- `adapters/parsers/chunker.py`
+- Ingestion pipeline files
+
+Implementation steps:
+1. Audit the full ingestion pipeline: PDF parse → text extraction → chunking → embedding → graph extraction. Find where content is lost.
+2. Switch from character-based to token/word-based chunking (or at least increase chunk size significantly for PDFs)
+3. Add boundary-aware splitting: prefer splitting at slide boundaries, paragraph boundaries, or section headers
+4. Log total chunks produced vs chunks stored to detect any silent truncation
+5. Verify: ingest a 50-slide PDF → all 50 slides should produce chunks
+
+Verification:
+- `PYTHONPATH=. pytest -q`
+- Manual: ingest a multi-slide PDF → verify all slides produce chunks (check logs for chunk count)
+- Manual: verify chunks don't cut mid-sentence
+
+Exit criteria:
+- Full document content is chunked and ingested
+- No silent truncation
+
+### UXI.6. Fix truncated source excerpts in prompts
+
+Purpose:
+- Flashcard/quiz generation prompts receive only 3 chunks × 300 chars = 900 chars of source material. This is far too little for concept-specific quiz generation.
+
+Root cause:
+- `domain/learning/quiz_persistence.py` `load_generation_context()` limits to 3 chunks and truncates each to 300 chars.
+
+Files involved:
+- `domain/learning/quiz_persistence.py`
+- Prompt templates
+
+Implementation steps:
+1. Increase chunk limit from 3 to at least 8-10 chunks per concept
+2. Increase per-chunk truncation from 300 to at least 800-1000 chars (or remove truncation and let token budget handle it)
+3. If token budget is a concern, add a summarization step: retrieve all chunks → summarize into a dense context block → include in prompt
+4. Add chat history summarization for the CHAT_HISTORY_CONTEXT section (currently dumps raw messages which wastes tokens)
+5. Verify: generate a quiz → check Phoenix trace → SOURCE_MATERIAL_EXCERPTS contains substantial, useful content
+
+Verification:
+- `PYTHONPATH=. pytest -q`
+- Manual: generate a quiz → check Phoenix trace → SOURCE_MATERIAL_EXCERPTS contains substantial content (not 900 chars)
+- Manual: generated quizzes are more concept-specific and accurate
+
+Exit criteria:
+- Source material in prompts is sufficient for concept-specific quiz/flashcard generation
+- Chat history is summarized, not raw-dumped
+
+### UXI.7. Rework gardener design
+
+Purpose:
+- Gardener receives only node names+descriptions for pruning decisions. It cannot make informed decisions about pruning because it lacks: document summaries (which docs feed this concept?), edges (what's connected?), concept tiers, learning status (has user mastered this?).
+
+Root cause:
+- `adapters/db/graph/gardener.py` `_cluster_llm_decision()` passes only concept metadata. The pruning/orphan logic doesn't check if source documents still exist.
+
+Files involved:
+- `adapters/db/graph/gardener.py`
+- Gardener LLM prompt template
+- Potentially `domain/graph/` services
+
+Implementation steps:
+1. Enhance gardener context to include:
+   - Document provenance (which documents fed each concept, are those docs still present?)
+   - Edge list (what concepts are connected to this one?)
+   - Concept tier
+   - Learning status/mastery score (protect learned concepts from pruning)
+2. Add orphan detection: if ALL source documents for a concept are deleted, flag for pruning
+3. Add mastery protection: never prune concepts with mastery_score > 0 or mastery_status != "not_started"
+4. Batch disambiguation: instead of one LLM call per cluster, batch multiple clusters into a single call with array output
+5. Update gardener prompt template to include this richer context
+
+Verification:
+- `PYTHONPATH=. pytest -q`
+- Manual: run gardener → verify LLM prompt includes edges, tiers, mastery status, document provenance
+- Manual: verify learned concepts (mastery > 0) are not pruned
+- Manual: verify orphaned concepts (no source docs) are flagged
+
+Exit criteria:
+- Gardener makes informed merge/prune decisions with full context
+- Learned concepts protected
+- Orphaned concepts (no source docs) are pruned
+- Disambiguation is batched
+
+### UXI.8. Audit and fix conductor/intent classifier
+
+Purpose:
+- The LLM call before generating a response (query_analyzer/intent classifier) returns intent+keywords but the result doesn't appear to influence downstream behavior. This is a wasted LLM call.
+
+Root cause:
+- `domain/chat/prompt_kit.py` `classify_social_intent()` is a regex classifier (not an LLM call). But there's a separate `query_analyzer_v1` asset rendered as an LLM prompt. The LLM result may not be consumed.
+
+Files involved:
+- `domain/chat/stream.py`
+- `domain/chat/prompt_kit.py`
+- `domain/chat/social_turns.py`
+- Prompt assets
+
+Implementation steps:
+1. Trace the conductor/intent LLM call: where is the result used after the call?
+2. If result IS used: document the flow and ensure it's working correctly
+3. If result is NOT used: either integrate it properly (use intent to route between response strategies: learn → tutor, practice → flashcard, explore → graph, etc.) or remove the wasted call
+4. If keeping: fix the truncated prompt visible in Phoenix — ensure full prompt renders
+5. If making agentic: design a proper orchestrator that routes based on classified intent
+
+Verification:
+- `PYTHONPATH=. pytest -q`
+- Manual: trace intent classifier LLM call in Phoenix → verify result is consumed downstream
+- Manual: if removed, verify no wasted LLM calls occur before response generation
+- Manual: if integrated, verify intent correctly routes to different response strategies
+
+Exit criteria:
+- Either the intent classifier drives routing decisions OR it's removed
+- No wasted LLM calls
+- Prompt not truncated
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -228,6 +360,10 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 2. `UXI.2` LLM prompt caching ✅
 3. `UXI.3` Dev stats toggle ✅ (pre-existing)
 4. `UXI.4` Phoenix Info tab: system prompts & output in LLM traces ✅
+5. `UXI.5` Fix document chunking pipeline 🔲
+6. `UXI.6` Fix truncated source excerpts in prompts 🔲
+7. `UXI.7` Rework gardener design 🔲
+8. `UXI.8` Audit and fix conductor/intent classifier 🔲
 
 ### Verification Block — UXI.1
 
@@ -281,6 +417,8 @@ npx vitest run  # from apps/web/
 ```text
 Read docs/UX_OVERHAUL_MASTER_PLAN.md, then read docs/ux_overhaul/05_infrastructure_plan.md.
 Begin with the next incomplete UXI slice exactly as described.
+
+UXI.1-4 are complete. UXI.5-8 are pending — these address user feedback: document chunking pipeline, source excerpt truncation, gardener rework, and conductor/intent classifier audit.
 
 Execution loop for this child plan:
 

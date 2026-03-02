@@ -30,6 +30,8 @@ Replace the D3 force-simulation-based graph (`concept-graph.tsx`) with a Sigma.j
 
 The LightRAG porting guide provides complete reference implementation details for all aspects of the graph: rendering pipeline, layout algorithms, interaction model, visual styling, search, and state management.
 
+Additionally, UXG.14–17 address user feedback from a deep review session: merging tutor slide-overs, fixing dark mode graph colors, auditing layout accuracy and tier filter behavior, and resolving a persistent bordered node program registration error.
+
 ## Inputs Used
 
 - `docs/UX_OVERHAUL_MASTER_PLAN.md`
@@ -86,6 +88,10 @@ What this track replaces:
 - `UXG.11` Legend & status bar — tier color legend, node/edge counts, depth display
 - `UXG.12` Settings panel — toggleable graph settings with localStorage persistence
 - `UXG.13` Node expand/prune — subgraph exploration from selected node
+- `UXG.14` Simplify tutor graph drawer + unified slide-over
+- `UXG.15` Graph dark/light mode responsive
+- `UXG.16` Review layout algorithm accuracy + tier filter functionality
+- `UXG.17` Fix bordered node program registration (persistent error)
 
 ## Decision Log
 
@@ -118,6 +124,10 @@ Reference: `docs/lightrag-graph-porting-guide.md` Section 16
 | Phase 4: Properties Panel | ⏭️ skipped | We use our own detail panel (Decision Log #5) |
 | Phase 5: Layout Controls | ✅ partially | UXG.4 (ForceAtlas2, Circular, No-overlap); UXG.9 adds remaining layouts + play/pause |
 | Phase 6: Polish | 🔲 pending | UXG.10 (loading), UXG.11 (legend/status), UXG.12 (settings), UXG.13 (expand/prune) |
+| User Feedback: Tutor drawer | 🔲 pending | UXG.14 (unified slide-over with 3 tabs) |
+| User Feedback: Dark mode | 🔲 pending | UXG.15 (theme-aware graph colors) |
+| User Feedback: Layout/filter audit | 🔲 pending | UXG.16 (layout accuracy + tier filter fix) |
+| User Feedback: Bordered program | 🔲 pending | UXG.17 (node program registration fix) |
 
 ## Current Verification Status
 
@@ -557,6 +567,128 @@ Exit criteria:
 - Restore returns to full graph view
 - Layout adjusts after expand/prune operations
 
+### UXG.14. Simplify tutor graph drawer + unified slide-over
+
+Purpose:
+- The tutor page has separate slide-overs for graph and quiz. Merge into a single unified slide-over with two views/tabs: (1) Graph view — simplified, no full graph page controls (remove camera, layout selector, settings panel — just the graph + detail panel), (2) Level-up quiz view. Also port the flashcard stack and quiz history UI into this slide-over so users can access practice from the tutor page.
+
+Files involved:
+- `apps/web/features/tutor/components/tutor-graph-drawer.tsx`
+- `apps/web/features/tutor/components/tutor-quiz-drawer.tsx`
+- `apps/web/features/tutor/components/tutor-slide-over.tsx` (new)
+- Tutor page
+
+Implementation steps:
+1. Merge tutor-graph-drawer and tutor-quiz-drawer into a single `tutor-slide-over.tsx` with tabs: "Graph", "Level-up", "Practice"
+2. Strip down graph view: remove camera controls, layout selector, settings panel — show only the compact sigma graph + concept detail
+3. Port `FlashcardStack` and `QuizHistory` components into the "Practice" tab
+4. Keep "Level-up" tab with existing LevelUpCard
+
+Verification:
+- `npx vitest run`
+- Manual: open slide-over from tutor page → 3 tabs visible and functional
+- Manual: graph tab shows clean sigma graph without full-page controls
+- Manual: practice tab shows flashcard stack and quiz history
+
+Exit criteria:
+- Single slide-over with 3 tabs
+- Graph is clean and uncluttered (no camera, layout, settings controls)
+- Practice accessible from tutor page
+
+### UXG.15. Graph dark/light mode responsive
+
+Purpose:
+- Sigma graph colors are hardcoded hex values for light mode. In dark mode, labels are invisible, edges are invisible, background clashes.
+
+Root cause:
+- `sigma-settings.ts`, `graph-reducers.tsx`, `constants.ts` all use hardcoded hex colors instead of theme-derived values.
+
+Files involved:
+- `apps/web/lib/graph/sigma-settings.ts`
+- `apps/web/lib/graph/constants.ts`
+- `apps/web/components/sigma-graph/graph-reducers.tsx`
+- `apps/web/lib/graph/hooks/use-graph-theme.ts` (new)
+
+Implementation steps:
+1. Create a `useGraphTheme()` hook that reads `data-theme` attribute and returns appropriate color sets
+2. Define light and dark color palettes for: labelColor, defaultEdgeColor, defaultNodeColor, dimmedNodeColor, highlightEdgeColor, selectionBorderColor, tier colors
+3. Pass theme colors into sigma settings dynamically (SigmaContainer re-renders on settings change)
+4. Update graph-reducers.tsx to use theme colors instead of hardcoded values
+5. Test: toggle theme → graph colors update
+
+Verification:
+- `npx vitest run`
+- Manual: light mode → graph has readable labels, visible edges, correct background
+- Manual: dark mode → graph has readable labels, visible edges, correct background
+- Manual: toggle theme → graph colors update without page refresh
+
+Exit criteria:
+- Graph is readable and visually correct in both light and dark mode
+
+### UXG.16. Review layout algorithm accuracy + tier filter functionality
+
+Purpose:
+- User reports layout algorithms may not match their titles. Tier filters (umbrella/topic/subtopic/granular) appear to just change layout rather than filter nodes.
+
+Root cause:
+- Tier filter sets `hidden: true` on graphology nodes but layout algorithms still compute positions for hidden nodes. Hidden nodes may still appear in some layouts.
+
+Files involved:
+- `apps/web/components/sigma-graph/graph-layout.tsx`
+- `apps/web/lib/graph/transform.ts`
+- `apps/web/features/graph/components/graph-viz-panel.tsx`
+
+Implementation steps:
+1. Audit each layout algorithm — run each and verify visual matches name:
+   - ForceAtlas2: force-directed with gravity → should show clusters
+   - Force Directed: spring model → should show connected structure
+   - Circular: nodes on a circle → should show ring
+   - Circle Pack: concentric rings by tier → should show tiers
+   - Random: scattered → should be random
+2. Fix tier filters: when a tier is filtered out, actually remove those nodes from the graphology instance (or skip them in layout computation) instead of just setting hidden=true
+3. If removing is complex, at least ensure nodeReducer properly hides filtered nodes from rendering AND layout doesn't waste computation on them
+
+Verification:
+- `npx vitest run`
+- Manual: each layout produces visual output matching its name
+- Manual: tier filter hides nodes AND excludes them from layout computation
+- Manual: re-enabling a filtered tier restores those nodes with correct positions
+
+Exit criteria:
+- Each layout produces visual output matching its name
+- Tier filters actually remove nodes from view and layout computation
+
+### UXG.17. Fix bordered node program registration (persistent error)
+
+Purpose:
+- "Sigma: could not find a suitable program for node type 'bordered'" error STILL occurs despite requestAnimationFrame defer added previously.
+
+Root cause:
+- The defer via requestAnimationFrame in graph-reducers.tsx is insufficient. The SigmaContainer may not have fully registered NodeBorderProgram by the time reducers fire, especially during route transitions.
+
+Files involved:
+- `apps/web/components/sigma-graph/graph-reducers.tsx`
+- `apps/web/components/sigma-graph.tsx`
+- `apps/web/lib/graph/sigma-settings.ts`
+
+Implementation steps:
+1. Investigate: add logging to determine when SigmaContainer registers programs vs when GraphReducers fires
+2. Possible fixes:
+   a. Use `sigma.getNodeProgramNames()` (or equivalent) to check if "bordered" is registered before calling refresh()
+   b. Add a readiness flag from SigmaContainer → GraphReducers
+   c. Move reducer registration into the SigmaContainer's `onReady` callback if available
+   d. Fallback: register NodeBorderProgram imperatively via `sigma.setSetting("nodeProgramClasses", ...)` in GraphReducers before refresh
+3. Test: navigate away from graph page and back → no error in console
+
+Verification:
+- `npx vitest run`
+- Manual: navigate to graph page → no "bordered" errors in console
+- Manual: navigate away and back → no "bordered" errors in console
+- Manual: open tutor drawer with graph → no "bordered" errors in console
+
+Exit criteria:
+- Zero "Sigma: could not find a suitable program for node type 'bordered'" errors in browser console during normal navigation
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -585,6 +717,10 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 11. `UXG.11` Legend & status bar ✅
 12. `UXG.12` Settings panel + persistence ✅
 13. `UXG.13` Node expand/prune ✅
+14. `UXG.14` Simplify tutor graph drawer + unified slide-over 🔲
+15. `UXG.15` Graph dark/light mode responsive 🔲
+16. `UXG.16` Review layout algorithm accuracy + tier filter functionality 🔲
+17. `UXG.17` Fix bordered node program registration 🔲
 
 ## Verification Matrix
 
@@ -655,6 +791,8 @@ Observed outcome
 Read docs/UX_OVERHAUL_MASTER_PLAN.md, then read docs/ux_overhaul/02_graph_replacement_plan.md.
 Also read docs/lightrag-graph-porting-guide.md as the primary reference.
 Begin with the next incomplete UXG slice exactly as described.
+
+UXG.1-13 are complete. UXG.14-17 are pending — these address user feedback: tutor drawer unification, dark mode graph colors, layout/filter audit, and bordered node program fix.
 
 Execution loop for this child plan:
 
