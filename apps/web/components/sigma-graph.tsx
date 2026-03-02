@@ -5,6 +5,7 @@ import { SigmaContainer } from "@react-sigma/core";
 import "@react-sigma/core/lib/style.css";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 import { buildGraphologyGraph } from "@/lib/graph/transform";
+import { buildSearchIndex, searchNodes } from "@/lib/graph/search";
 import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/sigma-settings";
 import { GraphReducers } from "@/components/sigma-graph/graph-reducers";
 import { GraphLayout } from "@/components/sigma-graph/graph-layout";
@@ -59,6 +60,13 @@ export default function SigmaGraph({
     [nodes, edges, filteredTiers],
   );
 
+  // UXG.6: MiniSearch fuzzy graph search
+  const searchIndex = useMemo(() => buildSearchIndex(nodes), [nodes]);
+  const searchMatchKeys = useMemo(
+    () => searchNodes(searchIndex, searchHighlight || ""),
+    [searchIndex, searchHighlight],
+  );
+
   if (nodes.length === 0) {
     return <p style={{ color: "var(--muted)" }}>No graph data yet.</p>;
   }
@@ -81,7 +89,8 @@ export default function SigmaGraph({
         <GraphReducers
           selectedId={selectedId}
           hoveredNode={hoveredNode}
-          searchHighlight={searchHighlight}
+          searchMatchKeys={searchMatchKeys}
+          hasSearchQuery={!!searchHighlight?.trim()}
         />
         <GraphEvents
           onSelect={onSelect}

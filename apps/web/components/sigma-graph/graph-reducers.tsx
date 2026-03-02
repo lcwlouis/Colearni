@@ -6,7 +6,8 @@ import { useSigma } from "@react-sigma/core";
 type Props = {
   selectedId?: number;
   hoveredNode: string | null;
-  searchHighlight?: string;
+  searchMatchKeys?: Set<string>;
+  hasSearchQuery?: boolean;
 };
 
 /**
@@ -14,7 +15,7 @@ type Props = {
  * selection highlighting, neighbour dimming, and search filtering.
  * Must be rendered inside a <SigmaContainer>.
  */
-export function GraphReducers({ selectedId, hoveredNode, searchHighlight }: Props) {
+export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSearchQuery }: Props) {
   const sigma = useSigma();
 
   useEffect(() => {
@@ -42,10 +43,8 @@ export function GraphReducers({ selectedId, hoveredNode, searchHighlight }: Prop
         }
       }
 
-      if (searchHighlight) {
-        const label = (data.label || "").toLowerCase();
-        const query = searchHighlight.toLowerCase();
-        if (!label.includes(query)) {
+      if (hasSearchQuery) {
+        if (!searchMatchKeys?.has(node)) {
           result.color = "#e0e0e0";
           result.label = undefined;
           result.zIndex = 0;
@@ -82,7 +81,7 @@ export function GraphReducers({ selectedId, hoveredNode, searchHighlight }: Prop
       sigma.setSetting("nodeReducer", null);
       sigma.setSetting("edgeReducer", null);
     };
-  }, [sigma, selectedId, hoveredNode, searchHighlight]);
+  }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery]);
 
   return null;
 }
