@@ -1,4 +1,4 @@
-import { ConceptGraph } from "@/components/concept-graph";
+import SigmaGraph from "@/components/sigma-graph";
 import { ConceptActivityPanel } from "@/components/concept-activity-panel";
 import type { GraphConceptSummary, GraphSubgraphResponse, ConceptActivityResponse } from "@/lib/api/types";
 import { masteryLabel } from "../types";
@@ -55,7 +55,7 @@ export function TutorGraphDrawer({
       {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
       {conceptsError ? <p className="status error">{conceptsError}</p> : null}
       {subgraph ? (
-        <ConceptGraph
+        <SigmaGraph
           nodes={subgraph.nodes}
           edges={subgraph.edges}
           selectedId={currentConcept?.concept_id}

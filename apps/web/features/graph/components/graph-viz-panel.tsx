@@ -1,5 +1,5 @@
 import { AsyncState } from "@/components/async-state";
-import { ConceptGraph } from "@/components/concept-graph";
+import SigmaGraph from "@/components/sigma-graph";
 import { useState, useCallback } from "react";
 import { apiClient } from "@/lib/api/client";
 import type {
@@ -280,7 +280,7 @@ export function GraphVizPanel({
           ))}
         </div>
       ) : fullGraph && fullGraph.nodes.length > 0 ? (
-        <ConceptGraph
+        <SigmaGraph
           nodes={fullGraph.nodes}
           edges={fullGraph.edges}
           selectedId={selectedDetail?.concept.concept_id}

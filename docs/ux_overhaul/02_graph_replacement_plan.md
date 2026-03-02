@@ -297,13 +297,13 @@ Exit criteria:
 
 ## Execution Order (Update After Each Run)
 
-1. `UXG.1` Install deps + scaffold
-2. `UXG.2` Data pipeline
-3. `UXG.3` Core rendering
-4. `UXG.4` Layout algorithms
-5. `UXG.5` Interactions
-6. `UXG.6` Search
-7. `UXG.7` Integration + archive
+1. `UXG.1` Install deps + scaffold ✅
+2. `UXG.2` Data pipeline ✅
+3. `UXG.3` Core rendering ✅
+4. `UXG.4` Layout algorithms ✅
+5. `UXG.5` Interactions ✅
+6. `UXG.6` Search ✅
+7. `UXG.7` Integration + archive ✅
 
 ## Verification Matrix
 
@@ -314,7 +314,59 @@ npm --prefix apps/web run typecheck
 
 ## Removal Ledger
 
-{Append entries during implementation}
+Removal Entry - UXG.7
+
+Removed artifact
+- `apps/web/components/concept-graph.tsx` (renamed to `concept-graph.d3-archive.tsx`)
+
+Reason for removal
+- Replaced by Sigma.js-based `sigma-graph.tsx` which provides WebGL rendering, 
+  ForceAtlas2 layout, fuzzy search, and improved interaction model.
+
+Replacement
+- `apps/web/components/sigma-graph.tsx` + `apps/web/components/sigma-graph/` sub-components
+
+Reverse path
+- `git mv apps/web/components/concept-graph.d3-archive.tsx apps/web/components/concept-graph.tsx`
+- Revert import in `graph-viz-panel.tsx` from `SigmaGraph` back to `ConceptGraph`
+- Revert import in `tutor-graph-drawer.tsx` from `SigmaGraph` back to `ConceptGraph`
+
+Compatibility impact
+- Internal only. No public API changes. The component prop interface is identical.
+
+Verification
+- `npx vitest run` passes
+- `npm run typecheck` passes
+- All graph interactions preserved: click, hover, drag, zoom, search, tier filter
+
+Verification Block - UXG.7
+
+Root cause
+- D3 force simulation graph rated 3/10 — needed replacement with modern WebGL renderer
+
+Files changed
+- apps/web/components/concept-graph.tsx → concept-graph.d3-archive.tsx (archived)
+- apps/web/features/graph/components/graph-viz-panel.tsx (import swap)
+- apps/web/features/tutor/components/tutor-graph-drawer.tsx (import swap)
+
+What changed
+- Archived D3 graph component, wired Sigma.js replacement into graph page and tutor drawer
+
+Commands run
+- npx vitest run
+- npm run typecheck
+
+Manual verification steps
+- Load graph page → Sigma.js graph renders with tier-colored nodes
+- Click node → detail panel populates
+- Hover → neighbor highlighting
+- Search → fuzzy matching highlights nodes
+- Tier filter toggles → nodes show/hide
+- Zoom/pan → smooth camera control
+- Tutor drawer graph → renders with SigmaGraph
+
+Observed outcome
+- All tests pass (117/117), graph renders correctly with new Sigma.js component
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 
