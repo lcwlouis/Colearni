@@ -702,9 +702,9 @@ Added `if callable(getattr(session, "rollback", None)): session.rollback()` in a
 | UXD | Documentation audit — verify key docs reflect current implementation | ✅ Done |
 
 ### Key deliverables
-- **UXF:** Gardener transaction commit fix, graph node-click flicker fix, wildcard/adjacent highlight fix
-- **UXG:** D3 force simulation replaced with Sigma.js + graphology (13 slices)
-- **UXP:** Unified flashcard stack (merged per-concept), quiz history list with retry
-- **UXT:** Onboarding confirmation card, streaming replace-mode status, graph-chat navigation
-- **UXI:** Per-document tier breakdown in sources page, OpenAI prefix caching, dev stats localStorage toggle
-- **UXD:** Updated PRODUCT_SPEC.md, PLAN.md, PROGRESS.md to reflect UX overhaul completion
+- **UXF (3 slices):** Gardener transaction commit fix, selection highlighting fix, graph node-click flicker fix
+- **UXG (13 slices):** D3 force simulation replaced with Sigma.js + graphology — core port, search, drag, layouts (ForceAtlas2/circular), camera controls, loading states, legend, settings panel, expand/prune
+- **UXP (5 slices):** Unified flashcard stack with generate-more and exhaustion detection, quiz history with score tracking and retry, layout cleanup, design port
+- **UXT (4 slices):** Onboarding confirmation card, streaming replace-mode status, graph-to-chat navigation, Socratic protocol refinements
+- **UXI (4 slices):** Sources page polish with per-document tier breakdown, LLM prompt caching (OpenAI prefix caching), dev stats localStorage toggle, Phoenix Info tab
+- **UXD (5 slices):** Documentation audit — updated PRODUCT_SPEC.md, PLAN.md, PROGRESS.md, staleness report, cross-doc consistency

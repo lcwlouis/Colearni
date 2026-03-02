@@ -129,7 +129,7 @@
 - Backend visibility enhancement (next incremental slice):
   - Add explicit persisted ingestion lifecycle field (`queued`/`processing`/`ingested`/`failed`) for documents to replace chunk-count-only inference.
 
-## Session 5 UX + Operability Plan (Current)
+## Session 5 UX + Operability Plan (Completed)
 - Route rewrite script hygiene:
   - Confirm `tmp/rewrite_routes.py` is absent and not required after UUID+namespaced route cutover.
 - KB upload operability:
@@ -214,7 +214,7 @@
 - ⏳ Remaining: add/finish coverage for chat respond with document lookups, sidebar session CRUD, KB delete cascade.
 - ⏳ Remaining: resolve legacy contract/doc sync + ingestion test debt (`test_api_docs_sync`, `test_response_contracts`, `test_ingestion_embeddings`, `test_document_ingestion_integration`).
 
-## Session 11 UI Resilience + Quiz Lifecycle + Scalable Graph UX (Current Plan)
+## Session 11 UI Resilience + Quiz Lifecycle + Scalable Graph UX (Completed)
 
 ### Session 11 Implementation Map (Do-Not-Rediscover Notes)
 - **Tutor shell/layout baseline (already implemented in Session 10)**:

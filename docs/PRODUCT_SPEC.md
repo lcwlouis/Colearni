@@ -74,7 +74,16 @@ Users can:
 - inspect a node’s description
 - see adjacent nodes
 - trigger practice tools from a node
-- navigate to an active chat session from the graph detail panel (graph-chat navigation)
+- navigate to an active chat session from the graph detail panel (graph-to-chat navigation)
+
+#### 5a) Rendering & interaction
+- Graph is rendered with **Sigma.js** (WebGL) backed by a **graphology** data model, replacing the earlier D3 force simulation.
+- Default layout: **ForceAtlas2** (via `graphology-layout-forceatlas2` web worker). Users can switch between ForceAtlas2 and circular layouts.
+- Camera controls: zoom-to-fit, zoom-in/out, and reset buttons. Mouse wheel zoom and drag-to-pan supported.
+
+#### 5b) Search & filtering
+- **MiniSearch** fuzzy search over node labels with instant highlight and camera focus.
+- Expand/prune controls to add neighbor nodes or remove leaf nodes from the visible subgraph.
 
 ### 6) “I’m feeling lucky”
 A button that suggests:
