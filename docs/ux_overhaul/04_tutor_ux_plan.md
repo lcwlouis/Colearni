@@ -176,15 +176,19 @@ Implementation steps:
      - Fetch chats where the concept was discussed (keyword match on concept name in chat messages, or a backend concept-chat association)
      - Show chat title/preview with a direct link
    - If no active chats: show only the "Start new chat" button
-2. Add to `graph-detail-panel.tsx`:
+2. Show list of existing chats for the selected concept/topic in the graph detail panel:
+   - Each chat shows title + last activity date
+   - Click to navigate directly to that chat
+   - Keep the "Start new chat" button but move it below the list
+3. Add to `graph-detail-panel.tsx`:
    - New expandable section "Chat" below Quizzes (if UXP track is done) or after existing sections
    - Contains the `ConceptChatLinks` component
-3. "Start new chat" flow:
+4. "Start new chat" flow:
    - Navigate to `/tutor` with query param `?topic={conceptName}`
    - Tutor page detects the query param and either:
      - Creates a new chat session pre-seeded with the topic
      - Or shows the onboarding confirm with the topic pre-selected
-4. Backend (if needed):
+5. Backend (if needed):
    - Add an endpoint or query param to list chats that reference a given concept
    - Alternative: do a client-side filter on existing chat list by title/topic match
 

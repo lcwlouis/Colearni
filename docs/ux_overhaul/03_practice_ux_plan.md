@@ -71,6 +71,8 @@ What this track adds:
 - `UXP.1` Unified flashcard stack viewer
 - `UXP.2` Generate-more with exhaustion awareness
 - `UXP.3` Quiz history browser with retry
+- `UXP.4` Remove redundant practice buttons and improve layout
+- `UXP.5` Port original flashcard and quiz designs
 
 ## Decision Log
 
@@ -205,6 +207,53 @@ Exit criteria:
 - Retry works for practice quizzes only
 - Level-up quizzes have no retry option
 
+### UXP.4. Remove redundant practice buttons and improve layout
+
+Purpose:
+- Remove duplicate inline flashcard/quiz buttons from graph detail panel
+- The collapsible sections (Flashcards, Quizzes) already provide full functionality
+- Consider replacing dropdown/collapsible sections with always-visible tabbed sections if space allows
+- User preference: avoid dropdowns where possible — prefer tabs or always-visible sections
+
+Files involved:
+- `apps/web/features/graph/components/graph-detail-panel.tsx`
+
+Implementation steps:
+1. Remove the inline "Flashcards" and "Practice quiz" buttons (currently above the collapsible sections)
+2. Convert the `<details>/<summary>` collapsible sections to tabs or always-visible cards
+3. Keep the "Close" button for dismissing the panel
+4. Ensure the practice sections are easily discoverable without needing to click a dropdown
+
+Exit criteria:
+- No duplicate buttons for the same action
+- Flashcard and quiz sections are visible without clicking dropdowns
+- Panel layout is clean and intuitive
+
+### UXP.5. Port original flashcard and quiz designs
+
+Purpose:
+- Port the original flashcard card design (flip animation, styling, front/back layout) into the unified FlashcardStack viewer
+- Port the original quiz design (question layout, answer marking with green/red, score display) into the QuizHistory retry view
+- Fix: retry submit button must show answer marking (correct/incorrect highlighting) after submission, same as original quiz
+
+Files involved:
+- `apps/web/features/graph/components/flashcard-stack.tsx` (or wherever the unified stack lives)
+- `apps/web/features/graph/components/quiz-history.tsx` (or wherever quiz retry lives)
+- Original flashcard component (find and reference for design porting)
+- Original quiz component (find and reference for design porting)
+
+Implementation steps:
+1. Find the original flashcard component design (pre-UXP changes) — port its card layout, flip animation, and styling
+2. Find the original quiz component design — port its question rendering, answer choice highlighting (green for correct, red for incorrect), and score display
+3. In FlashcardStack: use the ported card design for each card in the stack
+4. In QuizHistory retry: after submit, show marking on each answer (green/red highlighting) just like the original quiz
+5. Ensure "Generate more" button uses the same card design for new cards
+
+Exit criteria:
+- Flashcard stack uses original card design with flip animation
+- Quiz retry shows answer marking after submission
+- Visual consistency with the proven original designs
+
 ## Audit Cycle Reopening
 
 After all tracks in the master plan reach "done", the Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
@@ -223,6 +272,8 @@ After all tracks in the master plan reach "done", the Self-Audit Convergence Pro
 1. `UXP.1` Unified flashcard stack viewer
 2. `UXP.2` Generate-more with exhaustion awareness
 3. `UXP.3` Quiz history browser with retry
+4. `UXP.4` Remove redundant practice buttons and improve layout
+5. `UXP.5` Port original flashcard and quiz designs
 
 ## Verification Matrix
 

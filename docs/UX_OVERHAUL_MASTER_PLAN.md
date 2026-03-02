@@ -153,6 +153,9 @@ What is materially missing:
 13. **Practice quiz retry ONLY**: Level-up quizzes cannot be retried — they affect mastery progression. Practice quizzes are safe to retry.
 14. **Graph replacement scope**: UXG replaces concept-graph.tsx with a Sigma.js-based component. The graph detail panel (flashcards, quizzes, activity) remains and is enhanced in UXP. The data fetching hooks are adapted, not rewritten.
 15. **UXG scope expansion (user request)**: UXG.8–UXG.13 added by user request to cover remaining LightRAG porting checklist features: camera control panel, extended layout suite (6 algorithms + play/pause), loading states, legend & status bar, settings panel with persistence, and node expand/prune. These are NOT audit-cycle reopenings — they are new scope added to the plan.
+16. **Practice panel layout**: Remove duplicate inline flashcard/quiz buttons. Convert collapsible dropdowns to tabs or always-visible sections. User prefers avoiding dropdowns.
+17. **Design porting**: Port original flashcard flip-card design and quiz marking design into the new unified components for visual consistency.
+18. **Graph chat list**: Show existing chats for a concept in the graph detail panel, not just "start new chat".
 
 ## Deferred Follow-On Scope
 
@@ -283,12 +286,12 @@ Dependencies between tracks:
 
 | Track | Status | Last note |
 |---|---|---|
-| `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) |
-| `UXG` Graph replacement | 🟢 done | All 7 slices complete (UXG.1–UXG.7) — Sigma.js + graphology replaces D3 |
-| `UXP` Practice UX | 🟢 done | All 3 slices complete (UXP.1–UXP.3) — flashcard stack, generate-more, quiz history |
-| `UXT` Tutor UX | 🟢 done | All 3 slices complete (UXT.1–UXT.3) — onboarding confirm, status animation, graph-chat |
-| `UXI` Infrastructure | 🟢 done | All 3 slices complete (UXI.1–UXI.3) — sources polish, LLM caching, dev stats |
-| `UXD` Documentation audit | 🟢 done | All 5 slices complete (UXD.1–UXD.5) — all 9 docs audited and updated |
+| `UXF` Critical fixes | 🟢 done | All 3 slices complete (UXF.1–UXF.3) — gardener commit, selection highlight, flicker fix |
+| `UXG` Graph replacement | 🔄 in progress | UXG.1–UXG.7 ✅ done (Sigma.js core). UXG.8–UXG.13 🔲 pending (user-requested: camera, layouts, loading, legend, settings, expand/prune) |
+| `UXP` Practice UX | 🔲 not started | 0/3 slices — flashcard stack, generate-more, quiz history all pending |
+| `UXT` Tutor UX | 🔲 not started | 0/3 slices — onboarding, status animation, graph-chat nav all pending |
+| `UXI` Infrastructure | 🔲 not started | 0/3 slices — sources, caching, dev stats all pending |
+| `UXD` Documentation audit | 🔄 in progress | UXD.1 ✅ done (audit report). UXD.2–UXD.5 🔲 pending |
 
 ## Verification Block Template
 
