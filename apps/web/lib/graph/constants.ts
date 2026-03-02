@@ -9,12 +9,3 @@ export const TIER_COLORS: Record<string, string> = {
 
 export const NODE_SIZE_RANGE = { min: 4, max: 15 } as const;
 export const EDGE_SIZE_RANGE = { min: 0.5, max: 3 } as const;
-
-export const DEFAULT_SIGMA_SETTINGS = {
-  renderLabels: true,
-  labelColor: { color: "var(--text)" },
-  defaultEdgeColor: "var(--line)",
-  defaultNodeColor: "#6b7280",
-  defaultEdgeType: "arrow" as const,
-  labelRenderedSizeThreshold: 6,
-} as const;

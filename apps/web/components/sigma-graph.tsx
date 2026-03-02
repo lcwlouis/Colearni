@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useState } from "react";
 import { SigmaContainer } from "@react-sigma/core";
 import "@react-sigma/core/lib/style.css";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 import { buildGraphologyGraph } from "@/lib/graph/transform";
-import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/constants";
+import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/sigma-settings";
+import { GraphReducers } from "@/components/sigma-graph/graph-reducers";
 
 // --- Same props interface as ConceptGraph (concept-graph.tsx) ---
 type Props = {
@@ -26,11 +27,11 @@ type Props = {
  * Sigma.js-based graph visualisation — drop-in replacement for ConceptGraph.
  *
  * UXG.1: scaffold only — renders an empty Sigma canvas.
+ * UXG.2: node/edge population, mastery colours, tier sizing.
+ * UXG.3: core rendering with visual programs and reducers.
  * Future slices will add:
- *   UXG.2  – node/edge population, mastery colours, tier sizing
- *   UXG.3  – ForceAtlas2 layout
- *   UXG.4  – selection, focus-mode, search highlight
- *   UXG.5  – drag, zoom-to-fit, reset-view callback
+ *   UXG.4  – ForceAtlas2 layout
+ *   UXG.5  – drag, zoom-to-fit, reset-view, onSelect, onBackgroundClick
  */
 export default function SigmaGraph({
   nodes,
@@ -46,6 +47,7 @@ export default function SigmaGraph({
   filteredTiers,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
   // Build graphology instance from API data (UXG.2)
   const graph = useMemo(
@@ -53,16 +55,12 @@ export default function SigmaGraph({
     [nodes, edges, filteredTiers],
   );
 
-  // TODO (UXG.3): wire ForceAtlas2 layout
-  // TODO (UXG.4): handle selectedId, focusNodeId, searchHighlight
-  // TODO (UXG.5): expose onResetViewReady, drag behaviour, onBackgroundClick
+  // TODO (UXG.5): expose onResetViewReady, drag behaviour, onSelect, onBackgroundClick, focusNodeId
 
   // Suppress unused-variable warnings until future slices consume these props
-  void selectedId;
   void onSelect;
   void onBackgroundClick;
   void focusNodeId;
-  void searchHighlight;
   void onResetViewReady;
 
   if (nodes.length === 0) {
@@ -82,7 +80,13 @@ export default function SigmaGraph({
         graph={graph}
         style={{ width: "100%", height: "100%" }}
         settings={DEFAULT_SIGMA_SETTINGS}
-      />
+      >
+        <GraphReducers
+          selectedId={selectedId}
+          hoveredNode={hoveredNode}
+          searchHighlight={searchHighlight}
+        />
+      </SigmaContainer>
     </div>
   );
 }
