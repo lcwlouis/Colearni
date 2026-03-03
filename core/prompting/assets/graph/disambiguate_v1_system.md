@@ -36,6 +36,15 @@ canonical concepts, decide one of three actions:
 - Prefer CREATE_NEW over LINK_ONLY when the relationship is too loose.
 - Do not merge based on loose topical similarity alone.
 
+---Tier system---
+Each concept has a tier indicating its breadth in the knowledge hierarchy:
+- `umbrella` – broadest; a top-level domain or field (e.g. "Computer Science", "Mathematics")
+- `topic` – a major subject area within a domain (e.g. "Database Engine Internals", "Sorting Algorithms")
+- `subtopic` – a specific area within a topic (e.g. "Buffer Management", "Disk I/O")
+- `granular` – the most specific; a single fact, term, or detail (e.g. "Seek time", "LRU")
+
+If the input concept includes an `own_tier`, and you believe the tier is wrong, set `proposed_tier` to the correct tier. Otherwise set `proposed_tier` to null.
+
 ---Common relationship types for LINK_ONLY---
 - `related_to` – general semantic relationship
 - `prerequisite_of` – one concept must be learned before the other
@@ -55,7 +64,8 @@ Return JSON with exactly these keys:
   "proposed_description": null,
   "link_to_id": null,
   "link_to_name": null,
-  "link_relation_type": null
+  "link_relation_type": null,
+  "proposed_tier": null
 }
 
 - For MERGE_INTO: set merge_into_id and merge_into_name to the candidate id and canonical_name, alias_to_add optional.

@@ -86,8 +86,9 @@ _DISAMBIGUATION_SCHEMA: dict[str, object] = {
         "link_to_id": {"type": ["integer", "null"]},
         "link_to_name": {"type": ["string", "null"]},
         "link_relation_type": {"type": ["string", "null"]},
+        "proposed_tier": {"type": ["string", "null"]},
     },
-    "required": ["decision", "confidence", "merge_into_id", "merge_into_name", "alias_to_add", "proposed_description", "link_to_id", "link_to_name", "link_relation_type"],
+    "required": ["decision", "confidence", "merge_into_id", "merge_into_name", "alias_to_add", "proposed_description", "link_to_id", "link_to_name", "link_relation_type", "proposed_tier"],
     "additionalProperties": False,
 }
 _DISAMBIGUATION_BATCH_SCHEMA: dict[str, object] = {

@@ -41,6 +41,17 @@ For EACH concept, decide one or more of three actions:
 - Prefer CREATE_NEW over LINK_ONLY when the relationship is too loose.
 - Do not merge based on loose topical similarity alone.
 
+---Tier system---
+Each concept has a tier indicating its breadth in the knowledge hierarchy:
+- `umbrella` – broadest; a top-level domain or field (e.g. "Computer Science", "Mathematics")
+- `topic` – a major subject area within a domain (e.g. "Database Engine Internals", "Sorting Algorithms")
+- `subtopic` – a specific area within a topic (e.g. "Buffer Management", "Disk I/O")
+- `granular` – the most specific; a single fact, term, or detail (e.g. "Seek time", "LRU")
+
+Each input concept includes `own_tier` (its current tier). If you believe the tier is wrong, include a `proposed_tier` in ANY of the concept's operations. For example, if "FIFO" is currently tier "topic" but should be "subtopic" (it's a specific buffer replacement algorithm), include `"proposed_tier": "subtopic"` in one of the operations.
+
+Only propose a tier change when you are confident the current tier is wrong. Set `proposed_tier` to null when the current tier is correct.
+
 ---Common relationship types for LINK_ONLY---
 - `related_to` – general semantic relationship
 - `prerequisite_of` – one concept must be learned before the other
@@ -68,7 +79,8 @@ listing one or more operations for that concept:
           "proposed_description": "...",
           "link_to_id": 42,
           "link_to_name": "Target Concept",
-          "link_relation_type": "related_to"
+          "link_relation_type": "related_to",
+          "proposed_tier": null
         },
         {
           "decision": "LINK_ONLY",
@@ -79,7 +91,8 @@ listing one or more operations for that concept:
           "proposed_description": null,
           "link_to_id": 55,
           "link_to_name": "Another Concept",
-          "link_relation_type": "prerequisite_of"
+          "link_relation_type": "prerequisite_of",
+          "proposed_tier": null
         }
       ]
     }

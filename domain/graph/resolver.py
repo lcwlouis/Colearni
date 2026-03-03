@@ -79,6 +79,7 @@ class _DisambiguationPayload(BaseModel):
     proposed_description: str | None = None
     link_to_id: int | None = None
     link_relation_type: str | None = None
+    proposed_tier: str | None = None
 
     @model_validator(mode="after")
     def validate_merge_id(self) -> _DisambiguationPayload:

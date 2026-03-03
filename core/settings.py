@@ -423,6 +423,15 @@ class Settings(BaseSettings):
         ),
         ge=1,
     )
+    gardener_max_candidates_per_item: int = Field(
+        default=10,
+        description="Max candidates per concept in gardener batch LLM calls",
+        validation_alias=AliasChoices(
+            "APP_GARDENER_MAX_CANDIDATES_PER_ITEM",
+            "GARDENER_MAX_CANDIDATES_PER_ITEM",
+        ),
+        ge=2,
+    )
 
     # ── Auth settings ──────────────────────────────────────────────────
     auth_magic_link_ttl_minutes: int = Field(

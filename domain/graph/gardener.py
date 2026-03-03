@@ -50,6 +50,7 @@ class GardenerConfig:
     full_scan_lexical_top_k: int = 20
     full_scan_vector_top_k: int = 30
     full_scan_candidate_cap: int = 30
+    max_candidates_per_item: int = 10
 
     @classmethod
     def from_settings(cls, settings: Settings) -> GardenerConfig:
@@ -71,6 +72,7 @@ class GardenerConfig:
             full_scan_lexical_top_k=settings.gardener_full_scan_lexical_top_k,
             full_scan_vector_top_k=settings.gardener_full_scan_vector_top_k,
             full_scan_candidate_cap=settings.gardener_full_scan_candidate_cap,
+            max_candidates_per_item=settings.gardener_max_candidates_per_item,
         )
 
 
@@ -116,6 +118,7 @@ class GardenerRunResult:
     pruned_concepts: int = 0
     pruned_edges: int = 0
     tiers_backfilled: int = 0
+    tiers_updated: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +141,7 @@ class _GardenerDecisionPayload(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     link_to_id: int | None = None
     link_relation_type: str | None = None
+    proposed_tier: str | None = None
 
     @model_validator(mode="after")
     def validate_ids(self) -> _GardenerDecisionPayload:
@@ -301,6 +305,7 @@ def run_graph_gardener(
         stabilized_seed_ids: set[int] = set()
         merges_applied = 0
         links_created = 0
+        tiers_updated = 0
         clusters_skipped = 0
         stopped_by_cluster_budget = False
         stopped_by_llm_budget = False
@@ -356,6 +361,7 @@ def run_graph_gardener(
                 llm_client=llm_client,
                 concepts=cluster_concepts,
                 clusters=[c for c, _ in batch],
+                max_candidates_per_item=config.max_candidates_per_item,
             )
             budgets.register_llm_call()
             emit_event(
@@ -451,6 +457,23 @@ def run_graph_gardener(
                             merges_applied += 1
                             already_merged.add(concept_id)
 
+                    # --- Tier correction (applies to all decision types) ---
+                    if (
+                        decision.proposed_tier
+                        and decision.proposed_tier in VALID_TIERS
+                        and concept_id not in already_merged
+                    ):
+                        current_tier = cluster_concepts[concept_id].tier
+                        if decision.proposed_tier != current_tier:
+                            session.execute(
+                                text(
+                                    "UPDATE concepts_canon SET tier = :tier"
+                                    " WHERE workspace_id = :workspace_id AND id = :concept_id"
+                                ),
+                                {"tier": decision.proposed_tier, "workspace_id": workspace_id, "concept_id": concept_id},
+                            )
+                            tiers_updated += 1
+
                 stabilized_seed_ids.update(cluster_seed_ids)
 
         for concept_id in sorted(stabilized_seed_ids):
@@ -486,6 +509,7 @@ def run_graph_gardener(
             pruned_concepts=prune_result["pruned_concepts"],
             pruned_edges=prune_result["pruned_edges"],
             tiers_backfilled=tiers_backfilled,
+            tiers_updated=tiers_updated,
         )
         if span is not None:
             span.set_attribute("graph.seed_nodes", len(seeds))
@@ -502,7 +526,7 @@ def run_graph_gardener(
                 input_summary=f"workspace={workspace_id}, seeds={len(seeds)}",
                 output_summary=(
                     f"processed={budgets.clusters_processed}, merges={merges_applied}, "
-                    f"links={links_created}, llm={budgets.llm_calls}"
+                    f"links={links_created}, tiers={tiers_updated}, llm={budgets.llm_calls}"
                     + (", budget_stop" if stopped_by_cluster_budget or stopped_by_llm_budget else "")
                 ),
             )
@@ -659,6 +683,7 @@ def _batch_cluster_llm_decisions(
     llm_client: GraphLLMClient,
     concepts: Mapping[int, _ClusterConcept],
     clusters: list[set[int]],
+    max_candidates_per_item: int = 10,
 ) -> list[list[tuple[int, _GardenerDecisionPayload | None]]]:
     """Disambiguate clusters: each member is checked against all others.
 
@@ -675,10 +700,18 @@ def _batch_cluster_llm_decisions(
         for concept_id in ordered_ids:
             concept = concepts[concept_id]
             others = [cid for cid in ordered_ids if cid != concept_id]
+            if len(others) > max_candidates_per_item:
+                concept_neighbors = set(concept.neighbor_names)
+                def _relevance(cid: int) -> tuple[int, str]:
+                    c = concepts[cid]
+                    overlap = len(concept_neighbors & set(c.neighbor_names))
+                    return (-overlap, c.canonical_name)
+                others = sorted(others, key=_relevance)[:max_candidates_per_item]
             if not others:
                 continue
             batch_items.append({
                 "own_id": concept_id,
+                "own_tier": concept.tier or "unknown",
                 "raw_name": concept.canonical_name,
                 "context_snippet": concept.description,
                 "candidates": [
