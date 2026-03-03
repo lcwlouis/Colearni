@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronRight, ChevronDown } from "lucide-react";
 import { TIER_COLORS } from "@/lib/graph/constants";
 import styles from "./graph-legend.module.css";
 
@@ -23,7 +24,7 @@ export function GraphLegend() {
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? "Expand legend" : "Collapse legend"}
         >
-          {collapsed ? "▶" : "▼"}
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
       {!collapsed && (

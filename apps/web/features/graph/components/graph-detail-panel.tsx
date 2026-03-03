@@ -52,6 +52,7 @@ interface GraphDetailPanelProps {
   onOpenQuiz?: (quizId: number) => void;
   onRetryQuiz?: (quizId: number) => void;
   onOpenFlashcardRun?: (runId: string) => void;
+  allNodes?: Array<{ concept_id: number; canonical_name: string; tier?: string | null; description?: string }>;
 }
 
 export function GraphDetailPanel({
@@ -79,6 +80,7 @@ export function GraphDetailPanel({
   onOpenQuiz,
   onRetryQuiz,
   onOpenFlashcardRun,
+  allNodes,
 }: GraphDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<"flashcards" | "quizzes" | "chat">("flashcards");
   const { phase, selectedDetail, luckyPick, error } = state;
@@ -96,9 +98,57 @@ export function GraphDetailPanel({
       <AsyncState
         loading={phase === "loading_detail"}
         error={phase === "error" && !!selectedDetail ? error : null}
-        empty={!selectedDetail && phase !== "loading_detail"}
-        emptyLabel="Select a concept to explore."
+        empty={false}
+        emptyLabel=""
       />
+
+      {!selectedDetail && phase !== "loading_detail" && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1, minHeight: 0 }}>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted)', padding: '0 0 0.5rem' }}>
+            {allNodes && allNodes.length > 0
+              ? `${allNodes.length} concepts — select one to explore`
+              : "Select a concept to explore."}
+          </p>
+          {allNodes && allNodes.length > 0 && (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {allNodes.map((node) => (
+                <button
+                  key={node.concept_id}
+                  type="button"
+                  onClick={() => selectConcept(node.concept_id)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: '1px solid var(--line)',
+                    padding: '0.5rem 0.25rem',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                    color: 'inherit',
+                  }}
+                >
+                  <span style={{ fontWeight: 500 }}>{node.canonical_name}</span>
+                  {node.tier && (
+                    <span style={{
+                      ...(TIER_BADGE_STYLES[node.tier] ?? {}),
+                      marginLeft: '0.4rem',
+                    }}>
+                      {node.tier.toUpperCase()}
+                    </span>
+                  )}
+                  {node.description && (
+                    <span style={{ display: 'block', color: 'var(--muted)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+                      {node.description.slice(0, 100)}{node.description.length > 100 ? '…' : ''}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {selectedDetail ? (
         <>
@@ -196,7 +246,7 @@ export function GraphDetailPanel({
                         marginBottom: "-2px",
                       }}
                     >
-                      {tab === "flashcards" ? "Flashcards" : tab === "quizzes" ? "Quizzes" : "💬 Chat"}
+                      {tab === "flashcards" ? "Flashcards" : tab === "quizzes" ? "Quizzes" : "Chat"}
                     </button>
                   ))}
                 </div>

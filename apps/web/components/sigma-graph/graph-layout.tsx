@@ -38,8 +38,8 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
   const { assign: assignFA2 } = useLayoutForceAtlas2({
     iterations: 100,
     settings: {
-      gravity: 1,
-      scalingRatio: 2,
+      gravity: 0.5,
+      scalingRatio: 4,
       strongGravityMode: true,
       barnesHutOptimize: true,
     },
@@ -47,8 +47,8 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
 
   const { start: startFA2, stop: stopFA2 } = useWorkerLayoutForceAtlas2({
     settings: {
-      gravity: 1,
-      scalingRatio: 2,
+      gravity: 0.5,
+      scalingRatio: 4,
       strongGravityMode: true,
       barnesHutOptimize: true,
     },
@@ -58,12 +58,12 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
 
   const { assign: assignNoverlap } = useLayoutNoverlap({
     maxIterations: 50,
-    settings: { margin: 5, ratio: 1.1 },
+    settings: { margin: 5, ratio: 1.1, speed: 3 },
   });
 
   const { assign: assignForce } = useLayoutForce({
     maxIterations: 100,
-    settings: { attraction: 0.0005, repulsion: 0.1, gravity: 0.0001, inertia: 0.6 },
+    settings: { attraction: 0.0003, repulsion: 0.02, gravity: 0.02, inertia: 0.4 },
   });
 
   /** Simple deterministic hash for seeded randomness. */

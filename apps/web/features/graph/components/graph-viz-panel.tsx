@@ -227,15 +227,19 @@ export function GraphVizPanel({
 
       {availableTiers.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', padding: '0.4rem 0.75rem 0.1rem' }}>
-          {filteredTiers.size > 0 && (
-            <button
-              type="button"
-              onClick={clearTierFilter}
-              style={{ ...chipBase, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--line)', fontWeight: 400 }}
-            >
-              All
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={clearTierFilter}
+            style={{
+              ...chipBase,
+              background: filteredTiers.size >= 4 ? 'var(--accent, #4338ca)' : 'var(--surface)',
+              color: filteredTiers.size >= 4 ? '#fff' : 'var(--text)',
+              border: filteredTiers.size >= 4 ? '1px solid var(--accent, #4338ca)' : '1px solid var(--line)',
+              fontWeight: filteredTiers.size >= 4 ? 600 : 400,
+            }}
+          >
+            All
+          </button>
           {availableTiers.map((tier) => {
             const isActive = filteredTiers.has(tier);
             const styles = TIER_CHIP_STYLES[tier] ?? TIER_CHIP_STYLES.granular;

@@ -15,7 +15,7 @@ export function buildGraphologyGraph(
 
   // --- Add nodes (skip filtered tiers entirely so layouts ignore them) ---
   for (const node of nodes) {
-    if (filteredTiers && filteredTiers.has(node.tier ?? "")) continue;
+    if (filteredTiers && filteredTiers.size > 0 && filteredTiers.size < 4 && !filteredTiers.has(node.tier ?? "")) continue;
 
     const key = String(node.concept_id);
     graph.addNode(key, {

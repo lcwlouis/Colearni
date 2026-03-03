@@ -10,7 +10,7 @@ interface ConceptActivityPanelProps {
   activity: ConceptActivityResponse | null;
   loading: boolean;
   error: string | null;
-  onRefresh: () => void;
+  onRefresh?: () => void;
   onOpenQuiz?: (quizId: number) => void;
   onRetryQuiz?: (quizId: number) => void;
   onOpenFlashcardRun?: (runId: string) => void;
@@ -155,24 +155,7 @@ export function ConceptActivityPanel({
 
   return (
     <div className="stack" style={{ gap: "0.5rem" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <h3 style={{ margin: 0 }}>Activity</h3>
-        <button
-          type="button"
-          className="secondary"
-          style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}
-          onClick={onRefresh}
-          disabled={loading}
-        >
-          ↻
-        </button>
-      </div>
+      <h3 style={{ margin: 0 }}>Activity</h3>
 
       {empty && <p className="field-label">No activity yet.</p>}
 

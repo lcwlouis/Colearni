@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { ZoomIn, ZoomOut, Home, RotateCw, RotateCcw, Maximize } from "lucide-react";
 import { useSigma } from "@react-sigma/core";
 import styles from "./camera-controls.module.css";
 
@@ -60,7 +61,7 @@ export function CameraControls({ containerRef }: Props) {
         aria-label="Zoom in"
         title="Zoom in (+)"
       >
-        +
+        <ZoomIn size={16} />
       </button>
       <button
         className={styles.btn}
@@ -68,7 +69,7 @@ export function CameraControls({ containerRef }: Props) {
         aria-label="Zoom out"
         title="Zoom out (−)"
       >
-        −
+        <ZoomOut size={16} />
       </button>
       <div className={styles.separator} />
       <button
@@ -77,7 +78,7 @@ export function CameraControls({ containerRef }: Props) {
         aria-label="Reset view"
         title="Reset view (R)"
       >
-        ⌂
+        <Home size={16} />
       </button>
       <div className={styles.separator} />
       <button
@@ -86,7 +87,7 @@ export function CameraControls({ containerRef }: Props) {
         aria-label="Rotate clockwise"
         title="Rotate clockwise"
       >
-        ↻
+        <RotateCw size={16} />
       </button>
       <button
         className={styles.btn}
@@ -94,7 +95,7 @@ export function CameraControls({ containerRef }: Props) {
         aria-label="Rotate counter-clockwise"
         title="Rotate counter-clockwise"
       >
-        ↺
+        <RotateCcw size={16} />
       </button>
       <div className={styles.separator} />
       <button
@@ -103,7 +104,7 @@ export function CameraControls({ containerRef }: Props) {
         aria-label="Toggle fullscreen"
         title="Fullscreen (F)"
       >
-        ⛶
+        <Maximize size={16} />
       </button>
     </div>
   );

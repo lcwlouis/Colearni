@@ -17,6 +17,8 @@ import type {
   GraphSubgraphEdge,
 } from "@/lib/api/types";
 
+const ALL_TIERS = new Set(['umbrella', 'topic', 'subtopic', 'granular']);
+
 export function useGraphPage() {
   const auth = useRequireAuth();
   const wsId = auth.activeWorkspaceId ?? "";
@@ -58,15 +60,20 @@ export function useGraphPage() {
   const [resetView, setResetView] = useState<(() => void) | null>(null);
 
   // Tier filter state
-  const [filteredTiers, setFilteredTiers] = useState<Set<string>>(new Set());
+  const [filteredTiers, setFilteredTiers] = useState<Set<string>>(new Set(ALL_TIERS));
   const toggleTierFilter = useCallback((tier: string) => {
     setFilteredTiers(prev => {
       const next = new Set(prev);
-      if (next.has(tier)) next.delete(tier); else next.add(tier);
+      if (next.has(tier)) {
+        next.delete(tier);
+        if (next.size === 0) return prev;
+      } else {
+        next.add(tier);
+      }
       return next;
     });
   }, []);
-  const clearTierFilter = useCallback(() => setFilteredTiers(new Set()), []);
+  const clearTierFilter = useCallback(() => setFilteredTiers(new Set(ALL_TIERS)), []);
 
   const handleResetViewReady = useCallback((fn: () => void) => {
     setResetView(() => fn);

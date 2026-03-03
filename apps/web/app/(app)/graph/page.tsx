@@ -77,6 +77,7 @@ export default function GraphPage() {
           setPracticeMode={g.setPracticeMode}
           setStatefulCards={g.setStatefulCards}
           conceptActivity={g.conceptActivity}
+          allNodes={g.fullGraph?.nodes}
         />
       </div>
     </div>

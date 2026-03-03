@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Settings as SettingsIcon } from "lucide-react";
 import { useGraphSettings } from "@/lib/graph/settings-store";
 import type { LayoutType } from "./graph-layout";
 import styles from "./settings-panel.module.css";
@@ -29,7 +30,7 @@ export function SettingsPanel({ onLayoutChange }: Props) {
         aria-label="Graph settings"
         title="Graph settings"
       >
-        Settings
+        <SettingsIcon size={16} />
       </button>
 
       {open && (
