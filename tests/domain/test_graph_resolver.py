@@ -44,7 +44,10 @@ class StubLLM(GraphLLMClient):
         self.disambiguate_calls += 1
         if isinstance(self._disambiguation_payload, Exception):
             raise self._disambiguation_payload
-        return [self._disambiguation_payload for _ in items]
+        return [
+            {"concept_ref": str(item.get("raw_name", "")), "operations": [self._disambiguation_payload]}
+            for item in items
+        ]
 
 
 class StubEmbeddingProvider(EmbeddingProvider):

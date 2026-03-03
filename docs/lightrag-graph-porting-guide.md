@@ -421,55 +421,292 @@ const sigmaSettings: Partial<SigmaSettings> = {
 
 ## 6. Layout Algorithms
 
-Six layout algorithms are available, switchable at runtime with animated transitions:
+Six layout algorithms are available, switchable at runtime with animated transitions. They fall into two categories:
 
-| Layout | Package | Description | Best For |
-|--------|---------|-------------|----------|
-| **ForceAtlas2** | `@react-sigma/layout-forceatlas2` | Physics-based force-directed (default) | General graphs, reveals communities |
-| **Force Directed** | `@react-sigma/layout-force` | Basic spring-electric model | Simpler graphs |
-| **Circular** | `@react-sigma/layout-circular` | Nodes on a circle | Understanding connectivity |
-| **Circlepack** | `@react-sigma/layout-circlepack` | Nested circles by group | Hierarchical data |
-| **No-overlap** | `@react-sigma/layout-noverlap` | Removes node overlaps | Dense graphs |
-| **Random** | `@react-sigma/layout-random` | Random positions | Baseline / reset |
+### 6.1 Layout Categories
 
-### Layout Application
+**Static layouts** — compute positions instantly, no continuous animation:
+
+| Layout | Package | Hook | Description |
+|--------|---------|------|-------------|
+| **Circular** | `@react-sigma/layout-circular` | `useLayoutCircular` | Nodes arranged on a circle |
+| **Circlepack** | `@react-sigma/layout-circlepack` | `useLayoutCirclepack` | Nested circles by group |
+| **Random** | `@react-sigma/layout-random` | `useLayoutRandom` | Random positions (baseline/reset) |
+
+**Iterative layouts** — run physics simulations, support continuous play/pause animation via Web Workers:
+
+| Layout | Package | Layout Hook | Worker Hook | Description |
+|--------|---------|-------------|-------------|-------------|
+| **No-overlap** | `@react-sigma/layout-noverlap` | `useLayoutNoverlap` | `useWorkerLayoutNoverlap` | Removes node overlaps |
+| **Force Directed** | `@react-sigma/layout-force` | `useLayoutForce` | `useWorkerLayoutForce` | Spring-electric model |
+| **Force Atlas** | `@react-sigma/layout-forceatlas2` | `useLayoutForceAtlas2` | `useWorkerLayoutForceAtlas2` | Physics-based force-directed (default on load) |
+
+> **Key distinction:** Only the 3 iterative layouts have both a `layout` hook (for computing positions synchronously) and a `worker` hook (for background continuous simulation). Static layouts only have a `layout` hook. The play/pause animation button is **only shown** for layouts that have a worker.
+
+### 6.2 Layout Parameter Configuration
+
+Each layout hook is initialized with specific parameters. Getting these right is critical for good visual results.
 
 ```typescript
-// Initial layout on graph load (ForceAtlas2)
+import { useLayoutCircular } from '@react-sigma/layout-circular'
+import { useLayoutCirclepack } from '@react-sigma/layout-circlepack'
+import { useLayoutRandom } from '@react-sigma/layout-random'
+import { useLayoutNoverlap, useWorkerLayoutNoverlap } from '@react-sigma/layout-noverlap'
+import { useLayoutForce, useWorkerLayoutForce } from '@react-sigma/layout-force'
+import { useLayoutForceAtlas2, useWorkerLayoutForceAtlas2 } from '@react-sigma/layout-forceatlas2'
+
+// maxIterations is a user-configurable setting (default: 15, range: 1-30)
+const maxIterations = useSettingsStore.use.graphLayoutMaxIterations()
+
+// --- Static layouts (no parameters needed) ---
+const layoutCircular = useLayoutCircular()
+const layoutCirclepack = useLayoutCirclepack()
+const layoutRandom = useLayoutRandom()
+
+// --- Iterative layouts (parameters are tuned for good convergence) ---
+const layoutNoverlap = useLayoutNoverlap({
+  maxIterations: maxIterations,
+  settings: {
+    margin: 5,        // Minimum space between nodes
+    expansion: 1.1,   // How much to expand on each iteration
+    gridSize: 1,      // Spatial indexing grid size
+    ratio: 1,         // Scaling ratio
+    speed: 3,         // Movement speed per iteration
+  }
+})
+
+const layoutForce = useLayoutForce({
+  maxIterations: maxIterations,
+  settings: {
+    attraction: 0.0003,  // Low attraction to reduce oscillation
+    repulsion: 0.02,     // Low repulsion to reduce oscillation
+    gravity: 0.02,       // Pulls nodes toward center
+    inertia: 0.4,        // Damping factor (lower = more damping)
+    maxMove: 100,        // Max pixels a node moves per step (prevents jumps)
+  }
+})
+
+const layoutForceAtlas2 = useLayoutForceAtlas2({
+  iterations: maxIterations  // Note: 'iterations' not 'maxIterations'
+})
+
+// --- Worker hooks (for play/pause continuous animation) ---
+const workerNoverlap = useWorkerLayoutNoverlap()
+const workerForce = useWorkerLayoutForce()
+const workerForceAtlas2 = useWorkerLayoutForceAtlas2()
+```
+
+### 6.3 Layout Registry
+
+Layouts are stored in a registry map. Each entry has a `layout` hook (always present) and an optional `worker` hook (only for iterative layouts). The UI uses this structure to decide whether to show the play/pause button.
+
+```typescript
+type LayoutName = 'Circular' | 'Circlepack' | 'Random' | 'Noverlaps' | 'Force Directed' | 'Force Atlas'
+
+const layouts = useMemo(() => {
+  return {
+    Circular: {
+      layout: layoutCircular
+      // No worker — static layout
+    },
+    Circlepack: {
+      layout: layoutCirclepack
+    },
+    Random: {
+      layout: layoutRandom
+    },
+    Noverlaps: {
+      layout: layoutNoverlap,
+      worker: workerNoverlap     // Has worker — supports play/pause
+    },
+    'Force Directed': {
+      layout: layoutForce,
+      worker: workerForce
+    },
+    'Force Atlas': {
+      layout: layoutForceAtlas2,
+      worker: workerForceAtlas2
+    }
+  } as { [key: string]: { layout: LayoutHook; worker?: LayoutWorkerHook } }
+}, [layoutCirclepack, layoutCircular, layoutForce, layoutForceAtlas2,
+    layoutNoverlap, layoutRandom, workerForce, workerNoverlap, workerForceAtlas2])
+```
+
+### 6.4 Initial Layout on Graph Load (in GraphControl)
+
+The initial layout is applied in `GraphControl.tsx`, **not** in `LayoutsControl.tsx`. This runs ForceAtlas2 synchronously once when the graph first loads:
+
+```typescript
+// In GraphControl.tsx
 const { assign: assignLayout } = useLayoutForceAtlas2({
   iterations: maxIterations  // Default: 15, configurable 1-30
 })
 
-// Apply once when graph loads
 useEffect(() => {
   if (sigmaGraph && sigma) {
-    sigma.setGraph(sigmaGraph)
-    assignLayout()  // Run ForceAtlas2 synchronously
+    try {
+      if (typeof sigma.setGraph === 'function') {
+        sigma.setGraph(sigmaGraph as unknown as AbstractGraph<NodeType, EdgeType>)
+      } else {
+        (sigma as any).graph = sigmaGraph
+      }
+    } catch (error) {
+      console.error('Error setting graph on sigma instance:', error)
+    }
+
+    assignLayout()  // ForceAtlas2 applied synchronously on first load
   }
-}, [sigma, sigmaGraph, assignLayout])
+}, [sigma, sigmaGraph, assignLayout, maxIterations])
 ```
 
-### Layout Switching with Animation
+### 6.5 Layout Switching with Animation (in LayoutsControl)
+
+When the user selects a layout from the dropdown, positions are computed from the layout hook and nodes are animated to their new positions:
 
 ```typescript
-// Animated transition between layouts
-const runLayout = (newLayout: LayoutName) => {
+const runLayout = useCallback((newLayout: LayoutName) => {
   const { positions } = layouts[newLayout].layout
-  animateNodes(graph, positions, { duration: 400 })  // 400ms smooth transition
+
+  try {
+    const graph = sigma.getGraph()
+    if (!graph) return
+
+    const pos = positions()
+    animateNodes(graph, pos, { duration: 400 })  // 400ms smooth transition
+    setLayout(newLayout)
+  } catch (error) {
+    console.error('Error running layout:', error)
+  }
+}, [layouts, sigma])
+```
+
+### 6.6 Play/Pause Continuous Animation (WorkerLayoutControl)
+
+For the 3 iterative layouts, a `WorkerLayoutControl` component provides play/pause. **Critical:** it uses `mainLayout.positions()` (the synchronous layout hook) to compute positions, not the worker directly. The worker hook is only used for its `kill()`/`stop()` methods.
+
+```typescript
+interface ExtendedWorkerLayoutControlProps extends WorkerLayoutControlProps {
+  mainLayout: LayoutHook  // The synchronous layout hook, used for position computation
 }
 
-// Continuous layout animation (play/pause)
-const handlePlayPause = () => {
-  if (isRunning) {
-    clearInterval(timer)
-    layout.kill()
-  } else {
-    updatePositions()
-    timer = setInterval(updatePositions, 200)  // Update every 200ms
-    setTimeout(() => autoStop(), 3000)          // Auto-stop after 3s
-  }
+const WorkerLayoutControl = ({ layout, mainLayout }: ExtendedWorkerLayoutControlProps) => {
+  const sigma = useSigma()
+  const [isRunning, setIsRunning] = useState(false)
+  const animationTimerRef = useRef<number | null>(null)
+
+  // Compute positions using the main (synchronous) layout hook, then animate
+  const updatePositions = useCallback(() => {
+    if (!sigma) return
+    const graph = sigma.getGraph()
+    if (!graph || graph.order === 0) return
+
+    const positions = mainLayout.positions()         // <-- Uses mainLayout, NOT worker
+    animateNodes(graph, positions, { duration: 300 }) // 300ms per frame
+  }, [sigma, mainLayout])
+
+  const handleClick = useCallback(() => {
+    if (isRunning) {
+      // --- STOP ---
+      if (animationTimerRef.current) {
+        window.clearInterval(animationTimerRef.current)
+        animationTimerRef.current = null
+      }
+      // Kill the worker layout
+      try {
+        if (typeof layout.kill === 'function') layout.kill()
+        else if (typeof layout.stop === 'function') layout.stop()
+      } catch (error) { /* ignore */ }
+      setIsRunning(false)
+    } else {
+      // --- START ---
+      updatePositions()  // Immediate first frame
+
+      // Continuous updates every 200ms
+      animationTimerRef.current = window.setInterval(updatePositions, 200)
+      setIsRunning(true)
+
+      // Auto-stop after 3 seconds
+      setTimeout(() => {
+        if (animationTimerRef.current) {
+          window.clearInterval(animationTimerRef.current)
+          animationTimerRef.current = null
+          setIsRunning(false)
+          try {
+            if (typeof layout.kill === 'function') layout.kill()
+            else if (typeof layout.stop === 'function') layout.stop()
+          } catch (error) { /* ignore */ }
+        }
+      }, 3000)
+    }
+  }, [isRunning, layout, updatePositions])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (animationTimerRef.current) {
+        window.clearInterval(animationTimerRef.current)
+        animationTimerRef.current = null
+      }
+    }
+  }, [])
+
+  return (
+    <Button size="icon" onClick={handleClick}>
+      {isRunning ? <PauseIcon /> : <PlayIcon />}
+    </Button>
+  )
 }
 ```
+
+### 6.7 Conditional Play/Pause in the UI
+
+The play/pause button only renders when the currently selected layout has a `worker` property:
+
+```typescript
+// In LayoutsControl render
+<div>
+  {/* Play/pause button — only shown for iterative layouts */}
+  {layouts[layout] && 'worker' in layouts[layout] && (
+    <WorkerLayoutControl
+      layout={layouts[layout].worker!}      // Worker hook (for kill/stop)
+      mainLayout={layouts[layout].layout}   // Layout hook (for positions)
+    />
+  )}
+</div>
+
+<div>
+  {/* Layout dropdown — always shown */}
+  <Popover>
+    <PopoverTrigger>
+      <Button><GripIcon /></Button>
+    </PopoverTrigger>
+    <PopoverContent>
+      <Command>
+        <CommandList>
+          <CommandGroup>
+            {Object.keys(layouts).map((name) => (
+              <CommandItem onSelect={() => runLayout(name as LayoutName)} key={name}>
+                {name}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </CommandList>
+      </Command>
+    </PopoverContent>
+  </Popover>
+</div>
+```
+
+### 6.8 Porting Pitfalls
+
+| Pitfall | Explanation |
+|---------|-------------|
+| **Missing Force parameters** | Without the tuned `attraction`, `repulsion`, `gravity`, `inertia`, and `maxMove` settings for Force Directed, nodes will oscillate wildly or fly off-screen |
+| **Using worker for positions** | The worker hook does NOT provide `positions()` — you must pass the synchronous layout hook as `mainLayout` and call `mainLayout.positions()` |
+| **No play/pause for static layouts** | Circular, Circlepack, and Random are instant — showing a play/pause button for them will error |
+| **Missing auto-stop** | Without the 3-second auto-stop timeout, the animation runs forever and can drain CPU |
+| **Wrong initial layout location** | ForceAtlas2 initial layout runs in `GraphControl` on graph load, NOT in `LayoutsControl` — if you put it in the wrong component, it may not fire or may fire too late |
+| **Noverlap `iterations` vs `maxIterations`** | ForceAtlas2 uses `iterations` param; Noverlap and Force use `maxIterations` — mixing them up causes silent failures |
 
 ---
 

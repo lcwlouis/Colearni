@@ -131,7 +131,7 @@ class _ClusterConcept:
 
 
 class _GardenerDecisionPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
     decision: Literal["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]
     merge_into_id: int | None = None
@@ -700,13 +700,20 @@ def _batch_cluster_llm_decisions(
         with observation_context(operation="graph.disambiguate_batch"):
             raw_decisions = llm_client.disambiguate_batch(items=batch_items)
 
-        # Group results back by cluster
+        # Group results back by cluster — each concept may have multiple operations
         results: list[list[tuple[int, _GardenerDecisionPayload | None]]] = [[] for _ in clusters]
         for (cluster_idx, concept_id), raw_dec in zip(item_map, raw_decisions):
-            try:
-                payload = _GardenerDecisionPayload.model_validate(raw_dec)
-                results[cluster_idx].append((concept_id, payload))
-            except (ValidationError, ValueError):
+            ops = raw_dec.get("operations", [raw_dec]) if isinstance(raw_dec, dict) else [raw_dec]
+            parsed_any = False
+            for op in ops:
+                try:
+                    payload = _GardenerDecisionPayload.model_validate(op)
+                    if payload.decision != "CREATE_NEW":
+                        results[cluster_idx].append((concept_id, payload))
+                        parsed_any = True
+                except (ValidationError, ValueError):
+                    pass
+            if not parsed_any:
                 results[cluster_idx].append((concept_id, None))
         return results
     except (RuntimeError, ValueError):

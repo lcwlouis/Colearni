@@ -45,11 +45,16 @@ class IntegrationGardenerLLM(GraphLLMClient):
     ) -> Sequence[Mapping[str, Any]]:
         return [
             {
-                "decision": "MERGE_INTO",
-                "merge_into_id": self._merge_into_id,
-                "confidence": 0.92,
+                "concept_ref": str(item.get("raw_name", "")),
+                "operations": [
+                    {
+                        "decision": "MERGE_INTO",
+                        "merge_into_id": self._merge_into_id,
+                        "confidence": 0.92,
+                    }
+                ],
             }
-            for _ in items
+            for item in items
         ]
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:

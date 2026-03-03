@@ -60,7 +60,10 @@ class IntegrationGraphLLM(GraphLLMClient):
         *,
         items: Sequence[Mapping[str, object]],
     ) -> Sequence[Mapping[str, Any]]:
-        return [{"decision": "CREATE_NEW", "confidence": 1.0} for _ in items]
+        return [
+            {"concept_ref": str(item.get("raw_name", "")), "operations": [{"decision": "CREATE_NEW", "confidence": 1.0}]}
+            for item in items
+        ]
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt: str | None = None) -> str:
         return "Integration test summary."

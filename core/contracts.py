@@ -49,7 +49,10 @@ class GraphLLMClient(Protocol):
         """Disambiguate multiple concepts in a single LLM call.
 
         Each item has keys: raw_name, context_snippet, candidates.
-        Returns a list of decision dicts in the same order as input.
+        Returns a list of dicts in input order.  Each dict has:
+        ``concept_ref`` (the raw_name) and ``operations`` (a list of
+        decision dicts — one concept may map to multiple operations,
+        e.g. LINK_ONLY to several targets).
         """
 
     def generate_tutor_text(

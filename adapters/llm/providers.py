@@ -80,12 +80,14 @@ _DISAMBIGUATION_SCHEMA: dict[str, object] = {
         "decision": {"type": "string", "enum": ["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]},
         "confidence": {"type": "number"},
         "merge_into_id": {"type": ["integer", "null"]},
+        "merge_into_name": {"type": ["string", "null"]},
         "alias_to_add": {"type": ["string", "null"]},
         "proposed_description": {"type": ["string", "null"]},
         "link_to_id": {"type": ["integer", "null"]},
+        "link_to_name": {"type": ["string", "null"]},
         "link_relation_type": {"type": ["string", "null"]},
     },
-    "required": ["decision", "confidence", "merge_into_id", "alias_to_add", "proposed_description", "link_to_id", "link_relation_type"],
+    "required": ["decision", "confidence", "merge_into_id", "merge_into_name", "alias_to_add", "proposed_description", "link_to_id", "link_to_name", "link_relation_type"],
     "additionalProperties": False,
 }
 _DISAMBIGUATION_BATCH_SCHEMA: dict[str, object] = {
@@ -93,7 +95,15 @@ _DISAMBIGUATION_BATCH_SCHEMA: dict[str, object] = {
     "properties": {
         "decisions": {
             "type": "array",
-            "items": _DISAMBIGUATION_SCHEMA,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "concept_ref": {"type": "string"},
+                    "operations": {"type": "array", "items": _DISAMBIGUATION_SCHEMA},
+                },
+                "required": ["concept_ref", "operations"],
+                "additionalProperties": False,
+            },
         },
     },
     "required": ["decisions"],
@@ -203,7 +213,7 @@ class _BaseGraphLLMClient(ABC):
         *,
         items: Sequence[Mapping[str, object]],
     ) -> Sequence[Mapping[str, Any]]:
-        """Disambiguate multiple concepts in one LLM call.
+        """Disambiguate multiple concepts, splitting into sub-batches if needed.
 
         Each item must have: raw_name, context_snippet, candidates.
         Returns list of decision dicts in input order.
@@ -218,8 +228,52 @@ class _BaseGraphLLMClient(ABC):
                 context_snippet=str(item.get("context_snippet") or ""),
                 candidates=list(item.get("candidates", [])),  # type: ignore[arg-type]
             )
-            return [result]
+            return [{"concept_ref": str(item["raw_name"]), "operations": [result]}]
 
+        from core.settings import get_settings  # noqa: PLC0415
+
+        max_tokens = get_settings().disambiguate_max_tokens_per_batch
+        overhead = 500  # estimated system-prompt tokens
+
+        # Estimate tokens per item (rough chars-to-tokens ratio)
+        item_tokens = [len(json.dumps(item, ensure_ascii=True)) // 4 for item in items]
+
+        # Build sub-batches respecting the token limit
+        sub_batches: list[list[int]] = []
+        current_batch: list[int] = []
+        current_tokens = overhead
+        for i, tokens in enumerate(item_tokens):
+            if current_batch and current_tokens + tokens > max_tokens:
+                sub_batches.append(current_batch)
+                current_batch = [i]
+                current_tokens = overhead + tokens
+            else:
+                current_batch.append(i)
+                current_tokens += tokens
+        if current_batch:
+            sub_batches.append(current_batch)
+
+        if len(sub_batches) == 1:
+            return self._disambiguate_batch_single_call(items)
+
+        log.info(
+            "Splitting %d items into %d sub-batches for disambiguation",
+            len(items),
+            len(sub_batches),
+        )
+        all_results: list[Mapping[str, Any] | None] = [None] * len(items)
+        for indices in sub_batches:
+            sub_items = [items[i] for i in indices]
+            sub_results = self._disambiguate_batch_single_call(sub_items)
+            for idx, result in zip(indices, sub_results):
+                all_results[idx] = result
+        return all_results  # type: ignore[return-value]
+
+    def _disambiguate_batch_single_call(
+        self,
+        items: Sequence[Mapping[str, object]],
+    ) -> Sequence[Mapping[str, Any]]:
+        """Send a single batch of items to the LLM for disambiguation."""
         batch_payload = []
         for item in items:
             batch_payload.append({

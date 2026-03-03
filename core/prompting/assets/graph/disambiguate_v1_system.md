@@ -43,16 +43,18 @@ Return JSON with exactly these keys:
   "decision": "MERGE_INTO | CREATE_NEW | LINK_ONLY",
   "confidence": 0.0,
   "merge_into_id": null,
+  "merge_into_name": null,
   "alias_to_add": null,
   "proposed_description": null,
   "link_to_id": null,
+  "link_to_name": null,
   "link_relation_type": null
 }
 
-- For MERGE_INTO: set merge_into_id to the candidate id, alias_to_add optional.
-- For LINK_ONLY: set link_to_id to the candidate id, link_relation_type to the
+- For MERGE_INTO: set merge_into_id and merge_into_name to the candidate id and canonical_name, alias_to_add optional.
+- For LINK_ONLY: set link_to_id and link_to_name to the candidate id and canonical_name, link_relation_type to the
   relationship type (e.g. "prerequisite_of", "related_to").
-- For CREATE_NEW: all id fields should be null.
+- For CREATE_NEW: all id and name fields should be null.
 - Always include proposed_description with a brief description of the concept.
 
 ---Candidate fields---

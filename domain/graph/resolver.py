@@ -70,7 +70,7 @@ class ResolverConfig:
 
 
 class _DisambiguationPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
     decision: Literal["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]
     merge_into_id: int | None = None
@@ -450,8 +450,30 @@ class OnlineResolver:
 
             for (i, raw_concept, candidates), raw_dec in zip(items_for_llm, raw_decisions):
                 try:
-                    payload = _DisambiguationPayload.model_validate(raw_dec)
-                    decisions[i] = self._payload_to_decision(payload, candidates)
+                    # Multi-op format: {"concept_ref": ..., "operations": [...]}
+                    ops = raw_dec.get("operations", [raw_dec]) if isinstance(raw_dec, dict) else [raw_dec]
+                    # Pick the best operation: prefer MERGE_INTO, then LINK_ONLY, then CREATE_NEW
+                    best: _DisambiguationPayload | None = None
+                    for op in ops:
+                        try:
+                            payload = _DisambiguationPayload.model_validate(op)
+                        except (ValidationError, ValueError):
+                            continue
+                        if best is None:
+                            best = payload
+                        elif payload.decision == "MERGE_INTO" and best.decision != "MERGE_INTO":
+                            best = payload
+                        elif payload.decision == "LINK_ONLY" and best.decision == "CREATE_NEW":
+                            best = payload
+                        elif payload.decision == best.decision and payload.confidence > best.confidence:
+                            best = payload
+                    if best is not None:
+                        decisions[i] = self._payload_to_decision(best, candidates)
+                    else:
+                        decisions[i] = ResolverDecision(
+                            decision="CREATE_NEW", merge_into_id=None,
+                            confidence=1.0, method="fallback", llm_used=True,
+                        )
                 except (ValidationError, ValueError):
                     decisions[i] = ResolverDecision(
                         decision="CREATE_NEW", merge_into_id=None,

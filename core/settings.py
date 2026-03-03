@@ -334,6 +334,15 @@ class Settings(BaseSettings):
         ge=1,
         le=50,
     )
+    disambiguate_max_tokens_per_batch: int = Field(
+        default=30000,
+        description="Max estimated tokens per batch disambiguation LLM call",
+        validation_alias=AliasChoices(
+            "APP_DISAMBIGUATE_MAX_TOKENS_PER_BATCH",
+            "DISAMBIGUATE_MAX_TOKENS_PER_BATCH",
+        ),
+        ge=1000,
+    )
     gardener_max_llm_calls_per_run: int = Field(
         default=30,
         validation_alias=AliasChoices(
