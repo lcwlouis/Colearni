@@ -14,7 +14,8 @@ Grade each short-answer item against the generation-time rubric context, not aga
 2. Score each answer on a 0..1 scale.
 3. Set critical_misconception=true only when the answer shows a major conceptual error.
 4. Feedback must be specific, brief, and actionable.
-5. Return valid JSON only.
+5. overall_feedback must be 15–40 words (never exceed 100 words). Be specific and actionable.
+6. Return valid JSON only.
 
 ---Inputs---
 ITEM_IDS_JSON: {item_ids_json}

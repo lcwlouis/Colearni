@@ -435,7 +435,7 @@ def load_generation_context(
         .mappings()
         .all()
     )
-    chunk_excerpts = [str(r["text"])[:1000] for r in chunk_rows]
+    chunk_excerpts = [str(r["text"]) for r in chunk_rows]
     return {
         "concept_name": concept_name,
         "concept_description": str(concept["description"] or ""),
@@ -536,7 +536,7 @@ def get_latest_quiz_summary_for_concept(
         "quiz_status": str(row["quiz_status"]),
         "score": float(row["score"]) if row["score"] is not None else None,
         "passed": bool(row["passed"]) if row["passed"] is not None else None,
-        "overall_feedback": str(grading.get("overall_feedback", "")).strip()[:200],
+        "overall_feedback": str(grading.get("overall_feedback", "")).strip(),
         "attempted": row["graded_at"] is not None,
     }
 

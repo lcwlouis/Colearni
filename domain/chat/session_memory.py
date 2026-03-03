@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from adapters.db.chat import (
@@ -15,6 +16,8 @@ from adapters.db.chat import (
 from domain.chat.title_gen import generate_session_title
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+log = logging.getLogger("domain.chat.session_memory")
 
 COMPACTION_THRESHOLD = 40
 COMPACTION_KEEP_RECENT = 16
@@ -74,6 +77,7 @@ def persist_turn(
     user_text: str,
     assistant_payload: dict[str, Any],
     concept_name: str | None = None,
+    settings: Any | None = None,
 ) -> None:
     if session_id is None:
         return
@@ -115,6 +119,7 @@ def persist_turn(
         workspace_id=workspace_id,
         session_id=session_id,
         user_id=user_id,
+        settings=settings,
     )
     session.commit()
 
@@ -127,6 +132,7 @@ def maybe_compact_session_context(
     user_id: int,
     threshold: int = COMPACTION_THRESHOLD,
     keep_recent: int = COMPACTION_KEEP_RECENT,
+    settings: Any | None = None,
 ) -> None:
     total = count_chat_messages(session, session_id=session_id)
     if total <= threshold:
@@ -158,9 +164,31 @@ def maybe_compact_session_context(
     if not lines:
         return
 
-    summary = " ".join(lines)
-    if len(summary) > 1200:
-        summary = summary[:1197] + "..."
+    raw_summary = "\n".join(lines)
+
+    # Try LLM summarization if settings available and content is long enough
+    summary = raw_summary
+    if settings is not None and len(raw_summary) > 800:
+        try:
+            from domain.chat.response_service import build_tutor_llm_client
+
+            llm_client = build_tutor_llm_client(settings=settings)
+            if llm_client is not None:
+                compaction_prompt = (
+                    "Summarize the following tutor-learner conversation concisely. "
+                    "Preserve key topics discussed, questions asked, misconceptions identified, "
+                    "and learning progress. Keep the summary under 200 words.\n\n"
+                    f"CONVERSATION:\n{raw_summary}"
+                )
+                summary = llm_client.generate_tutor_text(
+                    prompt=compaction_prompt,
+                    system_prompt="You are a conversation summarizer. Return only the summary, nothing else.",
+                ).strip()
+                if not summary:
+                    summary = raw_summary
+        except Exception:
+            log.debug("LLM compaction failed, using raw summary")
+            summary = raw_summary
 
     append_chat_message(
         session,
@@ -204,9 +232,9 @@ def load_chat_context_for_quiz(
             continue
         role = str(message.get("type", ""))
         if role == "user":
-            lines.append(f"Learner: {text_value[:500]}")
+            lines.append(f"Learner: {text_value}")
         elif role == "assistant":
-            lines.append(f"Tutor: {text_value[:500]}")
+            lines.append(f"Tutor: {text_value}")
         if len(lines) >= max_turns:
             break
 

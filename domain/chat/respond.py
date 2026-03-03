@@ -114,6 +114,7 @@ def generate_chat_response(
                 user_id=request.user_id,
                 user_text=request.query,
                 assistant_payload=social_envelope.model_dump(mode="json"),
+                settings=active_settings,
             )
             set_input_output(span, output_value=social_envelope.text)
             return social_envelope
@@ -261,6 +262,7 @@ def generate_chat_response(
                 user_id=request.user_id,
                 user_text=request.query,
                 assistant_payload=empty_ws_envelope.model_dump(mode="json"),
+                settings=active_settings,
             )
             set_input_output(span, output_value=empty_ws_envelope.text)
             return empty_ws_envelope
@@ -476,6 +478,7 @@ def generate_chat_response(
             user_text=request.query,
             assistant_payload=envelope.model_dump(mode="json"),
             concept_name=resolved_name,
+            settings=active_settings,
         )
         return envelope
 

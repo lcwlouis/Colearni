@@ -118,6 +118,7 @@ def _grading_prompt_inline(ids_json: str, submission_json: str) -> str:
         "Use payload._generation_context as the canonical generation-time context. "
         "Each items entry must include item_id, score(0..1), "
         "critical_misconception(bool), feedback.\n"
+        "overall_feedback must be 15-40 words, max 100. "
         f"ITEM_IDS_JSON: {ids_json}\n"
         f"QUIZ_SUBMISSION_JSON: {submission_json}"
     )

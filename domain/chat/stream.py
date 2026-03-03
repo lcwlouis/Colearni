@@ -161,6 +161,7 @@ def _stream_inner(
             user_id=request.user_id,
             user_text=request.query,
             assistant_payload=social_envelope.model_dump(mode="json"),
+            settings=settings,
         )
         yield ChatStreamFinalEvent(envelope=social_envelope)
         return
@@ -310,6 +311,7 @@ def _stream_inner(
             user_id=request.user_id,
             user_text=request.query,
             assistant_payload=empty_env.model_dump(mode="json"),
+            settings=settings,
         )
         yield ChatStreamFinalEvent(envelope=empty_env)
         return
@@ -616,6 +618,7 @@ def _stream_inner(
         user_text=request.query,
         assistant_payload=envelope.model_dump(mode="json"),
         concept_name=resolved_name,
+        settings=settings,
     )
 
     yield ChatStreamFinalEvent(envelope=envelope)
