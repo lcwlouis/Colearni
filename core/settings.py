@@ -366,6 +366,54 @@ class Settings(BaseSettings):
         ),
         ge=1,
     )
+    gardener_full_scan_max_seeds: int = Field(
+        default=10000,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_FULL_SCAN_MAX_SEEDS",
+            "GARDENER_FULL_SCAN_MAX_SEEDS",
+        ),
+        ge=1,
+    )
+    gardener_full_scan_max_clusters: int = Field(
+        default=500,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_FULL_SCAN_MAX_CLUSTERS",
+            "GARDENER_FULL_SCAN_MAX_CLUSTERS",
+        ),
+        ge=0,
+    )
+    gardener_full_scan_max_llm_calls: int = Field(
+        default=200,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_FULL_SCAN_MAX_LLM_CALLS",
+            "GARDENER_FULL_SCAN_MAX_LLM_CALLS",
+        ),
+        ge=0,
+    )
+    gardener_full_scan_lexical_top_k: int = Field(
+        default=20,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_FULL_SCAN_LEXICAL_TOP_K",
+            "GARDENER_FULL_SCAN_LEXICAL_TOP_K",
+        ),
+        ge=1,
+    )
+    gardener_full_scan_vector_top_k: int = Field(
+        default=30,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_FULL_SCAN_VECTOR_TOP_K",
+            "GARDENER_FULL_SCAN_VECTOR_TOP_K",
+        ),
+        ge=1,
+    )
+    gardener_full_scan_candidate_cap: int = Field(
+        default=30,
+        validation_alias=AliasChoices(
+            "APP_GARDENER_FULL_SCAN_CANDIDATE_CAP",
+            "GARDENER_FULL_SCAN_CANDIDATE_CAP",
+        ),
+        ge=1,
+    )
 
     # ── Auth settings ──────────────────────────────────────────────────
     auth_magic_link_ttl_minutes: int = Field(
