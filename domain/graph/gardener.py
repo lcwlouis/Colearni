@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
@@ -25,6 +27,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from domain.graph.types import CanonicalCandidate, DEFAULT_TIER, VALID_TIERS, build_tier_inference_prompt, normalize_alias, tier_rank
+
+log = logging.getLogger(__name__)
 
 _GARDENER_REASON = "gardener_cluster_merge"
 
@@ -763,7 +767,11 @@ def _batch_cluster_llm_decisions(
             if not parsed_any:
                 results[cluster_idx].append((concept_id, None))
         return results
-    except (RuntimeError, ValueError):
+    except (RuntimeError, ValueError) as exc:
+        log.warning(
+            "Batch cluster LLM decisions failed; returning empty results. Error: %s",
+            exc,
+        )
         return [[] for _ in clusters]
 
 

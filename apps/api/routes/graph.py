@@ -138,13 +138,12 @@ def run_gardener(
     ws: WorkspaceContext = Depends(get_workspace_context),
     db: Session = Depends(get_db_session),
 ) -> GardenerRunResponse:
-    llm_client = getattr(request.app.state, "graph_llm_client", None)
-    if llm_client is None:
-        settings_state = getattr(request.app.state, "settings", None)
-        settings = settings_state if isinstance(settings_state, Settings) else None
-        llm_client = build_graph_llm_client(settings=settings)
     settings_state = getattr(request.app.state, "settings", None)
     settings = settings_state if isinstance(settings_state, Settings) else Settings()
+    llm_client = build_graph_llm_client(
+        settings=settings,
+        timeout_override=settings.graph_llm_long_timeout_seconds,
+    )
     result = run_graph_gardener(
         db,
         workspace_id=ws.workspace_id,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections import Counter
 
 from adapters.db.chat import ChatNotFoundError, resolve_session_by_public_id
@@ -18,6 +19,7 @@ from core.schemas import (
 from core.settings import Settings
 
 log = logging.getLogger("apps.api.routes.chat")
+KEEPALIVE_INTERVAL = 15  # seconds – SSE comment to prevent proxy/browser timeouts
 from domain.chat.respond import generate_chat_response
 from domain.chat.sessions import (
     ChatSessionNotFoundError,
@@ -250,11 +252,15 @@ def respond_chat_stream(
         event_count = 0
         event_types: Counter[str] = Counter()
         log.info("stream start ws=%s session=%s", ws.workspace_id, resolved_session_id)
+        last_event_time = time.monotonic()
         for event in generate_chat_response_stream(
             session=db,
             request=internal,
             settings=settings,
         ):
+            now = time.monotonic()
+            if now - last_event_time > KEEPALIVE_INTERVAL:
+                yield ": keepalive\n\n"
             event_count += 1
             event_types[event.event] += 1
             data = event.model_dump_json()
@@ -263,6 +269,7 @@ def respond_chat_stream(
                 event_count, event.event, ws.workspace_id,
             )
             yield f"event: {event.event}\ndata: {data}\n\n"
+            last_event_time = time.monotonic()
         log.info(
             "stream complete ws=%s session=%s events=%d breakdown=%s",
             ws.workspace_id,

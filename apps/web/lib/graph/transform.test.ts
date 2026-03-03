@@ -90,6 +90,22 @@ describe("buildGraphologyGraph", () => {
     expect(leafSize).toBeGreaterThanOrEqual(NODE_SIZE_RANGE.min);
   });
 
+  it("skips duplicate edges between the same node pair", () => {
+    const nodes = [
+      makeNode({ concept_id: 1, canonical_name: "A" }),
+      makeNode({ concept_id: 2, canonical_name: "B" }),
+    ];
+    const edges = [
+      makeEdge({ edge_id: 10, src_concept_id: 1, tgt_concept_id: 2 }),
+      makeEdge({ edge_id: 11, src_concept_id: 1, tgt_concept_id: 2 }),
+    ];
+
+    const g = buildGraphologyGraph(nodes, edges);
+
+    expect(g.order).toBe(2);
+    expect(g.size).toBe(1);
+  });
+
   it("skips edges whose source or target node is missing", () => {
     const nodes = [
       makeNode({ concept_id: 1, canonical_name: "A" }),

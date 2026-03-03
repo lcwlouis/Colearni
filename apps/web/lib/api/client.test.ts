@@ -159,12 +159,17 @@ describe("ApiClient", () => {
     expect(parsed).toEqual({ event: "delta", text: "Hello" });
   });
 
+  it("ignores SSE comment-only frames (keepalive)", () => {
+    expect(parseSseFrame(": keepalive")).toBeNull();
+  });
+
   it("streams chat events across chunk boundaries", async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode('event: status\ndata: {"event":"status","phase":"searching"}\n'));
         controller.enqueue(encoder.encode("\n"));
+        controller.enqueue(encoder.encode(": keepalive\n\n"));
         controller.enqueue(encoder.encode('event: delta\ndata: {"event":"delta","text":"Hello"}\n\n'));
         controller.close();
       },

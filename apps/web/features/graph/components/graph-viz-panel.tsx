@@ -81,11 +81,13 @@ export function GraphVizPanel({
 
   const [gardenerLoading, setGardenerLoading] = useState(false);
   const [gardenerMessage, setGardenerMessage] = useState<string | null>(null);
+  const [gardenerResultType, setGardenerResultType] = useState<"success" | "error" | "neutral" | null>(null);
 
   const handleRunGardener = useCallback(async () => {
     if (!wsId) return;
     setGardenerLoading(true);
     setGardenerMessage(null);
+    setGardenerResultType(null);
     try {
       const result = await apiClient.runGardener(wsId, { fullScan: true });
       const merged = result.merges_applied;
@@ -93,18 +95,21 @@ export function GraphVizPanel({
       const pruned = result.pruned_concepts;
       if (merged === 0 && linked === 0 && pruned === 0) {
         setGardenerMessage("No changes needed — graph is clean");
+        setGardenerResultType("neutral");
       } else {
         const parts: string[] = [];
         if (merged > 0) parts.push(`Merged ${merged} concept${merged !== 1 ? "s" : ""}`);
         if (linked > 0) parts.push(`linked ${linked} concept${linked !== 1 ? "s" : ""}`);
         if (pruned > 0) parts.push(`pruned ${pruned} orphan${pruned !== 1 ? "s" : ""}`);
         setGardenerMessage(parts.join(", "));
+        setGardenerResultType("success");
       }
       onGardenerSuccess?.();
-      setTimeout(() => setGardenerMessage(null), 4000);
+      setTimeout(() => { setGardenerMessage(null); setGardenerResultType(null); }, 4000);
     } catch {
       setGardenerMessage("Gardener failed");
-      setTimeout(() => setGardenerMessage(null), 3000);
+      setGardenerResultType("error");
+      setTimeout(() => { setGardenerMessage(null); setGardenerResultType(null); }, 3000);
     } finally {
       setGardenerLoading(false);
     }
@@ -209,16 +214,20 @@ export function GraphVizPanel({
           )}
           <button
             type="button"
-            className="secondary"
+            className={`secondary${gardenerLoading ? " gardener-loading" : ""}`}
             style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}
             onClick={handleRunGardener}
             disabled={gardenerLoading}
             title="Merge duplicate concepts in the graph"
           >
-            {gardenerLoading ? "Running…" : "🌱 Run Gardener"}
+            {gardenerLoading ? (
+              <span className="gardener-shimmer-text">Gardening…</span>
+            ) : (
+              "🌱 Run Gardener"
+            )}
           </button>
-          {gardenerMessage && (
-            <span style={{ fontSize: "0.75rem", color: "var(--text)", alignSelf: "center" }}>
+          {gardenerMessage && !gardenerLoading && (
+            <span className={`gardener-result ${gardenerResultType ?? ""}`}>
               {gardenerMessage}
             </span>
           )}

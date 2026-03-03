@@ -37,6 +37,8 @@ export function buildGraphologyGraph(
     const src = String(edge.src_concept_id);
     const tgt = String(edge.tgt_concept_id);
     if (!graph.hasNode(src) || !graph.hasNode(tgt)) continue;
+    // Skip duplicate edges between the same node pair (non-multi graph)
+    if (graph.hasEdge(src, tgt)) continue;
 
     const w = edge.weight ?? 1;
     const size =
