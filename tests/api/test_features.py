@@ -7,7 +7,11 @@ from core.settings import Settings
 from fastapi.testclient import TestClient
 
 
-def test_feature_flags_defaults():
+def test_feature_flags_defaults(monkeypatch):
+    monkeypatch.delenv("APP_SOCRATIC_MODE_DEFAULT", raising=False)
+    monkeypatch.delenv("SOCRATIC_MODE_DEFAULT", raising=False)
+    monkeypatch.delenv("APP_INCLUDE_DEV_STATS", raising=False)
+    monkeypatch.delenv("INCLUDE_DEV_STATS", raising=False)
     settings = Settings(_env_file=None)
     app = create_app(settings=settings)
     client = TestClient(app)

@@ -60,6 +60,8 @@ def test_settings_reads_litellm_embedding_config_from_legacy_env_aliases(monkeyp
 
 def test_settings_reads_gardener_budget_aliases(monkeypatch) -> None:
     """Gardener env aliases should hydrate budget defaults from APP_ and legacy keys."""
+    monkeypatch.delenv("APP_GARDENER_MAX_CLUSTERS_PER_RUN", raising=False)
+    monkeypatch.delenv("APP_GARDENER_RECENT_WINDOW_DAYS", raising=False)
     monkeypatch.setenv("APP_GARDENER_MAX_LLM_CALLS_PER_RUN", "12")
     monkeypatch.setenv("GARDENER_MAX_CLUSTERS_PER_RUN", "9")
     monkeypatch.setenv("APP_GARDENER_MAX_DIRTY_NODES_PER_RUN", "77")
@@ -102,3 +104,24 @@ def test_settings_reads_observability_aliases(monkeypatch) -> None:
     assert settings.observability_enabled is True
     assert settings.observability_otlp_endpoint == "http://127.0.0.1:4318/v1/traces"
     assert settings.observability_service_name == "colearni-test"
+
+
+def test_settings_reads_deepseek_api_key(monkeypatch) -> None:
+    """APP_DEEPSEEK_API_KEY should hydrate deepseek_api_key setting."""
+    monkeypatch.delenv("APP_DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("APP_DEEPSEEK_API_KEY", "sk-ds-test")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.deepseek_api_key == "sk-ds-test"
+
+
+def test_settings_litellm_base_url_defaults_to_none(monkeypatch) -> None:
+    """litellm_base_url should default to None (direct mode, no proxy)."""
+    monkeypatch.delenv("APP_LITELLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LITELLM_BASE_URL", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.litellm_base_url is None
