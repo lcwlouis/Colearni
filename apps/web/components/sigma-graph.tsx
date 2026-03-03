@@ -171,7 +171,7 @@ function SigmaGraphInner({
     >
       <SigmaContainer
         graph={graph}
-        style={{ width: "100%", height: "100%" }}
+        style={{ width: "100%", height: "100%", background: "var(--bg)" }}
         settings={sigmaSettings}
       >
         <GraphLayout layout={layout} isRunning={isLayoutRunning} onAutoStop={() => setIsLayoutRunning(false)} />
