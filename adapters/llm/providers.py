@@ -282,11 +282,16 @@ class _BaseGraphLLMClient(ABC):
         """Send a single batch of items to the LLM for disambiguation."""
         batch_payload = []
         for item in items:
-            batch_payload.append({
+            entry: dict[str, Any] = {
                 "raw_name": item["raw_name"],
                 "context_snippet": item.get("context_snippet") or "",
                 "candidates": list(item.get("candidates", [])),
-            })
+            }
+            if "own_id" in item:
+                entry["own_id"] = item["own_id"]
+            if "own_tier" in item:
+                entry["own_tier"] = item["own_tier"]
+            batch_payload.append(entry)
         batch_json = json.dumps(batch_payload, ensure_ascii=True)
 
         prompt_meta = None
@@ -318,12 +323,47 @@ class _BaseGraphLLMClient(ABC):
             system_prompt=system_prompt,
         )
         decisions = raw.get("decisions", [])
-        if not isinstance(decisions, list) or len(decisions) != len(items):
-            raise ValueError(
-                f"Batch disambiguation returned {len(decisions)} decisions "
-                f"for {len(items)} items"
+        if not isinstance(decisions, list):
+            log.warning("Batch disambiguation returned non-list decisions; treating all as CREATE_NEW")
+            decisions = []
+
+        # Build lookup by concept_ref for robust matching
+        decision_by_ref: dict[str, Any] = {}
+        for dec in decisions:
+            if isinstance(dec, dict) and dec.get("concept_ref"):
+                decision_by_ref[dec["concept_ref"]] = dec
+
+        # Ensure we have exactly one decision per item (fill CREATE_NEW for missing)
+        result: list[Any] = []
+        missing_count = 0
+        for item in items:
+            raw_name = str(item["raw_name"])
+            if raw_name in decision_by_ref:
+                result.append(decision_by_ref[raw_name])
+            else:
+                missing_count += 1
+                result.append({
+                    "concept_ref": raw_name,
+                    "operations": [{
+                        "decision": "CREATE_NEW",
+                        "confidence": 0.0,
+                        "merge_into_id": None,
+                        "merge_into_name": None,
+                        "alias_to_add": None,
+                        "proposed_description": None,
+                        "link_to_id": None,
+                        "link_to_name": None,
+                        "link_relation_type": None,
+                        "proposed_tier": None,
+                    }],
+                })
+
+        if missing_count > 0:
+            log.warning(
+                "Batch disambiguation returned %d/%d decisions; filled %d with CREATE_NEW",
+                len(decisions), len(items), missing_count,
             )
-        return decisions
+        return result
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> str:
         text, _ = self.generate_tutor_text_traced(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)
