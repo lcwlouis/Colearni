@@ -3,20 +3,13 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSigma } from "@react-sigma/core";
 import { useLayoutForceAtlas2 } from "@react-sigma/layout-forceatlas2";
-import { useWorkerLayoutForceAtlas2 } from "@react-sigma/layout-forceatlas2";
 import { useLayoutCircular } from "@react-sigma/layout-circular";
 import { useLayoutNoverlap } from "@react-sigma/layout-noverlap";
 import { useLayoutForce } from "@react-sigma/layout-force";
+import { useLayoutRandom } from "@react-sigma/layout-random";
+import { useLayoutCirclepack } from "@react-sigma/layout-circlepack";
 
 export type LayoutType = "forceatlas2" | "circular" | "force" | "circlepack" | "random";
-
-/** Tier ordering for circlepack: inner rings first. */
-const TIER_RING_ORDER: Record<string, number> = {
-  umbrella: 0,
-  topic: 1,
-  subtopic: 2,
-  granular: 3,
-};
 
 type Props = {
   layout: LayoutType;
@@ -26,89 +19,47 @@ type Props = {
 
 /**
  * Runs layout algorithms inside <SigmaContainer>.
- * UXG.4: ForceAtlas2 as default, circular as alternative, noverlap post-processing.
- * UXG.9: Extended layout suite with force, circlepack, random, animated transitions.
+ * Follows the porting guide pattern for layout switching and play/pause.
  */
 export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
   const sigma = useSigma();
   const hasRun = useRef(false);
   const animFrameRef = useRef<number>(0);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const autoStopTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  // --- Layout hooks ---
   const { assign: assignFA2 } = useLayoutForceAtlas2({
-    iterations: 100,
-    settings: {
-      gravity: 0.5,
-      scalingRatio: 4,
-      strongGravityMode: true,
-      barnesHutOptimize: true,
-    },
-  });
-
-  const { start: startFA2, stop: stopFA2 } = useWorkerLayoutForceAtlas2({
-    settings: {
-      gravity: 0.5,
-      scalingRatio: 4,
-      strongGravityMode: true,
-      barnesHutOptimize: true,
-    },
+    iterations: 15,
   });
 
   const { assign: assignCircular } = useLayoutCircular();
 
   const { assign: assignNoverlap } = useLayoutNoverlap({
     maxIterations: 50,
-    settings: { margin: 5, ratio: 1.1, speed: 3 },
+    settings: {
+      margin: 5,
+      expansion: 1.1,
+      gridSize: 1,
+      ratio: 1,
+      speed: 3,
+    },
   });
 
   const { assign: assignForce } = useLayoutForce({
-    maxIterations: 100,
-    settings: { attraction: 0.0003, repulsion: 0.02, gravity: 0.02, inertia: 0.4 },
+    maxIterations: 15,
+    settings: {
+      attraction: 0.0003,
+      repulsion: 0.02,
+      gravity: 0.02,
+      inertia: 0.4,
+      maxMove: 100,
+    },
   });
 
-  /** Simple deterministic hash for seeded randomness. */
-  const seededRandom = useCallback((seed: string) => {
-    let h = 0;
-    for (let i = 0; i < seed.length; i++) {
-      h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
-    }
-    // Map to 0..1
-    return ((h & 0x7fffffff) % 10000) / 10000;
-  }, []);
+  const { assign: assignRandom } = useLayoutRandom();
 
-  /** Assign random positions seeded by node key. */
-  const assignRandom = useCallback(() => {
-    const graph = sigma.getGraph();
-    graph.forEachNode((node) => {
-      graph.setNodeAttribute(node, "x", (seededRandom(node + "x") - 0.5) * 200);
-      graph.setNodeAttribute(node, "y", (seededRandom(node + "y") - 0.5) * 200);
-    });
-  }, [sigma, seededRandom]);
-
-  /** Arrange nodes in concentric rings grouped by tier. */
-  const assignCirclepack = useCallback(() => {
-    const graph = sigma.getGraph();
-    const groups: Record<number, string[]> = {};
-    graph.forEachNode((node) => {
-      const tier = graph.getNodeAttribute(node, "tier") as string | null;
-      const ring = TIER_RING_ORDER[tier ?? ""] ?? 3;
-      (groups[ring] ??= []).push(node);
-    });
-
-    const sortedRings = Object.keys(groups).map(Number).sort((a, b) => a - b);
-    let radius = 0;
-    for (const ring of sortedRings) {
-      const nodes = groups[ring];
-      const count = nodes.length;
-      radius += count <= 1 ? 0 : Math.max(30, count * 8);
-      for (let i = 0; i < count; i++) {
-        const angle = (2 * Math.PI * i) / count;
-        graph.setNodeAttribute(nodes[i], "x", Math.cos(angle) * radius);
-        graph.setNodeAttribute(nodes[i], "y", Math.sin(angle) * radius);
-      }
-      radius += Math.max(30, count * 8);
-    }
-  }, [sigma]);
+  const { assign: assignCirclepack } = useLayoutCirclepack();
 
   /** Capture current node positions. */
   const capturePositions = useCallback(() => {
@@ -127,7 +78,6 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
   const animateTransition = useCallback(
     (from: Record<string, { x: number; y: number }>, duration: number) => {
       const graph = sigma.getGraph();
-      // Capture target positions
       const to: Record<string, { x: number; y: number }> = {};
       graph.forEachNode((node) => {
         to[node] = {
@@ -158,7 +108,7 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
     [sigma],
   );
 
-  // Main layout effect
+  // Main layout effect — runs when layout type changes
   useEffect(() => {
     const graph = sigma.getGraph();
     if (graph.order === 0) return;
@@ -195,26 +145,59 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
     hasRun.current = true;
   }, [layout, sigma, assignFA2, assignCircular, assignNoverlap, assignForce, assignCirclepack, assignRandom, capturePositions, animateTransition]);
 
-  // Play/Pause continuous ForceAtlas2
+  // Play/Pause continuous layout animation
+  // Uses assign() to compute new positions synchronously, then animates.
+  // Repeats every 200ms. Auto-stops after 3s.
+  // This avoids the "giggling" caused by direct worker start/stop.
   useEffect(() => {
-    if (layout !== "forceatlas2") {
-      stopFA2();
+    if (!isRunning) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = undefined;
+      }
+      clearTimeout(autoStopTimer.current);
       return;
     }
-    if (isRunning) {
-      startFA2();
-      autoStopTimer.current = setTimeout(() => {
-        stopFA2();
-        onAutoStop?.();
-      }, 3000);
-    } else {
-      stopFA2();
-    }
-    return () => {
-      clearTimeout(autoStopTimer.current);
-      stopFA2();
+
+    // Only ForceAtlas2 supports continuous mode
+    if (layout !== "forceatlas2") return;
+
+    const graph = sigma.getGraph();
+    if (!graph || graph.order === 0) return;
+
+    const updatePositions = () => {
+      try {
+        const from = capturePositions();
+        assignFA2();
+        animateTransition(from, 300);
+      } catch {
+        // Layout computation can fail if graph changes mid-computation
+      }
     };
-  }, [isRunning, layout, startFA2, stopFA2, onAutoStop]);
+
+    // Immediate first frame
+    updatePositions();
+
+    // Continuous updates every 200ms
+    intervalRef.current = setInterval(updatePositions, 200);
+
+    // Auto-stop after 3 seconds
+    autoStopTimer.current = setTimeout(() => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = undefined;
+      }
+      onAutoStop?.();
+    }, 3000);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = undefined;
+      }
+      clearTimeout(autoStopTimer.current);
+    };
+  }, [isRunning, layout, sigma, assignFA2, capturePositions, animateTransition, onAutoStop]);
 
   return null;
 }

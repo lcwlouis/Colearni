@@ -24,7 +24,7 @@ export function GraphLegend() {
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? "Expand legend" : "Collapse legend"}
         >
-          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          {collapsed ? <ChevronRight size={14} style={{ display: 'block' }} /> : <ChevronDown size={14} style={{ display: 'block' }} />}
         </button>
       </div>
       {!collapsed && (

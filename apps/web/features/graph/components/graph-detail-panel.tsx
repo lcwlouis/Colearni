@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { AsyncState } from "@/components/async-state";
 import { FlashcardStack } from "./flashcard-stack";
 import { QuizHistory } from "./quiz-history";
@@ -53,6 +53,7 @@ interface GraphDetailPanelProps {
   onRetryQuiz?: (quizId: number) => void;
   onOpenFlashcardRun?: (runId: string) => void;
   allNodes?: Array<{ concept_id: number; canonical_name: string; tier?: string | null; description?: string }>;
+  filteredTiers?: ReadonlySet<string>;
 }
 
 export function GraphDetailPanel({
@@ -81,7 +82,13 @@ export function GraphDetailPanel({
   onRetryQuiz,
   onOpenFlashcardRun,
   allNodes,
+  filteredTiers,
 }: GraphDetailPanelProps) {
+  const filteredNodes = useMemo(() => {
+    if (!allNodes) return [];
+    if (!filteredTiers || filteredTiers.size >= 4) return allNodes;
+    return allNodes.filter(n => filteredTiers.has(n.tier ?? ''));
+  }, [allNodes, filteredTiers]);
   const [activeTab, setActiveTab] = useState<"flashcards" | "quizzes" | "chat">("flashcards");
   const { phase, selectedDetail, luckyPick, error } = state;
   const pick = luckyPick?.pick as
@@ -105,13 +112,13 @@ export function GraphDetailPanel({
       {!selectedDetail && phase !== "loading_detail" && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1, minHeight: 0 }}>
           <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted)', padding: '0 0 0.5rem' }}>
-            {allNodes && allNodes.length > 0
-              ? `${allNodes.length} concepts — select one to explore`
+            {filteredNodes.length > 0
+              ? `${filteredNodes.length} concepts — select one to explore`
               : "Select a concept to explore."}
           </p>
-          {allNodes && allNodes.length > 0 && (
+          {filteredNodes.length > 0 && (
             <div style={{ overflowY: 'auto', flex: 1 }}>
-              {allNodes.map((node) => (
+              {filteredNodes.map((node) => (
                 <button
                   key={node.concept_id}
                   type="button"

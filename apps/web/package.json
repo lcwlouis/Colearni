@@ -12,10 +12,12 @@
   },
   "dependencies": {
     "@react-sigma/core": "^5.0.6",
+    "@react-sigma/layout-circlepack": "^5.0.6",
     "@react-sigma/layout-circular": "^5.0.6",
     "@react-sigma/layout-force": "^5.0.6",
     "@react-sigma/layout-forceatlas2": "^5.0.6",
     "@react-sigma/layout-noverlap": "^5.0.6",
+    "@react-sigma/layout-random": "^5.0.6",
     "@sigma/edge-curve": "^3.1.0",
     "@sigma/node-border": "^3.0.0",
     "@types/d3-selection": "^3.0.11",

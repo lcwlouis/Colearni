@@ -78,6 +78,7 @@ export default function GraphPage() {
           setStatefulCards={g.setStatefulCards}
           conceptActivity={g.conceptActivity}
           allNodes={g.fullGraph?.nodes}
+          filteredTiers={g.filteredTiers}
         />
       </div>
     </div>

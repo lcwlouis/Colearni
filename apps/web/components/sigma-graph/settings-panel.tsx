@@ -30,7 +30,7 @@ export function SettingsPanel({ onLayoutChange }: Props) {
         aria-label="Graph settings"
         title="Graph settings"
       >
-        <SettingsIcon size={16} />
+        <SettingsIcon size={16} style={{ display: 'block' }} />
       </button>
 
       {open && (

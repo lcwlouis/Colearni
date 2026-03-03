@@ -66,14 +66,15 @@ export function useGraphPage() {
       const next = new Set(prev);
       if (next.has(tier)) {
         next.delete(tier);
-        if (next.size === 0) return prev;
       } else {
         next.add(tier);
       }
       return next;
     });
   }, []);
-  const clearTierFilter = useCallback(() => setFilteredTiers(new Set(ALL_TIERS)), []);
+  const clearTierFilter = useCallback(() => {
+    setFilteredTiers(prev => prev.size >= 4 ? new Set<string>() : new Set(ALL_TIERS));
+  }, []);
 
   const handleResetViewReady = useCallback((fn: () => void) => {
     setResetView(() => fn);

@@ -48,7 +48,7 @@ export function LayoutControls({
         aria-label={isRunning ? "Pause layout" : "Play layout"}
         title={canAnimate ? (isRunning ? "Pause" : "Play (auto-stops after 3s)") : "Only ForceAtlas2 supports continuous mode"}
       >
-        {isRunning ? <Pause size={14} /> : <Play size={14} />}
+        {isRunning ? <Pause size={14} style={{ display: 'block' }} /> : <Play size={14} style={{ display: 'block' }} />}
       </button>
     </div>
   );

@@ -1,3 +1,11 @@
+/* Ensure lucide-react SVG icons remain visible inside sigma graph controls */
+.graph-explorer .lucide,
+.react-sigma .lucide {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 /* ===== Concept Graph ===== */
 .concept-graph-svg {
   border: 1px solid var(--line);
