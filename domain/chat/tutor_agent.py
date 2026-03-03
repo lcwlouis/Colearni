@@ -77,7 +77,7 @@ def _build_tutor_prompt_parts(
 ) -> tuple[str, str]:
     """Build tutor prompt separated into (system, user) parts."""
     lines = [
-        f"- e{index}: {_truncate(' '.join(item.content.split()), limit=240)}"
+        f"- e{index}: {' '.join(item.content.split())}"
         for index, item in enumerate(evidence[:3], start=1)
     ]
     evidence_block = "\n".join(lines) if lines else "- (none)"
@@ -140,16 +140,12 @@ def _fallback_text(*, query: str, evidence: Sequence[EvidenceItem], style: Tutor
     if style == "direct":
         if not evidence:
             return f"I need source-linked material before I can directly explain: {query}"
-        lead = _truncate(" ".join(evidence[0].content.split()), limit=280)
+        lead = " ".join(evidence[0].content.split())
         return f'From your notes, here is a direct explanation: "{lead}"'
     if not evidence:
         return "What key idea do you already know? Share one step and I will guide next."
-    lead = _truncate(" ".join(evidence[0].content.split()), limit=220)
+    lead = " ".join(evidence[0].content.split())
     return f'What do you think this passage implies? Hint: start from "{lead}".'
-
-
-def _truncate(value: str, *, limit: int) -> str:
-    return value if len(value) <= limit else value[: limit - 3] + "..."
 
 
 __all__ = ["build_tutor_prompt", "build_tutor_response_text", "resolve_tutor_style"]
