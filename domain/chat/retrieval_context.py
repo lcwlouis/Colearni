@@ -119,7 +119,7 @@ def apply_concept_bias(
             span.set_attribute("retrieval.graph.boosted_count", boosted_count)
             span.set_attribute(
                 "retrieval.graph.linked_chunk_ids",
-                json.dumps(sorted(linked_chunk_ids)[:20]),
+                json.dumps(sorted(linked_chunk_ids)),
             )
         return [
             RankedChunk(
