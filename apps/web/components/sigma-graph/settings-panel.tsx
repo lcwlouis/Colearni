@@ -9,7 +9,8 @@ import styles from "./settings-panel.module.css";
 const LAYOUT_OPTIONS: { value: LayoutType; label: string }[] = [
   { value: "forceatlas2", label: "ForceAtlas2" },
   { value: "circular", label: "Circular" },
-  { value: "force", label: "Force" },
+  { value: "force", label: "Force Directed" },
+  { value: "noverlap", label: "No-overlap" },
   { value: "circlepack", label: "Circle Pack" },
   { value: "random", label: "Random" },
 ];

@@ -7,6 +7,7 @@ import styles from "./layout-controls.module.css";
 const LAYOUT_OPTIONS: { value: LayoutType; label: string }[] = [
   { value: "forceatlas2", label: "ForceAtlas2" },
   { value: "force", label: "Force Directed" },
+  { value: "noverlap", label: "No-overlap" },
   { value: "circular", label: "Circular" },
   { value: "circlepack", label: "Circle Pack" },
   { value: "random", label: "Random" },
@@ -25,7 +26,7 @@ export function LayoutControls({
   isRunning,
   onIsRunningChange,
 }: Props) {
-  const canAnimate = layout === "forceatlas2";
+  const canAnimate = layout === "forceatlas2" || layout === "force" || layout === "noverlap";
 
   return (
     <div className={styles.controls}>
@@ -46,7 +47,7 @@ export function LayoutControls({
         disabled={!canAnimate}
         onClick={() => onIsRunningChange(!isRunning)}
         aria-label={isRunning ? "Pause layout" : "Play layout"}
-        title={canAnimate ? (isRunning ? "Pause" : "Play (auto-stops after 3s)") : "Only ForceAtlas2 supports continuous mode"}
+        title={canAnimate ? (isRunning ? "Pause" : "Play (auto-stops after 3s)") : "Only iterative layouts support continuous mode"}
       >
         {isRunning ? <Pause size={14} style={{ display: 'block' }} /> : <Play size={14} style={{ display: 'block' }} />}
       </button>

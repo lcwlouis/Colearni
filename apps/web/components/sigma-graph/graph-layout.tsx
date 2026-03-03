@@ -1,6 +1,5 @@
 "use client";
-
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { useSigma } from "@react-sigma/core";
 import { useLayoutForceAtlas2 } from "@react-sigma/layout-forceatlas2";
 import { useLayoutCircular } from "@react-sigma/layout-circular";
@@ -9,7 +8,9 @@ import { useLayoutForce } from "@react-sigma/layout-force";
 import { useLayoutRandom } from "@react-sigma/layout-random";
 import { useLayoutCirclepack } from "@react-sigma/layout-circlepack";
 
-export type LayoutType = "forceatlas2" | "circular" | "force" | "circlepack" | "random";
+export type LayoutType = "forceatlas2" | "circular" | "force" | "circlepack" | "random" | "noverlap";
+
+const ITERATIVE_LAYOUTS: ReadonlySet<LayoutType> = new Set(["forceatlas2", "force", "noverlap"]);
 
 type Props = {
   layout: LayoutType;
@@ -17,10 +18,6 @@ type Props = {
   onAutoStop?: () => void;
 };
 
-/**
- * Runs layout algorithms inside <SigmaContainer>.
- * Follows the porting guide pattern for layout switching and play/pause.
- */
 export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
   const sigma = useSigma();
   const hasRun = useRef(false);
@@ -29,58 +26,37 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
   const autoStopTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // --- Layout hooks ---
-  const { assign: assignFA2 } = useLayoutForceAtlas2({
-    iterations: 15,
-  });
-
-  const { assign: assignCircular } = useLayoutCircular();
-
-  const { assign: assignNoverlap } = useLayoutNoverlap({
+  const fa2 = useLayoutForceAtlas2({ iterations: 15 });
+  const circular = useLayoutCircular();
+  const noverlap = useLayoutNoverlap({
     maxIterations: 50,
-    settings: {
-      margin: 5,
-      expansion: 1.1,
-      gridSize: 1,
-      ratio: 1,
-      speed: 3,
-    },
+    settings: { margin: 5, expansion: 1.1, gridSize: 1, ratio: 1, speed: 3 },
   });
-
-  const { assign: assignForce } = useLayoutForce({
+  const force = useLayoutForce({
     maxIterations: 15,
-    settings: {
-      attraction: 0.0003,
-      repulsion: 0.02,
-      gravity: 0.02,
-      inertia: 0.4,
-      maxMove: 100,
-    },
+    settings: { attraction: 0.0003, repulsion: 0.02, gravity: 0.02, inertia: 0.4, maxMove: 100 },
   });
+  const random = useLayoutRandom();
+  const circlepack = useLayoutCirclepack();
 
-  const { assign: assignRandom } = useLayoutRandom();
+  // Registry for easy lookup
+  const layoutMap = useMemo(() => ({
+    forceatlas2: fa2,
+    circular,
+    noverlap,
+    force,
+    circlepack,
+    random,
+  }), [fa2, circular, noverlap, force, circlepack, random]);
 
-  const { assign: assignCirclepack } = useLayoutCirclepack();
-
-  /** Capture current node positions. */
-  const capturePositions = useCallback(() => {
-    const graph = sigma.getGraph();
-    const positions: Record<string, { x: number; y: number }> = {};
-    graph.forEachNode((node) => {
-      positions[node] = {
-        x: graph.getNodeAttribute(node, "x") ?? 0,
-        y: graph.getNodeAttribute(node, "y") ?? 0,
-      };
-    });
-    return positions;
-  }, [sigma]);
-
-  /** Animate from `from` positions to current positions over `duration` ms. */
-  const animateTransition = useCallback(
-    (from: Record<string, { x: number; y: number }>, duration: number) => {
+  /** Animate nodes from current graph positions to target positions over duration ms. */
+  const animateToPositions = useCallback(
+    (target: Record<string, { [dim: string]: number }>, duration: number) => {
       const graph = sigma.getGraph();
-      const to: Record<string, { x: number; y: number }> = {};
+      // Capture current positions as "from"
+      const from: Record<string, { x: number; y: number }> = {};
       graph.forEachNode((node) => {
-        to[node] = {
+        from[node] = {
           x: graph.getNodeAttribute(node, "x") ?? 0,
           y: graph.getNodeAttribute(node, "y") ?? 0,
         };
@@ -92,10 +68,10 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
         const ease = t * (2 - t); // ease-out quad
         graph.forEachNode((node) => {
           const f = from[node];
-          const dest = to[node];
+          const dest = target[node];
           if (f && dest) {
-            graph.setNodeAttribute(node, "x", f.x + (dest.x - f.x) * ease);
-            graph.setNodeAttribute(node, "y", f.y + (dest.y - f.y) * ease);
+            graph.setNodeAttribute(node, "x", f.x + ((dest.x ?? f.x) - f.x) * ease);
+            graph.setNodeAttribute(node, "y", f.y + ((dest.y ?? f.y) - f.y) * ease);
           }
         });
         if (t < 1) {
@@ -113,42 +89,22 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
     const graph = sigma.getGraph();
     if (graph.order === 0) return;
 
-    const prevPositions = hasRun.current ? capturePositions() : null;
+    const hook = layoutMap[layout];
+    if (!hook) return;
 
-    switch (layout) {
-      case "circular":
-        assignCircular();
-        break;
-      case "force":
-        assignForce();
-        break;
-      case "circlepack":
-        assignCirclepack();
-        break;
-      case "random":
-        assignRandom();
-        break;
-      case "forceatlas2":
-      default:
-        assignFA2();
-        break;
-    }
-
-    // Post-process to prevent node overlap
-    assignNoverlap();
-
-    // Animate transition if we had previous positions
-    if (prevPositions) {
-      animateTransition(prevPositions, 400);
+    if (hasRun.current) {
+      // Animated transition: get target positions without applying, then animate
+      const target = hook.positions();
+      animateToPositions(target, 400);
+    } else {
+      // First layout: apply immediately (no animation source)
+      hook.assign();
     }
 
     hasRun.current = true;
-  }, [layout, sigma, assignFA2, assignCircular, assignNoverlap, assignForce, assignCirclepack, assignRandom, capturePositions, animateTransition]);
+  }, [layout, sigma, layoutMap, animateToPositions]);
 
-  // Play/Pause continuous layout animation
-  // Uses assign() to compute new positions synchronously, then animates.
-  // Repeats every 200ms. Auto-stops after 3s.
-  // This avoids the "giggling" caused by direct worker start/stop.
+  // Play/Pause continuous layout animation for iterative layouts
   useEffect(() => {
     if (!isRunning) {
       if (intervalRef.current) {
@@ -159,17 +115,18 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
       return;
     }
 
-    // Only ForceAtlas2 supports continuous mode
-    if (layout !== "forceatlas2") return;
+    if (!ITERATIVE_LAYOUTS.has(layout)) return;
 
     const graph = sigma.getGraph();
     if (!graph || graph.order === 0) return;
 
+    const hook = layoutMap[layout];
+    if (!hook) return;
+
     const updatePositions = () => {
       try {
-        const from = capturePositions();
-        assignFA2();
-        animateTransition(from, 300);
+        const target = hook.positions();
+        animateToPositions(target, 300);
       } catch {
         // Layout computation can fail if graph changes mid-computation
       }
@@ -197,7 +154,7 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
       }
       clearTimeout(autoStopTimer.current);
     };
-  }, [isRunning, layout, sigma, assignFA2, capturePositions, animateTransition, onAutoStop]);
+  }, [isRunning, layout, sigma, layoutMap, animateToPositions, onAutoStop]);
 
   return null;
 }
