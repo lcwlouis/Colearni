@@ -343,6 +343,15 @@ class Settings(BaseSettings):
         ),
         ge=1000,
     )
+    disambiguate_max_items_per_batch: int = Field(
+        default=8,
+        description="Max concepts per sub-batch in disambiguate_batch LLM calls",
+        validation_alias=AliasChoices(
+            "APP_DISAMBIGUATE_MAX_ITEMS_PER_BATCH",
+            "DISAMBIGUATE_MAX_ITEMS_PER_BATCH",
+        ),
+        ge=1,
+    )
     gardener_max_llm_calls_per_run: int = Field(
         default=30,
         validation_alias=AliasChoices(

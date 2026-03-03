@@ -233,18 +233,23 @@ class _BaseGraphLLMClient(ABC):
 
         from core.settings import get_settings  # noqa: PLC0415
 
-        max_tokens = get_settings().disambiguate_max_tokens_per_batch
+        settings = get_settings()
+        max_tokens = settings.disambiguate_max_tokens_per_batch
+        max_items = settings.disambiguate_max_items_per_batch
         overhead = 500  # estimated system-prompt tokens
 
         # Estimate tokens per item (rough chars-to-tokens ratio)
         item_tokens = [len(json.dumps(item, ensure_ascii=True)) // 4 for item in items]
 
-        # Build sub-batches respecting the token limit
+        # Build sub-batches respecting token and item-count limits
         sub_batches: list[list[int]] = []
         current_batch: list[int] = []
         current_tokens = overhead
         for i, tokens in enumerate(item_tokens):
-            if current_batch and current_tokens + tokens > max_tokens:
+            if current_batch and (
+                current_tokens + tokens > max_tokens
+                or len(current_batch) >= max_items
+            ):
                 sub_batches.append(current_batch)
                 current_batch = [i]
                 current_tokens = overhead + tokens
