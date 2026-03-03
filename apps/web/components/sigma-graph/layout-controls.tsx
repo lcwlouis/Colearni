@@ -5,7 +5,7 @@ import type { LayoutType } from "./graph-layout";
 import styles from "./layout-controls.module.css";
 
 const LAYOUT_OPTIONS: { value: LayoutType; label: string }[] = [
-  { value: "forceatlas2", label: "ForceAtlas2" },
+  { value: "forceatlas2", label: "Force Atlas" },
   { value: "force", label: "Force Directed" },
   { value: "noverlap", label: "No-overlap" },
   { value: "circular", label: "Circular" },

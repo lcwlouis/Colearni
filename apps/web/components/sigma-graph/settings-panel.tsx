@@ -7,7 +7,7 @@ import type { LayoutType } from "./graph-layout";
 import styles from "./settings-panel.module.css";
 
 const LAYOUT_OPTIONS: { value: LayoutType; label: string }[] = [
-  { value: "forceatlas2", label: "ForceAtlas2" },
+  { value: "forceatlas2", label: "Force Atlas" },
   { value: "circular", label: "Circular" },
   { value: "force", label: "Force Directed" },
   { value: "noverlap", label: "No-overlap" },
