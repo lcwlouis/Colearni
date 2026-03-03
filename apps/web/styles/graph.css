@@ -1,3 +1,12 @@
+/* Override react-sigma CSS variables for dark mode */
+[data-theme="dark"] {
+  --sigma-background-color: #0f1419;
+  --sigma-controls-background-color: #1a1f2e;
+  --sigma-controls-background-color-hover: rgba(255, 255, 255, 0.1);
+  --sigma-controls-border-color: #2a3540;
+  --sigma-controls-color: #e8ede8;
+}
+
 /* Ensure lucide-react SVG icons remain visible inside sigma graph controls */
 .graph-explorer .lucide,
 .react-sigma .lucide {
