@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from domain.retrieval.types import RankedChunk
+from core.observability import content_preview
 
 log = logging.getLogger("domain.retrieval.evidence_planner")
 
@@ -338,7 +339,7 @@ def build_evidence_plan(
     )
     log.info(
         "evidence_plan query=%r budget=%d concept_ids=%s subqueries=%s passes=%d",
-        base_query[:80],
+        content_preview(base_query),
         plan.retrieval_budget,
         candidate_concept_ids,
         subqueries,

@@ -9,6 +9,7 @@ from core.observability import (
     SPAN_KIND_RETRIEVER,
     record_content_enabled,
     start_span,
+    content_preview,
 )
 from core.settings import Settings
 from domain.retrieval.fts_retriever import PgFtsRetriever
@@ -34,7 +35,7 @@ def retrieve_ranked_chunks(
         "retrieval.hybrid",
         kind=SPAN_KIND_RETRIEVER,
         workspace_id=workspace_id,
-        **{"retrieval.query": query[:256], "retrieval.top_k": top_k},
+        **{"retrieval.query": content_preview(query), "retrieval.top_k": top_k},
     ) as span:
         provider = build_embedding_provider(settings=settings)
         vector_retriever = PgVectorRetriever(
@@ -68,13 +69,13 @@ def retrieve_ranked_chunks(
                             "document_id": r.document_id,
                             "score": round(r.score, 3),
                             "method": r.retrieval_method,
-                            **({"preview": r.text[:120]} if include_preview else {}),
+                            **({"preview": content_preview(r.text)} if include_preview else {}),
                         }
                         for i, r in enumerate(results[:5])
                     ],
                     default=str,
                 )
-                span.set_attribute("retrieval.documents", doc_summary[:1024])
+                span.set_attribute("retrieval.documents", doc_summary)
         return results
 
 
