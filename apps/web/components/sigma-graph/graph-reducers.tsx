@@ -98,23 +98,24 @@ export function GraphReducers({ selectedId, hoveredNode, searchMatchKeys, hasSea
     // SigmaContainer recreation, children effects re-run before the parent
     // effect recreates the Sigma instance, so refresh() may hit a killed
     // instance whose nodePrograms have been cleared.
-    try {
-      sigma.refresh();
-    } catch {
-      // Instance was killed; the replacement will render on its own.
-    }
-
-    return () => {
+    requestAnimationFrame(() => {
       try {
-        sigma.setSetting("nodeReducer", null);
-        sigma.setSetting("edgeReducer", null);
-        // Cancel the RAF that setSetting schedules via scheduleRefresh().
-        // Without this, a RAF fires later on the killed instance (nodePrograms={})
-        // and throws an uncaught "could not find a suitable program for bordered".
         sigma.refresh();
       } catch {
-        // Instance already killed; RAF was cancelled or never fired.
+        // Program may not be compiled yet or instance killed
       }
+    });
+
+    return () => {
+      requestAnimationFrame(() => {
+        try {
+          sigma.setSetting("nodeReducer", null);
+          sigma.setSetting("edgeReducer", null);
+          sigma.refresh();
+        } catch {
+          // Instance already killed; RAF was cancelled or never fired.
+        }
+      });
     };
   }, [sigma, selectedId, hoveredNode, searchMatchKeys, hasSearchQuery, highlightNeighbors, theme]);
 
