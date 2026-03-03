@@ -344,6 +344,18 @@ pre {
   margin: 1.5rem 0;
 }
 
+/* HTML blocks rendered via rehype-raw */
+.markdown-content div:not([class]),
+.markdown-content section,
+.markdown-content article {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  box-shadow: var(--shadow-sm);
+}
+
 .markdown-content blockquote {
   border-left: 3px solid var(--accent);
   margin: 0.5rem 0;
