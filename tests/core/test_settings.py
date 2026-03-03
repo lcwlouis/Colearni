@@ -125,3 +125,63 @@ def test_settings_litellm_base_url_defaults_to_none(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.litellm_base_url is None
+
+
+def test_settings_graph_llm_long_timeout_default(monkeypatch) -> None:
+    """graph_llm_long_timeout_seconds should default to 120."""
+    monkeypatch.delenv("APP_GRAPH_LLM_LONG_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("GRAPH_LLM_LONG_TIMEOUT_SECONDS", raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.graph_llm_long_timeout_seconds == 120.0
+
+
+def test_settings_graph_llm_long_timeout_env_alias(monkeypatch) -> None:
+    """APP_GRAPH_LLM_LONG_TIMEOUT_SECONDS env var should override default."""
+    monkeypatch.delenv("APP_GRAPH_LLM_LONG_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("GRAPH_LLM_LONG_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setenv("APP_GRAPH_LLM_LONG_TIMEOUT_SECONDS", "180")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.graph_llm_long_timeout_seconds == 180.0
+
+
+def test_settings_tutor_llm_defaults_to_none(monkeypatch) -> None:
+    """Tutor LLM settings should default to None when not set."""
+    for key in (
+        "APP_TUTOR_LLM_PROVIDER",
+        "TUTOR_LLM_PROVIDER",
+        "APP_TUTOR_LLM_MODEL",
+        "TUTOR_LLM_MODEL",
+        "APP_TUTOR_LLM_TIMEOUT_SECONDS",
+        "TUTOR_LLM_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.tutor_llm_provider is None
+    assert settings.tutor_llm_model is None
+    assert settings.tutor_llm_timeout_seconds is None
+
+
+def test_settings_tutor_llm_env_aliases(monkeypatch) -> None:
+    """APP_TUTOR_LLM_MODEL and TUTOR_LLM_MODEL aliases should hydrate settings."""
+    for key in (
+        "APP_TUTOR_LLM_PROVIDER",
+        "TUTOR_LLM_PROVIDER",
+        "APP_TUTOR_LLM_MODEL",
+        "TUTOR_LLM_MODEL",
+        "APP_TUTOR_LLM_TIMEOUT_SECONDS",
+        "TUTOR_LLM_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("APP_TUTOR_LLM_MODEL", "openai/gpt-4o")
+    monkeypatch.setenv("TUTOR_LLM_TIMEOUT_SECONDS", "45")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.tutor_llm_model == "openai/gpt-4o"
+    assert settings.tutor_llm_timeout_seconds == 45.0

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from adapters.db.mastery import get_mastery_status
-from adapters.llm.factory import build_graph_llm_client
+from adapters.llm.factory import build_tutor_llm_client as _build_tutor_client
 from core.contracts import GraphLLMClient
 from core.schemas import ChatRespondRequest, EvidenceItem, GroundingMode
 from core.schemas.assistant import GenerationTrace
@@ -121,7 +121,7 @@ def resolve_mastery_status(
 def build_tutor_llm_client(*, settings: Settings) -> GraphLLMClient | None:
     """Build the tutor LLM client, returning None if unavailable."""
     try:
-        return build_graph_llm_client(settings=settings)
+        return _build_tutor_client(settings=settings)
     except ValueError:
         return None
 

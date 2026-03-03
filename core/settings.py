@@ -166,6 +166,14 @@ class Settings(BaseSettings):
         ),
         gt=0,
     )
+    graph_llm_long_timeout_seconds: float = Field(
+        default=120.0,
+        validation_alias=AliasChoices(
+            "APP_GRAPH_LLM_LONG_TIMEOUT_SECONDS",
+            "GRAPH_LLM_LONG_TIMEOUT_SECONDS",
+        ),
+        gt=0,
+    )
     graph_llm_json_temperature: float = Field(
         default=0.0,
         validation_alias=AliasChoices(
@@ -183,6 +191,31 @@ class Settings(BaseSettings):
         ),
         ge=0.0,
         le=2.0,
+    )
+    tutor_llm_provider: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_TUTOR_LLM_PROVIDER",
+            "TUTOR_LLM_PROVIDER",
+        ),
+        description="LLM provider for tutor/chat. Falls back to graph_llm_provider if not set.",
+    )
+    tutor_llm_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_TUTOR_LLM_MODEL",
+            "TUTOR_LLM_MODEL",
+        ),
+        description="LLM model for tutor/chat. Falls back to graph_llm_model if not set.",
+    )
+    tutor_llm_timeout_seconds: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_TUTOR_LLM_TIMEOUT_SECONDS",
+            "TUTOR_LLM_TIMEOUT_SECONDS",
+        ),
+        gt=0,
+        description="LLM timeout for tutor/chat. Falls back to graph_llm_timeout_seconds if not set.",
     )
     observability_enabled: bool = Field(
         default=False,
@@ -211,14 +244,16 @@ class Settings(BaseSettings):
             "OBSERVABILITY_RECORD_CONTENT",
         ),
     )
-    litellm_base_url: str = Field(
-        default="http://localhost:4000/v1",
+    litellm_base_url: str | None = Field(
+        default=None,
         validation_alias=AliasChoices("APP_LITELLM_BASE_URL", "LITELLM_BASE_URL"),
     )
     litellm_model: str | None = Field(
         default=None,
         validation_alias=AliasChoices("APP_LITELLM_MODEL", "LITELLM_MODEL"),
     )
+    
+    # This portion is for adding API keys for various LLM providers, which can be set via environment variables.
     litellm_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("APP_LITELLM_API_KEY", "LITELLM_API_KEY"),
@@ -227,6 +262,19 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("APP_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
+    deepseek_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("APP_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"),
+    )
+    gemini_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("APP_GEMINI_API_KEY", "GEMINI_API_KEY"),
+    )
+    openrouter_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("APP_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
+    )
+    
     resolver_lexical_top_k: int = Field(
         default=5,
         validation_alias=AliasChoices("APP_RESOLVER_LEXICAL_TOP_K", "RESOLVER_LEXICAL_TOP_K"),

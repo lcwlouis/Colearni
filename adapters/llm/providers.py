@@ -145,6 +145,18 @@ class _BaseGraphLLMClient(ABC):
         self._reasoning_enabled = reasoning_enabled
         self._reasoning_effort = reasoning_effort
 
+    # ── Providers that support OpenAI-style json_schema response_format ──
+    _JSON_SCHEMA_PROVIDERS = frozenset({"openai"})
+
+    def _model_supports_json_schema(self) -> bool:
+        """Return True if the model supports ``{"type": "json_schema"}``."""
+        if self._provider in self._JSON_SCHEMA_PROVIDERS:
+            return True
+        model_lower = self._model.lower()
+        if model_lower.startswith("openai/") or "gpt-" in model_lower:
+            return True
+        return False
+
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         prompt_meta = None
         system_prompt = None
@@ -598,6 +610,27 @@ class _BaseGraphLLMClient(ABC):
                 return val
         return None
 
+    @staticmethod
+    def _is_format_error(exc: Exception) -> bool:
+        """Return True if *exc* indicates an unsupported response_format."""
+        cause = getattr(exc, "__cause__", None)
+        # BadRequestError from litellm/openai SDK (avoid importing the package)
+        if cause is not None and type(cause).__name__ == "BadRequestError":
+            return True
+        for e in (exc, cause):
+            if e is None:
+                continue
+            msg = str(e).lower()
+            if "response_format" in msg:
+                return True
+            if "format type" in msg and "unavailable" in msg:
+                return True
+            if "json_schema" in msg and (
+                "not supported" in msg or "unavailable" in msg
+            ):
+                return True
+        return False
+
     def _chat_json(
         self,
         *,
@@ -607,27 +640,82 @@ class _BaseGraphLLMClient(ABC):
         prompt_meta: Any | None = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
-        system_content = system_prompt or "Return only JSON that satisfies the provided schema."
-        messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": prompt},
-        ]
-        response_format = {
-            "type": "json_schema",
-            "json_schema": {"name": schema_name, "strict": True, "schema": schema},
-        }
-        result = self._call_with_observability(
-            messages=messages,
-            temperature=self._json_temperature,
-            response_format=response_format,
-            prompt_meta=prompt_meta,
-            rendered_length=len(prompt) if prompt_meta else None,
+        base_system = system_prompt or "Return only JSON that satisfies the provided schema."
+        schema_hint = json.dumps(schema, indent=2)
+        schema_suffix = (
+            f"\n\nYou MUST respond with a JSON object conforming to this schema:\n"
+            f"```json\n{schema_hint}\n```"
         )
-        content = self._extract_content(result)
-        response_payload = json.loads(content)
-        if not isinstance(response_payload, dict):
-            raise ValueError("Graph LLM response payload must decode to an object")
-        return response_payload
+
+        if self._model_supports_json_schema():
+            attempts: list[tuple[dict[str, object] | None, str, str]] = [
+                (
+                    {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": schema_name,
+                            "strict": True,
+                            "schema": schema,
+                        },
+                    },
+                    base_system,
+                    "json_schema",
+                ),
+                ({"type": "json_object"}, base_system + schema_suffix, "json_object+hint"),
+                (None, base_system + schema_suffix, "prompt-only"),
+            ]
+        else:
+            attempts = [
+                ({"type": "json_object"}, base_system + schema_suffix, "json_object+hint"),
+                (None, base_system + schema_suffix, "prompt-only"),
+            ]
+
+        for i, (response_format, system_content, level) in enumerate(attempts):
+            messages = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt},
+            ]
+            try:
+                result = self._call_with_observability(
+                    messages=messages,
+                    temperature=self._json_temperature,
+                    response_format=response_format,
+                    prompt_meta=prompt_meta,
+                    rendered_length=len(prompt) if prompt_meta else None,
+                )
+            except Exception as exc:
+                if i < len(attempts) - 1 and self._is_format_error(exc):
+                    log.warning(
+                        "JSON format level '%s' failed for model %s; "
+                        "falling back. Error: %s",
+                        level,
+                        self._model,
+                        exc,
+                    )
+                    continue
+                raise
+            # Parse the response — fall back to next level on malformed JSON.
+            try:
+                content = self._extract_content(result)
+                response_payload = json.loads(content)
+                if not isinstance(response_payload, dict):
+                    raise ValueError("Graph LLM response payload must decode to an object")
+                return response_payload
+            except (json.JSONDecodeError, ValueError) as parse_exc:
+                if i < len(attempts) - 1:
+                    log.warning(
+                        "JSON parse failed at level '%s' for model %s; "
+                        "falling back. Error: %s",
+                        level,
+                        self._model,
+                        parse_exc,
+                    )
+                    continue
+                raise
+
+        raise RuntimeError(
+            f"All JSON format attempts exhausted for model {self._model}"
+        )
 
     def _chat_text(self, *, prompt: str, system_instruction: str) -> str:
         text, _ = self._chat_text_traced(prompt=prompt, system_instruction=system_instruction)
@@ -921,13 +1009,11 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         timeout_seconds: float,
         json_temperature: float = 0.0,
         tutor_temperature: float = 0.0,
-        base_url: str,
+        base_url: str | None = None,
         api_key: str | None = None,
         reasoning_enabled: bool = False,
         reasoning_effort: str | None = None,
     ) -> None:
-        if not base_url.strip():
-            raise ValueError("graph_llm base_url cannot be empty")
         super().__init__(
             model=model,
             timeout_seconds=timeout_seconds,
@@ -937,7 +1023,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             reasoning_enabled=reasoning_enabled,
             reasoning_effort=reasoning_effort,
         )
-        self._base_url = base_url.rstrip("/")
+        self._base_url = base_url.rstrip("/") if base_url and base_url.strip() else None
         self._api_key = api_key.strip() if api_key and api_key.strip() else None
 
     def _sdk_call(
@@ -953,9 +1039,10 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             "model": self._model,
             "temperature": temperature,
             "messages": messages,
-            "api_base": self._base_url,
             "timeout": self._timeout_seconds,
         }
+        if self._base_url is not None:
+            kwargs["api_base"] = self._base_url
         if self._api_key is not None:
             kwargs["api_key"] = self._api_key
         if response_format is not None:
@@ -976,11 +1063,12 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             "model": self._model,
             "temperature": temperature,
             "messages": messages,
-            "api_base": self._base_url,
             "timeout": self._timeout_seconds,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if self._base_url is not None:
+            kwargs["api_base"] = self._base_url
         if self._api_key is not None:
             kwargs["api_key"] = self._api_key
         kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))

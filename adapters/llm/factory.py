@@ -6,9 +6,56 @@ from core.settings import Settings, get_settings
 from adapters.llm.providers import LiteLLMGraphLLMClient, OpenAIGraphLLMClient
 
 
-def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
+def _non_empty_or_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized if normalized else None
+
+
+def _resolve_litellm_api_key(
+    model: str,
+    settings: Settings,
+    api_base: str | None,
+) -> str | None:
+    """Resolve the API key for a LiteLLM model.
+
+    In proxy mode (api_base set), use the shared proxy key.
+    In direct mode, detect the provider from the model prefix and use
+    the matching per-provider key, falling back to litellm_api_key.
+    """
+    if api_base:
+        return _non_empty_or_none(settings.litellm_api_key)
+
+    if "/" in model:
+        prefix = model.split("/")[0].lower()
+        if prefix == "openai":
+            key = _non_empty_or_none(settings.openai_api_key)
+            if key:
+                return key
+        elif prefix == "deepseek":
+            key = _non_empty_or_none(settings.deepseek_api_key)
+            if key:
+                return key
+        elif prefix == "gemini":
+            key = _non_empty_or_none(settings.gemini_api_key)
+            if key:
+                return key
+        elif prefix == "openrouter":
+            key = _non_empty_or_none(settings.openrouter_api_key)
+            if key:
+                return key
+
+    return _non_empty_or_none(settings.litellm_api_key)
+
+
+def build_graph_llm_client(
+    settings: Settings | None = None,
+    timeout_override: float | None = None,
+) -> GraphLLMClient:
     """Build the configured graph LLM client implementation."""
     active_settings = settings or get_settings()
+    timeout = timeout_override or active_settings.graph_llm_timeout_seconds
 
     if active_settings.graph_llm_provider == "openai":
         api_key = active_settings.openai_api_key
@@ -20,7 +67,7 @@ def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
         return OpenAIGraphLLMClient(
             api_key=api_key,
             model=active_settings.graph_llm_model,
-            timeout_seconds=active_settings.graph_llm_timeout_seconds,
+            timeout_seconds=timeout,
             json_temperature=active_settings.graph_llm_json_temperature,
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
@@ -28,11 +75,15 @@ def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
         )
 
     if active_settings.graph_llm_provider == "litellm":
+        api_base = _non_empty_or_none(active_settings.litellm_base_url)
+        api_key = _resolve_litellm_api_key(
+            active_settings.graph_llm_model, active_settings, api_base,
+        )
         return LiteLLMGraphLLMClient(
             model=active_settings.graph_llm_model,
-            timeout_seconds=active_settings.graph_llm_timeout_seconds,
-            base_url=active_settings.litellm_base_url,
-            api_key=active_settings.litellm_api_key,
+            timeout_seconds=timeout,
+            base_url=api_base,
+            api_key=api_key,
             json_temperature=active_settings.graph_llm_json_temperature,
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
@@ -40,4 +91,54 @@ def build_graph_llm_client(settings: Settings | None = None) -> GraphLLMClient:
         )
 
     raise ValueError(f"Unsupported graph_llm_provider: {active_settings.graph_llm_provider}")
+
+
+def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
+    """Build the LLM client for tutor/chat operations.
+
+    Uses tutor-specific model/provider settings if configured,
+    otherwise falls back to the graph LLM settings.
+    """
+    active_settings = settings or get_settings()
+
+    # If no tutor-specific model is set, fall back to graph client
+    if active_settings.tutor_llm_model is None and active_settings.tutor_llm_provider is None:
+        return build_graph_llm_client(settings=active_settings)
+
+    # Resolve effective values with fallbacks
+    provider = active_settings.tutor_llm_provider or active_settings.graph_llm_provider
+    model = active_settings.tutor_llm_model or active_settings.graph_llm_model
+    timeout = active_settings.tutor_llm_timeout_seconds or active_settings.graph_llm_timeout_seconds
+
+    if provider == "openai":
+        api_key = active_settings.openai_api_key
+        if api_key is None or not api_key.strip():
+            raise ValueError(
+                "APP_OPENAI_API_KEY must be set when tutor provider is openai"
+            )
+        return OpenAIGraphLLMClient(
+            api_key=api_key,
+            model=model,
+            timeout_seconds=timeout,
+            json_temperature=active_settings.graph_llm_json_temperature,
+            tutor_temperature=active_settings.graph_llm_tutor_temperature,
+            reasoning_enabled=active_settings.llm_reasoning_chat,
+            reasoning_effort=active_settings.llm_reasoning_effort_chat,
+        )
+
+    if provider == "litellm":
+        api_base = _non_empty_or_none(active_settings.litellm_base_url)
+        api_key = _resolve_litellm_api_key(model, active_settings, api_base)
+        return LiteLLMGraphLLMClient(
+            model=model,
+            timeout_seconds=timeout,
+            base_url=api_base,
+            api_key=api_key,
+            json_temperature=active_settings.graph_llm_json_temperature,
+            tutor_temperature=active_settings.graph_llm_tutor_temperature,
+            reasoning_enabled=active_settings.llm_reasoning_chat,
+            reasoning_effort=active_settings.llm_reasoning_effort_chat,
+        )
+
+    raise ValueError(f"Unsupported tutor_llm_provider: {provider}")
 

@@ -14,8 +14,12 @@ def _clear_embedding_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in [
         "APP_EMBEDDING_PROVIDER",
         "EMBEDDING_PROVIDER",
+        "APP_EMBEDDING_MODEL",
+        "EMBEDDING_MODEL",
         "APP_OPENAI_API_KEY",
         "OPENAI_API_KEY",
+        "APP_DEEPSEEK_API_KEY",
+        "DEEPSEEK_API_KEY",
         "APP_LITELLM_MODEL",
         "LITELLM_MODEL",
         "APP_LITELLM_BASE_URL",
@@ -85,9 +89,9 @@ def test_factory_returns_litellm_provider_with_expected_kwargs(
     settings = get_settings().model_copy(
         update={
             "embedding_provider": "litellm",
+            "embedding_model": "openai/text-embedding-3-small",
             "embedding_dim": 4,
             "embedding_timeout_seconds": 9.5,
-            "litellm_model": "text-embedding-proxy",
             "litellm_base_url": "http://localhost:4000",
             "litellm_api_key": "proxy-key",
         }
@@ -95,7 +99,7 @@ def test_factory_returns_litellm_provider_with_expected_kwargs(
     provider = build_embedding_provider(settings=settings)
     assert isinstance(provider, _FakeLiteLLMProvider)
     assert captured == {
-        "model": "text-embedding-proxy",
+        "model": "openai/text-embedding-3-small",
         "embedding_dim": 4,
         "timeout_seconds": 9.5,
         "api_base": "http://localhost:4000",
@@ -103,11 +107,59 @@ def test_factory_returns_litellm_provider_with_expected_kwargs(
     }
 
 
-def test_factory_raises_when_litellm_model_is_missing() -> None:
+def test_factory_litellm_direct_mode_resolves_openai_api_key() -> None:
+    """In direct mode (no proxy), openai/ model uses openai_api_key."""
     settings = get_settings().model_copy(
-        update={"embedding_provider": "litellm", "litellm_model": "  "}
+        update={
+            "embedding_provider": "litellm",
+            "embedding_model": "openai/text-embedding-3-small",
+            "litellm_base_url": None,
+            "openai_api_key": "sk-openai",
+            "litellm_api_key": "sk-fallback",
+        }
     )
-    with pytest.raises(ValueError, match="APP_LITELLM_MODEL"):
+    provider = build_embedding_provider(settings=settings)
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider._api_key == "sk-openai"
+    assert provider._api_base is None
+
+
+def test_factory_litellm_direct_mode_resolves_deepseek_api_key() -> None:
+    """In direct mode, deepseek/ model uses deepseek_api_key."""
+    settings = get_settings().model_copy(
+        update={
+            "embedding_provider": "litellm",
+            "embedding_model": "deepseek/deepseek-chat",
+            "litellm_base_url": None,
+            "deepseek_api_key": "sk-deepseek",
+            "litellm_api_key": "sk-fallback",
+        }
+    )
+    provider = build_embedding_provider(settings=settings)
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider._api_key == "sk-deepseek"
+
+
+def test_factory_litellm_direct_mode_falls_back_to_litellm_key() -> None:
+    """In direct mode, unknown provider falls back to litellm_api_key."""
+    settings = get_settings().model_copy(
+        update={
+            "embedding_provider": "litellm",
+            "embedding_model": "custom-model",
+            "litellm_base_url": None,
+            "litellm_api_key": "sk-fallback",
+        }
+    )
+    provider = build_embedding_provider(settings=settings)
+    assert isinstance(provider, LiteLLMEmbeddingProvider)
+    assert provider._api_key == "sk-fallback"
+
+
+def test_factory_raises_when_litellm_embedding_model_is_missing() -> None:
+    settings = get_settings().model_copy(
+        update={"embedding_provider": "litellm", "embedding_model": "  "}
+    )
+    with pytest.raises(ValueError, match="APP_EMBEDDING_MODEL"):
         build_embedding_provider(settings=settings)
 
 
@@ -116,7 +168,7 @@ def test_factory_raises_when_litellm_model_is_missing() -> None:
     [
         ("mock", {}, MockEmbeddingProvider),
         ("openai", {"APP_OPENAI_API_KEY": "sk-test"}, OpenAIEmbeddingProvider),
-        ("litellm", {"APP_LITELLM_MODEL": "text-embedding-proxy"}, LiteLLMEmbeddingProvider),
+        ("litellm", {"APP_EMBEDDING_MODEL": "openai/text-embedding-3-small"}, LiteLLMEmbeddingProvider),
     ],
 )
 def test_factory_builds_provider_from_env_settings(
@@ -135,12 +187,12 @@ def test_factory_builds_provider_from_env_settings(
     assert isinstance(build_embedding_provider(settings=settings), expected_type)
 
 
-def test_factory_env_litellm_provider_requires_model(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_factory_env_litellm_provider_requires_embedding_model(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_embedding_env(monkeypatch)
     monkeypatch.setenv("APP_EMBEDDING_PROVIDER", "litellm")
-    monkeypatch.setenv("APP_LITELLM_MODEL", "   ")
+    monkeypatch.setenv("APP_EMBEDDING_MODEL", "   ")
 
     settings = Settings(_env_file=None)
 
-    with pytest.raises(ValueError, match="APP_LITELLM_MODEL"):
+    with pytest.raises(ValueError, match="APP_EMBEDDING_MODEL"):
         build_embedding_provider(settings=settings)
