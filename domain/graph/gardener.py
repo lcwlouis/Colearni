@@ -420,6 +420,8 @@ def run_graph_gardener(
 
                     elif decision.decision == "MERGE_INTO" and decision.merge_into_id is not None:
                         target_id = decision.merge_into_id
+                        if target_id == concept_id:
+                            continue
                         if target_id not in cluster or target_id in already_merged:
                             continue
                         if concept_id not in seed_ids:
@@ -666,6 +668,7 @@ def _batch_cluster_llm_decisions(
     # Build batch items: each cluster member becomes a separate item
     batch_items: list[dict[str, object]] = []
     item_map: list[tuple[int, int]] = []  # (cluster_index, concept_id)
+    item_valid_ids: list[set[int]] = []  # valid candidate IDs for each batch item
 
     for cluster_idx, cluster in enumerate(clusters):
         ordered_ids = sorted(cluster)
@@ -675,6 +678,7 @@ def _batch_cluster_llm_decisions(
             if not others:
                 continue
             batch_items.append({
+                "own_id": concept_id,
                 "raw_name": concept.canonical_name,
                 "context_snippet": concept.description,
                 "candidates": [
@@ -692,6 +696,7 @@ def _batch_cluster_llm_decisions(
                 ],
             })
             item_map.append((cluster_idx, concept_id))
+            item_valid_ids.append(set(others))
 
     if not batch_items:
         return [[] for _ in clusters]
@@ -702,15 +707,24 @@ def _batch_cluster_llm_decisions(
 
         # Group results back by cluster — each concept may have multiple operations
         results: list[list[tuple[int, _GardenerDecisionPayload | None]]] = [[] for _ in clusters]
-        for (cluster_idx, concept_id), raw_dec in zip(item_map, raw_decisions):
+        for (cluster_idx, concept_id), raw_dec, valid_ids in zip(item_map, raw_decisions, item_valid_ids):
             ops = raw_dec.get("operations", [raw_dec]) if isinstance(raw_dec, dict) else [raw_dec]
             parsed_any = False
             for op in ops:
                 try:
                     payload = _GardenerDecisionPayload.model_validate(op)
-                    if payload.decision != "CREATE_NEW":
-                        results[cluster_idx].append((concept_id, payload))
-                        parsed_any = True
+                    if payload.decision == "CREATE_NEW":
+                        continue
+                    # Reject self-merge
+                    if payload.decision == "MERGE_INTO" and payload.merge_into_id == concept_id:
+                        continue
+                    # Reject merge/link to IDs not in the candidate list
+                    if payload.decision == "MERGE_INTO" and payload.merge_into_id not in valid_ids:
+                        continue
+                    if payload.decision == "LINK_ONLY" and payload.link_to_id not in valid_ids:
+                        continue
+                    results[cluster_idx].append((concept_id, payload))
+                    parsed_any = True
                 except (ValidationError, ValueError):
                     pass
             if not parsed_any:

@@ -18,9 +18,16 @@ canonical concepts, decide one of three actions:
 3. **CREATE_NEW** – The raw concept has no meaningful match among candidates.
    Create it as a new standalone concept.
 
+---Critical constraints---
+- If the input concept includes an `own_id` field, this is the concept's existing ID in the graph.
+- NEVER use `own_id` as a `merge_into_id` or `link_to_id` — that would be a self-reference.
+- Only use IDs that appear in the `candidates` list.
+- If no candidate is a good match, use CREATE_NEW.
+
 ---Decision guidelines---
-- Use MERGE_INTO only when the raw concept and candidate refer to the
-  **exact same thing** (same entity, different surface form).
+- MERGE_INTO means the concept and candidate are the EXACT SAME real-world entity, just written differently (e.g. 'ML' and 'Machine Learning', 'DB' and 'Database').
+- Do NOT merge concepts that are merely related, similar, or in the same topic area.
+- Do NOT merge a parent concept with a child concept (e.g. 'Database Systems' and 'Disk-based Database Systems' are different).
 - Use LINK_ONLY when they are **different concepts that should be connected**
   in a knowledge graph (e.g. parent-child, prerequisite, closely related
   topic, part-whole). Specify the relationship type.
