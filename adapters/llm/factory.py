@@ -142,3 +142,66 @@ def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
 
     raise ValueError(f"Unsupported tutor_llm_provider: {provider}")
 
+
+def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLLMClient:
+    """Build the LLM client for query analysis.
+
+    Uses query-analyzer-specific settings if configured,
+    otherwise falls back to tutor, then graph LLM settings.
+    """
+    active_settings = settings or get_settings()
+
+    if (
+        active_settings.query_analyzer_llm_model is None
+        and active_settings.query_analyzer_llm_provider is None
+    ):
+        return build_tutor_llm_client(settings=active_settings)
+
+    provider = (
+        active_settings.query_analyzer_llm_provider
+        or active_settings.tutor_llm_provider
+        or active_settings.graph_llm_provider
+    )
+    model = (
+        active_settings.query_analyzer_llm_model
+        or active_settings.tutor_llm_model
+        or active_settings.graph_llm_model
+    )
+    timeout = (
+        active_settings.query_analyzer_llm_timeout_seconds
+        or active_settings.tutor_llm_timeout_seconds
+        or active_settings.graph_llm_timeout_seconds
+    )
+
+    if provider == "openai":
+        api_key = active_settings.openai_api_key
+        if api_key is None or not api_key.strip():
+            raise ValueError(
+                "APP_OPENAI_API_KEY must be set when query analyzer provider is openai"
+            )
+        return OpenAIGraphLLMClient(
+            api_key=api_key,
+            model=model,
+            timeout_seconds=timeout,
+            json_temperature=active_settings.graph_llm_json_temperature,
+            tutor_temperature=active_settings.graph_llm_tutor_temperature,
+            reasoning_enabled=False,
+            reasoning_effort=None,
+        )
+
+    if provider == "litellm":
+        api_base = _non_empty_or_none(active_settings.litellm_base_url)
+        api_key = _resolve_litellm_api_key(model, active_settings, api_base)
+        return LiteLLMGraphLLMClient(
+            model=model,
+            timeout_seconds=timeout,
+            base_url=api_base,
+            api_key=api_key,
+            json_temperature=active_settings.graph_llm_json_temperature,
+            tutor_temperature=active_settings.graph_llm_tutor_temperature,
+            reasoning_enabled=False,
+            reasoning_effort=None,
+        )
+
+    raise ValueError(f"Unsupported query_analyzer_llm_provider: {provider}")
+

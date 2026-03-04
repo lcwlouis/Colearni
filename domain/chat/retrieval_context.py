@@ -71,7 +71,7 @@ def retrieve_ranked_chunks(
                             "method": r.retrieval_method,
                             **({"preview": content_preview(r.text)} if include_preview else {}),
                         }
-                        for i, r in enumerate(results[:5])
+                        for i, r in enumerate(results[:10])
                     ],
                     default=str,
                 )

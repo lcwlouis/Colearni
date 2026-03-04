@@ -36,6 +36,7 @@ from domain.chat.evidence_builder import (
 from domain.chat.progress import ProgressSink, noop_sink
 from domain.chat.query_analyzer import run_query_analysis
 from domain.chat.response_service import (
+    build_query_analyzer_client,
     build_quiz_context,
     build_tutor_llm_client,
     generate_tutor_text,
@@ -125,10 +126,11 @@ def generate_chat_response(
         history_text = load_history_text(session, session_id=request.session_id)
 
         # ── Query analysis (AR1.1) ────────────────────────────────────
+        qa_llm = build_query_analyzer_client(settings=active_settings) or social_llm
         query_analysis = run_query_analysis(
             query=request.query,
             history_summary=history_text,
-            llm_client=social_llm,
+            llm_client=qa_llm,
         )
         log.info(
             "query_analysis intent=%s mode=%s retrieval=%s",

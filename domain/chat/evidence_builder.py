@@ -13,7 +13,6 @@ from core.schemas import (
     EvidenceSourceType,
 )
 from domain.retrieval.types import RankedChunk
-from core.observability import content_preview
 from sqlalchemy.orm import Session
 
 
@@ -63,7 +62,7 @@ def build_workspace_citations(evidence: list[EvidenceItem]) -> list[Citation]:
                 citation_id=f"c{index}",
                 evidence_id=item.evidence_id,
                 label=CITATION_LABEL_FROM_NOTES,
-                quote=content_preview(_single_line(item.content)),
+                quote=_single_line(item.content),
             )
         )
     return citations

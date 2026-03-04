@@ -217,6 +217,31 @@ class Settings(BaseSettings):
         gt=0,
         description="LLM timeout for tutor/chat. Falls back to graph_llm_timeout_seconds if not set.",
     )
+    query_analyzer_llm_provider: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_QUERY_ANALYZER_LLM_PROVIDER",
+            "QUERY_ANALYZER_LLM_PROVIDER",
+        ),
+        description="LLM provider for query analyzer. Falls back to tutor/graph provider if not set.",
+    )
+    query_analyzer_llm_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_QUERY_ANALYZER_LLM_MODEL",
+            "QUERY_ANALYZER_LLM_MODEL",
+        ),
+        description="LLM model for query analyzer. Falls back to tutor/graph model if not set.",
+    )
+    query_analyzer_llm_timeout_seconds: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_QUERY_ANALYZER_LLM_TIMEOUT_SECONDS",
+            "QUERY_ANALYZER_LLM_TIMEOUT_SECONDS",
+        ),
+        gt=0,
+        description="Timeout for query analyzer LLM. Falls back to tutor/graph timeout if not set.",
+    )
     observability_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("APP_OBSERVABILITY_ENABLED", "OBSERVABILITY_ENABLED"),

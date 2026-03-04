@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from adapters.db.mastery import get_mastery_status
+from adapters.llm.factory import build_query_analyzer_llm_client as _build_qa_client
 from adapters.llm.factory import build_tutor_llm_client as _build_tutor_client
 from core.contracts import GraphLLMClient
 from core.schemas import ChatRespondRequest, EvidenceItem, GroundingMode
@@ -122,6 +123,14 @@ def build_tutor_llm_client(*, settings: Settings) -> GraphLLMClient | None:
     """Build the tutor LLM client, returning None if unavailable."""
     try:
         return _build_tutor_client(settings=settings)
+    except ValueError:
+        return None
+
+
+def build_query_analyzer_client(*, settings: Settings) -> GraphLLMClient | None:
+    """Build the query analyzer LLM client, returning None if unavailable."""
+    try:
+        return _build_qa_client(settings=settings)
     except ValueError:
         return None
 

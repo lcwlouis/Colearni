@@ -295,11 +295,11 @@ def test_content_preview_truncates_long_text() -> None:
     short = "hello"
     assert content_preview(short) == "hello"
 
-    long_text = "x" * 1000
+    long_text = "x" * 5000
     preview = content_preview(long_text)
     assert preview is not None
-    assert len(preview) < 1000
-    assert "len=1000" in preview
+    assert len(preview) < 5000
+    assert "len=5000" in preview
 
     assert content_preview(None) is None
 
