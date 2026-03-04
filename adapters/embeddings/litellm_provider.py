@@ -7,6 +7,7 @@ from typing import Any
 
 import litellm
 from core.contracts import EmbeddingProvider
+from core.rate_limiter import get_embedding_limiter
 
 
 class LiteLLMEmbeddingProvider(EmbeddingProvider):
@@ -49,7 +50,7 @@ class LiteLLMEmbeddingProvider(EmbeddingProvider):
             request_kwargs["api_key"] = self._api_key
 
         try:
-            response = litellm.embedding(**request_kwargs)
+            response = get_embedding_limiter().execute(litellm.embedding, **request_kwargs)
         except Exception as exc:
             raise RuntimeError(f"LiteLLM embeddings request failed: {exc}") from exc
 

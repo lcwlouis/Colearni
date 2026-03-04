@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from core.contracts import EmbeddingProvider
+from core.rate_limiter import get_embedding_limiter
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
@@ -53,9 +54,12 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             method="POST",
         )
 
+        def _do_request() -> str:
+            with urlopen(request, timeout=self._timeout_seconds) as resp:  # noqa: S310
+                return resp.read().decode("utf-8")
+
         try:
-            with urlopen(request, timeout=self._timeout_seconds) as response:  # noqa: S310
-                response_body = response.read().decode("utf-8")
+            response_body = get_embedding_limiter().execute(_do_request)
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace") if exc.fp is not None else ""
             raise RuntimeError(

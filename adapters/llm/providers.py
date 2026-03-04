@@ -22,6 +22,7 @@ from core.observability import (
     start_span,
 )
 from core.prompting import PromptRegistry
+from core.rate_limiter import get_llm_limiter
 
 log = logging.getLogger("adapters.llm.providers")
 
@@ -976,7 +977,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         }
         if response_format is not None:
             kwargs["response_format"] = response_format
-        response = self._client.chat.completions.create(**kwargs)
+        response = get_llm_limiter().execute(self._client.chat.completions.create, **kwargs)
         return response.model_dump()
 
     def _sdk_stream_call(
@@ -994,7 +995,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
             "stream_options": {"include_usage": True},
         }
         kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
-        response = self._client.chat.completions.create(**kwargs)
+        response = get_llm_limiter().execute(self._client.chat.completions.create, **kwargs)
         for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
 
@@ -1047,7 +1048,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             kwargs["api_key"] = self._api_key
         if response_format is not None:
             kwargs["response_format"] = response_format
-        response = litellm.completion(**kwargs)
+        response = get_llm_limiter().execute(litellm.completion, **kwargs)
         return response.model_dump()
 
     def _sdk_stream_call(
@@ -1072,6 +1073,6 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         if self._api_key is not None:
             kwargs["api_key"] = self._api_key
         kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
-        response = litellm.completion(**kwargs)
+        response = get_llm_limiter().execute(litellm.completion, **kwargs)
         for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)

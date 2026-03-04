@@ -490,6 +490,48 @@ class Settings(BaseSettings):
         ge=2,
     )
 
+    # ── Rate limiting / concurrency ──────────────────────────────────
+    llm_max_concurrent_calls: int = Field(
+        default=3,
+        validation_alias=AliasChoices(
+            "APP_LLM_MAX_CONCURRENT_CALLS",
+            "LLM_MAX_CONCURRENT_CALLS",
+        ),
+        ge=1,
+        le=50,
+        description="Max simultaneous LLM API calls (prevents rate-limit errors).",
+    )
+    embedding_max_concurrent_calls: int = Field(
+        default=5,
+        validation_alias=AliasChoices(
+            "APP_EMBEDDING_MAX_CONCURRENT_CALLS",
+            "EMBEDDING_MAX_CONCURRENT_CALLS",
+        ),
+        ge=1,
+        le=50,
+        description="Max simultaneous embedding API calls.",
+    )
+    api_retry_max_attempts: int = Field(
+        default=3,
+        validation_alias=AliasChoices(
+            "APP_API_RETRY_MAX_ATTEMPTS",
+            "API_RETRY_MAX_ATTEMPTS",
+        ),
+        ge=0,
+        le=10,
+        description="Max retry attempts on rate-limit (HTTP 429) errors.",
+    )
+    api_retry_base_delay: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices(
+            "APP_API_RETRY_BASE_DELAY",
+            "API_RETRY_BASE_DELAY",
+        ),
+        gt=0,
+        le=60.0,
+        description="Base delay in seconds for exponential backoff on retries.",
+    )
+
     # ── Auth settings ──────────────────────────────────────────────────
     auth_magic_link_ttl_minutes: int = Field(
         default=30,
