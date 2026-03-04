@@ -1,0 +1,252 @@
+/* ===== Knowledge Base ===== */
+.kb-page {
+  height: 100%;
+  padding: 1rem 1.25rem 1.25rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.kb-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.kb-title {
+  margin: 0;
+}
+
+.kb-subtitle {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.kb-upload-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.kb-upload-queue {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.kb-upload-queue h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.kb-upload-queue ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.kb-upload-queue li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.kb-upload-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-table-wrap {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: 0.25rem;
+}
+
+.kb-doc-summary {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.35;
+  max-width: 20rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
+.kb-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.kb-table th,
+.kb-table td {
+  padding: 0.55rem 0.75rem;
+  vertical-align: middle;
+  font-size: 0.85rem;
+}
+
+.kb-table th:nth-child(1),
+.kb-table td:nth-child(1) { width: 18%; } /* Title */
+.kb-table th:nth-child(2),
+.kb-table td:nth-child(2) { width: 20%; } /* Description */
+.kb-table th:nth-child(3),
+.kb-table td:nth-child(3) { width: 10%; } /* Ingestion */
+.kb-table th:nth-child(4),
+.kb-table td:nth-child(4) { width: 14%; } /* Graph */
+.kb-table th:nth-child(5),
+.kb-table td:nth-child(5) { width: 8%; }  /* Chunks */
+.kb-table th:nth-child(6),
+.kb-table td:nth-child(6) { width: 12%; } /* Uploaded */
+.kb-table th:nth-child(7),
+.kb-table td:nth-child(7) { width: 18%; } /* Actions */
+
+.kb-table thead tr {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.kb-table tbody tr {
+  border-top: 1px solid var(--line);
+}
+
+.kb-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+  border: 1px solid var(--line);
+}
+
+.kb-badge.ok {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.kb-badge.failed {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: var(--danger);
+}
+
+[data-theme="dark"] .kb-badge.failed {
+  background: #2a1515;
+  border-color: #5a2020;
+  color: #fecaca;
+}
+
+.kb-badge.pending,
+.kb-badge.disabled {
+  color: var(--muted);
+}
+
+.kb-badge.extracting {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #b45309;
+  animation: kb-pulse 1.5s ease-in-out infinite;
+}
+
+[data-theme="dark"] .kb-badge.extracting {
+  background: #2a2510;
+  border-color: #7c6320;
+  color: #fcd34d;
+}
+
+@keyframes kb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.kb-extracting {
+  animation: kb-pulse 1.5s ease-in-out infinite;
+  font-style: italic;
+}
+
+.kb-meta {
+  margin-left: 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.kb-inline-confirm {
+  display: grid;
+  gap: 0.45rem;
+}
+
+/* B1: Consistent action button sizing in KB table */
+.kb-table .button-row {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+.kb-table .button-row button {
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+  white-space: nowrap;
+}
+
+.kb-danger-btn {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* B3: Rich empty state for sources page */
+.kb-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 2rem;
+  border: 2px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  text-align: center;
+}
+
+.kb-empty-icon {
+  color: var(--muted);
+  opacity: 0.5;
+}
+
+.kb-empty-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.kb-empty-desc {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  max-width: 28rem;
+  line-height: 1.5;
+}
+
+.switch-modal h3 {
+  margin: 0;
+}
+

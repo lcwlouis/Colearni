@@ -1,0 +1,39 @@
+.wrapper {
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.svg {
+  width: 100%;
+  height: 100%;
+}
+
+.shape {
+  fill: var(--line, #e0e0e0);
+  stroke: none;
+}
+
+.line {
+  stroke: var(--line, #e0e0e0);
+  stroke-width: 1.5;
+}
+
+.shimmer {
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 0.3;
+  }
+}

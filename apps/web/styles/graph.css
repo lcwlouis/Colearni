@@ -1,0 +1,245 @@
+/* Override react-sigma CSS variables for dark mode */
+[data-theme="dark"] {
+  --sigma-background-color: #0f1419;
+  --sigma-controls-background-color: #1a1f2e;
+  --sigma-controls-background-color-hover: rgba(255, 255, 255, 0.1);
+  --sigma-controls-border-color: #2a3540;
+  --sigma-controls-color: #e8ede8;
+}
+
+/* Ensure lucide-react SVG icons remain visible inside sigma graph controls */
+.graph-explorer .lucide,
+.react-sigma .lucide {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* ===== Concept Graph ===== */
+.concept-graph-svg {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.graph-legend {
+  margin-top: 0.25rem;
+}
+
+/* ===== Graph Explorer (redesigned) ===== */
+.graph-explorer {
+  display: grid;
+  gap: 0.75rem;
+  height: 100%;
+}
+
+.graph-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 65fr) minmax(0, 35fr);
+  gap: 1rem;
+  flex: 1;
+  overflow: hidden;
+  padding: 0 0.5rem 0.5rem;
+}
+
+.graph-explorer-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.graph-explorer-main .concept-graph-svg {
+  flex: 1;
+  min-height: 300px;
+}
+
+.graph-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 1rem 1.25rem;
+  min-width: 0;
+}
+
+.graph-detail-panel h1 {
+  margin: 0;
+  font-size: 1.3rem;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.graph-detail-panel p {
+  margin: 0.15rem 0;
+}
+
+.graph-viz-panel {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+  min-width: 0;
+}
+
+.graph-viz-panel .concept-graph-container {
+  flex: 1;
+  min-height: 200px;
+}
+
+.graph-search-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Gardener loading state — shimmer wave over button text */
+button.gardener-loading {
+  position: relative;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.gardener-shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    var(--muted) 35%,
+    var(--accent, #4338ca) 50%,
+    var(--muted) 65%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gardenerShimmer 1.8s ease-in-out infinite;
+  font-weight: 600;
+}
+
+@keyframes gardenerShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes gardenerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.gardener-result {
+  font-size: 0.75rem;
+  color: var(--text);
+  align-self: center;
+  animation: gardenerSlideIn 0.25s ease-out;
+}
+
+.gardener-result.success {
+  color: var(--success, #16a34a);
+}
+
+.gardener-result.error {
+  color: var(--danger, #dc2626);
+}
+
+.gardener-result.neutral {
+  color: var(--muted);
+}
+
+.graph-legend-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  flex-shrink: 0;
+  padding: 0.25rem 0;
+}
+
+.graph-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-left: 0.5rem;
+}
+
+.graph-viz-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  flex-shrink: 0;
+}
+
+.graph-viz-header h2 {
+  margin: 0;
+}
+
+/* Graph controls — node/edge limit selectors */
+.graph-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.graph-control-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.graph-control-label select {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.graph-truncation-banner {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary, var(--bg-secondary));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.25rem 0.6rem;
+  margin: 0;
+}
+
+/* Graph search header — native panel bar above the graph viz + detail columns */
+.graph-search-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+}
+
+.graph-search-header .concept-search {
+  flex: 1;
+  max-width: 24rem;
+}
+

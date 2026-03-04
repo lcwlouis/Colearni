@@ -1,0 +1,15 @@
+/* ===== CoLearni Global Stylesheet (aggregator) ===== */
+/* Each section has been moved to apps/web/styles/ for maintainability. */
+
+@import "../styles/tokens.css";
+@import "../styles/base.css";
+@import "../styles/shell.css";
+@import "../styles/sidebar.css";
+@import "../styles/tutor.css";
+@import "../styles/graph.css";
+@import "../styles/kb.css";
+@import "../styles/shared-components.css";
+@import "../styles/flashcard-stack.css";
+@import "../styles/quiz-history.css";
+@import "../styles/public-entry.css";
+

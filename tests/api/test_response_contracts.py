@@ -1,0 +1,616 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from adapters.db.dependencies import get_db_session
+from apps.api.dependencies import WorkspaceContext, get_workspace_context
+from apps.api.main import app
+from fastapi.testclient import TestClient
+
+# Fake workspace context for tests (skips DB + auth)
+_FAKE_USER = type("FakeUser", (), {"id": 3, "public_id": "u-fake", "email": "t@t.com", "display_name": None})()
+_FAKE_WS_CTX = WorkspaceContext(workspace_id=2, user=_FAKE_USER)
+_TEST_WS_ID = "test-ws-uuid"
+
+
+def _override_db() -> Any:
+    yield object()
+
+
+def _override_ws_ctx() -> WorkspaceContext:
+    return _FAKE_WS_CTX
+
+def _schema_ref(spec: dict[str, Any], path: str, method: str, status: str) -> str:
+    return str(
+        spec["paths"][path][method]["responses"][status]["content"]["application/json"]["schema"][
+            "$ref"
+        ]
+    )
+
+def _patch(monkeypatch: Any, target: str, payload: dict[str, Any]) -> None:
+    monkeypatch.setattr(target, lambda *args, **kwargs: payload)
+
+def _quiz_create() -> dict[str, Any]:
+    return {
+        "quiz_id": 1,
+        "workspace_id": 2,
+        "user_id": 3,
+        "concept_id": 4,
+        "status": "ready",
+        "items": [
+            {
+                "item_id": 11,
+                "position": 1,
+                "item_type": "mcq",
+                "prompt": "q",
+                "choices": [{"id": "a", "text": "Choice A"}],
+            }
+        ],
+    }
+
+
+def _submit(with_mastery: bool) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "quiz_id": 1,
+        "attempt_id": 9,
+        "score": 1.0,
+        "passed": True,
+        "critical_misconception": False,
+        "overall_feedback": "ok",
+        "items": [
+            {
+                "item_id": 11,
+                "item_type": "mcq",
+                "result": "correct",
+                "is_correct": True,
+                "critical_misconception": False,
+                "feedback": "ok",
+                "score": 1.0,
+            }
+        ],
+        "replayed": False,
+        "retry_hint": None,
+    }
+    if with_mastery:
+        payload["mastery_status"] = "learned"
+        payload["mastery_score"] = 1.0
+    return payload
+
+
+OPENAPI_ROUTES = {
+    ("/healthz", "get"),
+    ("/workspaces/{ws_id}/chat/sessions", "get"),
+    ("/workspaces/{ws_id}/chat/sessions", "post"),
+    ("/workspaces/{ws_id}/chat/sessions/{session_id}", "delete"),
+    ("/workspaces/{ws_id}/chat/sessions/{session_id}/messages", "get"),
+    ("/workspaces/{ws_id}/chat/respond", "post"),
+    ("/documents/upload", "post"),
+    ("/workspaces/{ws_id}/graph/concepts", "get"),
+    ("/workspaces/{ws_id}/graph/concepts/{concept_id}", "get"),
+    ("/workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph", "get"),
+    ("/workspaces/{ws_id}/graph/full", "get"),
+    ("/workspaces/{ws_id}/graph/lucky", "get"),
+    ("/workspaces/{ws_id}/onboarding/status", "get"),
+    ("/workspaces/{ws_id}/quizzes/level-up", "post"),
+    ("/workspaces/{ws_id}/quizzes/level-up", "get"),
+    ("/workspaces/{ws_id}/quizzes/level-up/{quiz_id}", "get"),
+    ("/workspaces/{ws_id}/quizzes/level-up/{quiz_id}/promote", "post"),
+    ("/workspaces/{ws_id}/quizzes/{quiz_id}/submit", "post"),
+    ("/workspaces/{ws_id}/practice/flashcards", "post"),
+    ("/workspaces/{ws_id}/practice/flashcards/due", "get"),
+    ("/workspaces/{ws_id}/practice/flashcards/runs", "get"),
+    ("/workspaces/{ws_id}/practice/flashcards/runs/{run_id}", "get"),
+    ("/workspaces/{ws_id}/practice/quizzes", "post"),
+    ("/workspaces/{ws_id}/practice/quizzes", "get"),
+    ("/workspaces/{ws_id}/practice/quizzes/{quiz_id}", "get"),
+    ("/workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit", "post"),
+}
+
+
+OPENAPI_REFS = [
+    ("/workspaces/{ws_id}/chat/sessions", "post", "201", "#/components/schemas/ChatSessionSummary"),
+    ("/workspaces/{ws_id}/chat/sessions", "get", "200", "#/components/schemas/ChatSessionListResponse"),
+    (
+        "/workspaces/{ws_id}/chat/sessions/{session_id}/messages",
+        "get",
+        "200",
+        "#/components/schemas/ChatMessagesResponse",
+    ),
+    ("/workspaces/{ws_id}/chat/respond", "post", "200", "#/components/schemas/AssistantResponseEnvelope"),
+    ("/documents/upload", "post", "201", "#/components/schemas/DocumentUploadResponse"),
+    ("/workspaces/{ws_id}/quizzes/level-up", "post", "201", "#/components/schemas/QuizCreateResponse"),
+    (
+        "/workspaces/{ws_id}/quizzes/level-up",
+        "get",
+        "200",
+        "#/components/schemas/LevelUpQuizHistoryListResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/quizzes/level-up/{quiz_id}",
+        "get",
+        "200",
+        "#/components/schemas/LevelUpQuizDetailResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/quizzes/level-up/{quiz_id}/promote",
+        "post",
+        "201",
+        "#/components/schemas/LevelUpPromoteToPracticeResponse",
+    ),
+    ("/workspaces/{ws_id}/quizzes/{quiz_id}/submit", "post", "200", "#/components/schemas/LevelUpQuizSubmitResponse"),
+    ("/workspaces/{ws_id}/practice/flashcards", "post", "200", "#/components/schemas/PracticeFlashcardsResponse"),
+    (
+        "/workspaces/{ws_id}/practice/flashcards/runs",
+        "get",
+        "200",
+        "#/components/schemas/FlashcardRunListResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/practice/flashcards/runs/{run_id}",
+        "get",
+        "200",
+        "#/components/schemas/FlashcardRunDetailResponse",
+    ),
+    ("/workspaces/{ws_id}/practice/quizzes", "post", "201", "#/components/schemas/QuizCreateResponse"),
+    (
+        "/workspaces/{ws_id}/practice/quizzes",
+        "get",
+        "200",
+        "#/components/schemas/PracticeQuizHistoryListResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/practice/quizzes/{quiz_id}",
+        "get",
+        "200",
+        "#/components/schemas/PracticeQuizDetailResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit",
+        "post",
+        "200",
+        "#/components/schemas/PracticeQuizSubmitResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/graph/concepts",
+        "get",
+        "200",
+        "#/components/schemas/GraphConceptListResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/graph/concepts/{concept_id}",
+        "get",
+        "200",
+        "#/components/schemas/GraphConceptDetailResponse",
+    ),
+    (
+        "/workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph",
+        "get",
+        "200",
+        "#/components/schemas/GraphSubgraphResponse",
+    ),
+    ("/workspaces/{ws_id}/graph/lucky", "get", "200", "#/components/schemas/GraphLuckyResponse"),
+]
+SUBMIT_FIELDS = {
+    "quiz_id",
+    "attempt_id",
+    "score",
+    "passed",
+    "critical_misconception",
+    "overall_feedback",
+    "items",
+    "replayed",
+    "retry_hint",
+}
+REQUIRED_FIELDS = {
+    "ChatSessionSummary": {
+        "session_id",
+        "public_id",
+        "workspace_id",
+        "user_id",
+        "last_activity_at",
+    },
+    "ChatSessionListResponse": {"workspace_id", "user_id", "sessions"},
+    "ChatMessagesResponse": {"workspace_id", "user_id", "session_id", "messages"},
+    "QuizCreateResponse": {"quiz_id", "workspace_id", "user_id", "concept_id", "status", "items"},
+    "LevelUpQuizHistoryListResponse": {"workspace_id", "user_id", "quizzes"},
+    "LevelUpQuizDetailResponse": {
+        "quiz_id",
+        "workspace_id",
+        "user_id",
+        "status",
+        "item_count",
+        "created_at",
+        "items",
+    },
+    "LevelUpPromoteToPracticeResponse": {"source_quiz_id", "practice_quiz"},
+    "LevelUpQuizSubmitResponse": SUBMIT_FIELDS | {"mastery_status", "mastery_score"},
+    "PracticeFlashcardsResponse": {"workspace_id", "concept_id", "concept_name", "flashcards"},
+    "FlashcardRunListResponse": {"workspace_id", "user_id", "runs"},
+    "FlashcardRunDetailResponse": {
+        "run_id",
+        "workspace_id",
+        "user_id",
+        "concept_id",
+        "concept_name",
+        "item_count",
+        "has_more",
+        "created_at",
+        "flashcards",
+    },
+    "PracticeQuizHistoryListResponse": {"workspace_id", "user_id", "quizzes"},
+    "PracticeQuizDetailResponse": {
+        "quiz_id",
+        "workspace_id",
+        "user_id",
+        "status",
+        "item_count",
+        "created_at",
+        "items",
+    },
+    "PracticeQuizSubmitResponse": SUBMIT_FIELDS,
+    "GraphConceptListResponse": {"workspace_id", "concepts"},
+    "GraphConceptDetailResponse": {"workspace_id", "concept"},
+    "GraphSubgraphResponse": {"workspace_id", "nodes", "edges"},
+    "GraphLuckyResponse": {"workspace_id", "seed_concept_id", "mode", "pick"},
+}
+
+
+@pytest.mark.parametrize(("path", "method"), sorted(OPENAPI_ROUTES))
+def test_openapi_declares_expected_backend_routes(path: str, method: str) -> None:
+    assert method in app.openapi()["paths"][path]
+
+
+@pytest.mark.parametrize(("path", "method", "status", "ref"), OPENAPI_REFS)
+def test_openapi_routes_use_typed_response_models(
+    path: str,
+    method: str,
+    status: str,
+    ref: str,
+) -> None:
+    assert _schema_ref(app.openapi(), path, method, status) == ref
+
+def test_openapi_required_fields_cover_contract() -> None:
+    schemas = app.openapi()["components"]["schemas"]
+    for name, fields in REQUIRED_FIELDS.items():
+        assert fields.issubset(set(schemas[name]["required"]))
+
+
+def test_legacy_upload_route_marked_deprecated_in_openapi() -> None:
+    spec = app.openapi()
+    upload_op = spec["paths"]["/documents/upload"]["post"]
+    assert upload_op.get("deprecated") is True
+
+@pytest.fixture
+def client() -> Any:
+    app.dependency_overrides[get_db_session] = _override_db
+    app.dependency_overrides[get_workspace_context] = _override_ws_ctx
+    prev_llm = getattr(app.state, "graph_llm_client", None)
+    app.state.graph_llm_client = object()
+    test_client = TestClient(app)
+    try:
+        yield test_client
+    finally:
+        test_client.close()
+        app.state.graph_llm_client = prev_llm
+        app.dependency_overrides.clear()
+
+def test_quizzes_runtime_response_contracts(client: Any, monkeypatch: Any) -> None:
+    level_up_history_payload = {
+        "workspace_id": 2,
+        "user_id": 3,
+        "concept_id": 4,
+        "quizzes": [
+            {
+                "quiz_id": 1,
+                "workspace_id": 2,
+                "user_id": 3,
+                "concept_id": 4,
+                "concept_name": "Linear Map",
+                "status": "graded",
+                "item_count": 1,
+                "created_at": "2026-01-01T00:00:00Z",
+                "latest_attempt": {
+                    "attempt_id": 9,
+                    "score": 1.0,
+                    "passed": True,
+                    "critical_misconception": False,
+                    "overall_feedback": "ok",
+                    "graded_at": "2026-01-01T00:10:00Z",
+                },
+            }
+        ],
+    }
+    level_up_detail_payload = {
+        **level_up_history_payload["quizzes"][0],
+        "items": _quiz_create()["items"],
+    }
+    _patch(monkeypatch, "apps.api.routes.quizzes.create_level_up_quiz", _quiz_create())
+    _patch(monkeypatch, "apps.api.routes.quizzes.list_level_up_quizzes", level_up_history_payload)
+    _patch(monkeypatch, "apps.api.routes.quizzes.get_level_up_quiz", level_up_detail_payload)
+    _patch(
+        monkeypatch,
+        "apps.api.routes.quizzes.promote_level_up_quiz_to_practice",
+        {"source_quiz_id": 1, "practice_quiz": _quiz_create()},
+    )
+    _patch(monkeypatch, "apps.api.routes.quizzes.submit_level_up_quiz", _submit(with_mastery=True))
+    listed = client.get(f"/workspaces/{_TEST_WS_ID}/quizzes/level-up")
+    detail = client.get(f"/workspaces/{_TEST_WS_ID}/quizzes/level-up/1")
+    created = client.post(
+        f"/workspaces/{_TEST_WS_ID}/quizzes/level-up",
+        json={"concept_id": 4, "question_count": 5},
+    )
+    promoted = client.post(
+        f"/workspaces/{_TEST_WS_ID}/quizzes/level-up/1/promote",
+    )
+    submitted = client.post(
+        f"/workspaces/{_TEST_WS_ID}/quizzes/1/submit",
+        json={"answers": [{"item_id": 11, "answer": "a"}]},
+    )
+    assert (listed.status_code, detail.status_code, created.status_code, promoted.status_code, submitted.status_code) == (200, 200, 201, 201, 200)
+    assert REQUIRED_FIELDS["LevelUpQuizHistoryListResponse"] <= set(listed.json())
+    assert REQUIRED_FIELDS["LevelUpQuizDetailResponse"] <= set(detail.json())
+    assert REQUIRED_FIELDS["LevelUpPromoteToPracticeResponse"] <= set(promoted.json())
+    assert REQUIRED_FIELDS["QuizCreateResponse"] <= set(created.json()) and {
+        "mastery_status",
+        "mastery_score",
+    } <= set(submitted.json())
+    item = created.json()["items"][0]
+    assert set(item) == {"item_id", "position", "item_type", "prompt", "choices"}
+    assert item["choices"] == [{"id": "a", "text": "Choice A"}]
+
+def test_practice_runtime_response_contracts(client: Any, monkeypatch: Any) -> None:
+    run_list_payload = {
+        "workspace_id": 2,
+        "user_id": 3,
+        "runs": [
+            {
+                "run_id": "5d07d69f-1d7a-4f58-9f97-a13af57a5f3d",
+                "workspace_id": 2,
+                "user_id": 3,
+                "concept_id": 4,
+                "concept_name": "Linear Map",
+                "item_count": 1,
+                "has_more": True,
+                "exhausted_reason": None,
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+        ],
+    }
+    run_detail_payload = {
+        **run_list_payload["runs"][0],
+        "flashcards": [
+            {
+                "flashcard_id": "3265693f-d78f-4dc8-bd29-c342f4e88295",
+                "front": "f",
+                "back": "b",
+                "hint": "h",
+                "self_rating": "good",
+                "passed": True,
+                "due_at": "2026-01-02T00:00:00Z",
+                "interval_days": 2.5,
+            }
+        ],
+    }
+    history_payload = {
+        "workspace_id": 2,
+        "user_id": 3,
+        "concept_id": 4,
+        "quizzes": [
+            {
+                "quiz_id": 1,
+                "workspace_id": 2,
+                "user_id": 3,
+                "concept_id": 4,
+                "concept_name": "Linear Map",
+                "status": "graded",
+                "item_count": 1,
+                "created_at": "2026-01-01T00:00:00Z",
+                "latest_attempt": {
+                    "attempt_id": 9,
+                    "score": 1.0,
+                    "passed": True,
+                    "critical_misconception": False,
+                    "overall_feedback": "ok",
+                    "graded_at": "2026-01-01T00:10:00Z",
+                },
+            }
+        ],
+    }
+    detail_payload = {
+        **history_payload["quizzes"][0],
+        "items": _quiz_create()["items"],
+    }
+    _patch(
+        monkeypatch,
+        "apps.api.routes.practice.generate_practice_flashcards",
+        {
+            "workspace_id": 2,
+            "concept_id": 4,
+            "concept_name": "Linear Map",
+            "flashcards": [{"front": "f", "back": "b", "hint": "h"}],
+        },
+    )
+    _patch(monkeypatch, "apps.api.routes.practice.create_practice_quiz", _quiz_create())
+    _patch(monkeypatch, "apps.api.routes.practice.list_flashcard_runs", run_list_payload)
+    _patch(monkeypatch, "apps.api.routes.practice.get_flashcard_run", run_detail_payload)
+    _patch(monkeypatch, "apps.api.routes.practice.list_practice_quizzes", history_payload)
+    _patch(monkeypatch, "apps.api.routes.practice.get_practice_quiz", detail_payload)
+    payload = _submit(with_mastery=False)
+    payload["items"][0]["item_type"] = "short_answer"
+    payload["items"][0]["result"] = "partial"
+    payload["items"][0]["is_correct"] = False
+    payload["items"][0]["score"] = 0.5
+    _patch(monkeypatch, "apps.api.routes.practice.submit_practice_quiz", payload)
+    cards = client.post(f"/workspaces/{_TEST_WS_ID}/practice/flashcards", json={"concept_id": 4})
+    runs = client.get(f"/workspaces/{_TEST_WS_ID}/practice/flashcards/runs")
+    run_detail = client.get(
+        f"/workspaces/{_TEST_WS_ID}/practice/flashcards/runs/5d07d69f-1d7a-4f58-9f97-a13af57a5f3d"
+    )
+    created = client.post(
+        f"/workspaces/{_TEST_WS_ID}/practice/quizzes",
+        json={"concept_id": 4, "question_count": 4},
+    )
+    listed = client.get(f"/workspaces/{_TEST_WS_ID}/practice/quizzes")
+    detail = client.get(f"/workspaces/{_TEST_WS_ID}/practice/quizzes/1")
+    submitted = client.post(
+        f"/workspaces/{_TEST_WS_ID}/practice/quizzes/1/submit",
+        json={"answers": [{"item_id": 11, "answer": "x"}]},
+    )
+    assert (
+        cards.status_code,
+        runs.status_code,
+        run_detail.status_code,
+        created.status_code,
+        listed.status_code,
+        detail.status_code,
+        submitted.status_code,
+    ) == (200, 200, 200, 201, 200, 200, 200)
+    assert REQUIRED_FIELDS["PracticeFlashcardsResponse"] <= set(cards.json())
+    assert REQUIRED_FIELDS["FlashcardRunListResponse"] <= set(runs.json())
+    assert REQUIRED_FIELDS["FlashcardRunDetailResponse"] <= set(run_detail.json())
+    assert REQUIRED_FIELDS["PracticeQuizHistoryListResponse"] <= set(listed.json())
+    assert REQUIRED_FIELDS["PracticeQuizDetailResponse"] <= set(detail.json())
+    assert REQUIRED_FIELDS["QuizCreateResponse"] <= set(created.json()) and {
+        "mastery_status",
+        "mastery_score",
+    }.isdisjoint(set(submitted.json()))
+    assert set(created.json()["items"][0]) == {
+        "item_id",
+        "position",
+        "item_type",
+        "prompt",
+        "choices",
+    }
+
+
+def test_chat_and_graph_runtime_response_contracts(client: Any, monkeypatch: Any) -> None:
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.create_session",
+        {
+            "session_id": 1,
+            "public_id": "sess-aaa-bbb",
+            "workspace_id": 2,
+            "user_id": 3,
+            "title": "Linear maps",
+            "last_activity_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.list_sessions",
+        {
+            "workspace_id": 2,
+            "user_id": 3,
+            "sessions": [
+                {
+                    "session_id": 1,
+                    "public_id": "sess-aaa-bbb",
+                    "workspace_id": 2,
+                    "user_id": 3,
+                    "title": "Linear maps",
+                    "last_activity_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        },
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.resolve_session_by_public_id",
+        1,
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.chat.get_messages",
+        {
+            "workspace_id": 2,
+            "user_id": 3,
+            "session_id": 1,
+            "messages": [
+                {
+                    "message_id": 5,
+                    "session_id": 1,
+                    "type": "assistant",
+                    "payload": {"text": "hello"},
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        },
+    )
+    _patch(
+        monkeypatch,
+        "apps.api.routes.graph.list_concepts",
+        {
+            "workspace_id": 2,
+            "user_id": 3,
+            "concepts": [
+                {
+                    "concept_id": 4,
+                    "canonical_name": "Linear Map",
+                    "description": "Preserves vector operations.",
+                    "degree": 2,
+                    "mastery_status": "learning",
+                    "mastery_score": 0.4,
+                }
+            ],
+        },
+    )
+    _patch(monkeypatch, "apps.api.routes.chat.delete_session", {})
+
+    created = client.post(f"/workspaces/{_TEST_WS_ID}/chat/sessions", json={})
+    sessions = client.get(f"/workspaces/{_TEST_WS_ID}/chat/sessions")
+    messages = client.get(f"/workspaces/{_TEST_WS_ID}/chat/sessions/sess-aaa-bbb/messages")
+    deleted = client.delete(f"/workspaces/{_TEST_WS_ID}/chat/sessions/sess-aaa-bbb")
+    concepts = client.get(f"/workspaces/{_TEST_WS_ID}/graph/concepts")
+
+    assert (
+        created.status_code,
+        sessions.status_code,
+        messages.status_code,
+        deleted.status_code,
+        concepts.status_code,
+    ) == (
+        201,
+        200,
+        200,
+        204,
+        200,
+    )
+    assert REQUIRED_FIELDS["ChatSessionSummary"] <= set(created.json())
+    assert REQUIRED_FIELDS["ChatSessionListResponse"] <= set(sessions.json())
+    assert REQUIRED_FIELDS["ChatMessagesResponse"] <= set(messages.json())
+    assert REQUIRED_FIELDS["GraphConceptListResponse"] <= set(concepts.json())
+
+
+# ── A3 regression: out-of-range graph params must return 422 ──────
+class TestGraphParamValidation:
+    """Ensure backend rejects values that exceed Query validation limits."""
+
+    @pytest.fixture(autouse=True)
+    def _override_deps(self) -> None:
+        app.dependency_overrides[get_db_session] = _override_db
+        app.dependency_overrides[get_workspace_context] = _override_ws_ctx
+        yield
+        app.dependency_overrides.clear()
+
+    def test_full_graph_rejects_nodes_above_500(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/full?max_nodes=1000")
+            assert r.status_code == 422
+
+    def test_full_graph_rejects_edges_above_1000(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/full?max_edges=2000")
+            assert r.status_code == 422
+
+    def test_subgraph_rejects_hops_above_3(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/concepts/1/subgraph?max_hops=4")
+            assert r.status_code == 422
+
+    def test_full_graph_accepts_max_valid_nodes(self) -> None:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            r = c.get(f"/workspaces/{_TEST_WS_ID}/graph/full?max_nodes=500")
+            # Should NOT be 422 (may be 200 or other status depending on DB)
+            assert r.status_code != 422

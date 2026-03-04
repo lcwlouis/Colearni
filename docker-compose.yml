@@ -1,102 +1,32 @@
-# Sample docker-compose.yaml file for Sapientian
-
-version: '3.8'
-
 services:
-  # Redis for SearXNG caching
-  redis:
-    image: redis:7-alpine
-    container_name: sapientian-redis
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-    networks:
-      - sapientian-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # SearXNG search engine
-  searxng:
-    build:
-      context: ./searxng
-      dockerfile: Dockerfile
-    container_name: sapientian-searxng
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./config/searxng/settings.yml:/etc/searxng/settings.yml:ro
-      - ./config/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: colearni-db
     environment:
-      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://localhost:8080}
-      - SEARXNG_SECRET=${SEARXNG_SECRET}
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - sapientian-network
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Sapientian App
-  sapientian-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: sapientian-app
-    restart: unless-stopped
+      POSTGRES_DB: colearni
+      POSTGRES_USER: colearni
+      POSTGRES_PASSWORD: colearni
     ports:
-      - "5000:5000"
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U colearni -d colearni"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: colearni-phoenix
+    profiles: ["observability"]
+    ports:
+      - "6006:6006"   # Phoenix UI & OTLP HTTP receiver
     environment:
-      - FLASK_ENV=${FLASK_ENV:-production}
-      - SEARXNG_API_URL=http://searxng:8080
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - REDIS_URL=redis://redis:6379/0
+      PHOENIX_WORKING_DIR: /phoenix-data
     volumes:
-      - ./src:/app/src:ro
-      - ./logs:/app/logs
-    depends_on:
-      searxng:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - sapientian-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Optional: Nginx reverse proxy
-  nginx:
-    image: nginx:alpine
-    container_name: sapientian-nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/ssl:ro
-    depends_on:
-      - sapientian-app
-      - searxng
-    networks:
-      - sapientian-network
-    profiles:
-      - production
+      - phoenix-data:/phoenix-data
 
 volumes:
-  redis_data:
-
-networks:
-  sapientian-network:
-    driver: bridge
+  pgdata:
+  phoenix-data:
