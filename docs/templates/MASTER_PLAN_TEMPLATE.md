@@ -205,6 +205,11 @@ What changed
 Commands run
 - <tests / typecheck / lint commands>
 
+Logic review
+- <For each changed file: describe what the code actually does, not just
+  what you intended. Trace the data flow. Confirm edge cases are handled.
+  "Tests pass" is not sufficient — explain WHY the logic is correct.>
+
 Manual verification steps
 - <UI/API/dev verification steps>
 
@@ -234,7 +239,21 @@ After all implementation tracks reach "done" in the Master Status Ledger, the ru
 
 ### Why This Exists
 
-Agents working top-to-bottom through a plan commonly miss edge cases, leave subtle regressions, or make assumptions that don't hold once later slices land. This protocol catches those gaps without requiring manual human review cycles.
+Agents working top-to-bottom through a plan commonly miss edge cases, leave subtle regressions, or make assumptions that don't hold once later slices land. **Passing tests do NOT prove correctness.** Tests only check what they were written to check — they miss logic errors, silent data drops, dead code paths, and integration mismatches. This protocol forces a fresh-eyes review that catches what tests cannot.
+
+### Fresh-Eyes Audit Principle
+
+**The auditor must treat every slice as if it has NOT been implemented.** Do not skim Verification Blocks or trust prior claims. Instead:
+
+1. Read the slice requirements (purpose, implementation steps, exit criteria) as if seeing them for the first time.
+2. **Before looking at any code**, independently write down in the Audit Workspace:
+   - What files should have been created or changed
+   - What logic should exist in each file
+   - What edge cases and error paths should be handled
+   - What the tests should actually verify (not just "tests pass")
+3. **Only then** open the actual code and compare against your independent analysis.
+4. For every point in your "should-exist" list, verify it truly exists and is correct.
+5. **Do not trust test names.** Open each test, read the body, and confirm it actually tests the claimed behavior with meaningful assertions — not just "no exception thrown."
 
 ### Convergence Loop
 
@@ -246,14 +265,23 @@ while AUDIT_CYCLE < MAX_AUDIT_CYCLES:
     AUDIT_CYCLE += 1
     
     1. Re-read {master_plan_path} and every child plan in order.
-    2. For each completed slice, verify:
-       a. The code change described in the Verification Block still holds
-          (files exist, tests pass, no regressions from later slices)
-       b. The slice's exit criteria are still met
-       c. No TODO/FIXME/HACK comments were left in changed files
-       d. No dead imports, unused variables, or orphaned test stubs
-       e. Cross-slice integration: does this slice's output still work
-          with what later slices built on top of it?
+    2. For each completed slice, perform the FRESH-EYES AUDIT:
+       a. Read the slice definition (purpose, steps, exit criteria).
+       b. In the child plan's Audit Workspace, write your independent
+          analysis of what SHOULD exist — before looking at any code.
+       c. Now open every file listed in the Verification Block.
+          Compare actual code against your independent analysis.
+       d. For each implementation step in the slice:
+          - Is the logic actually correct, or does it just not crash?
+          - Are edge cases handled (empty inputs, nulls, boundaries)?
+          - Is error handling meaningful (not swallowed or generic)?
+          - Does the code do what the slice SAYS it does, or something
+            subtly different?
+       e. For each test:
+          - Read the test body. Does it assert the RIGHT thing?
+          - Does it test edge cases, not just the happy path?
+          - Could the test pass even if the implementation is wrong?
+            (e.g., mocking too much, asserting only status codes)
        f. BEHAVIORAL AUDIT (DO NOT SKIP): For each feature-facing slice,
           trace the full code path from user action → frontend → API route
           → domain logic → response. Verify:
@@ -265,27 +293,56 @@ while AUDIT_CYCLE < MAX_AUDIT_CYCLES:
             mechanism, and that toggling actually changes behavior
        g. PROMPT AUDIT (for any LLM-facing slice): Open the prompt template
           and verify:
-          - System vs user role assignment is correct (instructions in system,
-            user query in user)
+          - System vs user role assignment is correct
           - Template variables are actually populated (not placeholders)
           - The prompt produces the expected output format
        h. OBSERVABILITY AUDIT: For any slice that touches tracing, verify
           traces show correct data in the expected panels, not just in
           attributes.
+       i. Cross-slice integration: does this slice's output still work
+          with what later slices built on top of it?
+       j. No TODO/FIXME/HACK comments left in changed files.
+       k. No dead imports, unused variables, or orphaned test stubs.
     3. Run the full Verification Matrix (all test suites, typecheck, lint).
-    4. Produce an Audit Report:
-       - Cycle number
-       - Slices re-examined
-       - Issues found (with severity: critical / minor / cosmetic)
-       - Slices to reopen (if any)
-       - Verdict: CONVERGED (0 issues) or NEEDS_REPASS (N issues)
-    5. If CONVERGED: update Master Status Ledger with "✅ audit-passed"
-       and exit the loop.
+    4. Produce an Audit Report in the Audit Workspace (template below).
+    5. If CONVERGED (0 issues): update Master Status Ledger with
+       "✅ audit-passed" and exit the loop.
     6. If NEEDS_REPASS:
        a. Reopen affected slices (set status back to pending in the
           child plan, add "Audit Cycle N" note)
-       b. Re-implement only the reopened slices (same verification rules)
+       b. Re-implement the reopened slices from scratch — do NOT just
+          patch the previous attempt. Re-read the slice definition,
+          think about what needs to happen, implement it properly,
+          then verify again.
        c. Continue to next audit cycle
+```
+
+### Audit Workspace
+
+Each child plan MUST contain an `## Audit Workspace` section (initially empty). During the audit, the agent writes its fresh-eyes analysis here:
+
+```text
+--- Audit Cycle {N} - {slice-id} ---
+
+What SHOULD exist (written BEFORE reading code):
+- Files: <expected file changes>
+- Logic: <expected logic in each file>
+- Edge cases: <expected edge case handling>
+- Tests: <what tests should verify>
+
+What ACTUALLY exists (written AFTER reading code):
+- Files: <actual file changes — match/mismatch?>
+- Logic: <actual logic — correct/incorrect/missing?>
+- Edge cases: <handled/missing?>
+- Tests: <meaningful assertions or shallow?>
+
+Gaps found:
+- <gap 1>
+- <gap 2>
+- <none if clean>
+
+Verdict: PASS / REOPEN
+Reason: <if reopened, explain exactly what's wrong>
 ```
 
 ### Audit Cycle Budget
@@ -302,11 +359,14 @@ Audit Report — Cycle {N}
 Slices re-examined: {count}
 Full verification matrix: {PASS / FAIL with details}
 
+Fresh-eyes analysis completed: {yes/no for each slice}
+
 Issues found:
 1. [{severity}] {slice-id}: {description}
    - File(s): {paths}
-   - Expected: {what should be true}
-   - Actual: {what was found}
+   - Expected (from fresh analysis): {what should be true}
+   - Actual (from code review): {what was found}
+   - Why tests didn't catch it: {explanation}
    - Action: {reopen slice / cosmetic fix / defer}
 
 Verdict: {CONVERGED | NEEDS_REPASS}
@@ -317,13 +377,16 @@ Slices reopened: {list or "none"}
 
 | Check | What it catches |
 |---|---|
+| Fresh-eyes independent analysis | Assumptions baked in from implementation bias |
+| Code logic review (not just test results) | Bugs that tests don't cover, dead code, wrong logic |
+| Test body inspection | Shallow tests that pass but don't verify behavior |
 | Verification Block accuracy | Slice claims that are no longer true |
 | Exit criteria still met | Regressions from later slices |
-| Test suite passes | Broken tests from cross-slice interactions |
-| No TODO/FIXME/HACK left | Incomplete work markers |
-| Dead code / unused imports | Cleanup missed during implementation |
-| Cross-slice integration | Output of slice A still works after slice B modified shared code |
-| Plan accuracy | Master/child plan status matches actual repo state |
+| TODO/FIXME scan | Unfinished work left behind |
+| Dead code scan | Imports, variables, stubs that serve no purpose |
+| Behavioral trace | Dropped fields, missing kwargs, stubs |
+| Prompt review | Bad role assignment, empty variables |
+| Observability review | Traces that don't surface in expected panels |
 
 ## REQUIRED KICKOFF PROMPT (DO NOT OMIT)
 

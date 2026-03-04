@@ -132,16 +132,34 @@ Exit criteria:
 
 ## Audit Cycle Reopening
 
-After all tracks in the master plan reach "done", the master plan's Self-Audit Convergence Protocol may reopen slices in this child plan. When a slice is reopened:
+After all tracks in the master plan reach "done", the master plan's Self-Audit Convergence Protocol may reopen slices in this child plan. The audit uses a **Fresh-Eyes** approach: the auditor treats each slice as if it has NOT been implemented, independently analyzes what should exist, then compares against actual code.
+
+When a slice is reopened:
 
 1. The slice status in the Execution Order is changed back to "reopened (audit cycle N)"
 2. The original Verification Block is preserved (do not delete it)
-3. A new Verification Block is produced, prefixed: `Audit Cycle N — Verification Block - {slice-id}`
-4. The reopening reason is documented inline:
+3. The auditor's fresh-eyes analysis is recorded in the Audit Workspace below
+4. A new Verification Block is produced, prefixed: `Audit Cycle N — Verification Block - {slice-id}`
+5. The reopening reason is documented inline:
    ```
    Reopened in Audit Cycle {N}: {reason}
    ```
-5. Only the specific issue identified in the Audit Report is addressed — do not widen scope
+6. The reopened slice is **re-implemented from scratch** — do not just patch the previous attempt. Re-read the slice definition, think about what needs to happen, implement it properly, then verify.
+7. Only the specific issue identified in the Audit Report is addressed — do not widen scope
+
+**IMPORTANT**: Tests passing is necessary but NOT sufficient for marking a reopened slice as done. The auditor must confirm the logic is correct through code review, not just test results.
+
+## Audit Workspace
+
+This section is initially empty. During the Self-Audit Convergence Protocol, the auditor writes their fresh-eyes analysis here. For each slice being audited:
+
+1. **Before looking at any code**, write down what SHOULD exist based on the slice definition
+2. **Then** open the code and compare against the independent analysis
+3. Document gaps, verdict, and reasoning
+
+```text
+(Audit entries will be appended here during the audit convergence loop)
+```
 
 ## Execution Order (Update After Each Run)
 
@@ -186,7 +204,13 @@ Execution loop for this child plan:
 
 Do NOT stop just because {TRACK_ID} is complete. {TRACK_ID} completion is only a checkpoint unless the master status ledger shows no remaining incomplete tracks.
 
-If this child plan is being revisited during an audit cycle, only work on slices marked as "reopened". Produce audit-prefixed Verification Blocks. Do not re-examine slices that passed the audit.
+If this child plan is being revisited during an audit cycle:
+- Treat every reopened slice as if it has NOT been implemented.
+- In the Audit Workspace, write what SHOULD exist BEFORE looking at code.
+- Then compare against actual implementation.
+- Re-implement from scratch if gaps are found — do not just patch.
+- Tests passing is NOT sufficient — confirm logic correctness through code review.
+- Only work on slices marked as "reopened". Do not re-examine slices that passed the audit.
 
 Stop only if verification fails, the code no longer matches plan assumptions, a blocker requires user input, or the next slice would widen scope beyond this plan.
 
