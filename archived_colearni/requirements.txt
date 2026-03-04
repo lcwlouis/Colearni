@@ -9,3 +9,7 @@ anthropic==0.8.1
 pydantic==2.5.0
 asyncio-mqtt==0.13.0
 gunicorn==21.2.0
+google-adk>=1.4.2
+langchain-community>=0.3.26
+litellm>=1.73.0
+tavily-python>=0.7.8

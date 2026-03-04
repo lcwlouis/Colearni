@@ -1,3 +1,3 @@
-[submodule "searxng"]
-	path = searxng
-	url = https://github.com/searxng/searxng.git
+# [submodule "searxng"]
+# 	path = searxng
+# 	url = https://github.com/searxng/searxng.git

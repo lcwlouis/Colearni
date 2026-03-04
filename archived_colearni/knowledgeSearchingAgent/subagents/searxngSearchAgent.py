@@ -15,7 +15,10 @@ model = LiteLlm(model="deepseek/deepseek-chat", api_key=os.getenv("DEEPSEEK_API_
 
 searxng_tool_instance = SearxSearchResults(
     wrapper=SearxSearchWrapper(
-        searx_host=os.getenv("SEARXNG_HOST"),
+        searx_host=(
+            os.getenv("SEARXNG_HOST")
+            or os.getenv("SEARXNG_API_URL")
+        ),
     ),
     num_results=5,
     description="A tool that uses the SearxNG metasearch engine to find high-quality, relevant, and authoritative information to support deep learning and research objectives."

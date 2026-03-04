@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sapientian</title>
+    <style>
+      body { font-family: sans-serif; margin: 24px; max-width: 960px; }
+      h1 { margin-bottom: 0; }
+      small { color: #666; }
+      textarea, input, select, button { font-size: 14px; }
+      textarea { width: 100%; min-height: 120px; }
+      .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 16px 0; }
+      .row { display: flex; gap: 8px; align-items: center; }
+      .row > * { flex: 1; }
+      pre { background: #f7f7f7; padding: 12px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Sapientian</h1>
+    <small>Learning copilot workflow demo</small>
+
+    <div class="card">
+      <h3>Steps 1–4: Topic → Plan → Search → Collate</h3>
+      <div class="row">
+        <input id="topic" placeholder="Enter your topic (e.g., Quantum Computing)" />
+        <button onclick="runSteps1to4()">Run</button>
+      </div>
+      <pre id="out_1_4"></pre>
+    </div>
+
+    <div class="card">
+      <h3>Step 6: Knowledge Finder (Queries)</h3>
+      <textarea id="pois" placeholder='["Quantum Entanglement","Bell's Theorem"]'></textarea>
+      <textarea id="user_ctx" placeholder='{"knowledge_level":"intermediate","goals":["deep understanding"],"preferences":["papers","expert posts"]}'></textarea>
+      <button onclick="runStep6()">Generate Queries</button>
+      <pre id="out_6"></pre>
+    </div>
+
+    <div class="card">
+      <h3>Step 8: Knowledge Extraction</h3>
+      <textarea id="sources_json" placeholder='[{"title":"Paper A","url":"https://example.com","snippet":"...","domain":"example.com"}]'></textarea>
+      <textarea id="user_ctx2" placeholder='{"knowledge_level":"intermediate"}'></textarea>
+      <button onclick="runStep8()">Extract</button>
+      <pre id="out_8"></pre>
+    </div>
+
+    <div class="card">
+      <h3>Step 9: Quiz Generator</h3>
+      <textarea id="extracted_md" placeholder='Paste extracted POIs markdown here'></textarea>
+      <button onclick="runStep9()">Generate Quiz</button>
+      <pre id="out_9"></pre>
+    </div>
+
+    <script>
+      async function runSteps1to4() {
+        const topic = document.getElementById('topic').value;
+        const res = await fetch('/step1_4/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ topic }) });
+        document.getElementById('out_1_4').textContent = JSON.stringify(await res.json(), null, 2);
+      }
+      async function runStep6() {
+        const selected_pois = JSON.parse(document.getElementById('pois').value || '[]');
+        const user_context = JSON.parse(document.getElementById('user_ctx').value || '{}');
+        const res = await fetch('/step6/queries', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ selected_pois, user_context }) });
+        const data = await res.json();
+        document.getElementById('out_6').textContent = data.markdown || JSON.stringify(data, null, 2);
+      }
+      async function runStep8() {
+        const sources = JSON.parse(document.getElementById('sources_json').value || '[]');
+        const user_context = JSON.parse(document.getElementById('user_ctx2').value || '{}');
+        const res = await fetch('/step8/extract', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ sources, user_context }) });
+        const data = await res.json();
+        document.getElementById('out_8').textContent = data.markdown || JSON.stringify(data, null, 2);
+      }
+      async function runStep9() {
+        const extracted_markdown = document.getElementById('extracted_md').value;
+        const res = await fetch('/step9/quiz', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ extracted_markdown }) });
+        const data = await res.json();
+        document.getElementById('out_9').textContent = data.markdown || JSON.stringify(data, null, 2);
+      }
+    </script>
+  </body>
+  </html>
+
+
