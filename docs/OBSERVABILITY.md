@@ -67,7 +67,7 @@ chat.respond (CHAIN)                            ← blocking chat orchestrator
   └─ llm.chat.respond (LLM)                    ← LLM adapter call
 
 chat.stream (CHAIN)                             ← streaming chat orchestrator
-  ├─ retrieval.hybrid (RETRIEVER)
+  ├─ retrieval.hybrid (RETRIEVER)               ← properly nested via use_span_context()
   │    ├─ retrieval.vector.search (RETRIEVER)
   │    ├─ retrieval.fts.search (RETRIEVER)
   │    └─ retrieval.hybrid.fuse (CHAIN)
@@ -84,6 +84,7 @@ ingestion.post_ingest (CHAIN)           ← post-ingest background task
        └─ graph.resolver.chunk (CHAIN)
 
 graph.gardener.run (CHAIN)              ← offline graph consolidation
+  ├─ graph.gardener.disambiguate_batch (CHAIN)  ← batch disambiguation
   └─ llm.graph.disambiguate (LLM)
 ```
 
@@ -105,6 +106,7 @@ graph.gardener.run (CHAIN)              ← offline graph consolidation
 | `graph.resolver.run` | CHAIN | `domain/graph/pipeline.py` |
 | `graph.resolver.chunk` | CHAIN | `domain/graph/pipeline.py` |
 | `graph.gardener.run` | CHAIN | `domain/graph/gardener.py` |
+| `graph.gardener.disambiguate_batch` | CHAIN | `domain/graph/gardener.py` |
 | `grading.level_up` | CHAIN | `domain/learning/quiz_flow.py` |
 | `grading.practice` | CHAIN | `domain/learning/quiz_flow.py` |
 | `llm.chat.respond` | LLM | `adapters/llm/providers.py` |
@@ -126,6 +128,9 @@ graph.gardener.run (CHAIN)              ← offline graph consolidation
 > **Note on `create_span`**: The streaming path uses `create_span()` instead
 > of `start_span()` because Python generators cannot use context managers that
 > cross async boundaries (Starlette runs sync generators in a thread pool).
+> During the synchronous setup phase of streaming, `use_span_context(span)` is
+> used to establish parent-child relationships so that child spans (retrieval,
+> LLM) are properly nested under the `chat.stream` root span.
 
 ### OpenInference Attributes on LLM Spans
 
@@ -133,13 +138,16 @@ graph.gardener.run (CHAIN)              ← offline graph consolidation
 |---|---|
 | `openinference.span.kind` | `LLM` — displays LLM icon in Phoenix |
 | `llm.model_name` | Model used (e.g. `gpt-4.1-mini`) |
-| `llm.input_messages` | JSON array of messages sent to the API (when content recording is on) |
-| `llm.output_messages` | JSON array of assistant response (when content recording is on) |
+| `llm.input_messages` | Flattened indexed attributes per OpenInference spec (e.g. `llm.input_messages.0.message.role`, `llm.input_messages.0.message.content`). Recorded when content recording is on. |
+| `llm.output_messages` | Flattened indexed attributes per OpenInference spec (e.g. `llm.output_messages.0.message.role`, `llm.output_messages.0.message.content`). Recorded when content recording is on. |
 | `llm.invocation_parameters` | JSON of model params (temperature, etc.) |
 | `llm.token_count.prompt` | Input token count |
 | `llm.token_count.completion` | Output token count |
 | `llm.token_count.total` | Total token count |
-| `llm.token_count.cached` | Cached prompt tokens (prefix caching); null when provider does not report |
+| `llm.token_count.prompt_details.cache_read` | Cached prompt tokens (prefix caching); null when provider does not report |
+| `llm.token_count.completion_details.reasoning` | Reasoning/chain-of-thought tokens; null when model does not support reasoning |
+| `llm.system` | AI system identifier (e.g. `openai`, `anthropic`) |
+| `llm.provider` | Hosting provider identifier (e.g. `openai`, `litellm`) |
 | `llm.usage_source` | `provider_reported`, `estimated`, or `missing` |
 
 ### Content Capture Policy
@@ -380,7 +388,8 @@ content should not be persisted.
 - Aggregate token counts in the Phoenix UI using span grouping.
 - The `extract_token_usage` helper normalises both OpenAI (`prompt_tokens`) and Anthropic (`input_tokens`) key names and extracts `cached_tokens` from `prompt_tokens_details.cached_tokens` when present.
 - Usage source is always labeled via `llm.usage_source` — never silently estimated.
-- **Cached tokens**: When the provider reports `prompt_tokens_details.cached_tokens`, this value is surfaced on LLM spans as `llm.token_count.cached`, in the `llm.call` event as `token_cached`, and in the user-facing `GenerationTrace` as `cached_tokens`.  A non-null value indicates a prefix-caching hit — the corresponding prompt tokens were served from cache at reduced cost/latency.
+- **Cached tokens**: When the provider reports `prompt_tokens_details.cached_tokens`, this value is surfaced on LLM spans as `llm.token_count.prompt_details.cache_read`, in the `llm.call` event as `token_cached`, and in the user-facing `GenerationTrace` as `cached_tokens`.  A non-null value indicates a prefix-caching hit — the corresponding prompt tokens were served from cache at reduced cost/latency.
+- **Reasoning tokens**: When the provider reports reasoning token usage, this value is surfaced on LLM spans as `llm.token_count.completion_details.reasoning`.  Only populated for models that support reasoning (o1/o3/o4).
 
 ---
 

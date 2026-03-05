@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -15,6 +16,8 @@ from sqlalchemy.orm import Session
 from domain.graph.extraction import extract_raw_graph_from_chunk
 from domain.graph.resolver import OnlineResolver, ResolverConfig
 from domain.graph.types import GraphBuildResult, ResolverBudgets, normalize_alias
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from adapters.db.chunks import ChunkRow
@@ -106,11 +109,10 @@ def build_graph_for_chunks(
 
         windows = _make_graph_windows(chunks, settings.ingest_graph_chunk_size, settings.ingest_chunk_unit)
         if span is not None:
-            print("graph.windows_count: ", len(windows))
+            _LOGGER.debug("graph.windows_count: %d", len(windows))
             for i, (chunk_id, window_text) in enumerate(windows):
-                print(f"graph.window_{i}_chunk_id: {chunk_id}")
-                print(f"graph.window_{i}_text: {window_text}")
-                print(f"*"*40)
+                _LOGGER.debug("graph.window_%d_chunk_id: %s", i, chunk_id)
+                _LOGGER.debug("graph.window_%d_text: %s", i, window_text)
         for window_chunk_id, window_text in windows:
             with observation_context(chunk_id=window_chunk_id), start_span(
                 "graph.resolver.chunk",

@@ -355,7 +355,18 @@ def audit_span(span: dict[str, Any]) -> list[Finding]:
                     detail=f"First 300 chars: {content[:300]}",
                 ))
 
-    # --- Check 4: Token counts ---
+    # --- Check 4: llm.system attribute ---
+    llm_system = _get_nested(attrs, "llm.system")
+    if not llm_system:
+        findings.append(Finding(
+            span_name=span_name,
+            span_id=span_id,
+            severity="warning",
+            category="missing_llm_system",
+            message="llm.system attribute is missing — cannot identify AI provider system",
+        ))
+
+    # --- Check 5: Token counts ---
     prompt_tokens = _get_nested(attrs, "llm.token_count.prompt")
     completion_tokens = _get_nested(attrs, "llm.token_count.completion")
     if prompt_tokens is None and completion_tokens is None:
@@ -375,7 +386,7 @@ def audit_span(span: dict[str, Any]) -> list[Finding]:
             message=f"Suspiciously low prompt token count: {prompt_tokens}",
         ))
 
-    # --- Check 5: Truncation markers ---
+    # --- Check 6: Truncation markers ---
     if input_value:
         truncation_patterns = ["... (len=", "…(truncated)", "[TRUNCATED]"]
         for pat in truncation_patterns:
@@ -389,7 +400,7 @@ def audit_span(span: dict[str, Any]) -> list[Finding]:
                 ))
                 break
 
-    # --- Check 6: Source material quality (for tutor/quiz spans) ---
+    # --- Check 7: Source material quality (for tutor/quiz spans) ---
     if messages:
         for msg in messages:
             content = str(msg.get("content", ""))

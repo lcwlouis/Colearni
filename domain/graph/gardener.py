@@ -739,33 +739,41 @@ def _batch_cluster_llm_decisions(
         return [[] for _ in clusters]
 
     try:
-        with observation_context(operation="graph.disambiguate_batch"):
-            raw_decisions = llm_client.disambiguate_batch(items=batch_items)
+        with start_span("graph.gardener.disambiguate_batch", kind=SPAN_KIND_CHAIN) as span:
+            with observation_context(operation="graph.disambiguate_batch"):
+                raw_decisions = llm_client.disambiguate_batch(items=batch_items)
 
-        # Group results back by cluster — each concept may have multiple operations
-        results: list[list[tuple[int, _GardenerDecisionPayload | None]]] = [[] for _ in clusters]
-        for (cluster_idx, concept_id), raw_dec, valid_ids in zip(item_map, raw_decisions, item_valid_ids):
-            ops = raw_dec.get("operations", [raw_dec]) if isinstance(raw_dec, dict) else [raw_dec]
-            parsed_any = False
-            for op in ops:
-                try:
-                    payload = _GardenerDecisionPayload.model_validate(op)
-                    if payload.decision == "CREATE_NEW":
-                        continue
-                    # Reject self-merge
-                    if payload.decision == "MERGE_INTO" and payload.merge_into_id == concept_id:
-                        continue
-                    # Reject merge/link to IDs not in the candidate list
-                    if payload.decision == "MERGE_INTO" and payload.merge_into_id not in valid_ids:
-                        continue
-                    if payload.decision == "LINK_ONLY" and payload.link_to_id not in valid_ids:
-                        continue
-                    results[cluster_idx].append((concept_id, payload))
-                    parsed_any = True
-                except (ValidationError, ValueError):
-                    pass
-            if not parsed_any:
-                results[cluster_idx].append((concept_id, None))
+            # Group results back by cluster — each concept may have multiple operations
+            merge_count = 0
+            results: list[list[tuple[int, _GardenerDecisionPayload | None]]] = [[] for _ in clusters]
+            for (cluster_idx, concept_id), raw_dec, valid_ids in zip(item_map, raw_decisions, item_valid_ids):
+                ops = raw_dec.get("operations", [raw_dec]) if isinstance(raw_dec, dict) else [raw_dec]
+                parsed_any = False
+                for op in ops:
+                    try:
+                        payload = _GardenerDecisionPayload.model_validate(op)
+                        if payload.decision == "CREATE_NEW":
+                            continue
+                        # Reject self-merge
+                        if payload.decision == "MERGE_INTO" and payload.merge_into_id == concept_id:
+                            continue
+                        # Reject merge/link to IDs not in the candidate list
+                        if payload.decision == "MERGE_INTO" and payload.merge_into_id not in valid_ids:
+                            continue
+                        if payload.decision == "LINK_ONLY" and payload.link_to_id not in valid_ids:
+                            continue
+                        results[cluster_idx].append((concept_id, payload))
+                        parsed_any = True
+                        if payload.decision == "MERGE_INTO":
+                            merge_count += 1
+                    except (ValidationError, ValueError):
+                        pass
+                if not parsed_any:
+                    results[cluster_idx].append((concept_id, None))
+
+            if span is not None:
+                set_span_summary(span, input_summary=f"batch_size={len(batch_items)}", output_summary=f"merges={merge_count}")
+
         return results
     except (RuntimeError, ValueError) as exc:
         log.warning(
