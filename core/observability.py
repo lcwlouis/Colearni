@@ -133,11 +133,12 @@ _PREVIEW_CHARS = 256
 
 def configure_observability(settings: Any) -> None:
     """Initialize observability wiring from settings in an idempotent way."""
-    global _OBSERVABILITY_ENABLED, _CONFIG_SIGNATURE, _RECORD_CONTENT, _TRACER_PROVIDER
+    global _OBSERVABILITY_ENABLED, _CONFIG_SIGNATURE, _RECORD_CONTENT, _TRACER_PROVIDER, _PREVIEW_CHARS
 
     enabled = bool(getattr(settings, "observability_enabled", False))
     _OBSERVABILITY_ENABLED = enabled
     _RECORD_CONTENT = bool(getattr(settings, "observability_record_content", True))
+    _PREVIEW_CHARS = int(getattr(settings, "observability_preview_chars", 256))
     if not enabled:
         return
 
@@ -434,6 +435,68 @@ def set_span_summary(
         span.set_attribute(OUTPUT_MIME_TYPE, "text/plain")
 
 
+def set_retrieval_documents(
+    span: Any,
+    *,
+    query: str | None = None,
+    documents: list[dict] | None = None,
+) -> None:
+    """Set retrieval document attributes in OpenInference flattened format.
+
+    This makes retrieved documents visible in Phoenix's Info tab and
+    Retrieved Documents section.
+    """
+    if span is None:
+        return
+
+    include_content = record_content_enabled()
+
+    # Always set input.value = the query (shows in Info tab)
+    if query and include_content:
+        span.set_attribute(INPUT_VALUE, query)
+        span.set_attribute(INPUT_MIME_TYPE, "text/plain")
+
+    if not documents:
+        # No documents retrieved — still show something in Info tab
+        if include_content:
+            span.set_attribute(OUTPUT_VALUE, "No documents retrieved.")
+            span.set_attribute(OUTPUT_MIME_TYPE, "text/plain")
+        return
+
+    # Set OpenInference flattened retrieval document attributes
+    for i, doc in enumerate(documents):
+        prefix = f"{RETRIEVAL_DOCUMENTS}.{i}.document"
+        if include_content and doc.get("text"):
+            span.set_attribute(f"{prefix}.content", str(doc["text"]))
+        if doc.get("chunk_id") is not None:
+            span.set_attribute(f"{prefix}.id", str(doc["chunk_id"]))
+        if doc.get("score") is not None:
+            span.set_attribute(f"{prefix}.score", float(doc["score"]))
+        meta_parts: dict[str, Any] = {}
+        if doc.get("document_id") is not None:
+            meta_parts["document_id"] = doc["document_id"]
+        if doc.get("retrieval_method"):
+            meta_parts["method"] = doc["retrieval_method"]
+        if doc.get("rank") is not None:
+            meta_parts["rank"] = doc["rank"]
+        if meta_parts:
+            span.set_attribute(f"{prefix}.metadata", json.dumps(meta_parts))
+
+    # Set output.value with a readable summary for the Info tab
+    if include_content:
+        lines = []
+        for i, doc in enumerate(documents):
+            line = f"[{i+1}] chunk_id={doc.get('chunk_id')} score={doc.get('score', 'N/A')}"
+            if doc.get("retrieval_method"):
+                line += f" method={doc['retrieval_method']}"
+            text = doc.get("text", "")
+            if text:
+                line += f"\n{text}"
+            lines.append(line)
+        span.set_attribute(OUTPUT_VALUE, "\n\n".join(lines))
+        span.set_attribute(OUTPUT_MIME_TYPE, "text/plain")
+
+
 def classify_usage_source(
     token_usage: Mapping[str, int | None],
 ) -> str:
@@ -706,6 +769,7 @@ __all__ = [
     "record_content_enabled",
     "set_event_sink",
     "set_input_output",
+    "set_retrieval_documents",
     "set_span_summary",
     "set_llm_span_attributes",
     "set_prompt_metadata",

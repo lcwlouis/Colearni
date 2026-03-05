@@ -335,6 +335,48 @@ def test_content_preview_truncates_long_text() -> None:
     assert content_preview(None) is None
 
 
+def test_content_preview_respects_custom_preview_chars() -> None:
+    """content_preview uses the module-level _PREVIEW_CHARS value."""
+    import core.observability as obs
+
+    original = obs._PREVIEW_CHARS
+    try:
+        obs._PREVIEW_CHARS = 10
+        result = obs.content_preview("a" * 50)
+        assert result is not None
+        assert result.startswith("a" * 10 + "...")
+        assert "len=50" in result
+        # Text shorter than limit is returned as-is
+        assert obs.content_preview("short") == "short"
+    finally:
+        obs._PREVIEW_CHARS = original
+
+
+def test_configure_observability_sets_preview_chars() -> None:
+    """configure_observability with observability_preview_chars=1000 updates _PREVIEW_CHARS."""
+    import core.observability as obs
+
+    original = obs._PREVIEW_CHARS
+    try:
+        settings = get_settings().model_copy(
+            update={
+                "observability_enabled": False,
+                "observability_preview_chars": 1000,
+            }
+        )
+        configure_observability(settings)
+        assert obs._PREVIEW_CHARS == 1000
+
+        # Verify content_preview now uses the new limit
+        text = "x" * 1500
+        preview = obs.content_preview(text)
+        assert preview is not None
+        assert preview.startswith("x" * 1000 + "...")
+        assert "len=1500" in preview
+    finally:
+        obs._PREVIEW_CHARS = original
+
+
 def test_classify_usage_source() -> None:
     """classify_usage_source returns correct labels."""
     from core.observability import classify_usage_source
@@ -593,3 +635,21 @@ def test_graph_chunk_span_includes_extraction_counts(otel_exporter) -> None:
     assert len(spans) == 1
     assert spans[0].attributes.get("graph.concepts_extracted") == 4
     assert spans[0].attributes.get("graph.edges_extracted") == 2
+
+
+def test_set_retrieval_documents_empty_still_sets_query(otel_exporter) -> None:
+    """When documents=[], INPUT_VALUE (query) and OUTPUT_VALUE must still be set."""
+    from core.observability import (
+        INPUT_VALUE,
+        OUTPUT_VALUE,
+        SPAN_KIND_RETRIEVER,
+        set_retrieval_documents,
+    )
+
+    with start_span("retrieval.fts.search", kind=SPAN_KIND_RETRIEVER) as span:
+        set_retrieval_documents(span, query="machine learning", documents=[])
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].attributes.get(INPUT_VALUE) == "machine learning"
+    assert spans[0].attributes.get(OUTPUT_VALUE) == "No documents retrieved."
