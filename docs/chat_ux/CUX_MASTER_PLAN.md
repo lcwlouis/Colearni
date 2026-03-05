@@ -119,11 +119,11 @@ What is critically broken or materially missing:
 
 | Track | Child Plan | Status |
 |---|---|---|
-| `CUX1` Chat-Topic Binding | `docs/chat_ux/01_chat_topic_binding_plan.md` | pending |
-| `CUX2` Topic Hierarchy Awareness | `docs/chat_ux/02_topic_hierarchy_plan.md` | pending |
-| `CUX3` Header & Navigation Refactor | `docs/chat_ux/03_header_nav_plan.md` | pending |
-| `CUX4` Slideover & Practice UX | `docs/chat_ux/04_slideover_practice_plan.md` | pending |
-| `CUX5` Suggestion Relocation | `docs/chat_ux/05_suggestion_relocation_plan.md` | pending |
+| `CUX1` Chat-Topic Binding | `docs/chat_ux/01_chat_topic_binding_plan.md` | audit-passed |
+| `CUX2` Topic Hierarchy Awareness | `docs/chat_ux/02_topic_hierarchy_plan.md` | audit-passed |
+| `CUX3` Header & Navigation Refactor | `docs/chat_ux/03_header_nav_plan.md` | audit-passed |
+| `CUX4` Slideover & Practice UX | `docs/chat_ux/04_slideover_practice_plan.md` | audit-passed |
+| `CUX5` Suggestion Relocation | `docs/chat_ux/05_suggestion_relocation_plan.md` | audit-passed |
 
 ## Decision Log
 
