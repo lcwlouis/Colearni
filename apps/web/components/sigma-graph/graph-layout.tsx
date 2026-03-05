@@ -157,6 +157,8 @@ export function GraphLayout({ layout, isRunning, onAutoStop }: Props) {
         intervalRef.current = undefined;
       }
       clearTimeout(autoStopTimer.current);
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = 0;
     };
   }, [isRunning, layout, sigma]);
 

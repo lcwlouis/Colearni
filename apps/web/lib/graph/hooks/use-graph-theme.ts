@@ -9,6 +9,10 @@ export interface GraphTheme {
   dimmedNodeColor: string;
   highlightEdgeColor: string;
   selectionBorderColor: string;
+  /** Background fill for the hover/highlighted label box. */
+  hoverBackgroundColor: string;
+  /** Shadow colour for the hover/highlighted label box. */
+  hoverShadowColor: string;
   isDark: boolean;
 }
 
@@ -19,6 +23,8 @@ const LIGHT: GraphTheme = {
   dimmedNodeColor: "#e0e0e0",
   highlightEdgeColor: "#88ccff",
   selectionBorderColor: "#ff6600",
+  hoverBackgroundColor: "#FFFFFF",
+  hoverShadowColor: "#000000",
   isDark: false,
 };
 
@@ -29,6 +35,8 @@ const DARK: GraphTheme = {
   dimmedNodeColor: "#2a3540",
   highlightEdgeColor: "#5dadec",
   selectionBorderColor: "#ff8833",
+  hoverBackgroundColor: "#1e293b",
+  hoverShadowColor: "#000000",
   isDark: true,
 };
 

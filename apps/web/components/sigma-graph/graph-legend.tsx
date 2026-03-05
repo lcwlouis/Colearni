@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
-import { TIER_COLORS } from "@/lib/graph/constants";
+import { TIER_COLORS, MASTERY_INDICATORS, ACTIVE_CHAT_INDICATOR } from "@/lib/graph/constants";
 import styles from "./graph-legend.module.css";
 
 const TIER_LABELS: Record<string, string> = {
@@ -18,7 +18,7 @@ export function GraphLegend() {
   return (
     <div className={styles.legend}>
       <div className={styles.header}>
-        <span>Tiers</span>
+        <span>Legend</span>
         <button
           className={styles.toggle}
           onClick={() => setCollapsed((c) => !c)}
@@ -35,6 +35,16 @@ export function GraphLegend() {
               <span>{TIER_LABELS[tier] ?? tier}</span>
             </div>
           ))}
+          {Object.entries(MASTERY_INDICATORS).map(([status, icon]) => (
+            <div key={status} className={styles.item}>
+              <span style={{ fontSize: 12, lineHeight: 1 }}>{icon.trim()}</span>
+              <span>{status === "learned" ? "Mastered" : "Learning"}</span>
+            </div>
+          ))}
+          <div className={styles.item}>
+            <span style={{ fontSize: 12, lineHeight: 1 }}>{ACTIVE_CHAT_INDICATOR.trim()}</span>
+            <span>Active Chat</span>
+          </div>
         </div>
       )}
     </div>

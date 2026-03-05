@@ -1,6 +1,6 @@
 import Graph from "graphology";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
-import { TIER_COLORS, NODE_SIZE_RANGE, EDGE_SIZE_RANGE } from "./constants";
+import { TIER_COLORS, NODE_SIZE_RANGE, EDGE_SIZE_RANGE, NODE_BORDER_COLOR, NODE_BORDER_SIZE } from "./constants";
 
 /**
  * Convert API subgraph data into a graphology Graph instance
@@ -29,6 +29,9 @@ export function buildGraphologyGraph(
       tier: node.tier ?? null,
       conceptId: node.concept_id,
       masteryStatus: node.mastery_status,
+      type: "bordered",
+      borderColor: NODE_BORDER_COLOR,
+      borderSize: NODE_BORDER_SIZE,
     });
   }
 

@@ -47,6 +47,7 @@ interface GraphVizPanelProps {
   toggleTierFilter: (tier: string) => void;
   clearTierFilter: () => void;
   onGardenerSuccess?: () => void;
+  activeChatNodeKeys?: Set<string>;
 }
 
 export function GraphVizPanel({
@@ -76,6 +77,7 @@ export function GraphVizPanel({
   toggleTierFilter,
   clearTierFilter,
   onGardenerSuccess,
+  activeChatNodeKeys,
 }: GraphVizPanelProps) {
   const { phase, concepts, selectedDetail, subgraph, error } = state;
 
@@ -267,18 +269,12 @@ export function GraphVizPanel({
       )}
 
       <AsyncState
-        loading={phase === "loading_list" || phase === "loading_detail"}
+        loading={phase === "loading_list"}
         error={phase === "error" && !selectedDetail ? error : null}
         empty={phase === "list_ready" && concepts.length === 0}
         emptyLabel="No concepts found."
       />
 
-      <div className="graph-legend-bar">
-        <span className="graph-legend-dot" style={{ background: "#2ecc71" }} /> Learned
-        <span className="graph-legend-dot" style={{ background: "#f39c12" }} /> Learning
-        <span className="graph-legend-dot" style={{ background: "#95a5a6" }} /> Locked
-        <span className="graph-legend-dot" style={{ background: "#0f5f9c" }} /> Unseen
-      </div>
       {concepts.length > 0 && debouncedQuery.trim().length > 0 && !selectedDetail ? (
         <div className="concept-list">
           {concepts.map((c) => (
@@ -303,14 +299,15 @@ export function GraphVizPanel({
         <SigmaGraph
           nodes={fullGraph.nodes}
           edges={fullGraph.edges}
-          selectedId={selectedDetail?.concept.concept_id}
+          selectedId={selectedDetail?.concept.concept_id ?? focusNodeId ?? undefined}
           onSelect={handleGraphSelect}
           onBackgroundClick={handleGraphBgClick}
           focusNodeId={focusNodeId}
           searchHighlight={debouncedGraphSearch}
           onResetViewReady={handleResetViewReady}
           filteredTiers={filteredTiers}
-          isLoading={phase === "loading_list" || phase === "loading_detail"}
+          isLoading={phase === "loading_list"}
+          activeChatNodeKeys={activeChatNodeKeys}
         />
       ) : (
         <SigmaGraph
@@ -318,7 +315,7 @@ export function GraphVizPanel({
           edges={[]}
           onSelect={handleGraphSelect}
           onBackgroundClick={handleGraphBgClick}
-          isLoading={phase === "loading_list" || phase === "loading_detail"}
+          isLoading={phase === "loading_list"}
         />
       )}
     </section>

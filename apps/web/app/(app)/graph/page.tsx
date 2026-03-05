@@ -53,6 +53,7 @@ export default function GraphPage() {
           toggleTierFilter={g.toggleTierFilter}
           clearTierFilter={g.clearTierFilter}
           onGardenerSuccess={g.refreshFullGraph}
+          activeChatNodeKeys={g.activeChatNodeKeys}
         />
 
         <GraphDetailPanel

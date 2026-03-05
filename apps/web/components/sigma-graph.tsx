@@ -2,14 +2,16 @@
 
 import { useRef, useMemo, useState, useEffect, useCallback } from "react";
 import { LayoutControls } from "@/components/sigma-graph/layout-controls";
-import { SigmaContainer } from "@react-sigma/core";
+import { StableSigmaContainer } from "@/components/sigma-graph/stable-sigma-container";
 import "@react-sigma/core/lib/style.css";
 import type { GraphSubgraphNode, GraphSubgraphEdge } from "@/lib/api/types";
 import { buildGraphologyGraph } from "@/lib/graph/transform";
 import { buildSearchIndex, searchNodes } from "@/lib/graph/search";
 import { DEFAULT_SIGMA_SETTINGS } from "@/lib/graph/sigma-settings";
 import { useGraphTheme } from "@/lib/graph/hooks/use-graph-theme";
+import { createDrawNodeHover } from "@/lib/graph/draw-hover";
 import { GraphReducers } from "@/components/sigma-graph/graph-reducers";
+import { GraphFlash } from "@/components/sigma-graph/graph-flash";
 import { GraphLayout } from "@/components/sigma-graph/graph-layout";
 import type { LayoutType } from "@/components/sigma-graph/graph-layout";
 import { GraphEvents } from "@/components/sigma-graph/graph-events";
@@ -38,6 +40,7 @@ type Props = {
   isLoading?: boolean;
   /** Hide layout controls, camera, settings panel, legend, status bar */
   compact?: boolean;
+  activeChatNodeKeys?: Set<string>;
 };
 
 /**
@@ -72,6 +75,7 @@ function SigmaGraphInner({
   filteredTiers,
   isLoading,
   compact,
+  activeChatNodeKeys,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
@@ -79,6 +83,7 @@ function SigmaGraphInner({
   const [isLayoutRunning, setIsLayoutRunning] = useState(false);
   const settings = useGraphSettings();
   const graphTheme = useGraphTheme();
+  const flashRef = useRef(false);
 
   // Sync layout state when settings change
   useEffect(() => {
@@ -95,6 +100,7 @@ function SigmaGraphInner({
       labelColor: { color: graphTheme.labelColor },
       defaultEdgeColor: graphTheme.defaultEdgeColor,
       defaultNodeColor: graphTheme.defaultNodeColor,
+      defaultDrawNodeHover: createDrawNodeHover(graphTheme.hoverBackgroundColor, graphTheme.hoverShadowColor),
     }),
     [settings.showLabels, settings.labelDensity, settings.showEdgeLabels, graphTheme],
   );
@@ -169,7 +175,7 @@ function SigmaGraphInner({
         animation: "fadeIn 0.3s ease-in",
       }}
     >
-      <SigmaContainer
+      <StableSigmaContainer
         graph={graph}
         style={{ width: "100%", height: "100%", background: "var(--bg)" }}
         settings={sigmaSettings}
@@ -182,6 +188,12 @@ function SigmaGraphInner({
           hasSearchQuery={!!searchHighlight?.trim()}
           highlightNeighbors={settings.highlightNeighbors}
           theme={graphTheme}
+          activeChatKeys={activeChatNodeKeys}
+          flashRef={flashRef}
+        />
+        <GraphFlash
+          active={(activeChatNodeKeys?.size ?? 0) > 0}
+          flashRef={flashRef}
         />
         <GraphEvents
           onSelect={onSelect}
@@ -192,7 +204,7 @@ function SigmaGraphInner({
         />
         {!compact && <CameraControls containerRef={containerRef} />}
         {!compact && <ExpandPruneControls selectedId={selectedId} />}
-      </SigmaContainer>
+      </StableSigmaContainer>
       {!compact && (
         <LayoutControls
           layout={layout}

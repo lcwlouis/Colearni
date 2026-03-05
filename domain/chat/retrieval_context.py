@@ -7,9 +7,10 @@ import json
 from adapters.embeddings.factory import build_embedding_provider
 from core.observability import (
     SPAN_KIND_RETRIEVER,
-    record_content_enabled,
-    start_span,
     content_preview,
+    set_input_output,
+    set_retrieval_documents,
+    start_span,
 )
 from core.settings import Settings
 from domain.retrieval.fts_retriever import PgFtsRetriever
@@ -59,23 +60,14 @@ def retrieve_ranked_chunks(
         )
         if span is not None:
             span.set_attribute("retrieval.results_count", len(results))
-            if results:
-                include_preview = record_content_enabled()
-                doc_summary = json.dumps(
-                    [
-                        {
-                            "rank": i + 1,
-                            "chunk_id": r.chunk_id,
-                            "document_id": r.document_id,
-                            "score": round(r.score, 3),
-                            "method": r.retrieval_method,
-                            **({"preview": content_preview(r.text)} if include_preview else {}),
-                        }
-                        for i, r in enumerate(results[:10])
-                    ],
-                    default=str,
-                )
-                span.set_attribute("retrieval.documents", doc_summary)
+            set_retrieval_documents(
+                span,
+                query=query,
+                documents=[
+                    {"chunk_id": r.chunk_id, "document_id": r.document_id, "score": round(r.score, 3), "text": r.text, "retrieval_method": r.retrieval_method, "rank": i + 1}
+                    for i, r in enumerate(results[:10])
+                ],
+            )
         return results
 
 
@@ -103,6 +95,11 @@ def apply_concept_bias(
             if span is not None:
                 span.set_attribute("retrieval.graph.linked_count", 0)
                 span.set_attribute("retrieval.graph.boosted_count", 0)
+                set_input_output(
+                    span,
+                    input_value=f"Graph provenance lookup for concept_id={concept_id} — {len(chunks)} candidate chunks",
+                    output_value="No provenance links found for this concept — returning chunks unchanged.",
+                )
             return chunks
         boosted = [
             (
@@ -120,6 +117,34 @@ def apply_concept_bias(
             span.set_attribute(
                 "retrieval.graph.linked_chunk_ids",
                 json.dumps(sorted(linked_chunk_ids)),
+            )
+            # Build final result list for retrieval documents
+            final_results = [
+                RankedChunk(
+                    workspace_id=item[2].workspace_id,
+                    document_id=item[2].document_id,
+                    chunk_id=item[2].chunk_id,
+                    chunk_index=item[2].chunk_index,
+                    text=item[2].text,
+                    score=item[0],
+                    retrieval_method=item[2].retrieval_method,
+                )
+                for item in boosted
+            ]
+            set_retrieval_documents(
+                span,
+                query=f"Graph provenance bias for concept_id={concept_id} — boosted {boosted_count}/{len(chunks)} chunks by +0.15",
+                documents=[
+                    {
+                        "chunk_id": r.chunk_id,
+                        "document_id": r.document_id,
+                        "score": round(r.score, 3),
+                        "text": r.text,
+                        "retrieval_method": f"{r.retrieval_method} ★ graph-boosted" if r.chunk_id in linked_chunk_ids else r.retrieval_method,
+                        "rank": i + 1,
+                    }
+                    for i, r in enumerate(final_results[:5])
+                ],
             )
         return [
             RankedChunk(

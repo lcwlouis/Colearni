@@ -269,6 +269,14 @@ class Settings(BaseSettings):
             "OBSERVABILITY_RECORD_CONTENT",
         ),
     )
+    observability_preview_chars: int = Field(
+        default=256,
+        validation_alias=AliasChoices(
+            "APP_OBSERVABILITY_PREVIEW_CHARS",
+            "OBSERVABILITY_PREVIEW_CHARS",
+        ),
+        ge=1,
+    )
     litellm_base_url: str | None = Field(
         default=None,
         validation_alias=AliasChoices("APP_LITELLM_BASE_URL", "LITELLM_BASE_URL"),

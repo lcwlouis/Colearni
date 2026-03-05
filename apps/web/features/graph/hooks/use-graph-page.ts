@@ -50,6 +50,9 @@ export function useGraphPage() {
     total_concept_count?: number;
   } | null>(null);
 
+  // Active-chat node keys (concepts with recent chat sessions)
+  const [activeChatNodeKeys, setActiveChatNodeKeys] = useState<Set<string>>(new Set());
+
   // Graph controls
   const [maxNodes, setMaxNodes] = useState(100);
   const [maxEdges, setMaxEdges] = useState(300);
@@ -106,6 +109,34 @@ export function useGraphPage() {
       .then((res) => setFullGraph(res))
       .catch((e) => console.error("Failed to load full graph overview", e));
   }, [wsId, debouncedQuery, maxNodes, maxEdges]);
+
+  // Compute active-chat concept IDs by matching session titles against graph node names
+  useEffect(() => {
+    if (!wsId || !fullGraph || fullGraph.nodes.length === 0) return;
+    let cancelled = false;
+    apiClient
+      .listChatSessions(wsId, { limit: 100 })
+      .then((res) => {
+        if (cancelled) return;
+        const now = Date.now();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const recentSessions = res.sessions.filter(
+          (s) => s.title && now - new Date(s.last_activity_at).getTime() < oneDayMs,
+        );
+        const keys = new Set<string>();
+        for (const session of recentSessions) {
+          const titleLower = session.title!.toLowerCase();
+          for (const node of fullGraph.nodes) {
+            if (titleLower.includes(node.canonical_name.toLowerCase())) {
+              keys.add(String(node.concept_id));
+            }
+          }
+        }
+        setActiveChatNodeKeys(keys);
+      })
+      .catch((e) => console.error("Failed to load chat sessions for flash:", e));
+    return () => { cancelled = true; };
+  }, [wsId, fullGraph]);
 
   const refreshFullGraph = useCallback(() => {
     if (!wsId) return;
@@ -302,5 +333,6 @@ export function useGraphPage() {
     filteredTiers,
     toggleTierFilter,
     clearTierFilter,
+    activeChatNodeKeys,
   };
 }

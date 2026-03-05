@@ -1,8 +1,16 @@
 /**
  * Sigma.js renderer settings — separated from constants.ts because the
  * WebGL program imports cannot be loaded in a Node/JSDOM test environment.
+ *
+ * IMPORTANT: We explicitly import and register NodeCircleProgram and
+ * NodeBorderProgram here rather than relying on sigma's internal
+ * DEFAULT_NODE_PROGRAM_CLASSES. Turbopack
+ * can produce stale module references for sigma's internal relative imports
+ * during HMR and client-side navigation, causing "could not find program
+ * for node type circle" errors. Our own top-level import is stable.
  */
 
+import { NodeCircleProgram } from "sigma/rendering";
 import { NodeBorderProgram } from "@sigma/node-border";
 import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 
@@ -15,6 +23,7 @@ export const DEFAULT_SIGMA_SETTINGS = {
   defaultEdgeType: "curvedArrow" as const,
   defaultNodeType: "bordered" as const,
   nodeProgramClasses: {
+    circle: NodeCircleProgram,
     bordered: NodeBorderProgram,
   },
   edgeProgramClasses: {
