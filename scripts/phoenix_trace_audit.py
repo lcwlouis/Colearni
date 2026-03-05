@@ -164,10 +164,32 @@ def _get_nested(attrs: dict[str, Any], dotted_key: str) -> Any:
 
 
 def _parse_messages(attrs: dict[str, Any]) -> list[dict[str, str]] | None:
-    """Extract input messages from attributes."""
+    """Extract input messages from attributes.
+
+    Supports two formats:
+    - **Flattened (OpenInference)**: ``llm.input_messages`` is a dict with
+      numeric keys, each containing ``message.role`` / ``message.content``.
+    - **Legacy JSON string**: ``llm.input_messages`` is a JSON-encoded list
+      of ``{"role": ..., "content": ...}`` dicts.
+    """
     raw = _get_nested(attrs, "llm.input_messages")
     if not raw:
         return None
+    # Flattened format: dict with numeric string keys ("0", "1", ...)
+    if isinstance(raw, dict):
+        messages: list[dict[str, str]] = []
+        for key in sorted(raw.keys(), key=lambda k: int(k) if k.isdigit() else float("inf")):
+            if not key.isdigit():
+                continue
+            entry = raw[key]
+            if isinstance(entry, dict):
+                msg_data = entry.get("message", entry)
+                messages.append({
+                    "role": str(msg_data.get("role", "")),
+                    "content": str(msg_data.get("content", "")),
+                })
+        return messages if messages else None
+    # Legacy: JSON string
     if isinstance(raw, str):
         try:
             return json.loads(raw)

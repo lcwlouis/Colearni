@@ -269,6 +269,35 @@ def record_content_enabled() -> bool:
     return _OBSERVABILITY_ENABLED and _RECORD_CONTENT
 
 
+def _set_flattened_messages(
+    span: Any,
+    messages: Sequence[Mapping[str, object]],
+    prefix: str,
+) -> None:
+    """Set OpenInference flattened message attributes on a span.
+
+    Produces attributes like ``llm.input_messages.0.message.role``,
+    ``llm.input_messages.0.message.content`` per the OpenInference spec.
+    """
+    for i, msg in enumerate(messages):
+        role = str(msg.get("role", ""))
+        content = str(msg.get("content", ""))
+        span.set_attribute(f"{prefix}.{i}.message.role", role)
+        if record_content_enabled():
+            span.set_attribute(f"{prefix}.{i}.message.content", content)
+        # Handle tool calls if present
+        tool_calls = msg.get("tool_calls")
+        if tool_calls and isinstance(tool_calls, list):
+            for j, tc in enumerate(tool_calls):
+                if isinstance(tc, dict):
+                    fn = tc.get("function", {})
+                    if isinstance(fn, dict):
+                        span.set_attribute(
+                            f"{prefix}.{i}.message.tool_calls.{j}.tool_call.function.name",
+                            str(fn.get("name", "")),
+                        )
+
+
 def set_llm_span_attributes(
     span: Any,
     *,
@@ -282,7 +311,7 @@ def set_llm_span_attributes(
 
     Content policy:
     - Preview/length are always set when messages are provided.
-    - Full message bodies are only attached when ``record_content_enabled()``.
+    - Full message bodies use OpenInference flattened indexed format.
     """
     if span is None:
         return
@@ -302,19 +331,14 @@ def set_llm_span_attributes(
         full_json = json.dumps(list(messages), default=str)
         span.set_attribute("llm.input_messages.length", len(full_json))
         span.set_attribute("llm.input_messages.preview", content_preview(full_json) or "")
-        if record_content_enabled():
-            span.set_attribute(LLM_INPUT_MESSAGES, full_json)
+        _set_flattened_messages(span, messages, LLM_INPUT_MESSAGES)
 
     if response_message is not None:
         span.set_attribute("llm.output_messages.length", len(response_message))
         span.set_attribute("llm.output_messages.preview", content_preview(response_message) or "")
+        span.set_attribute(f"{LLM_OUTPUT_MESSAGES}.0.message.role", "assistant")
         if record_content_enabled():
-            span.set_attribute(
-                LLM_OUTPUT_MESSAGES,
-                json.dumps(
-                    [{"role": "assistant", "content": response_message}], default=str
-                ),
-            )
+            span.set_attribute(f"{LLM_OUTPUT_MESSAGES}.0.message.content", response_message)
 
     if token_usage:
         if token_usage.get("token_prompt") is not None:
