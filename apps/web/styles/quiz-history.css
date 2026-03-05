@@ -28,6 +28,12 @@
   font-size: 0.85rem;
 }
 
+.quiz-history__concept {
+  font-weight: 600;
+  color: var(--text);
+  width: 100%;
+}
+
 .quiz-history__date {
   color: var(--muted);
 }
@@ -55,6 +61,12 @@
 
 [data-theme="dark"] .quiz-history__score--fail {
   background: #2a1515;
+}
+
+.quiz-history__score--pending {
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--line);
 }
 
 .quiz-history__actions {

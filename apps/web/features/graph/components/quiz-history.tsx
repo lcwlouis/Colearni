@@ -102,17 +102,25 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
         {quizzes.map((q) => (
           <li key={q.quiz_id} className="quiz-history__item">
             <div className="quiz-history__info">
+              {q.concept_name && (
+                <span className="quiz-history__concept">{q.concept_name}</span>
+              )}
               <span className="quiz-history__date">
                 {new Date(q.created_at).toLocaleDateString()}
               </span>
               <span className="quiz-history__questions">
                 {q.item_count} questions
               </span>
-              {q.latest_attempt && (
+              {q.latest_attempt ? (
                 <span
                   className={`quiz-history__score ${q.latest_attempt.passed ? "quiz-history__score--pass" : "quiz-history__score--fail"}`}
                 >
-                  {Math.round(q.latest_attempt.score * 100)}%
+                  {Math.round(q.latest_attempt.score * 100)}%{" "}
+                  {q.latest_attempt.passed ? "Passed" : "Failed"}
+                </span>
+              ) : (
+                <span className="quiz-history__score quiz-history__score--pending">
+                  Not attempted
                 </span>
               )}
             </div>
