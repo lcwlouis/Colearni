@@ -10,7 +10,7 @@ import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from opentelemetry import trace
+from opentelemetry import context as context_api, trace
 
 _LOGGER = logging.getLogger("colearni.observability")
 _LOCK = threading.Lock()
@@ -235,6 +235,28 @@ def create_span(name: str, *, kind: str | None = None, **attributes: Any):
         span.set_attribute(OPENINFERENCE_SPAN_KIND, kind)
     _set_span_attributes(span, combined)
     return span
+
+
+@contextlib.contextmanager
+def use_span_context(span):
+    """Temporarily set *span* as the current span in OTel context.
+
+    Use this inside generators after ``create_span()`` to ensure child
+    spans created in the synchronous setup phase auto-parent under *span*.
+
+    The context is cleaned up when the block exits.  This is safe as long
+    as the ``with`` block does NOT cross async/thread boundaries (i.e. no
+    ``yield`` inside the ``with`` block).
+    """
+    if span is None or not _OBSERVABILITY_ENABLED:
+        yield
+        return
+    ctx = trace.set_span_in_context(span)
+    token = context_api.attach(ctx)
+    try:
+        yield
+    finally:
+        context_api.detach(token)
 
 
 def get_observation_context() -> dict[str, Any]:

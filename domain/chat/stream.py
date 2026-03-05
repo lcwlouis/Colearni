@@ -15,6 +15,7 @@ from core.observability import (
     SPAN_KIND_CHAIN,
     create_span,
     set_input_output,
+    use_span_context,
 )
 from core.schemas import (
     AssistantDraft,
@@ -114,6 +115,7 @@ def generate_chat_response_stream(
             request=request,
             settings=active_settings,
             grounding_mode=grounding_mode,
+            parent_span=span,
         ):
             if isinstance(event, ChatStreamFinalEvent) and event.envelope:
                 final_text = event.envelope.text
@@ -140,6 +142,7 @@ def _stream_inner(
     request: ChatRespondRequest,
     settings: Settings,
     grounding_mode: GroundingMode,
+    parent_span=None,
 ) -> Iterator[ChatStreamEvent]:
     # ── Phase: thinking ───────────────────────────────────────────────
     yield ChatStreamStatusEvent(phase=ChatPhase.THINKING)
@@ -169,59 +172,62 @@ def _stream_inner(
     # ── Phase: searching ──────────────────────────────────────────────
     yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="planning_turn", step_label="Analyzing question")
 
-    history_text = load_history_text(session, session_id=request.session_id)
+    # Set parent span as current so child spans auto-parent under chat.stream.
+    # Each block must be yield-free to avoid cross-thread context issues.
+    with use_span_context(parent_span):
+        history_text = load_history_text(session, session_id=request.session_id)
 
-    # ── Query analysis (AR1.1) ────────────────────────────────────────
-    query_analysis = run_query_analysis(
-        query=request.query,
-        history_summary=history_text,
-        llm_client=social_llm,
-    )
-    log.info(
-        "query_analysis intent=%s mode=%s retrieval=%s",
-        query_analysis.intent,
-        query_analysis.requested_mode,
-        query_analysis.needs_retrieval,
-    )
+        # ── Query analysis (AR1.1) ────────────────────────────────────────
+        query_analysis = run_query_analysis(
+            query=request.query,
+            history_summary=history_text,
+            llm_client=social_llm,
+        )
+        log.info(
+            "query_analysis intent=%s mode=%s retrieval=%s",
+            query_analysis.intent,
+            query_analysis.requested_mode,
+            query_analysis.needs_retrieval,
+        )
 
-    assessment_context = load_assessment_context(session, session_id=request.session_id)
+        assessment_context = load_assessment_context(session, session_id=request.session_id)
 
-    concept_resolution = resolve_concept_for_turn(
-        session,
-        workspace_id=request.workspace_id,
-        query=request.query,
-        history_text=history_text,
-        current_concept_id=request.concept_id,
-        suggested_concept_id=request.suggested_concept_id,
-        switch_decision=request.concept_switch_decision,
-    )
-
-    resolved_concept_id = (
-        concept_resolution.resolved_concept.concept_id
-        if concept_resolution.resolved_concept is not None
-        else None
-    )
-    resolved_name = (
-        concept_resolution.resolved_concept.canonical_name
-        if concept_resolution.resolved_concept is not None
-        else None
-    )
-    resolved_tier = (
-        concept_resolution.resolved_concept.tier
-        if concept_resolution.resolved_concept is not None
-        else None
-    )
-
-    ancestor_context = (
-        build_ancestor_context(
+        concept_resolution = resolve_concept_for_turn(
             session,
             workspace_id=request.workspace_id,
-            concept_id=resolved_concept_id,
-            tier=resolved_tier,
+            query=request.query,
+            history_text=history_text,
+            current_concept_id=request.concept_id,
+            suggested_concept_id=request.suggested_concept_id,
+            switch_decision=request.concept_switch_decision,
         )
-        if resolved_concept_id is not None
-        else ""
-    )
+
+        resolved_concept_id = (
+            concept_resolution.resolved_concept.concept_id
+            if concept_resolution.resolved_concept is not None
+            else None
+        )
+        resolved_name = (
+            concept_resolution.resolved_concept.canonical_name
+            if concept_resolution.resolved_concept is not None
+            else None
+        )
+        resolved_tier = (
+            concept_resolution.resolved_concept.tier
+            if concept_resolution.resolved_concept is not None
+            else None
+        )
+
+        ancestor_context = (
+            build_ancestor_context(
+                session,
+                workspace_id=request.workspace_id,
+                concept_id=resolved_concept_id,
+                tier=resolved_tier,
+            )
+            if resolved_concept_id is not None
+            else ""
+        )
 
     yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="checking_mastery", step_label="Checking mastery level")
     mastery_status = resolve_mastery_status(
@@ -261,26 +267,28 @@ def _stream_inner(
 
     # ── Plan-gated retrieval via EvidencePlan (AR2.1 / AR2.2) ────────
     yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="retrieving_chunks", step_label="Searching knowledge base")
-    evidence_plan = build_evidence_plan(
-        base_query=request.query,
-        workspace_id=request.workspace_id,
-        needs_retrieval=turn_plan.needs_retrieval,
-        top_k=request.top_k,
-        concept_id=(
-            concept_resolution.resolved_concept.concept_id
-            if concept_resolution.resolved_concept is not None
-            else None
-        ),
-        concept_name=resolved_name,
-        session=session,
-    )
+    with use_span_context(parent_span):
+        evidence_plan = build_evidence_plan(
+            base_query=request.query,
+            workspace_id=request.workspace_id,
+            needs_retrieval=turn_plan.needs_retrieval,
+            top_k=request.top_k,
+            concept_id=(
+                concept_resolution.resolved_concept.concept_id
+                if concept_resolution.resolved_concept is not None
+                else None
+            ),
+            concept_name=resolved_name,
+            session=session,
+        )
     if evidence_plan.expand_graph_neighbors:
         yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="expanding_graph", step_label="Finding related concepts")
-    evidence_plan, ranked_chunks = execute_evidence_plan(
-        session,
-        plan=evidence_plan,
-        settings=settings,
-    )
+    with use_span_context(parent_span):
+        evidence_plan, ranked_chunks = execute_evidence_plan(
+            session,
+            plan=evidence_plan,
+            settings=settings,
+        )
 
     # ── Empty workspace fast-path ─────────────────────────────────
     if evidence_plan.stop_reason == "empty_workspace":

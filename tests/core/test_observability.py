@@ -11,6 +11,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, Sp
 
 from core.observability import (
     configure_observability,
+    create_span,
     emit_event,
     observation_context,
     record_content_enabled,
@@ -18,6 +19,7 @@ from core.observability import (
     set_llm_span_attributes,
     set_tracer_provider_for_testing,
     start_span,
+    use_span_context,
 )
 from core.settings import get_settings
 
@@ -260,6 +262,35 @@ def test_emit_event_works_without_active_span(otel_exporter) -> None:
     assert result["event_name"] == "standalone.event"
     assert len(events) == 1
     set_event_sink(None)
+
+
+def test_use_span_context_nests_child_spans(otel_exporter) -> None:
+    """use_span_context makes create_span children parent correctly."""
+    parent = create_span("chat.stream")
+    assert parent is not None
+
+    with use_span_context(parent):
+        with start_span("retrieval.search"):
+            pass
+
+    parent.end()
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 2
+    child = next(s for s in spans if s.name == "retrieval.search")
+    assert child.parent is not None
+    assert child.parent.span_id == parent.get_span_context().span_id
+
+
+def test_use_span_context_noop_when_span_is_none(otel_exporter) -> None:
+    """use_span_context is a no-op when span is None."""
+    with use_span_context(None):
+        with start_span("orphan.span"):
+            pass
+
+    spans = otel_exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].name == "orphan.span"
 
 
 # ---- OBS-3: Prompt identity and content policy tests ----
