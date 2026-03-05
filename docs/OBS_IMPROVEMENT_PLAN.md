@@ -462,13 +462,13 @@ This section is initially empty. During the Self-Audit Convergence Protocol, the
 
 ## Execution Order (Update After Each Run)
 
-1. `OBS.1` Fix streaming span nesting — **pending**
-2. `OBS.2` Fix error handling gaps — **pending**
-3. `OBS.3` Adopt OpenInference flattened message format — **pending**
-4. `OBS.4` Add missing OpenInference semantic attributes — **pending**
-5. `OBS.5` Fix _PREVIEW_CHARS and content_preview — **pending**
-6. `OBS.6` Code quality: debug prints + gardener span — **pending**
-7. `OBS.7` Update documentation and audit script — **pending**
+1. `OBS.1` Fix streaming span nesting — **done** (commit e7fb31e)
+2. `OBS.2` Fix error handling gaps — **done** (commit 395ca08)
+3. `OBS.3` Adopt OpenInference flattened message format — **done** (commit aa44dfb)
+4. `OBS.4` Add missing OpenInference semantic attributes — **done** (commit deaf835)
+5. `OBS.5` Fix _PREVIEW_CHARS and content_preview — **done** (commit 86b14ae)
+6. `OBS.6` Code quality: debug prints + gardener span — **done** (commit 15538f9)
+7. `OBS.7` Update documentation and audit script — **done** (commit 15538f9)
 
 Re-read this file after every 2 completed slices and restate which slices remain.
 
