@@ -253,6 +253,46 @@ def workspace_has_no_chunks(session: Session, workspace_id: int) -> bool:
         return False
 
 
+def format_hierarchy_prompt_context(
+    *,
+    session_topic_name: str | None,
+    active_concept_name: str | None,
+    active_concept_tier: str | None,
+    ancestor_context: str,
+) -> str:
+    """Format hierarchy context for injection into tutor system prompt."""
+    if not active_concept_name:
+        return ""
+
+    lines: list[str] = ["TOPIC HIERARCHY CONTEXT:"]
+
+    if session_topic_name:
+        lines.append(f"Current session topic: {session_topic_name}")
+
+    tier_label = f" ({active_concept_tier})" if active_concept_tier else ""
+    lines.append(f"Active concept: {active_concept_name}{tier_label}")
+
+    if ancestor_context:
+        # ancestor_context looks like "Concept hierarchy (from parent to root): A → B → C"
+        # Extract the chain part after the colon and reverse to root → leaf order
+        if ": " in ancestor_context:
+            chain = ancestor_context.split(": ", 1)[1]
+            parts = [p.strip() for p in chain.split(" → ")]
+            parts.reverse()
+            hierarchy_str = " → ".join(parts) + " → " + active_concept_name
+        else:
+            hierarchy_str = active_concept_name
+        lines.append(f"Hierarchy: {hierarchy_str}")
+    else:
+        lines.append(f"Hierarchy: {active_concept_name}")
+
+    lines.append(
+        "The user is exploring a subtopic within the session's main topic."
+        " Stay aware of the broader context."
+    )
+    return "\n".join(lines)
+
+
 def _build_ancestor_context_line(ancestors: list[dict]) -> str:
     """Format ancestor chain into a compact context string."""
     if not ancestors:
@@ -281,3 +321,38 @@ def build_ancestor_context(
         return _build_ancestor_context_line(ancestors)
     except Exception:
         return ""
+
+
+def build_hierarchy_path(
+    session: Session,
+    *,
+    workspace_id: int,
+    concept_id: int | None,
+    tier: str | None,
+    concept_name: str | None = None,
+) -> list[dict[str, object]]:
+    """Return hierarchy path ordered root → leaf, with the current concept last.
+
+    Each element has ``concept_id`` (int), ``name`` (str), ``tier`` (str | None).
+    Returns an empty list when *concept_id* is ``None`` or on error.
+    """
+    if concept_id is None:
+        return []
+    try:
+        from domain.graph.explore import get_ancestor_chain  # avoid circular at module level
+
+        ancestors = get_ancestor_chain(session, workspace_id=workspace_id, concept_id=concept_id)
+        # ancestors are ordered immediate-parent → most-distant; reverse for root → leaf
+        path: list[dict[str, object]] = [
+            {
+                "concept_id": int(a["concept_id"]),
+                "name": a["canonical_name"],
+                "tier": a.get("tier"),
+            }
+            for a in reversed(ancestors)
+        ]
+        # Append the current concept itself as the leaf
+        path.append({"concept_id": concept_id, "name": concept_name or "", "tier": tier})
+        return path
+    except Exception:
+        return []

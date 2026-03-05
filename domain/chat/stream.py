@@ -43,7 +43,7 @@ from core.verifier import verify_assistant_draft
 from sqlalchemy.orm import Session
 
 from domain.chat.concept_resolver import resolve_concept_for_turn
-from domain.chat.retrieval_context import build_ancestor_context
+from domain.chat.retrieval_context import build_ancestor_context, format_hierarchy_prompt_context
 from domain.chat.evidence_builder import (
     build_document_summaries_context,
     build_workspace_citations,
@@ -227,6 +227,20 @@ def _stream_inner(
             )
             if resolved_concept_id is not None
             else ""
+        )
+
+        # ── Hierarchy prompt context (S2.4) ───────────────────────────────
+        session_topic_name: str | None = None
+        if hasattr(request, "session_id") and request.session_id:
+            from adapters.db.chat import get_chat_session_concept_name
+
+            session_topic_name = get_chat_session_concept_name(session, session_id=request.session_id)
+
+        hierarchy_prompt_context = format_hierarchy_prompt_context(
+            session_topic_name=session_topic_name,
+            active_concept_name=resolved_name,
+            active_concept_tier=resolved_tier,
+            ancestor_context=ancestor_context,
         )
 
     yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="checking_mastery", step_label="Checking mastery level")
@@ -439,7 +453,7 @@ def _stream_inner(
                 chunks=ranked_chunks,
                 expanded_document_ids=evidence_plan.expanded_document_ids,
             ),
-            graph_context="\n".join(filter(None, [ancestor_context, evidence_plan.graph_evidence_context])),
+            graph_context="\n".join(filter(None, [hierarchy_prompt_context, evidence_plan.graph_evidence_context])),
             flashcard_progress=flashcard_progress,
             learner_profile_summary=learner_profile_summary,
         )
@@ -494,7 +508,7 @@ def _stream_inner(
                 chunks=ranked_chunks,
                 expanded_document_ids=evidence_plan.expanded_document_ids,
             ),
-            graph_context="\n".join(filter(None, [ancestor_context, evidence_plan.graph_evidence_context])),
+            graph_context="\n".join(filter(None, [hierarchy_prompt_context, evidence_plan.graph_evidence_context])),
             quiz_context=quiz_context_text,
             flashcard_progress=flashcard_progress,
             learner_profile_summary=learner_profile_summary,

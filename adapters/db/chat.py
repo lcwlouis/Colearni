@@ -433,6 +433,32 @@ def update_session_title(
     }
 
 
+def get_chat_session_concept_name(session: Session, *, session_id: int) -> str | None:
+    """Return the canonical name of the concept bound to a chat session, or None."""
+    if not hasattr(session, "execute"):
+        return None
+    row = (
+        session.execute(
+            text(
+                """
+                SELECT c.canonical_name
+                FROM chat_sessions s
+                JOIN concepts_canon c ON c.id = s.concept_id
+                WHERE s.id = :session_id
+                  AND s.concept_id IS NOT NULL
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    return str(row["canonical_name"])
+
+
 def _as_json(payload: dict[str, Any]) -> str:
     import json
 
@@ -446,6 +472,7 @@ __all__ = [
     "count_chat_messages",
     "create_chat_session",
     "delete_chat_session",
+    "get_chat_session_concept_name",
     "latest_system_summary",
     "list_chat_messages",
     "list_chat_sessions",
