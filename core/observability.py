@@ -118,7 +118,7 @@ _SENSITIVE_MARKERS = (
     "secret",
 )
 _MAX_VALUE_CHARS = 65536
-_PREVIEW_CHARS = _MAX_VALUE_CHARS
+_PREVIEW_CHARS = 256
 
 
 def configure_observability(settings: Any) -> None:
