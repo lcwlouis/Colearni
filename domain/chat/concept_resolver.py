@@ -51,6 +51,7 @@ def resolve_concept_for_turn(
     current_concept_id: int | None,
     suggested_concept_id: int | None,
     switch_decision: SwitchDecision | None,
+    session_concept_id: int | None = None,
 ) -> ConceptResolution:
     if not hasattr(session, "execute"):
         return _fallback_resolution(
@@ -112,6 +113,21 @@ def resolve_concept_for_turn(
     ):
         resolved = current
 
+    # If session is bound to a topic, constrain resolution to its subtree.
+    _out_of_scope = False
+    if session_concept_id is not None and resolved is not None:
+        subtree = _get_subtree_concept_ids(
+            session, workspace_id=workspace_id, root_concept_id=session_concept_id,
+        )
+        if resolved.concept_id not in subtree:
+            _out_of_scope = True
+            if current is not None and current.concept_id in subtree:
+                resolved = current
+            else:
+                resolved = _concept_by_id(
+                    session, workspace_id=workspace_id, concept_id=session_concept_id,
+                )
+
     switch_suggestion: ConceptSwitchSuggestion | None = None
     if (
         current is not None
@@ -127,6 +143,16 @@ def resolve_concept_for_turn(
             reason="latest message appears closer to another concept",
         )
 
+    # When out-of-scope inference was blocked, suggest starting a new chat.
+    if _out_of_scope and inferred is not None and current is not None:
+        switch_suggestion = ConceptSwitchSuggestion(
+            from_concept_id=current.concept_id,
+            from_concept_name=current.canonical_name,
+            to_concept_id=inferred.concept_id,
+            to_concept_name=inferred.canonical_name,
+            reason="This topic is outside the current chat scope. Consider starting a new chat.",
+        )
+
     return ConceptResolution(
         resolved_concept=resolved,
         confidence=confidence,
@@ -134,6 +160,35 @@ def resolve_concept_for_turn(
         clarification_prompt=None,
         switch_suggestion=switch_suggestion,
     )
+
+
+def _get_subtree_concept_ids(
+    session: Session,
+    *,
+    workspace_id: int,
+    root_concept_id: int,
+) -> set[int]:
+    """Return concept IDs that are direct children of *root_concept_id* plus the root itself."""
+    rows = (
+        session.execute(
+            text(
+                """
+                SELECT tgt_concept_id AS concept_id
+                FROM edges_canon
+                WHERE workspace_id = :workspace_id
+                  AND src_concept_id = :root_id
+                  AND relation_type IN ('contains', 'has_subtopic')
+                  AND is_active = TRUE
+                """
+            ),
+            {"workspace_id": workspace_id, "root_id": root_concept_id},
+        )
+        .mappings()
+        .all()
+    )
+    result = {int(r["concept_id"]) for r in rows}
+    result.add(root_concept_id)
+    return result
 
 
 def _fallback_resolution(
@@ -267,6 +322,29 @@ def _infer_concept(
     if best is None:
         return suggested_concept, 0.0
     return best, best_score
+
+
+def _get_subtree_concept_ids(
+    session: Session,
+    *,
+    workspace_id: int,
+    root_concept_id: int,
+) -> set[int]:
+    """Get concept IDs that are direct children of the root concept."""
+    rows = session.execute(
+        text("""
+            SELECT tgt_concept_id AS concept_id
+            FROM edges_canon
+            WHERE workspace_id = :workspace_id
+              AND src_concept_id = :root_id
+              AND relation_type IN ('contains', 'has_subtopic')
+              AND is_active = TRUE
+        """),
+        {"workspace_id": workspace_id, "root_id": root_concept_id},
+    ).mappings().all()
+    result = {int(r["concept_id"]) for r in rows}
+    result.add(root_concept_id)
+    return result
 
 
 def _concept_by_id(

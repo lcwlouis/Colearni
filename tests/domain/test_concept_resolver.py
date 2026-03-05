@@ -247,6 +247,154 @@ def test_infer_concept_returns_topic_and_umbrella_tiers() -> None:
     assert score > 0
 
 
+def test_session_scope_blocks_out_of_subtree_resolution(monkeypatch: Any) -> None:
+    """When session_concept_id is set, inferred concepts outside the subtree are blocked."""
+    concept_root = ConceptInfo(concept_id=10, canonical_name="Machine Learning", tier="topic")
+    concept_child = ConceptInfo(concept_id=11, canonical_name="Gradient Descent", tier="subtopic")
+    concept_outside = ConceptInfo(concept_id=20, canonical_name="Calculus", tier="topic")
+
+    def fake_by_id(
+        _session: Any, *, workspace_id: int, concept_id: int | None,
+    ) -> ConceptInfo | None:
+        return {10: concept_root, 11: concept_child, 20: concept_outside}.get(concept_id)  # type: ignore[arg-type]
+
+    def fake_subtree(
+        _session: Any, *, workspace_id: int, root_concept_id: int,
+    ) -> set[int]:
+        return {10, 11}
+
+    monkeypatch.setattr("domain.chat.concept_resolver._concept_by_id", fake_by_id)
+    monkeypatch.setattr("domain.chat.concept_resolver._get_subtree_concept_ids", fake_subtree)
+    # Infer an out-of-scope concept with high confidence
+    monkeypatch.setattr(
+        "domain.chat.concept_resolver._infer_concept",
+        lambda *a, **kw: (concept_outside, 5.0),
+    )
+
+    resolution = resolve_concept_for_turn(
+        _SessionWithExecute(),
+        workspace_id=1,
+        query="Tell me about calculus",
+        history_text="",
+        current_concept_id=11,
+        suggested_concept_id=None,
+        switch_decision=None,
+        session_concept_id=10,
+    )
+    # Should stay on current (in-subtree) concept, not switch to Calculus
+    assert resolution.resolved_concept is not None
+    assert resolution.resolved_concept.concept_id == 11
+    # Should suggest starting a new chat
+    assert resolution.switch_suggestion is not None
+    assert "new chat" in resolution.switch_suggestion.reason.lower()
+    assert resolution.switch_suggestion.to_concept_id == 20
+
+
+def test_session_scope_allows_in_subtree_resolution(monkeypatch: Any) -> None:
+    """When session_concept_id is set, in-subtree concepts resolve normally."""
+    concept_root = ConceptInfo(concept_id=10, canonical_name="Machine Learning", tier="topic")
+    concept_child = ConceptInfo(concept_id=11, canonical_name="Gradient Descent", tier="subtopic")
+
+    def fake_by_id(
+        _session: Any, *, workspace_id: int, concept_id: int | None,
+    ) -> ConceptInfo | None:
+        return {10: concept_root, 11: concept_child}.get(concept_id)  # type: ignore[arg-type]
+
+    def fake_subtree(
+        _session: Any, *, workspace_id: int, root_concept_id: int,
+    ) -> set[int]:
+        return {10, 11}
+
+    monkeypatch.setattr("domain.chat.concept_resolver._concept_by_id", fake_by_id)
+    monkeypatch.setattr("domain.chat.concept_resolver._get_subtree_concept_ids", fake_subtree)
+    monkeypatch.setattr(
+        "domain.chat.concept_resolver._infer_concept",
+        lambda *a, **kw: (concept_child, 5.0),
+    )
+
+    resolution = resolve_concept_for_turn(
+        _SessionWithExecute(),
+        workspace_id=1,
+        query="How does gradient descent work?",
+        history_text="",
+        current_concept_id=10,
+        suggested_concept_id=None,
+        switch_decision=None,
+        session_concept_id=10,
+    )
+    assert resolution.resolved_concept is not None
+    assert resolution.resolved_concept.concept_id == 11
+
+
+def test_session_scope_none_behaves_normally(monkeypatch: Any) -> None:
+    """When session_concept_id is None, resolver works as before (no scoping)."""
+    concept_a = ConceptInfo(concept_id=1, canonical_name="Linear Map")
+    concept_b = ConceptInfo(concept_id=2, canonical_name="Gradient Descent")
+
+    def fake_by_id(
+        _session: Any, *, workspace_id: int, concept_id: int | None,
+    ) -> ConceptInfo | None:
+        return {1: concept_a, 2: concept_b}.get(concept_id)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("domain.chat.concept_resolver._concept_by_id", fake_by_id)
+    monkeypatch.setattr(
+        "domain.chat.concept_resolver._infer_concept",
+        lambda *a, **kw: (concept_b, 5.0),
+    )
+
+    resolution = resolve_concept_for_turn(
+        _SessionWithExecute(),
+        workspace_id=1,
+        query="Tell me about gradient descent",
+        history_text="linear map",
+        current_concept_id=1,
+        suggested_concept_id=None,
+        switch_decision=None,
+        session_concept_id=None,
+    )
+    # Without scoping, should switch freely
+    assert resolution.resolved_concept is not None
+    assert resolution.resolved_concept.concept_id == 2
+
+
+def test_session_scope_falls_back_to_root_when_current_outside(monkeypatch: Any) -> None:
+    """When current concept is also outside subtree, falls back to session root."""
+    concept_root = ConceptInfo(concept_id=10, canonical_name="Machine Learning", tier="topic")
+    concept_outside_a = ConceptInfo(concept_id=20, canonical_name="Calculus", tier="topic")
+    concept_outside_b = ConceptInfo(concept_id=30, canonical_name="Physics", tier="topic")
+
+    def fake_by_id(
+        _session: Any, *, workspace_id: int, concept_id: int | None,
+    ) -> ConceptInfo | None:
+        return {10: concept_root, 20: concept_outside_a, 30: concept_outside_b}.get(concept_id)  # type: ignore[arg-type]
+
+    def fake_subtree(
+        _session: Any, *, workspace_id: int, root_concept_id: int,
+    ) -> set[int]:
+        return {10, 11}
+
+    monkeypatch.setattr("domain.chat.concept_resolver._concept_by_id", fake_by_id)
+    monkeypatch.setattr("domain.chat.concept_resolver._get_subtree_concept_ids", fake_subtree)
+    monkeypatch.setattr(
+        "domain.chat.concept_resolver._infer_concept",
+        lambda *a, **kw: (concept_outside_b, 5.0),
+    )
+
+    resolution = resolve_concept_for_turn(
+        _SessionWithExecute(),
+        workspace_id=1,
+        query="Tell me about physics",
+        history_text="",
+        current_concept_id=20,
+        suggested_concept_id=None,
+        switch_decision=None,
+        session_concept_id=10,
+    )
+    # Should fall back to session root
+    assert resolution.resolved_concept is not None
+    assert resolution.resolved_concept.concept_id == 10
+
+
 def test_infer_concept_allows_null_tier_legacy_concepts() -> None:
     """Legacy concepts with tier=NULL should still be valid switch candidates."""
     rows = [
