@@ -452,6 +452,29 @@ def update_session_title(
     }
 
 
+def update_unbound_session_title(
+    session: Session,
+    *,
+    session_id: int,
+    title: str,
+) -> None:
+    """Update title for unbound sessions (no concept_id) to reflect topic drift."""
+    normalized = title.strip()
+    if not normalized:
+        return
+    session.execute(
+        text(
+            """
+            UPDATE chat_sessions
+            SET title = :title, updated_at = now()
+            WHERE id = :session_id
+              AND concept_id IS NULL
+            """
+        ),
+        {"session_id": session_id, "title": normalized[:120]},
+    )
+
+
 def get_chat_session_concept_name(session: Session, *, session_id: int) -> str | None:
     """Return the canonical name of the concept bound to a chat session, or None."""
     if not hasattr(session, "execute"):
@@ -514,4 +537,5 @@ __all__ = [
     "resolve_session_by_public_id",
     "set_chat_session_title_if_missing",
     "update_session_title",
+    "update_unbound_session_title",
 ]

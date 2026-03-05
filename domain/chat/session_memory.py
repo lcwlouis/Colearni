@@ -12,6 +12,7 @@ from adapters.db.chat import (
     latest_system_summary,
     list_recent_chat_messages,
     set_chat_session_title_if_missing,
+    update_unbound_session_title,
 )
 from domain.chat.title_gen import generate_session_title
 from sqlalchemy import text
@@ -116,6 +117,16 @@ def persist_turn(
             session_concept_name=session_concept_name,
         ),
     )
+    # For unbound sessions, update title to reflect topic drift
+    if concept_name and not session_concept_name:
+        update_unbound_session_title(
+            session,
+            session_id=session_id,
+            title=generate_session_title(
+                user_query=user_text,
+                concept_name=concept_name,
+            ),
+        )
     maybe_compact_session_context(
         session,
         workspace_id=workspace_id,
