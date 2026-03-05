@@ -16,6 +16,7 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
   const [loading, setLoading] = useState(true);
   const [selectedQuizId, setSelectedQuizId] = useState<number | null>(null);
   const [retryingQuizId, setRetryingQuizId] = useState<number | null>(null);
+  const [retryLoading, setRetryLoading] = useState(false);
 
   const fetchQuizzes = useCallback(async () => {
     setLoading(true);
@@ -56,6 +57,23 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
     };
   }, [workspaceId, conceptId]);
 
+  async function handleRetry(quiz: PracticeQuizHistoryEntry) {
+    if (quiz.concept_id == null) return;
+    setRetryLoading(true);
+    setRetryingQuizId(quiz.quiz_id);
+    try {
+      const newQuiz = await apiClient.createPracticeQuiz(workspaceId, {
+        concept_id: quiz.concept_id,
+      });
+      setSelectedQuizId(newQuiz.quiz_id);
+    } catch (err) {
+      console.error("Failed to create retry quiz:", err);
+      setRetryingQuizId(null);
+    } finally {
+      setRetryLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <p style={{ color: "var(--muted)", padding: "1rem" }}>
@@ -84,7 +102,7 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
       <QuizViewer
         workspaceId={workspaceId}
         quizId={selectedQuizId}
-        isRetry={retryingQuizId === selectedQuizId}
+        isRetry={retryingQuizId != null}
         onBack={() => {
           setSelectedQuizId(null);
           setRetryingQuizId(null);
@@ -134,12 +152,12 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setRetryingQuizId(q.quiz_id);
-                  setSelectedQuizId(q.quiz_id);
-                }}
+                disabled={retryLoading || q.concept_id == null}
+                onClick={() => handleRetry(q)}
               >
-                Retry
+                {retryLoading && retryingQuizId === q.quiz_id
+                  ? "Creating…"
+                  : "Retry"}
               </button>
             </div>
           </li>
