@@ -8,13 +8,16 @@ const SigmaGraph = dynamic(() => import("@/components/sigma-graph"), {
   loading: () => <p style={{ color: "var(--muted)" }}>Loading graph…</p>,
 });
 import { ConceptActivityPanel } from "@/components/concept-activity-panel";
+import { HierarchyBreadcrumb } from "@/components/hierarchy-breadcrumb";
 import { LevelUpCard } from "@/components/level-up-card";
 import { FlashcardStack } from "@/features/graph/components/flashcard-stack";
 import { QuizHistory } from "@/features/graph/components/quiz-history";
 import type {
+  ConceptSwitchSuggestion,
   GraphConceptSummary,
   GraphSubgraphResponse,
   ConceptActivityResponse,
+  HierarchyNode,
 } from "@/lib/api/types";
 import type { LevelUpState } from "@/lib/tutor/level-up-state";
 import { masteryLabel } from "../types";
@@ -51,6 +54,16 @@ interface TutorSlideOverProps {
 
   // Practice tab props
   workspaceId?: string;
+
+  // Hierarchy breadcrumb
+  hierarchyPath?: HierarchyNode[];
+
+  // Concept switch suggestion (rendered at bottom of sidebar)
+  switchSuggestion?: ConceptSwitchSuggestion | null;
+  setSwitchDecision?: (decision: "accept" | "reject" | null) => void;
+  switchDecisionRef?: React.MutableRefObject<"accept" | "reject" | null>;
+  setSwitchSuggestion?: (suggestion: ConceptSwitchSuggestion | null) => void;
+  onStartNewChat?: (conceptId: number) => void;
 }
 
 const TAB_LABELS: Record<SlideOverTab, string> = {
@@ -78,9 +91,18 @@ export function TutorSlideOver({
   onSubmitQuiz,
   dispatchReset,
   workspaceId,
+  hierarchyPath,
+  switchSuggestion,
+  setSwitchDecision,
+  switchDecisionRef,
+  setSwitchSuggestion,
+  onStartNewChat,
 }: TutorSlideOverProps) {
   return (
     <aside className={`panel slide-over${closing ? " closing" : ""}`}>
+      {hierarchyPath && hierarchyPath.length > 1 && (
+        <HierarchyBreadcrumb path={hierarchyPath} />
+      )}
       <nav className="slide-over__tabs" role="tablist">
         {(Object.keys(TAB_LABELS) as SlideOverTab[]).map((tab) => (
           <button
@@ -132,6 +154,61 @@ export function TutorSlideOver({
           />
         )}
       </div>
+
+      {switchSuggestion && setSwitchSuggestion && onStartNewChat ? (
+        <div style={{
+          margin: "0.75rem",
+          padding: "0.75rem",
+          borderRadius: "0.5rem",
+          background: "var(--bg-raised, #f5f5f5)",
+          border: "1px solid var(--line)",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+            <span style={{ fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>
+              Suggested Topic
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSwitchDecision?.("reject");
+                if (switchDecisionRef) switchDecisionRef.current = "reject";
+                setSwitchSuggestion(null);
+              }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: "1rem", lineHeight: 1, padding: 0 }}
+              aria-label="Dismiss suggestion"
+            >
+              ×
+            </button>
+          </div>
+          <p style={{ fontWeight: 500, fontSize: "0.9rem", margin: "0 0 0.25rem 0", color: "var(--text)" }}>
+            {switchSuggestion.to_concept_name}
+          </p>
+          {switchSuggestion.reason && (
+            <p style={{ fontSize: "0.8rem", color: "var(--muted)", margin: "0 0 0.5rem 0" }}>
+              {switchSuggestion.reason}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              onStartNewChat(switchSuggestion.to_concept_id);
+              setSwitchSuggestion(null);
+            }}
+            style={{
+              fontSize: "0.8rem",
+              padding: "0.3rem 0.75rem",
+              borderRadius: "0.25rem",
+              border: "1px solid var(--line)",
+              background: "var(--bg, white)",
+              color: "var(--text)",
+              cursor: "pointer",
+              width: "100%",
+            }}
+          >
+            Start new chat →
+          </button>
+        </div>
+      ) : null}
     </aside>
   );
 }

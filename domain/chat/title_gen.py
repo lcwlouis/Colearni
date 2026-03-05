@@ -24,15 +24,20 @@ def generate_session_title(
     *,
     user_query: str,
     concept_name: str | None = None,
+    session_concept_name: str | None = None,
 ) -> str:
     """Derive a short, topic-aware title for a chat session.
 
     Strategy:
+    0. If session has a bound concept, return its name directly (CUX1).
     1. If a concept was resolved, prefer "{concept_name} Discussion"
        (or just the concept name if it's already ≥2 words).
     2. Otherwise, extract key words from the user query.
     3. Title-case the result, clamp to 2–5 words.
     """
+    if session_concept_name and session_concept_name.strip():
+        return session_concept_name.strip()
+
     if concept_name and concept_name.strip():
         name = concept_name.strip()
         words = name.split()

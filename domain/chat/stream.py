@@ -26,7 +26,7 @@ from core.schemas import (
     ConversationMeta,
     GroundingMode,
 )
-from core.schemas.assistant import GenerationTrace
+from core.schemas.assistant import GenerationTrace, HierarchyNode
 from core.schemas.chat import (
     ChatPhase,
     ChatStreamAnswerPartEvent,
@@ -43,7 +43,7 @@ from core.verifier import verify_assistant_draft
 from sqlalchemy.orm import Session
 
 from domain.chat.concept_resolver import resolve_concept_for_turn
-from domain.chat.retrieval_context import build_ancestor_context, format_hierarchy_prompt_context
+from domain.chat.retrieval_context import build_ancestor_context, build_hierarchy_path, format_hierarchy_prompt_context
 from domain.chat.evidence_builder import (
     build_document_summaries_context,
     build_workspace_citations,
@@ -192,6 +192,15 @@ def _stream_inner(
 
         assessment_context = load_assessment_context(session, session_id=request.session_id)
 
+        # ── Session concept lookup (CUX1) ─────────────────────────────────
+        session_topic_name: str | None = None
+        session_concept_id: int | None = None
+        if hasattr(request, "session_id") and request.session_id:
+            from adapters.db.chat import get_chat_session_concept_name, get_chat_session_concept_id
+
+            session_topic_name = get_chat_session_concept_name(session, session_id=request.session_id)
+            session_concept_id = get_chat_session_concept_id(session, session_id=request.session_id)
+
         concept_resolution = resolve_concept_for_turn(
             session,
             workspace_id=request.workspace_id,
@@ -200,6 +209,7 @@ def _stream_inner(
             current_concept_id=request.concept_id,
             suggested_concept_id=request.suggested_concept_id,
             switch_decision=request.concept_switch_decision,
+            session_concept_id=session_concept_id,
         )
 
         resolved_concept_id = (
@@ -229,12 +239,13 @@ def _stream_inner(
             else ""
         )
 
-        # ── Hierarchy prompt context (S2.4) ───────────────────────────────
-        session_topic_name: str | None = None
-        if hasattr(request, "session_id") and request.session_id:
-            from adapters.db.chat import get_chat_session_concept_name
-
-            session_topic_name = get_chat_session_concept_name(session, session_id=request.session_id)
+        hierarchy_path_data = build_hierarchy_path(
+            session,
+            workspace_id=request.workspace_id,
+            concept_id=resolved_concept_id,
+            tier=resolved_tier,
+            concept_name=resolved_name,
+        )
 
         hierarchy_prompt_context = format_hierarchy_prompt_context(
             session_topic_name=session_topic_name,
@@ -333,6 +344,8 @@ def _stream_inner(
             user_id=request.user_id,
             user_text=request.query,
             assistant_payload=empty_env.model_dump(mode="json"),
+            concept_name=resolved_name,
+            session_concept_name=session_topic_name,
             settings=settings,
         )
         yield ChatStreamFinalEvent(envelope=empty_env)
@@ -558,6 +571,9 @@ def _stream_inner(
             if concept_resolution.switch_suggestion is not None
             else None
         ),
+        hierarchy_path=[
+            HierarchyNode(**node) for node in hierarchy_path_data
+        ],
     )
     envelope = envelope.model_copy(update={"conversation_meta": meta})
 
@@ -640,6 +656,7 @@ def _stream_inner(
         user_text=request.query,
         assistant_payload=envelope.model_dump(mode="json"),
         concept_name=resolved_name,
+        session_concept_name=session_topic_name,
         settings=settings,
     )
 

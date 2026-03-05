@@ -53,6 +53,7 @@ class ChatSessionSummary(BaseModel):
     workspace_id: int = Field(gt=0)
     user_id: int = Field(gt=0)
     title: str | None = None
+    concept_id: int | None = None
     last_activity_at: datetime
 
 

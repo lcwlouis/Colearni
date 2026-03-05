@@ -8,6 +8,7 @@ interface ConceptSwitchBannerProps {
   setSwitchDecision: (decision: "accept" | "reject" | null) => void;
   switchDecisionRef: React.MutableRefObject<"accept" | "reject" | null>;
   setSwitchSuggestion: (suggestion: ConceptSwitchSuggestion | null) => void;
+  onStartNewChat?: (conceptId: number) => void;
 }
 
 /**
@@ -23,31 +24,48 @@ export function ConceptSwitchBanner({
   setSwitchDecision,
   switchDecisionRef,
   setSwitchSuggestion,
+  onStartNewChat,
 }: ConceptSwitchBannerProps) {
+  const isOutOfScope = switchSuggestion.reason?.includes("outside the current chat scope");
+
   return (
     <div className="switch-banner" role="status" aria-live="polite">
       <span className="switch-banner-text">
-        💡 Possible topic:{" "}
+        💡 {isOutOfScope ? "Different topic:" : "Possible topic:"}{" "}
         <strong>{switchSuggestion.to_concept_name}</strong>
       </span>
       <span className="switch-banner-actions">
-        <button
-          type="button"
-          className="secondary"
-          style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}
-          onClick={() => {
-            const matched = concepts.find(
-              (item) => item.concept_id === switchSuggestion.to_concept_id,
-            );
-            if (matched) setCurrentConcept(matched);
-            setSuggestedConceptId(switchSuggestion.to_concept_id);
-            setSwitchDecision("accept");
-            switchDecisionRef.current = "accept";
-            setSwitchSuggestion(null);
-          }}
-        >
-          Switch
-        </button>
+        {isOutOfScope && onStartNewChat ? (
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}
+            onClick={() => {
+              onStartNewChat(switchSuggestion.to_concept_id);
+              setSwitchSuggestion(null);
+            }}
+          >
+            Start new chat
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: "0.75rem", padding: "0.15rem 0.5rem" }}
+            onClick={() => {
+              const matched = concepts.find(
+                (item) => item.concept_id === switchSuggestion.to_concept_id,
+              );
+              if (matched) setCurrentConcept(matched);
+              setSuggestedConceptId(switchSuggestion.to_concept_id);
+              setSwitchDecision("accept");
+              switchDecisionRef.current = "accept";
+              setSwitchSuggestion(null);
+            }}
+          >
+            Switch
+          </button>
+        )}
         <button
           type="button"
           className="secondary"

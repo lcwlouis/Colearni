@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from domain.chat.retrieval_context import (
     _build_ancestor_context_line,
     build_ancestor_context,
+    build_hierarchy_path,
 )
 
 
@@ -92,3 +93,75 @@ class TestBuildAncestorContext:
                 session, workspace_id=1, concept_id=42, tier="subtopic"
             )
         assert result == ""
+
+
+class TestBuildHierarchyPath:
+    def test_correct_root_to_leaf_order(self):
+        """Ancestors (parent → root) should be reversed to root → leaf, with current concept last."""
+        session = MagicMock()
+        ancestors = [
+            {"concept_id": "20", "canonical_name": "Subtopic A", "description": "", "tier": "subtopic"},
+            {"concept_id": "10", "canonical_name": "Topic X", "description": "", "tier": "topic"},
+            {"concept_id": "1", "canonical_name": "Umbrella", "description": "", "tier": "umbrella"},
+        ]
+        with patch("domain.graph.explore.get_ancestor_chain", return_value=ancestors):
+            result = build_hierarchy_path(
+                session,
+                workspace_id=1,
+                concept_id=99,
+                tier="granular",
+                concept_name="Detail Z",
+            )
+        assert len(result) == 4
+        assert result[0] == {"concept_id": 1, "name": "Umbrella", "tier": "umbrella"}
+        assert result[1] == {"concept_id": 10, "name": "Topic X", "tier": "topic"}
+        assert result[2] == {"concept_id": 20, "name": "Subtopic A", "tier": "subtopic"}
+        assert result[3] == {"concept_id": 99, "name": "Detail Z", "tier": "granular"}
+
+    def test_empty_list_when_no_concept_id(self):
+        session = MagicMock()
+        result = build_hierarchy_path(
+            session, workspace_id=1, concept_id=None, tier="topic"
+        )
+        assert result == []
+
+    def test_no_ancestors_still_includes_current_concept(self):
+        """When no ancestors exist, the path should contain only the current concept."""
+        session = MagicMock()
+        with patch("domain.graph.explore.get_ancestor_chain", return_value=[]):
+            result = build_hierarchy_path(
+                session,
+                workspace_id=1,
+                concept_id=42,
+                tier="topic",
+                concept_name="Solo Topic",
+            )
+        assert result == [{"concept_id": 42, "name": "Solo Topic", "tier": "topic"}]
+
+    def test_exception_returns_empty_list(self):
+        session = MagicMock()
+        with patch(
+            "domain.graph.explore.get_ancestor_chain",
+            side_effect=RuntimeError("db error"),
+        ):
+            result = build_hierarchy_path(
+                session, workspace_id=1, concept_id=42, tier="subtopic"
+            )
+        assert result == []
+
+    def test_single_ancestor(self):
+        session = MagicMock()
+        ancestors = [
+            {"concept_id": "5", "canonical_name": "Parent", "description": "", "tier": "topic"},
+        ]
+        with patch("domain.graph.explore.get_ancestor_chain", return_value=ancestors):
+            result = build_hierarchy_path(
+                session,
+                workspace_id=1,
+                concept_id=15,
+                tier="subtopic",
+                concept_name="Child",
+            )
+        assert len(result) == 2
+        assert result[0] == {"concept_id": 5, "name": "Parent", "tier": "topic"}
+        assert result[1] == {"concept_id": 15, "name": "Child", "tier": "subtopic"}

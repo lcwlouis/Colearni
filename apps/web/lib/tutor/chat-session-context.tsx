@@ -13,7 +13,7 @@ interface ChatSessionContextType {
     sessionsError: string | null;
     setActiveSessionId: (id: string | null) => void;
     refreshSessions: () => Promise<void>;
-    startNewSession: () => Promise<string | null>;
+    startNewSession: (conceptId?: number) => Promise<string | null>;
     deleteSession: (sessionId: string) => Promise<void>;
     renameSession: (sessionId: string, title: string) => void; // Optimistic rename
     syncUrl: (sessionId: string) => void;
@@ -82,7 +82,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         }
     };
 
-    const startNewSession = async (): Promise<string | null> => {
+    const startNewSession = async (conceptId?: number): Promise<string | null> => {
         if (!wsId) return null;
         // Guard: if the active session looks empty (no title), just re-select it
         if (activeSessionId) {
@@ -97,7 +97,9 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         }
         setSessionsError(null);
         try {
-            const created = await apiClient.createChatSession(wsId, {});
+            const created = await apiClient.createChatSession(wsId, {
+                ...(conceptId ? { concept_id: conceptId } : {}),
+            });
             setSessions((prev) => [created, ...prev]);
             setActiveSessionId(created.public_id);
             if (pathname !== "/tutor") {

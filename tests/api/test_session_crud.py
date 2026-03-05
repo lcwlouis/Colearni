@@ -114,7 +114,7 @@ def client(monkeypatch: Any, mem_db: _InMemoryDB) -> Generator[TestClient, None,
     # Wire route-level imports to in-memory store
     monkeypatch.setattr(
         "apps.api.routes.chat.create_session",
-        lambda _session, *, workspace_id, user_id, title: mem_db.create(workspace_id, user_id, title),
+        lambda _session, *, workspace_id, user_id, title, concept_id=None: mem_db.create(workspace_id, user_id, title),
     )
     monkeypatch.setattr(
         "apps.api.routes.chat.list_sessions",

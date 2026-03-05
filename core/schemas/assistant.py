@@ -149,6 +149,12 @@ class ConceptSwitchSuggestion(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class HierarchyNode(BaseModel):
+    concept_id: int
+    name: str
+    tier: str | None = None
+
+
 class ConversationMeta(BaseModel):
     session_id: int | None = Field(default=None, gt=0)
     resolved_concept_id: int | None = Field(default=None, gt=0)
@@ -157,6 +163,7 @@ class ConversationMeta(BaseModel):
     concept_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     requires_clarification: bool = False
     concept_switch_suggestion: ConceptSwitchSuggestion | None = None
+    hierarchy_path: list[HierarchyNode] = Field(default_factory=list)
 
 
 class AnswerParts(BaseModel):

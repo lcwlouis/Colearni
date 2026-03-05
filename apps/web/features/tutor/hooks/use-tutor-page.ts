@@ -6,6 +6,7 @@ import type {
   GraphConceptSummary,
   GraphSubgraphResponse,
   GroundingMode,
+  HierarchyNode,
   OnboardingStatusResponse,
 } from "@/lib/api/types";
 import { useChatSession } from "@/lib/tutor/chat-session-context";
@@ -19,13 +20,17 @@ import type { SlideOverTab } from "../components/tutor-slide-over";
 export function useTutorPage() {
   const { user, isLoading: authLoading, activeWorkspaceId } = useRequireAuth();
   const wsId = activeWorkspaceId ?? undefined;
-  const { activeSessionId, setActiveSessionId, startNewSession, refreshSessions } = useChatSession();
+  const { activeSessionId, setActiveSessionId, startNewSession, refreshSessions, sessions } = useChatSession();
   const searchParams = useSearchParams();
   const topicParam = searchParams.get("topic");
   const sessionParam = searchParams.get("session");
 
   const [grounding_mode, setGroundingMode] = useState<GroundingMode>("hybrid");
   const [tutorProtocol, setTutorProtocol] = useState(false);
+
+  // Derive session title from active session
+  const activeSession = sessions.find((s) => s.public_id === activeSessionId);
+  const sessionTitle = activeSession?.title ?? null;
 
   // Concept state
   const [concepts, setConcepts] = useState<GraphConceptSummary[]>([]);
@@ -40,6 +45,9 @@ export function useTutorPage() {
   const [switchSuggestion, setSwitchSuggestion] = useState<ConceptSwitchSuggestion | null>(null);
   const [switchDecision, setSwitchDecision] = useState<"accept" | "reject" | null>(null);
   const switchDecisionRef = useRef<"accept" | "reject" | null>(null);
+
+  // Hierarchy breadcrumb state
+  const [hierarchyPath, setHierarchyPath] = useState<HierarchyNode[]>([]);
 
   // Slide-over state (unified drawer)
   const [showSlideOver, setShowSlideOver] = useState(false);
@@ -92,6 +100,7 @@ export function useTutorPage() {
     setSwitchSuggestion,
     setSuggestedConceptId,
     setSwitchDecision,
+    setHierarchyPath,
   });
 
   // Load concepts
@@ -164,6 +173,15 @@ export function useTutorPage() {
     setDrawerOpen(true);
   }
 
+  function toggleSidebar() {
+    if (showSlideOver) {
+      closeDrawer();
+    } else {
+      setShowSlideOver(true);
+      setDrawerOpen(true);
+    }
+  }
+
   // Effects
   useEffect(() => {
     void loadConcepts();
@@ -205,6 +223,13 @@ export function useTutorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId]);
 
+  // S1.7: Sync currentConcept from session's bound concept_id
+  useEffect(() => {
+    if (!activeSession?.concept_id || !concepts.length) return;
+    const matched = concepts.find((c) => c.concept_id === activeSession.concept_id);
+    if (matched) setCurrentConcept(matched);
+  }, [activeSessionId, sessions, concepts]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (showSlideOver && slideOverTab === "graph" && currentConcept) {
       void loadSubgraph(currentConcept.concept_id);
@@ -231,6 +256,8 @@ export function useTutorPage() {
     grounding_mode,
     setGroundingMode,
     tutorProtocol,
+    sessionTitle,
+    startNewSession,
     // Concepts
     concepts,
     conceptsLoading,
@@ -255,6 +282,8 @@ export function useTutorPage() {
     switchDecision,
     setSwitchDecision,
     switchDecisionRef,
+    // Hierarchy
+    hierarchyPath,
     // Drawers
     showSlideOver,
     slideOverTab,
@@ -263,6 +292,7 @@ export function useTutorPage() {
     closingDrawer,
     openDrawer,
     closeDrawer,
+    toggleSidebar,
     // Onboarding
     onboarding,
     // Concept activity

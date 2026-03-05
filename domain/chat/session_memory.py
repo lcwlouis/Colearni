@@ -77,6 +77,7 @@ def persist_turn(
     user_text: str,
     assistant_payload: dict[str, Any],
     concept_name: str | None = None,
+    session_concept_name: str | None = None,
     settings: Any | None = None,
 ) -> None:
     if session_id is None:
@@ -112,6 +113,7 @@ def persist_turn(
         title=generate_session_title(
             user_query=user_text,
             concept_name=concept_name,
+            session_concept_name=session_concept_name,
         ),
     )
     maybe_compact_session_context(

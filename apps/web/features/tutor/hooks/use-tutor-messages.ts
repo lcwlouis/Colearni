@@ -6,6 +6,7 @@ import type {
   ConceptSwitchSuggestion,
   GraphConceptSummary,
   GroundingMode,
+  HierarchyNode,
 } from "@/lib/api/types";
 import type { ChatPhase, TimelineMessage, ActivityStep } from "../types";
 import { errorText, mapMessage, ACTIVITY_LABELS } from "../types";
@@ -43,6 +44,7 @@ interface UseTutorMessagesOptions {
   setSwitchSuggestion: (suggestion: ConceptSwitchSuggestion | null) => void;
   setSuggestedConceptId: (id: number | null) => void;
   setSwitchDecision: (decision: "accept" | "reject" | null) => void;
+  setHierarchyPath: (path: HierarchyNode[]) => void;
 }
 
 export function useTutorMessages({
@@ -59,6 +61,7 @@ export function useTutorMessages({
   setSwitchSuggestion,
   setSuggestedConceptId,
   setSwitchDecision,
+  setHierarchyPath,
 }: UseTutorMessagesOptions) {
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -203,6 +206,9 @@ export function useTutorMessages({
               } else {
                 setSwitchSuggestion(null);
               }
+              if (response.conversation_meta?.hierarchy_path) {
+                setHierarchyPath(response.conversation_meta.hierarchy_path);
+              }
               setSuggestedConceptId(null);
               setSwitchDecision(null);
               switchDecisionRef.current = null;
@@ -275,6 +281,10 @@ export function useTutorMessages({
         setSwitchSuggestion(response.conversation_meta.concept_switch_suggestion);
       } else {
         setSwitchSuggestion(null);
+      }
+
+      if (response.conversation_meta?.hierarchy_path) {
+        setHierarchyPath(response.conversation_meta.hierarchy_path);
       }
 
       setSuggestedConceptId(null);

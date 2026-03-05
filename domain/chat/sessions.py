@@ -23,12 +23,14 @@ def create_session(
     workspace_id: int,
     user_id: int,
     title: str | None,
+    concept_id: int | None = None,
 ) -> dict[str, object]:
     return create_chat_session(
         session,
         workspace_id=workspace_id,
         user_id=user_id,
         title=title,
+        concept_id=concept_id,
     )
 
 

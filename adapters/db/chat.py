@@ -18,20 +18,36 @@ def create_chat_session(
     workspace_id: int,
     user_id: int,
     title: str | None,
+    concept_id: int | None = None,
 ) -> dict[str, Any]:
+    # If concept_id provided and no explicit title, derive from concept name
+    effective_title = (title or "").strip() or None
+    if concept_id and not effective_title and hasattr(session, "execute"):
+        concept_row = (
+            session.execute(
+                text("SELECT canonical_name FROM concepts_canon WHERE id = :cid AND workspace_id = :wid"),
+                {"cid": concept_id, "wid": workspace_id},
+            )
+            .mappings()
+            .first()
+        )
+        if concept_row:
+            effective_title = str(concept_row["canonical_name"]).strip()
+
     row = (
         session.execute(
             text(
                 """
-                INSERT INTO chat_sessions (workspace_id, user_id, title)
-                VALUES (:workspace_id, :user_id, :title)
-                RETURNING id, public_id, workspace_id, user_id, title, created_at, updated_at
+                INSERT INTO chat_sessions (workspace_id, user_id, title, concept_id)
+                VALUES (:workspace_id, :user_id, :title, :concept_id)
+                RETURNING id, public_id, workspace_id, user_id, title, concept_id, created_at, updated_at
                 """
             ),
             {
                 "workspace_id": workspace_id,
                 "user_id": user_id,
-                "title": (title or "").strip() or None,
+                "title": effective_title,
+                "concept_id": concept_id,
             },
         )
         .mappings()
@@ -44,6 +60,7 @@ def create_chat_session(
         "workspace_id": int(row["workspace_id"]),
         "user_id": int(row["user_id"]),
         "title": str(row["title"] or "").strip() or None,
+        "concept_id": int(row["concept_id"]) if row["concept_id"] else None,
         "last_activity_at": row["updated_at"],
     }
 
@@ -65,13 +82,14 @@ def list_chat_sessions(
                     s.workspace_id,
                     s.user_id,
                     s.title,
+                    s.concept_id,
                     COALESCE(MAX(m.created_at), s.updated_at) AS last_activity_at
                 FROM chat_sessions s
                 LEFT JOIN chat_messages m
                   ON m.session_id = s.id
                 WHERE s.workspace_id = :workspace_id
                   AND s.user_id = :user_id
-                GROUP BY s.id, s.public_id, s.workspace_id, s.user_id, s.title, s.updated_at
+                GROUP BY s.id, s.public_id, s.workspace_id, s.user_id, s.title, s.concept_id, s.updated_at
                 ORDER BY COALESCE(MAX(m.created_at), s.updated_at) DESC, s.id DESC
                 LIMIT :limit
                 """
@@ -88,6 +106,7 @@ def list_chat_sessions(
             "workspace_id": int(row["workspace_id"]),
             "user_id": int(row["user_id"]),
             "title": str(row["title"] or "").strip() or None,
+            "concept_id": int(row["concept_id"]) if row["concept_id"] else None,
             "last_activity_at": row["last_activity_at"],
         }
         for row in rows
@@ -457,6 +476,21 @@ def get_chat_session_concept_name(session: Session, *, session_id: int) -> str |
     if row is None:
         return None
     return str(row["canonical_name"])
+
+
+def get_chat_session_concept_id(session: Session, *, session_id: int) -> int | None:
+    """Return the concept_id bound to a chat session, or None."""
+    if not hasattr(session, "execute"):
+        return None
+    row = (
+        session.execute(
+            text("SELECT concept_id FROM chat_sessions WHERE id = :sid AND concept_id IS NOT NULL LIMIT 1"),
+            {"sid": session_id},
+        )
+        .mappings()
+        .first()
+    )
+    return int(row["concept_id"]) if row else None
 
 
 def _as_json(payload: dict[str, Any]) -> str:

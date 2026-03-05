@@ -40,6 +40,7 @@ router = APIRouter(prefix="/workspaces/{ws_id}/chat", tags=["chat"])
 
 class ChatSessionCreateRequest(BaseModel):
     title: str | None = None
+    concept_id: int | None = Field(default=None, gt=0)
 
 
 class ChatSessionRenameRequest(BaseModel):
@@ -71,6 +72,7 @@ def create_chat_session(
             workspace_id=ws.workspace_id,
             user_id=ws.user.id,
             title=payload.title,
+            concept_id=payload.concept_id,
         )
     )
 

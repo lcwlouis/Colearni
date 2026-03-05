@@ -42,6 +42,12 @@ export interface ConceptSwitchSuggestion {
   reason: string;
 }
 
+export interface HierarchyNode {
+  concept_id: number;
+  name: string;
+  tier: string | null;
+}
+
 export interface ConversationMeta {
   session_id: number | null;
   resolved_concept_id: number | null;
@@ -49,6 +55,7 @@ export interface ConversationMeta {
   concept_confidence: number | null;
   requires_clarification: boolean;
   concept_switch_suggestion: ConceptSwitchSuggestion | null;
+  hierarchy_path?: HierarchyNode[];
 }
 
 export interface AnswerParts {
@@ -89,6 +96,7 @@ export interface ChatSessionSummary {
   workspace_id: number;
   user_id: number;
   title: string | null;
+  concept_id?: number | null;
   last_activity_at: string;
 }
 
@@ -115,6 +123,7 @@ export interface ChatMessagesResponse {
 
 export interface CreateChatSessionRequest {
   title?: string;
+  concept_id?: number;
 }
 
 export interface DeleteChatSessionRequest {

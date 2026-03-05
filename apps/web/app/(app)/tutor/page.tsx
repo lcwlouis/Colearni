@@ -5,7 +5,6 @@ import { useTutorPage } from "@/features/tutor/hooks/use-tutor-page";
 import { masteryLabel } from "@/features/tutor/types";
 import { TutorTimeline } from "@/features/tutor/components/tutor-timeline";
 import { TutorSlideOver } from "@/features/tutor/components/tutor-slide-over";
-import { ConceptSwitchBanner } from "@/features/tutor/components/concept-switch-banner";
 import type { ActionCTA, GroundingMode } from "@/lib/api/types";
 import { useCallback } from "react";
 
@@ -39,10 +38,10 @@ export default function TutorPage() {
       <section className="chat-main">
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.75rem 1rem", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <span style={{ fontWeight: 600, fontSize: "1rem", color: "var(--text)" }}>Tutor Chat</span>
+            <span style={{ fontWeight: 600, fontSize: "1rem", color: "var(--text)" }}>{t.sessionTitle || "New Chat"}</span>
             {t.currentConcept && (
               <span style={{ fontSize: "0.85rem", color: "var(--muted)", marginLeft: "0.5rem" }}>
-                · {t.currentConcept.canonical_name} ({masteryLabel(t.currentConcept.mastery_status, t.currentConcept.mastery_score)})
+                ({masteryLabel(t.currentConcept.mastery_status, t.currentConcept.mastery_score)})
               </span>
             )}
             {t.suggestedConceptId && (
@@ -62,30 +61,19 @@ export default function TutorPage() {
             </select>
             <button
               type="button"
-              className={`header-action-btn${t.showSlideOver && t.slideOverTab === "level-up" ? " active" : ""}`}
-              onClick={() => {
-                if (t.showSlideOver && t.slideOverTab === "level-up") {
-                  t.closeDrawer();
-                } else {
-                  t.openDrawer("quiz");
-                  if (t.levelUpState.phase === "idle") void t.startLevelUp();
-                }
-              }}
+              className={`header-action-btn${t.showSlideOver ? " active" : ""}`}
+              onClick={() => t.toggleSidebar()}
+              aria-label={t.showSlideOver ? "Close sidebar" : "Open sidebar"}
             >
-              {t.showSlideOver && t.slideOverTab === "level-up" ? "Hide quiz" : "Level-up quiz"}
-            </button>
-            <button
-              type="button"
-              className={`header-action-btn${t.showSlideOver && t.slideOverTab === "graph" ? " active" : ""}`}
-              onClick={() => {
-                if (t.showSlideOver && t.slideOverTab === "graph") {
-                  t.closeDrawer();
-                } else {
-                  t.openDrawer("graph");
-                }
-              }}
-            >
-              {t.showSlideOver && t.slideOverTab === "graph" ? "Hide graph" : "Show graph"}
+              {t.showSlideOver ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
+                </svg>
+              )}
             </button>
           </div>
         </header>
@@ -155,20 +143,15 @@ export default function TutorPage() {
           onSubmitQuiz={() => void t.submitLevelUp()}
           dispatchReset={() => t.dispatchLevelUp({ type: "reset" })}
           workspaceId={t.wsId}
-        />
-      ) : null}
-
-      {t.switchSuggestion ? (
-        <ConceptSwitchBanner
+          hierarchyPath={t.hierarchyPath}
           switchSuggestion={t.switchSuggestion}
-          concepts={t.concepts}
-          setCurrentConcept={t.setCurrentConcept}
-          setSuggestedConceptId={t.setSuggestedConceptId}
           setSwitchDecision={t.setSwitchDecision}
           switchDecisionRef={t.switchDecisionRef}
           setSwitchSuggestion={t.setSwitchSuggestion}
+          onStartNewChat={(conceptId) => void t.startNewSession(conceptId)}
         />
       ) : null}
+
     </section>
   );
 }

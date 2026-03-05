@@ -60,3 +60,32 @@ def test_concept_name_preferred_over_query() -> None:
     )
     assert "Vector" in title
     assert "Space" in title
+
+
+def test_session_concept_name_returns_as_is() -> None:
+    """When session has a bound concept, return its name directly (CUX1)."""
+    title = generate_session_title(
+        user_query="tell me about vectors",
+        concept_name="Vector Space",
+        session_concept_name="Linear Algebra",
+    )
+    assert title == "Linear Algebra"
+
+
+def test_session_concept_name_takes_priority_over_concept_name() -> None:
+    title = generate_session_title(
+        user_query="explain it",
+        concept_name="Eigenvalue",
+        session_concept_name="Matrix Theory",
+    )
+    assert title == "Matrix Theory"
+
+
+def test_session_concept_name_none_falls_through() -> None:
+    """When session_concept_name is None, fall back to normal logic."""
+    title = generate_session_title(
+        user_query="explain it",
+        concept_name="Eigenvalue",
+        session_concept_name=None,
+    )
+    assert title == "Eigenvalue Discussion"
