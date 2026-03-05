@@ -17,6 +17,7 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
   const [selectedQuizId, setSelectedQuizId] = useState<number | null>(null);
   const [retryingQuizId, setRetryingQuizId] = useState<number | null>(null);
   const [retryLoading, setRetryLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const fetchQuizzes = useCallback(async () => {
     setLoading(true);
@@ -74,6 +75,22 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
     }
   }
 
+  async function handleCreate() {
+    setCreating(true);
+    try {
+      const newQuiz = await apiClient.createPracticeQuiz(workspaceId, {
+        concept_id: conceptId,
+      });
+      onCreateQuiz?.();
+      setSelectedQuizId(newQuiz.quiz_id);
+      await fetchQuizzes();
+    } catch (err) {
+      console.error("Failed to create quiz:", err);
+    } finally {
+      setCreating(false);
+    }
+  }
+
   if (loading) {
     return (
       <p style={{ color: "var(--muted)", padding: "1rem" }}>
@@ -88,11 +105,9 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
         <p style={{ color: "var(--muted)", marginBottom: "0.5rem" }}>
           No quizzes yet
         </p>
-        {onCreateQuiz && (
-          <button type="button" onClick={onCreateQuiz}>
-            Create practice quiz
-          </button>
-        )}
+        <button type="button" disabled={creating} onClick={() => { void handleCreate(); }}>
+          {creating ? "Creating…" : "Create practice quiz"}
+        </button>
       </div>
     );
   }

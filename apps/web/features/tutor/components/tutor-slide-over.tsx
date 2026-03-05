@@ -130,6 +130,7 @@ export function TutorSlideOver({
             setGraphViewConceptId={setGraphViewConceptId}
             tutorResetViewRef={tutorResetViewRef}
             conceptActivity={conceptActivity}
+            onStartNewChat={onStartNewChat}
           />
         )}
         {activeTab === "level-up" && (
@@ -215,6 +216,13 @@ export function TutorSlideOver({
 
 /* ---------- Graph tab (migrated from TutorGraphDrawer) ---------- */
 
+const TIER_EMOJI: Record<string, string> = {
+  umbrella: "🌳",
+  topic: "📚",
+  subtopic: "📖",
+  granular: "🔬",
+};
+
 function GraphTabContent({
   currentConcept,
   graphViewConceptId,
@@ -225,6 +233,7 @@ function GraphTabContent({
   setGraphViewConceptId,
   tutorResetViewRef,
   conceptActivity,
+  onStartNewChat,
 }: Pick<
   TutorSlideOverProps,
   | "currentConcept"
@@ -236,6 +245,7 @@ function GraphTabContent({
   | "setGraphViewConceptId"
   | "tutorResetViewRef"
   | "conceptActivity"
+  | "onStartNewChat"
 >) {
   return (
     <>
@@ -259,21 +269,21 @@ function GraphTabContent({
       {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
       {conceptsError ? <p className="status error">{conceptsError}</p> : null}
       {subgraph ? (
-        <SigmaGraph
-          nodes={subgraph.nodes}
-          edges={subgraph.edges}
-          selectedId={currentConcept?.concept_id}
-          onSelect={(id) => {
-            setGraphViewConceptId(id);
-            void loadSubgraph(id);
-          }}
-          onResetViewReady={(fn) => {
-            tutorResetViewRef.current = fn;
-          }}
-          width={320}
-          height={350}
-          compact
-        />
+        <div style={{ width: "100%", minHeight: 280, height: 300 }}>
+          <SigmaGraph
+            nodes={subgraph.nodes}
+            edges={subgraph.edges}
+            selectedId={currentConcept?.concept_id}
+            onSelect={(id) => {
+              setGraphViewConceptId(id);
+              void loadSubgraph(id);
+            }}
+            onResetViewReady={(fn) => {
+              tutorResetViewRef.current = fn;
+            }}
+            compact
+          />
+        </div>
       ) : !conceptsLoading ? (
         <p className="status empty">Select a concept to view its graph.</p>
       ) : null}
@@ -304,6 +314,50 @@ function GraphTabContent({
           />
         </div>
       ) : null}
+      {(() => {
+        if (!subgraph || !currentConcept || !onStartNewChat) return null;
+        const adjacent = subgraph.nodes
+          .filter((n) => n.hop_distance === 1 && n.concept_id !== currentConcept.concept_id)
+          .slice(0, 5);
+        if (adjacent.length === 0) return null;
+        return (
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: "0.5rem", marginTop: "0.5rem" }}>
+            <h3 style={{ fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)", margin: "0 0 0.4rem 0" }}>
+              Related Topics
+            </h3>
+            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+              {adjacent.map((node) => (
+                <li key={node.concept_id}>
+                  <button
+                    type="button"
+                    onClick={() => onStartNewChat(node.concept_id)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      background: "none",
+                      border: "1px solid var(--line)",
+                      borderRadius: "0.25rem",
+                      padding: "0.35rem 0.5rem",
+                      cursor: "pointer",
+                      fontSize: "0.85rem",
+                      color: "var(--text)",
+                      textAlign: "left",
+                    }}
+                  >
+                    <span>
+                      {node.tier ? (TIER_EMOJI[node.tier] ?? "") + " " : ""}
+                      {node.canonical_name}
+                    </span>
+                    <span style={{ fontSize: "0.75rem", color: "var(--muted)", whiteSpace: "nowrap" }}>Chat →</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
     </>
   );
 }

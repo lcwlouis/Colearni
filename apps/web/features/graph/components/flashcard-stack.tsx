@@ -95,11 +95,9 @@ export function FlashcardStack({ workspaceId, conceptId, conceptName, onGenerate
     return (
       <div style={{ padding: "1rem", textAlign: "center" }}>
         <p style={{ color: "var(--muted)", marginBottom: "0.5rem" }}>No flashcards yet</p>
-        {onGenerateFlashcards && (
-          <button type="button" onClick={onGenerateFlashcards}>
-            Generate flashcards
-          </button>
-        )}
+        <button type="button" disabled={generating} onClick={() => { void generateMore(); onGenerateFlashcards?.(); }}>
+          {generating ? "Generating…" : "Generate flashcards"}
+        </button>
       </div>
     );
   }

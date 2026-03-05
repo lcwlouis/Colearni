@@ -60,20 +60,20 @@ export function TutorGraphDrawer({
       {conceptsLoading ? <p className="status loading">Loading concepts...</p> : null}
       {conceptsError ? <p className="status error">{conceptsError}</p> : null}
       {subgraph ? (
-        <SigmaGraph
-          nodes={subgraph.nodes}
-          edges={subgraph.edges}
-          selectedId={currentConcept?.concept_id}
-          onSelect={(id) => {
-            setGraphViewConceptId(id);
-            void loadSubgraph(id);
-          }}
-          onResetViewReady={(fn) => {
-            tutorResetViewRef.current = fn;
-          }}
-          width={320}
-          height={350}
-        />
+        <div style={{ width: "100%", minHeight: 280, height: 300 }}>
+          <SigmaGraph
+            nodes={subgraph.nodes}
+            edges={subgraph.edges}
+            selectedId={currentConcept?.concept_id}
+            onSelect={(id) => {
+              setGraphViewConceptId(id);
+              void loadSubgraph(id);
+            }}
+            onResetViewReady={(fn) => {
+              tutorResetViewRef.current = fn;
+            }}
+          />
+        </div>
       ) : !conceptsLoading ? (
         <p className="status empty">Select a concept to view its graph.</p>
       ) : null}
