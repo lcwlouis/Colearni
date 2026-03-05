@@ -51,6 +51,12 @@ USAGE_SOURCE_PROVIDER = "provider_reported"
 USAGE_SOURCE_ESTIMATED = "estimated"
 USAGE_SOURCE_MISSING = "missing"
 
+# Additional LLM semantic attributes (OBS.4)
+LLM_SYSTEM = "llm.system"
+LLM_PROVIDER = "llm.provider"
+LLM_TOKEN_COUNT_CACHE_READ = "llm.token_count.prompt_details.cache_read"
+LLM_TOKEN_COUNT_REASONING = "llm.token_count.completion_details.reasoning"
+
 # Span kind constants (values recognised by Phoenix)
 SPAN_KIND_LLM = "LLM"
 SPAN_KIND_CHAIN = "CHAIN"
@@ -110,6 +116,10 @@ _SAFE_KEYS = {
     USER_ID,
     RETRIEVAL_DOCUMENTS,
     METADATA,
+    LLM_SYSTEM,
+    LLM_PROVIDER,
+    LLM_TOKEN_COUNT_CACHE_READ,
+    LLM_TOKEN_COUNT_REASONING,
 }
 _SENSITIVE_MARKERS = (
     "api_key",
@@ -306,6 +316,8 @@ def set_llm_span_attributes(
     model: str | None = None,
     invocation_params: Mapping[str, object] | None = None,
     token_usage: Mapping[str, int | None] | None = None,
+    llm_system: str | None = None,
+    llm_provider: str | None = None,
 ) -> None:
     """Set OpenInference LLM span attributes on a trace span.
 
@@ -320,6 +332,11 @@ def set_llm_span_attributes(
 
     if model:
         span.set_attribute(LLM_MODEL_NAME, model)
+
+    if llm_system:
+        span.set_attribute(LLM_SYSTEM, llm_system)
+    if llm_provider:
+        span.set_attribute(LLM_PROVIDER, llm_provider)
 
     if invocation_params:
         span.set_attribute(
@@ -347,6 +364,8 @@ def set_llm_span_attributes(
             span.set_attribute(LLM_TOKEN_COUNT_COMPLETION, int(token_usage["token_completion"]))
         if token_usage.get("token_total") is not None:
             span.set_attribute(LLM_TOKEN_COUNT_TOTAL, int(token_usage["token_total"]))
+        if token_usage.get("token_cached") is not None:
+            span.set_attribute(LLM_TOKEN_COUNT_CACHE_READ, int(token_usage["token_cached"]))
         set_usage_source(span, classify_usage_source(token_usage))
 
     # Also populate input.value / output.value so Phoenix Info tab shows content

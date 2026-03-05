@@ -11,6 +11,7 @@ from typing import Any
 from core.contracts import TutorTextStream
 from core.observability import (
     SPAN_KIND_LLM,
+    LLM_TOKEN_COUNT_REASONING,
     classify_usage_source,
     create_span,
     emit_event,
@@ -529,6 +530,8 @@ class _BaseGraphLLMClient(ABC):
                 "stream": True,
             },
             messages=messages,
+            llm_system=self._provider,
+            llm_provider=self._provider,
         )
         set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
 
@@ -581,6 +584,8 @@ class _BaseGraphLLMClient(ABC):
             response_message=response_text,
             token_usage=usage,
         )
+        if reasoning_tokens is not None and span is not None:
+            span.set_attribute(LLM_TOKEN_COUNT_REASONING, int(reasoning_tokens))
 
         emit_event(
             "llm.call",
@@ -816,6 +821,8 @@ class _BaseGraphLLMClient(ABC):
                     "provider": self._provider,
                 },
                 messages=messages,
+                llm_system=self._provider,
+                llm_provider=self._provider,
             )
             set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
 
@@ -846,6 +853,7 @@ class _BaseGraphLLMClient(ABC):
             cached = token_usage.get("token_cached")
             if cached:
                 log.debug("prefix cache hit: %d tokens cached", cached)
+            reasoning_tokens = self._extract_reasoning_tokens(result)
             response_content = self._extract_content_safe(result)
 
             set_llm_span_attributes(
@@ -853,6 +861,8 @@ class _BaseGraphLLMClient(ABC):
                 response_message=response_content,
                 token_usage=token_usage,
             )
+            if reasoning_tokens is not None and span is not None:
+                span.set_attribute(LLM_TOKEN_COUNT_REASONING, int(reasoning_tokens))
             emit_event(
                 "llm.call",
                 status="success",
