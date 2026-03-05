@@ -132,25 +132,25 @@ def generate_practice_flashcards(
                 span,
                 output_summary=f"{len(_cards_tmp) if isinstance(_cards_tmp, list) else 0} flashcards",
             )
-    cards = payload.get("flashcards")
-    if not isinstance(cards, list) or len(cards) != card_count:
-        raise PracticeGenerationError("Flashcard response must contain exactly card_count entries.")
+        cards = payload.get("flashcards")
+        if not isinstance(cards, list) or len(cards) != card_count:
+            raise PracticeGenerationError("Flashcard response must contain exactly card_count entries.")
 
-    normalized: list[dict[str, str]] = []
-    for card in cards:
-        if not isinstance(card, dict):
-            raise PracticeGenerationError("Each flashcard must be an object.")
-        front, back, hint = [str(card.get(key, "")).strip() for key in ("front", "back", "hint")]
-        if not front or not back or not hint:
-            raise PracticeGenerationError("Each flashcard requires front, back, and hint.")
-        normalized.append({"front": front, "back": back, "hint": hint})
+        normalized: list[dict[str, str]] = []
+        for card in cards:
+            if not isinstance(card, dict):
+                raise PracticeGenerationError("Each flashcard must be an object.")
+            front, back, hint = [str(card.get(key, "")).strip() for key in ("front", "back", "hint")]
+            if not front or not back or not hint:
+                raise PracticeGenerationError("Each flashcard requires front, back, and hint.")
+            normalized.append({"front": front, "back": back, "hint": hint})
 
-    return {
-        "workspace_id": workspace_id,
-        "concept_id": concept_id,
-        "concept_name": context["concept_name"],
-        "flashcards": normalized,
-    }
+        return {
+            "workspace_id": workspace_id,
+            "concept_id": concept_id,
+            "concept_name": context["concept_name"],
+            "flashcards": normalized,
+        }
 
 
 def create_practice_quiz(
@@ -667,10 +667,9 @@ def generate_stateful_flashcards(
                 span,
                 output_summary=f"{len(_cards_tmp) if isinstance(_cards_tmp, list) else 0} flashcards",
             )
-
-    raw_cards = payload.get("flashcards")
-    if not isinstance(raw_cards, list) or not raw_cards:
-        raise PracticeGenerationError("Flashcard response must contain flashcard entries.")
+        raw_cards = payload.get("flashcards")
+        if not isinstance(raw_cards, list) or not raw_cards:
+            raise PracticeGenerationError("Flashcard response must contain flashcard entries.")
 
     # Create generation run
     run_row = (

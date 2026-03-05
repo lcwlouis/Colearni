@@ -15,6 +15,8 @@ import logging
 from typing import Any
 from uuid import uuid4
 
+from opentelemetry import trace
+
 from core.contracts import GraphLLMClient
 from core.observability import (
     SPAN_KIND_CHAIN,
@@ -520,6 +522,9 @@ def submit_quiz(
                 stage=stage,
                 error_type=type(exc).__name__,
             )
+            if span is not None:
+                span.set_status(trace.StatusCode.ERROR, str(exc))
+                span.record_exception(exc)
             if isinstance(exc, _QVE) and not isinstance(exc, QuizValidationError):
                 raise QuizValidationError(str(exc)) from exc
             if isinstance(exc, _QGE) and not isinstance(exc, QuizGradingError):
