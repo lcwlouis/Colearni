@@ -613,6 +613,27 @@ class Settings(BaseSettings):
         description="Maximum tool-calling loop iterations per agent turn.",
     )
 
+    web_search_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "APP_WEB_SEARCH_API_KEY",
+            "WEB_SEARCH_API_KEY",
+            "TAVILY_API_KEY",
+        ),
+        description="API key for web search provider (Tavily).",
+    )
+
+    web_search_max_results: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        validation_alias=AliasChoices(
+            "APP_WEB_SEARCH_MAX_RESULTS",
+            "WEB_SEARCH_MAX_RESULTS",
+        ),
+        description="Maximum number of web search results per query.",
+    )
+
     # ── Auth settings ──────────────────────────────────────────────────
     auth_magic_link_ttl_minutes: int = Field(
         default=30,

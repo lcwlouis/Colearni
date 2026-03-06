@@ -21,6 +21,7 @@ class EvidenceSourceType(str, Enum):
 
     WORKSPACE = "workspace"
     GENERAL = "general"
+    WEB = "web"
 
 
 class AssistantResponseKind(str, Enum):
@@ -89,6 +90,15 @@ class EvidenceItem(BaseModel):
                 raise ValueError(
                     "workspace evidence requires document_id, chunk_id, and chunk_index; "
                     f"missing: {', '.join(missing)}"
+                )
+            return self
+
+        if self.source_type == EvidenceSourceType.WEB:
+            populated = [field for field in workspace_fields if getattr(self, field) is not None]
+            if populated:
+                raise ValueError(
+                    "web evidence must not include document_id, chunk_id, or chunk_index; "
+                    f"found: {', '.join(populated)}"
                 )
             return self
 
