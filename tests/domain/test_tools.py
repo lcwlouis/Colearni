@@ -191,3 +191,45 @@ class TestToolRegistryIntegration:
         specs = registry.to_openai_tools()
         names = {s["function"]["name"] for s in specs}
         assert names == {"search_knowledge_base", "lookup_concept", "check_mastery"}
+
+
+# ---------------------------------------------------------------------------
+# Registry factory
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryFactory:
+    def test_all_deps_provided(self):
+        from domain.tools.registry_factory import build_tool_registry
+
+        registry = build_tool_registry(
+            session=None,
+            workspace_id=1,
+            user_id=1,
+            retrieve_fn=lambda **_: [],
+            concept_lookup_fn=lambda *a, **k: {},
+            mastery_fn=lambda *a, **k: None,
+        )
+        assert len(registry) == 3
+
+    def test_partial_deps(self):
+        from domain.tools.registry_factory import build_tool_registry
+
+        registry = build_tool_registry(
+            session=None,
+            workspace_id=1,
+            user_id=1,
+            retrieve_fn=lambda **_: [],
+        )
+        assert len(registry) == 1
+        assert "search_knowledge_base" in registry
+
+    def test_no_deps(self):
+        from domain.tools.registry_factory import build_tool_registry
+
+        registry = build_tool_registry(
+            session=None,
+            workspace_id=1,
+            user_id=1,
+        )
+        assert len(registry) == 0

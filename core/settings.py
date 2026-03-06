@@ -595,6 +595,24 @@ class Settings(BaseSettings):
         description="Enable LiteLLM client-side JSON schema validation.",
     )
 
+    enable_tool_calling: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "APP_ENABLE_TOOL_CALLING",
+            "ENABLE_TOOL_CALLING",
+        ),
+        description="Enable LLM tool calling in tutor agent (experimental).",
+    )
+
+    agent_max_iterations: int = Field(
+        default=5,
+        validation_alias=AliasChoices(
+            "APP_AGENT_MAX_ITERATIONS",
+            "AGENT_MAX_ITERATIONS",
+        ),
+        description="Maximum tool-calling loop iterations per agent turn.",
+    )
+
     # ── Auth settings ──────────────────────────────────────────────────
     auth_magic_link_ttl_minutes: int = Field(
         default=30,
