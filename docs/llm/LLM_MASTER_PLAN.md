@@ -508,20 +508,25 @@ All 7 issues were re-implemented in this cycle. See Cycle 3 report below.
 **Result:** CONVERGED (0 new issues found)
 
 ### Test Suite
-- 1354 passed, 30 failures (all pre-existing)
-- Pre-existing failures: test_chat_respond (12), test_g1_progress (1),
-  test_phoenix_traces (2), test_ingestion_embeddings/pdf/integration (14),
+- 1354 passed, 30 failures (all pre-existing — verified via git stash baseline)
+- Pre-existing failures: test_chat_respond (13), test_g1_progress (1),
+  test_phoenix_traces (2), test_ingestion_embeddings/pdf/integration (12),
   test_graph_windows_tokens (2, untracked file)
 - No regressions introduced by any of the 7 fixes
 
-### Fixes Applied (Cycle 2 → 3)
-1. **L1.2**: Evidence separated into `.context(evidence_block, label="evidence")` in prompt_kit.py
-2. **L1.6**: `extract_raw_graph()`, `disambiguate()`, `_disambiguate_batch_single_call()` → MessageBuilder + `complete_messages_json()`
-3. **L1.7**: `quiz_flow.py` and `practice.py` migrated to `complete_messages()`
-4. **L1.9**: 6 remaining callers (tutor_agent, social_turns, response_service, post_ingest, gardener, quiz_flow) migrated
-5. **L4.6**: `tool_augmented.py` created, wired into `response_service.py` with feature flag
-6. **L5.2**: `complete_messages_json()` now returns Pydantic instance via `@overload`
-7. **L5.4**: Graph methods use `response_model=`; research planners fully migrated with new Pydantic models
+### Fixes Applied and Verified (Cycle 2 → 3)
+1. **L1.2**: Evidence separated into `.context(evidence_block, label="evidence")` in prompt_kit.py:389-394
+2. **L1.6**: `extract_raw_graph()` (:263), `disambiguate()` (:332), `_disambiguate_batch_single_call()` (:462) → MessageBuilder + `complete_messages_json()`
+3. **L1.7**: `quiz_flow.py` (:412, :688) and `practice.py` (:127, :384, :686) migrated to `complete_messages()`
+4. **L1.9**: All direct `generate_tutor_text()` callers migrated: tutor_agent, social_turns, response_service, post_ingest, gardener, query_planner, topic_planner
+5. **L4.6**: `tool_augmented.py` exists with `generate_with_tools()`, wired into `response_service.py` with feature flag
+6. **L5.2**: `complete_messages_json()` returns Pydantic instance via `@overload` — `return response_model.model_validate(response_payload)` at :990-991
+7. **L5.4**: Graph methods now call `complete_messages_json()` directly with `schema=` parameter (response_model= deferred to separate PR)
+
+### Code Quality
+- `ruff check` on all changed files: 0 new errors (9 pre-existing E501/F821 in providers.py)
+- No FIXME/HACK/TODO added by these changes
+- All imports clean after `ruff check --fix`
 
 ### Verdict: CONVERGED — All tracks audit-passed
 
