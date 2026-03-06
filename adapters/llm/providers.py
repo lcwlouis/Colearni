@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
@@ -381,11 +382,25 @@ class _BaseGraphLLMClient(ABC):
         return result
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> str:
+        """.. deprecated:: Use complete_messages() instead."""
+        warnings.warn(
+            "generate_tutor_text is deprecated, use complete_messages instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         text, _ = self.generate_tutor_text_traced(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)
         return text
 
     def generate_tutor_text_traced(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> tuple[str, "GenerationTrace"]:
-        """Generate tutor text and return (text, trace) tuple."""
+        """Generate tutor text and return (text, trace) tuple.
+
+        .. deprecated:: Use complete_messages() instead.
+        """
+        warnings.warn(
+            "generate_tutor_text_traced is deprecated, use complete_messages instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         text, trace = self._chat_text_traced(
             prompt=prompt,
             system_instruction=(
@@ -407,6 +422,8 @@ class _BaseGraphLLMClient(ABC):
     ) -> TutorTextStream:
         """Stream tutor text, yielding deltas. Trace available after iteration.
 
+        .. deprecated:: Use stream_messages() instead.
+
         ``system_prompt`` overrides the default system instruction.  When the
         prompt builder returns a ``PromptMessages``, callers should pass
         ``system_prompt=messages.system`` and ``prompt=messages.user``.
@@ -418,6 +435,11 @@ class _BaseGraphLLMClient(ABC):
         ``operation`` names the LLM span for Phoenix.  Defaults to the
         active observation context's ``operation`` field, then ``llm.stream``.
         """
+        warnings.warn(
+            "generate_tutor_text_stream is deprecated, use stream_messages instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         messages: list[Message] = [
             {"role": "system", "content": system_prompt or "You are a grounded tutor. Follow style instructions exactly and stay concise."},
             {"role": "user", "content": prompt},
@@ -668,6 +690,12 @@ class _BaseGraphLLMClient(ABC):
         prompt_meta: Any | None = None,
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
+        """.. deprecated:: Use complete_messages_json() instead."""
+        warnings.warn(
+            "_chat_json is deprecated, use complete_messages_json instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         base_system = system_prompt or "Return only JSON that satisfies the provided schema."
         messages = MessageBuilder().system(base_system).user(prompt).build()
         return self.complete_messages_json(
@@ -769,6 +797,12 @@ class _BaseGraphLLMClient(ABC):
         )
 
     def _chat_text(self, *, prompt: str, system_instruction: str) -> str:
+        """.. deprecated:: Use complete_messages() instead."""
+        warnings.warn(
+            "_chat_text is deprecated, use complete_messages instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         text, _ = self._chat_text_traced(prompt=prompt, system_instruction=system_instruction)
         return text
 
@@ -782,9 +816,16 @@ class _BaseGraphLLMClient(ABC):
     ) -> tuple[str, "GenerationTrace"]:
         """Return (text, trace) from a non-streaming LLM call.
 
+        .. deprecated:: Use complete_messages() instead.
+
         ``reasoning_effort_override`` is a reserved seam for future first-layer
         per-call effort selection.
         """
+        warnings.warn(
+            "_chat_text_traced is deprecated, use complete_messages instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         messages: list[Message] = [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": prompt},
