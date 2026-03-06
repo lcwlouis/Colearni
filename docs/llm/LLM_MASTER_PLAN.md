@@ -153,7 +153,7 @@ What is critically broken or materially missing:
 | `L5` JSON Mode | `docs/llm/05_json_mode_plan.md` | ✅ done |
 | `L6` Regeneration | `docs/llm/06_regeneration_plan.md` | ✅ done |
 | `L7` Graph Batching | `docs/llm/07_graph_batching_plan.md` | ✅ done |
-| `L8` Web Search | `docs/llm/08_web_search_plan.md` | pending |
+| `L8` Web Search | `docs/llm/08_web_search_plan.md` | ✅ done |
 
 ## Decision Log
 
@@ -465,7 +465,7 @@ Dependencies between tracks:
 | `L5` JSON Mode | ✅ done | All 5 slices complete |
 | `L6` Regeneration | ✅ done | All 3 slices complete |
 | `L7` Graph Batching | ✅ done | All 3 slices complete |
-| `L8` Web Search | 🔄 pending | Depends on L4 ✅ — ready |
+| `L8` Web Search | ✅ done | All 4 slices complete |
 
 ## Verification Block Template
 
