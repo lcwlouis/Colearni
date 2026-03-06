@@ -18,12 +18,10 @@ import {
 } from "../stream-messages";
 
 const STREAMING_ENABLED =
-  typeof process !== "undefined" &&
-  process.env?.NEXT_PUBLIC_CHAT_STREAMING_ENABLED === "true";
+  process.env.NEXT_PUBLIC_CHAT_STREAMING_ENABLED === "true";
 
 const REASONING_SUMMARY_ENABLED =
-  typeof process !== "undefined" &&
-  process.env?.NEXT_PUBLIC_REASONING_SUMMARY_ENABLED === "true";
+  process.env.NEXT_PUBLIC_REASONING_SUMMARY_ENABLED === "true";
 
 // F0: diagnostic log for streaming config
 if (typeof window !== "undefined") {
