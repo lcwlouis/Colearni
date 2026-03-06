@@ -86,7 +86,7 @@ export function LevelUpCard({
                       {item.position}. {stripLeadingNumber(item.prompt)}
                     </strong>
                   </p>
-                  <p className="field-label">Type: {item.item_type}</p>
+
                   <QuizItemInput
                     item={item}
                     value={answers[item.item_id] ?? ""}

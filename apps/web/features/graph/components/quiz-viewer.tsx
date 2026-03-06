@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api/client";
+import { QuizItemInput } from "@/components/quiz-item-input";
 import type {
   PracticeQuizDetailResponse,
   PracticeQuizSubmitResponse,
-  QuizItemSummary,
   QuizSubmitAnswer,
   QuizFeedbackItem,
 } from "@/lib/api/types";
@@ -143,111 +143,54 @@ export function QuizViewer({
         ) : null}
       </div>
 
-      {result?.overall_feedback && (
-        <p className="quiz-viewer__feedback">{result.overall_feedback}</p>
-      )}
-
-      <ol className="quiz-viewer__items">
-        {quiz.items.map((item) => (
-          <li key={item.item_id} className="quiz-viewer__item">
-            <p className="quiz-viewer__prompt">{item.prompt}</p>
-            {renderItemBody(item, showResults, feedbackMap, answers, handleAnswer)}
-          </li>
-        ))}
+      <ol className="quiz-items">
+        {quiz.items.map((item, idx) => {
+          const fb = feedbackMap.get(item.item_id);
+          return (
+            <li key={item.item_id} className={`quiz-item${fb ? (fb.is_correct ? " correct" : " incorrect") : ""}`}>
+              <p><strong>{idx + 1}. {item.prompt.replace(/^\d+[\.\)]\s*/, "")}</strong></p>
+              <QuizItemInput
+                item={item}
+                value={answers[item.item_id] ?? ""}
+                disabled={showResults || submitting}
+                onChange={handleAnswer}
+              />
+              {fb && (
+                <div className="quiz-item-feedback">
+                  <span className={`quiz-item-result-label ${fb.is_correct ? "correct" : "incorrect"}`}>
+                    {fb.is_correct ? "✓ Correct" : "✗ Incorrect"}
+                  </span>
+                  {fb.feedback && <p>{fb.feedback}</p>}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ol>
 
       {isRetry && !result && (
-        <div className="quiz-viewer__submit-row">
+        <div className="button-row">
           {error && <p className="status error">{error}</p>}
           <button
             type="button"
+            onClick={() => { void handleSubmit(); }}
             disabled={submitting || !allAnswered}
-            onClick={handleSubmit}
           >
             {submitting ? "Submitting…" : "Submit"}
           </button>
         </div>
       )}
 
-      {result?.retry_hint && (
-        <p className="quiz-viewer__retry-hint">{result.retry_hint}</p>
+      {result && (
+        <div className="stack level-up-feedback">
+          <h3>Results</h3>
+          {result.overall_feedback && <p>{result.overall_feedback}</p>}
+          <p className="field-label">
+            Score: {Math.round(result.score * 100)}% · {result.passed ? "Passed" : "Not passed"}
+          </p>
+          {result.retry_hint && <p className="field-label">{result.retry_hint}</p>}
+        </div>
       )}
     </div>
-  );
-}
-
-function renderItemBody(
-  item: QuizItemSummary,
-  showResults: boolean,
-  feedbackMap: Map<number, QuizFeedbackItem>,
-  answers: Record<number, string>,
-  onAnswer: (itemId: number, value: string) => void,
-) {
-  const fb = feedbackMap.get(item.item_id);
-
-  if (item.item_type === "mcq" && item.choices) {
-    return (
-      <ul className="quiz-viewer__choices">
-        {item.choices.map((choice) => {
-          const selected = answers[item.item_id] === choice.id;
-          let cls = "quiz-viewer__choice";
-          if (showResults && fb) {
-            if (selected && fb.is_correct) cls += " quiz-viewer__choice--correct";
-            else if (selected && !fb.is_correct) cls += " quiz-viewer__choice--incorrect";
-          } else if (selected) {
-            cls += " quiz-viewer__choice--selected";
-          }
-
-          return (
-            <li key={choice.id} className={cls}>
-              {showResults ? (
-                <span>{choice.text}</span>
-              ) : (
-                <label>
-                  <input
-                    type="radio"
-                    name={`q-${item.item_id}`}
-                    value={choice.id}
-                    checked={selected}
-                    onChange={() => onAnswer(item.item_id, choice.id)}
-                  />
-                  {choice.text}
-                </label>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  }
-
-  // Short answer
-  if (showResults && fb) {
-    return (
-      <div>
-        <p
-          className={
-            fb.is_correct
-              ? "quiz-viewer__answer--correct"
-              : "quiz-viewer__answer--incorrect"
-          }
-        >
-          Your answer: {answers[item.item_id] ?? "—"}
-        </p>
-        {fb.feedback && (
-          <p className="quiz-viewer__item-feedback">{fb.feedback}</p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <input
-      type="text"
-      className="quiz-viewer__text-input"
-      placeholder="Your answer…"
-      value={answers[item.item_id] ?? ""}
-      onChange={(e) => onAnswer(item.item_id, e.target.value)}
-    />
   );
 }

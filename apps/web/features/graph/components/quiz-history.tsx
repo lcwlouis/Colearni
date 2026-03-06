@@ -126,7 +126,7 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
 
   return (
     <div className="quiz-history">
-      <div style={{ padding: "0.5rem 0", textAlign: "right" }}>
+      <div style={{ padding: "0.5rem 0", textAlign: "center" }}>
         <button type="button" disabled={creating} onClick={() => { void handleCreate(); }}>
           {creating ? "Creating…" : "＋ New practice quiz"}
         </button>
@@ -168,16 +168,18 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
               >
                 View
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedQuizId(q.quiz_id);
-                  setSelectedSource(q.source);
-                  setRetryingQuizId(q.quiz_id);
-                }}
-              >
-                Retry
-              </button>
+              {q.latest_attempt != null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedQuizId(q.quiz_id);
+                    setSelectedSource(q.source);
+                    setRetryingQuizId(q.quiz_id);
+                  }}
+                >
+                  Retry
+                </button>
+              )}
             </div>
           </li>
         ))}
