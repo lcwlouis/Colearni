@@ -262,3 +262,48 @@ class TestRunQueryAnalysis:
             llm_client=_FakeLLM(payload),
         )
         assert result.intent == "learn"
+
+
+class TestPydanticValidation:
+    """Tests verifying Pydantic schema validation catches bad data."""
+
+    def test_extra_fields_rejected(self) -> None:
+        """Pydantic extra='forbid' catches unexpected fields that manual parsing ignored."""
+        raw = json.dumps({
+            "intent": "learn",
+            "requested_mode": "socratic",
+            "needs_retrieval": True,
+            "should_offer_level_up": False,
+            "high_level_keywords": [],
+            "low_level_keywords": [],
+            "concept_hints": [],
+            "rogue_field": "should not be here",
+        })
+        result = parse_query_analysis(raw)
+        assert result.intent == "clarify"  # falls back
+
+    def test_wrong_type_for_bool_field_rejected(self) -> None:
+        """Pydantic catches non-boolean values for bool fields."""
+        raw = json.dumps({
+            "intent": "learn",
+            "requested_mode": "socratic",
+            "needs_retrieval": [1, 2],
+        })
+        result = parse_query_analysis(raw)
+        assert result.intent == "clarify"  # falls back
+
+    def test_accepts_dict_directly(self) -> None:
+        """parse_query_analysis accepts a dict (from complete_messages_json)."""
+        data = {
+            "intent": "explore",
+            "requested_mode": "direct",
+            "needs_retrieval": False,
+            "should_offer_level_up": False,
+            "high_level_keywords": ["math"],
+            "low_level_keywords": [],
+            "concept_hints": ["algebra"],
+        }
+        result = parse_query_analysis(data)
+        assert result.intent == "explore"
+        assert result.requested_mode == "direct"
+        assert result.concept_hints == ["algebra"]

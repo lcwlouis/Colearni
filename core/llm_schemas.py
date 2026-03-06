@@ -77,13 +77,13 @@ class DisambiguationBatchResponse(BaseModel):
 class QueryAnalysisResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    intent: Literal["learn", "practice", "level_up", "explore", "social", "clarify"]
-    requested_mode: Literal["socratic", "direct", "unknown"]
-    needs_retrieval: bool
-    should_offer_level_up: bool
-    high_level_keywords: list[str]
-    low_level_keywords: list[str]
-    concept_hints: list[str]
+    intent: Literal["learn", "practice", "level_up", "explore", "social", "clarify"] = "clarify"
+    requested_mode: Literal["socratic", "direct", "unknown"] = "unknown"
+    needs_retrieval: bool = True
+    should_offer_level_up: bool = False
+    high_level_keywords: list[str] = Field(default_factory=list)
+    low_level_keywords: list[str] = Field(default_factory=list)
+    concept_hints: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

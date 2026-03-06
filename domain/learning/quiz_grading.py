@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from core.llm_messages import Message, MessageBuilder
+from core.llm_schemas import QuizGradingResponse
 from core.prompting import PromptRegistry
 
 log = logging.getLogger("domain.learning.quiz_grading")
@@ -173,53 +174,34 @@ def grading_messages(
     )
 
 
-def parse_grading(response: str, item_ids: list[int]) -> dict[str, Any]:
-    text_value = response.strip()
-    if text_value.startswith("```"):
-        text_value = "\n".join(
-            line for line in text_value.splitlines() if not line.strip().startswith("```")
-        ).strip()
+def parse_grading(response: str | dict, item_ids: list[int]) -> dict[str, Any]:
     try:
-        payload = json.loads(text_value)
-    except json.JSONDecodeError as exc:
-        raise QuizGradingError("Grading response is not valid JSON.") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-        raise QuizGradingError("Grading response missing items list.")
-    if (
-        not isinstance(payload.get("overall_feedback"), str)
-        or not payload["overall_feedback"].strip()
-    ):
-        raise QuizGradingError("Grading response missing overall_feedback.")
+        if isinstance(response, dict):
+            data = response
+        else:
+            text_value = response.strip()
+            if text_value.startswith("```"):
+                text_value = "\n".join(
+                    line
+                    for line in text_value.splitlines()
+                    if not line.strip().startswith("```")
+                ).strip()
+            data = json.loads(text_value)
+        validated = QuizGradingResponse.model_validate(data)
+    except QuizGradingError:
+        raise
+    except Exception as exc:
+        raise QuizGradingError(
+            "Grading response is not valid JSON or fails schema validation."
+        ) from exc
 
-    by_id: dict[int, dict[str, Any]] = {}
-    for item in payload["items"]:
-        if not isinstance(item, dict) or not isinstance(item.get("item_id"), int):
-            raise QuizGradingError("Invalid grading item payload.")
-        score = item.get("score")
-        critical = item.get("critical_misconception")
-        feedback = item.get("feedback")
-        if (
-            not isinstance(score, (int, float))
-            or float(score) < 0
-            or float(score) > 1
-            or not isinstance(critical, bool)
-            or not isinstance(feedback, str)
-            or not feedback.strip()
-        ):
-            raise QuizGradingError("Invalid grading score/critical/feedback values.")
-        by_id[int(item["item_id"])] = {
-            "item_id": int(item["item_id"]),
-            "score": float(score),
-            "critical_misconception": critical,
-            "feedback": feedback.strip(),
-        }
-
+    by_id = {item.item_id: item.model_dump() for item in validated.items}
     if set(by_id.keys()) != set(item_ids):
         raise QuizGradingError("grading items must cover every quiz item exactly once.")
 
     return {
         "items": [by_id[item_id] for item_id in item_ids],
-        "overall_feedback": payload["overall_feedback"].strip(),
+        "overall_feedback": validated.overall_feedback,
     }
 
 

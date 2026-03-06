@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from core.llm_messages import MessageBuilder
+from core.llm_schemas import QueryAnalysisResponse
 from core.prompting import PromptRegistry
 
 log = logging.getLogger("domain.chat.query_analyzer")
@@ -113,44 +114,29 @@ def build_query_analysis_messages(*, query: str, history_summary: str = "") -> M
     )
 
 
-def parse_query_analysis(raw_json: str) -> QueryAnalysis:
+def parse_query_analysis(raw_json: str | dict) -> QueryAnalysis:
     """Parse LLM JSON output into a :class:`QueryAnalysis`.
 
     Returns the conservative fallback on any parse or validation error.
     """
     try:
-        data = json.loads(raw_json)
-    except (json.JSONDecodeError, TypeError):
-        log.warning("query analysis JSON parse failed, using fallback")
+        if isinstance(raw_json, dict):
+            data = raw_json
+        else:
+            data = json.loads(raw_json)
+        validated = QueryAnalysisResponse.model_validate(data)
+        return QueryAnalysis(
+            intent=validated.intent,
+            requested_mode=validated.requested_mode,
+            needs_retrieval=validated.needs_retrieval,
+            should_offer_level_up=validated.should_offer_level_up,
+            high_level_keywords=validated.high_level_keywords,
+            low_level_keywords=validated.low_level_keywords,
+            concept_hints=validated.concept_hints,
+        )
+    except Exception:
+        log.warning("query analysis parse/validation failed, using fallback")
         return _FALLBACK
-
-    if not isinstance(data, dict):
-        return _FALLBACK
-
-    intent = data.get("intent", "clarify")
-    if intent not in {"learn", "practice", "level_up", "explore", "social", "clarify"}:
-        intent = "clarify"
-
-    requested_mode = data.get("requested_mode", "unknown")
-    if requested_mode not in {"socratic", "direct", "unknown"}:
-        requested_mode = "unknown"
-
-    return QueryAnalysis(
-        intent=intent,
-        requested_mode=requested_mode,
-        needs_retrieval=bool(data.get("needs_retrieval", True)),
-        should_offer_level_up=bool(data.get("should_offer_level_up", False)),
-        high_level_keywords=_str_list(data.get("high_level_keywords")),
-        low_level_keywords=_str_list(data.get("low_level_keywords")),
-        concept_hints=_str_list(data.get("concept_hints")),
-    )
-
-
-def _str_list(val: object) -> list[str]:
-    """Coerce a value to a list of strings, dropping non-string items."""
-    if not isinstance(val, list):
-        return []
-    return [str(v) for v in val if isinstance(v, str)]
 
 
 def run_query_analysis(
@@ -187,7 +173,7 @@ def run_query_analysis(
         log.warning("query analysis LLM call failed unexpectedly", exc_info=True)
         return _FALLBACK
 
-    return parse_query_analysis(json.dumps(data))
+    return parse_query_analysis(data)
 
 
 __all__ = [
