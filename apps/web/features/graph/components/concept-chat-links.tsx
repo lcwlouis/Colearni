@@ -48,7 +48,7 @@ export function ConceptChatLinks({
 
   const handleStartChat = () => {
     const encodedTopic = encodeURIComponent(conceptName);
-    router.push(`/tutor?topic=${encodedTopic}`);
+    router.push(`/tutor?topic=${encodedTopic}&concept_id=${conceptId}`);
   };
 
   return (

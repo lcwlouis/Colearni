@@ -66,7 +66,7 @@ export function useTutorPage() {
   async function ensureSession(): Promise<string | null> {
     if (!wsId) return null;
     if (activeSessionId) return activeSessionId;
-    return await startNewSession();
+    return await startNewSession(currentConcept?.concept_id);
   }
 
   // Sub-hooks
@@ -201,12 +201,23 @@ export function useTutorPage() {
       .catch(() => { /* keep local default */ });
   }, []);
   const topicConsumedRef = useRef(false);
+  const conceptIdParam = searchParams.get("concept_id");
   useEffect(() => {
     if (topicParam && !topicConsumedRef.current) {
       topicConsumedRef.current = true;
       setQuery(`Teach me about ${topicParam}`);
+
+      // Bind session to the concept from the URL
+      const cid = conceptIdParam ? Number(conceptIdParam) : null;
+      if (cid && concepts.length) {
+        const matched = concepts.find((c) => c.concept_id === cid);
+        if (matched) setCurrentConcept(matched);
+      }
+      if (cid) {
+        void startNewSession(cid);
+      }
     }
-  }, [topicParam, setQuery]);
+  }, [topicParam, conceptIdParam, concepts, setQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Navigate to a specific chat session when ?session= param is present
   useEffect(() => {
