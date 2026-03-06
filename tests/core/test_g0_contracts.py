@@ -224,11 +224,11 @@ class TestStreamEvents:
 
 
 class TestChatStreamingFlag:
-    def test_default_disabled(self, monkeypatch) -> None:
+    def test_default_enabled(self, monkeypatch) -> None:
         monkeypatch.delenv("APP_CHAT_STREAMING_ENABLED", raising=False)
         monkeypatch.delenv("CHAT_STREAMING_ENABLED", raising=False)
         settings = Settings(_env_file=None)
-        assert settings.chat_streaming_enabled is False
+        assert settings.chat_streaming_enabled is True
 
     def test_enabled_via_env(self, monkeypatch) -> None:
         monkeypatch.setenv("APP_CHAT_STREAMING_ENABLED", "true")

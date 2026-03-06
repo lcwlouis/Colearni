@@ -750,7 +750,8 @@ class Settings(BaseSettings):
 
     # ── Chat streaming ────────────────────────────────────────────────
     chat_streaming_enabled: bool = Field(
-        default=False,
+        default=True,
+        description="Enable the SSE /respond/stream endpoint. Defaults to True.",
         validation_alias=AliasChoices(
             "APP_CHAT_STREAMING_ENABLED",
             "CHAT_STREAMING_ENABLED",
