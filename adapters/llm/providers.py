@@ -1552,6 +1552,72 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         async for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
 
+    def _batch_complete_messages_json(
+        self,
+        message_lists: Sequence[list[Message]],
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+    ) -> list[dict[str, Any]]:
+        """Use ``asyncio.gather`` with the async OpenAI client for parallel JSON calls."""
+        import asyncio  # noqa: PLC0415
+
+        if not message_lists:
+            return []
+
+        schema_hint = json.dumps(schema, indent=2)
+        schema_suffix = (
+            "\n\nYou MUST respond with a JSON object conforming to this schema:\n"
+            f"```json\n{schema_hint}\n```"
+        )
+
+        if self._model_supports_json_schema():
+            response_format: dict[str, object] | None = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": True,
+                    "schema": schema,
+                },
+            }
+            needs_hint = False
+        else:
+            response_format = {"type": "json_object"}
+            needs_hint = True
+
+        async def _call_one(msgs: list[Message]) -> dict[str, Any]:
+            prepared = (
+                self._with_schema_hint(list(msgs), schema_suffix) if needs_hint
+                else list(msgs)
+            )
+            sdk_messages = self._prepare_messages(prepared)
+            result = await self._async_sdk_call(
+                messages=sdk_messages,
+                temperature=self._json_temperature,
+                response_format=response_format,
+            )
+            content = self._extract_content(result)
+            payload = json.loads(content)
+            if not isinstance(payload, dict):
+                raise ValueError("Batch response payload must decode to an object")
+            return payload
+
+        async def _gather_all() -> list[dict[str, Any]]:
+            return list(await asyncio.gather(*[_call_one(msgs) for msgs in message_lists]))
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            # Already inside an event loop — fall back to serial
+            return [
+                self.complete_messages_json(msgs, schema_name=schema_name, schema=schema)
+                for msgs in message_lists
+            ]
+        return asyncio.run(_gather_all())
+
 
 class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
     """Graph LLM adapter using the LiteLLM SDK."""
