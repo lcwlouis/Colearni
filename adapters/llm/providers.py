@@ -962,6 +962,8 @@ class _BaseGraphLLMClient(ABC):
         *,
         prompt_meta: Any | None = None,
         reasoning_effort_override: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> tuple[str, "GenerationTrace"]:
         """Non-streaming LLM call from pre-built messages.
 
@@ -981,6 +983,8 @@ class _BaseGraphLLMClient(ABC):
             response_format=None,
             prompt_meta=prompt_meta,
             rendered_length=rendered_length,
+            tools=tools,
+            tool_choice=tool_choice,
         )
         elapsed_ms = round((_time.monotonic_ns() - t0) / 1_000_000, 2)
         text = self._extract_content(result).strip()
@@ -1192,6 +1196,8 @@ class _BaseGraphLLMClient(ABC):
         response_format: dict[str, object] | None,
         prompt_meta: Any | None = None,
         rendered_length: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         """Wrap the SDK call with observability spans and events."""
         context = get_observation_context()
@@ -1226,6 +1232,8 @@ class _BaseGraphLLMClient(ABC):
                     messages=sdk_messages,
                     temperature=temperature,
                     response_format=response_format,
+                    tools=tools,
+                    tool_choice=tool_choice,
                 )
             except Exception as exc:
                 emit_event(
@@ -1279,6 +1287,8 @@ class _BaseGraphLLMClient(ABC):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         """Execute the provider-specific SDK call and return the raw response dict."""
 
@@ -1298,6 +1308,8 @@ class _BaseGraphLLMClient(ABC):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         """Async version of _sdk_call(). Override in subclasses."""
         raise NotImplementedError
@@ -1412,6 +1424,8 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -1420,6 +1434,10 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         }
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
         response = get_llm_limiter().execute(self._client.chat.completions.create, **kwargs)
         return response.model_dump()
 
@@ -1448,6 +1466,8 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -1456,6 +1476,10 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         }
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
         # TODO: async rate limiter
         response = await self._async_client.chat.completions.create(**kwargs)
         return response.model_dump()
@@ -1523,6 +1547,8 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         import litellm  # noqa: PLC0415
 
@@ -1541,6 +1567,10 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             kwargs["api_key"] = self._api_key
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
         response = get_llm_limiter().execute(litellm.completion, **kwargs)
         return response.model_dump()
 
@@ -1579,6 +1609,8 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         import litellm  # noqa: PLC0415
 
@@ -1597,6 +1629,10 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             kwargs["api_key"] = self._api_key
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools:
+            kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
         # TODO: async rate limiter
         response = await litellm.acompletion(**kwargs)
         return response.model_dump()

@@ -28,6 +28,8 @@ class _StubGraphLLMClient(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         # Capture the prompt for assertion
         self._last_messages = messages
@@ -151,6 +153,8 @@ class _FormatCapturingStub(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         self._captured_format = response_format
         self._captured_messages = messages
@@ -256,6 +260,8 @@ class _FallbackStub(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         self._call_count += 1
         self.captured_formats.append(response_format)
@@ -350,6 +356,8 @@ class _ContentSequenceStub(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         idx = self._call_count
         self._call_count += 1

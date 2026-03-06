@@ -144,6 +144,8 @@ class MockStreamingClient(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         return self._blocking_response
 

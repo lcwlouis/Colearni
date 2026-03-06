@@ -34,6 +34,8 @@ class _StubGraphLLMClient(_BaseGraphLLMClient):
         messages: list[dict[str, str]],
         temperature: float,
         response_format: dict[str, object] | None,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> Mapping[str, Any]:
         self._last_messages = messages
         self._last_response_format = response_format
