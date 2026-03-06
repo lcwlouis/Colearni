@@ -85,6 +85,24 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
     }
   }
 
+  if (selectedQuizId != null) {
+    return (
+      <QuizViewer
+        workspaceId={workspaceId}
+        quizId={selectedQuizId}
+        isRetry={retryingQuizId != null}
+        source={selectedSource}
+        onBack={() => {
+          setSelectedQuizId(null);
+          setRetryingQuizId(null);
+        }}
+        onRetryComplete={() => {
+          fetchQuizzes();
+        }}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <p style={{ color: "var(--muted)", padding: "1rem" }}>
@@ -103,24 +121,6 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
           {creating ? "Creating…" : "Create practice quiz"}
         </button>
       </div>
-    );
-  }
-
-  if (selectedQuizId != null) {
-    return (
-      <QuizViewer
-        workspaceId={workspaceId}
-        quizId={selectedQuizId}
-        isRetry={retryingQuizId != null}
-        source={selectedSource}
-        onBack={() => {
-          setSelectedQuizId(null);
-          setRetryingQuizId(null);
-        }}
-        onRetryComplete={() => {
-          fetchQuizzes();
-        }}
-      />
     );
   }
 

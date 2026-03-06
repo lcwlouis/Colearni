@@ -168,6 +168,10 @@ export function QuizViewer({
         })}
       </ol>
 
+      {submitting && (
+        <p className="status loading">Submitting and grading...</p>
+      )}
+
       {isRetry && !result && (
         <div className="button-row">
           {error && <p className="status error">{error}</p>}

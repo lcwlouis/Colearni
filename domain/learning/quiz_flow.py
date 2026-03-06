@@ -321,7 +321,7 @@ def submit_quiz(
             existing = _load_existing_graded_attempt(
                 session, quiz_id=quiz_id, user_id=user_id
             )
-            if existing is not None:
+            if existing is not None and quiz_type != "practice":
                 grading = existing["grading"] if isinstance(existing["grading"], dict) else {}
                 feedback_items = _compose_feedback_items(
                     item_refs=item_refs,
