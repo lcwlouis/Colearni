@@ -70,6 +70,7 @@ class QueryAnalysis:
     requested_mode: RequestedMode = "unknown"
     needs_retrieval: bool = True
     should_offer_level_up: bool = False
+    needs_web_search: bool = False
     high_level_keywords: list[str] = field(default_factory=list)
     low_level_keywords: list[str] = field(default_factory=list)
     concept_hints: list[str] = field(default_factory=list)
@@ -125,11 +126,13 @@ def parse_query_analysis(raw_json: str | dict) -> QueryAnalysis:
         else:
             data = json.loads(raw_json)
         validated = QueryAnalysisResponse.model_validate(data)
+        intent = validated.intent
         return QueryAnalysis(
-            intent=validated.intent,
+            intent=intent,
             requested_mode=validated.requested_mode,
             needs_retrieval=validated.needs_retrieval,
             should_offer_level_up=validated.should_offer_level_up,
+            needs_web_search=intent == "explore",
             high_level_keywords=validated.high_level_keywords,
             low_level_keywords=validated.low_level_keywords,
             concept_hints=validated.concept_hints,

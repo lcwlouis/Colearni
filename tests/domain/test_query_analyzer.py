@@ -307,3 +307,27 @@ class TestPydanticValidation:
         assert result.intent == "explore"
         assert result.requested_mode == "direct"
         assert result.concept_hints == ["algebra"]
+        assert result.needs_web_search is True
+
+
+class TestNeedsWebSearch:
+    """needs_web_search is derived from intent == 'explore'."""
+
+    def test_explore_intent_enables_web_search(self) -> None:
+        data = {"intent": "explore"}
+        result = parse_query_analysis(data)
+        assert result.needs_web_search is True
+
+    def test_learn_intent_disables_web_search(self) -> None:
+        data = {"intent": "learn"}
+        result = parse_query_analysis(data)
+        assert result.needs_web_search is False
+
+    def test_clarify_intent_disables_web_search(self) -> None:
+        data = {"intent": "clarify"}
+        result = parse_query_analysis(data)
+        assert result.needs_web_search is False
+
+    def test_fallback_disables_web_search(self) -> None:
+        result = parse_query_analysis("invalid json")
+        assert result.needs_web_search is False
