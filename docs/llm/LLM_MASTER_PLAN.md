@@ -149,7 +149,7 @@ What is critically broken or materially missing:
 | `L1` Message Format | `docs/llm/01_message_format_plan.md` | pending |
 | `L2` Message Persistence | `docs/llm/02_message_persistence_plan.md` | pending |
 | `L3` LLM Client Enhancement | `docs/llm/03_llm_client_enhancement_plan.md` | ✅ done |
-| `L4` Agentic Tool Framework | `docs/llm/04_tool_framework_plan.md` | pending |
+| `L4` Agentic Tool Framework | `docs/llm/04_tool_framework_plan.md` | ✅ done |
 | `L5` JSON Mode | `docs/llm/05_json_mode_plan.md` | ✅ done |
 | `L6` Regeneration | `docs/llm/06_regeneration_plan.md` | pending |
 | `L7` Graph Batching | `docs/llm/07_graph_batching_plan.md` | pending |
@@ -461,11 +461,11 @@ Dependencies between tracks:
 | `L1` Message Format | ✅ done | All 9 slices complete |
 | `L2` Message Persistence | ✅ done | All 6 slices complete |
 | `L3` LLM Client Enhancement | ✅ done | All 6 slices complete |
-| `L4` Agentic Tool Framework | 🔄 pending | Depends on L1 ✅ — ready |
+| `L4` Agentic Tool Framework | ✅ done | All 6 slices complete |
 | `L5` JSON Mode | ✅ done | All 5 slices complete |
 | `L6` Regeneration | 🔄 pending | Depends on L2 ✅ — ready |
 | `L7` Graph Batching | 🔄 pending | Depends on L1 ✅ — ready |
-| `L8` Web Search | 🔄 pending | Blocked by L4 |
+| `L8` Web Search | 🔄 pending | Depends on L4 ✅ — ready |
 
 ## Verification Block Template
 

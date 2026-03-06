@@ -14,12 +14,12 @@ limits per docs/CODEX.md.
 
 | Slice | Description | Status |
 |-------|-------------|--------|
-| L4.1 | Define `Tool` protocol and `ToolRegistry` with schema generation | 🔄 pending |
-| L4.2 | Implement `ToolExecutor` — dispatch tool calls, format results | 🔄 pending |
-| L4.3 | Implement bounded `AgentLoop` — LLM → tool → repeat (max N) | 🔄 pending |
-| L4.4 | Add `tools` parameter support to LLM client methods | 🔄 pending |
-| L4.5 | Implement built-in tools: search, lookup_concept, check_mastery | 🔄 pending |
-| L4.6 | Wire tool framework into tutor agent (optional tool mode) | 🔄 pending |
+| L4.1 | Define `Tool` protocol and `ToolRegistry` with schema generation | ✅ done |
+| L4.2 | Implement `ToolExecutor` — dispatch tool calls, format results | ✅ done |
+| L4.3 | Implement bounded `AgentLoop` — LLM → tool → repeat (max N) | ✅ done |
+| L4.4 | Add `tools` parameter support to LLM client methods | ✅ done |
+| L4.5 | Implement built-in tools: search, lookup_concept, check_mastery | ✅ done |
+| L4.6 | Wire tool framework into tutor agent (optional tool mode) | ✅ done |
 
 ---
 
