@@ -65,7 +65,6 @@ export function GraphReducers({
       sigma.setSetting("nodeProgramClasses", { ...programs, bordered: NodeBorderProgram });
     }
 
-    const graph = sigma.getGraph();
     const dimmed = theme?.dimmedNodeColor ?? "#e0e0e0";
     const hlEdge = theme?.highlightEdgeColor ?? "#88ccff";
 
@@ -73,9 +72,10 @@ export function GraphReducers({
     sigma.setSetting("nodeReducer", (node: string, data: any) => {
       const result = { ...data };
       const activeNode = hoveredRef.current || selectedKeyRef.current;
+      const currentGraph = sigma.getGraph();
 
-      if (highlightRef.current && activeNode && graph.hasNode(activeNode)) {
-        const neighbors = new Set(graph.neighbors(activeNode));
+      if (highlightRef.current && activeNode && currentGraph.hasNode(activeNode)) {
+        const neighbors = new Set(currentGraph.neighbors(activeNode));
         if (node === activeNode) {
           result.highlighted = true;
           result.zIndex = 2;
@@ -89,7 +89,7 @@ export function GraphReducers({
           result.label = undefined;
           result.zIndex = 0;
         }
-      } else if (!highlightRef.current && activeNode && graph.hasNode(activeNode) && node === activeNode) {
+      } else if (!highlightRef.current && activeNode && currentGraph.hasNode(activeNode) && node === activeNode) {
         result.highlighted = true;
         result.zIndex = 2;
         result.borderColor = NODE_BORDER_COLOR_SELECTED;
@@ -126,9 +126,10 @@ export function GraphReducers({
     sigma.setSetting("edgeReducer", (edge: string, data: any) => {
       const result = { ...data };
       const activeNode = hoveredRef.current || selectedKeyRef.current;
+      const currentGraph = sigma.getGraph();
 
-      if (highlightRef.current && activeNode && graph.hasNode(activeNode)) {
-        const extremities = graph.extremities(edge);
+      if (highlightRef.current && activeNode && currentGraph.hasNode(activeNode) && currentGraph.hasEdge(edge)) {
+        const extremities = currentGraph.extremities(edge);
         if (extremities.includes(activeNode)) {
           result.color = hlEdge;
           result.size = ((data.size as number) || 1) * 1.5;

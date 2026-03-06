@@ -5,6 +5,9 @@ import type { PracticeQuizHistoryEntry } from "@/lib/api/types";
 import { apiClient } from "@/lib/api/client";
 import { QuizViewer } from "./quiz-viewer";
 
+type QuizSource = "practice" | "level_up";
+type QuizHistoryItem = PracticeQuizHistoryEntry & { source: QuizSource };
+
 type Props = {
   workspaceId: string;
   conceptId: number;
@@ -12,7 +15,7 @@ type Props = {
 };
 
 export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
-  const [quizzes, setQuizzes] = useState<PracticeQuizHistoryEntry[]>([]);
+  const [quizzes, setQuizzes] = useState<QuizHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuizId, setSelectedQuizId] = useState<number | null>(null);
   const [retryingQuizId, setRetryingQuizId] = useState<number | null>(null);
@@ -22,12 +25,15 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
   const fetchQuizzes = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await apiClient.listPracticeQuizzes(
-        workspaceId,
-        conceptId,
-        50,
-      );
-      setQuizzes(result.quizzes);
+      const [practiceResult, levelUpResult] = await Promise.all([
+        apiClient.listPracticeQuizzes(workspaceId, conceptId, 50),
+        apiClient.listLevelUpQuizzes(workspaceId, conceptId, 50),
+      ]);
+      const merged: QuizHistoryItem[] = [
+        ...practiceResult.quizzes.map((q) => ({ ...q, source: "practice" as const })),
+        ...levelUpResult.quizzes.map((q) => ({ ...q, source: "level_up" as const })),
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setQuizzes(merged);
     } catch (err) {
       console.error("Failed to fetch quizzes:", err);
     } finally {
@@ -40,12 +46,17 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
     async function load() {
       setLoading(true);
       try {
-        const result = await apiClient.listPracticeQuizzes(
-          workspaceId,
-          conceptId,
-          50,
-        );
-        if (!cancelled) setQuizzes(result.quizzes);
+        const [practiceResult, levelUpResult] = await Promise.all([
+          apiClient.listPracticeQuizzes(workspaceId, conceptId, 50),
+          apiClient.listLevelUpQuizzes(workspaceId, conceptId, 50),
+        ]);
+        if (!cancelled) {
+          const merged: QuizHistoryItem[] = [
+            ...practiceResult.quizzes.map((q) => ({ ...q, source: "practice" as const })),
+            ...levelUpResult.quizzes.map((q) => ({ ...q, source: "level_up" as const })),
+          ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setQuizzes(merged);
+        }
       } catch (err) {
         console.error("Failed to fetch quizzes:", err);
       } finally {
@@ -58,7 +69,7 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
     };
   }, [workspaceId, conceptId]);
 
-  async function handleRetry(quiz: PracticeQuizHistoryEntry) {
+  async function handleRetry(quiz: QuizHistoryItem) {
     if (quiz.concept_id == null) return;
     setRetryLoading(true);
     setRetryingQuizId(quiz.quiz_id);
@@ -135,6 +146,9 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
         {quizzes.map((q) => (
           <li key={q.quiz_id} className="quiz-history__item">
             <div className="quiz-history__info">
+              <span className="quiz-history__type" style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
+                {q.source === "level_up" ? "🎯 Level-up" : "📝 Practice"}
+              </span>
               {q.concept_name && (
                 <span className="quiz-history__concept">{q.concept_name}</span>
               )}

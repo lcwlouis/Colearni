@@ -63,6 +63,12 @@ export function StableSigmaContainer({
   // --- Update graph in-place when it changes ---
   useEffect(() => {
     if (!sigmaRef.current) return;
+    // Clear reducers before swapping graphs to prevent stale-graph crashes
+    // in reducers that fire during setGraph / refresh.
+    try {
+      sigmaRef.current.setSetting("nodeReducer", null);
+      sigmaRef.current.setSetting("edgeReducer", null);
+    } catch { /* instance may be killed */ }
     sigmaRef.current.setGraph(graph);
     sigmaRef.current.refresh({ skipIndexation: false });
   }, [graph]);

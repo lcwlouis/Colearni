@@ -92,9 +92,20 @@ export function useTutorMessages({
           const candidate = record.payload as Partial<AssistantResponseEnvelope>;
           const resolvedConceptId = candidate.conversation_meta?.resolved_concept_id;
           if (resolvedConceptId) {
-            setCurrentConcept(
-              concepts.find((c) => c.concept_id === resolvedConceptId) ?? null,
-            );
+            const resolved = concepts.find((c) => c.concept_id === resolvedConceptId);
+            if (resolved) setCurrentConcept(resolved);
+            break;
+          }
+        }
+      }
+
+      // Restore hierarchy path from the latest assistant message
+      for (let i = payload.messages.length - 1; i >= 0; i--) {
+        const record = payload.messages[i];
+        if (record.type === "assistant" && typeof record.payload === "object") {
+          const candidate = record.payload as Partial<AssistantResponseEnvelope>;
+          if (candidate.conversation_meta?.hierarchy_path?.length) {
+            setHierarchyPath(candidate.conversation_meta.hierarchy_path);
             break;
           }
         }
