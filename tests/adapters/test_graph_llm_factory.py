@@ -105,6 +105,7 @@ def test_build_tutor_llm_client_with_tutor_model() -> None:
             "graph_llm_provider": "openai",
             "openai_api_key": "test-key",
             "graph_llm_model": "gpt-4.1-mini",
+            "tutor_llm_provider": None,
             "tutor_llm_model": "gpt-4o",
         },
     )
