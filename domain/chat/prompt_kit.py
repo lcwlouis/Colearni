@@ -277,7 +277,34 @@ def _build_persona_prefix(
     persona: dict[str, str],
     style: Literal["socratic", "direct"],
 ) -> str:
-    """Build the stable persona + teaching-style prefix (cacheable)."""
+    """Build the stable persona + teaching-style prefix (cacheable).
+
+    Loads the stable (non-variable) sections from the versioned prompt
+    template — everything before ``---Inputs---``.  This produces a prefix
+    that is identical across turns for the same style, enabling prompt
+    caching with providers that support it (e.g. Anthropic).
+
+    Falls back to a compact inline prefix if the asset cannot be loaded.
+    """
+    asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    try:
+        asset = _registry.get(asset_id)
+        parts = asset.template.split("---Inputs---", 1)
+        if len(parts) == 2:
+            stable = parts[0].rstrip()
+            if stable:
+                return stable
+    except Exception:
+        log.debug("stable prefix load failed for %s, using inline fallback", asset_id)
+    return _build_persona_prefix_inline(persona=persona, style=style)
+
+
+def _build_persona_prefix_inline(
+    *,
+    persona: dict[str, str],
+    style: Literal["socratic", "direct"],
+) -> str:
+    """Inline fallback for persona prefix when template loading fails."""
     lines: list[str] = [
         persona.get("system_prefix", PERSONA_COLEARNI["system_prefix"]),
         "",

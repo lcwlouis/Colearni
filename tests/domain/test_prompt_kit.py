@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import pytest
+
 from core.llm_messages import MessageBuilder
 from core.schemas import EvidenceItem, EvidenceSourceType, GroundingMode
 from domain.chat.prompt_kit import (
     PromptMessages,
     build_full_tutor_prompt,
     build_full_tutor_prompt_with_meta,
+    build_social_response,
     build_socratic_interactive_messages,
     build_socratic_interactive_prompt,
-    build_social_response,
     build_system_prompt,
     build_tutor_messages,
     classify_social_intent,
@@ -192,7 +193,8 @@ class TestBuildTutorMessages:
         assert len(system_msgs) >= 1
         prefix = system_msgs[0]["content"]
         assert "CoLearni" in prefix
-        assert "Socratic" in prefix
+        # Template-loaded prefix includes guiding question instruction
+        assert "guiding question" in prefix.lower()
 
     def test_builder_ends_with_user_message(self) -> None:
         persona = get_persona("colearni")
@@ -265,7 +267,8 @@ class TestBuildTutorMessages:
         )
         msgs = builder.build()
         prefix = msgs[0]["content"]
-        assert "Direct" in prefix
+        # Template-loaded prefix includes direct-style phrasing
+        assert "clear" in prefix.lower() or "concise" in prefix.lower()
 
 
 class TestBuildFullTutorPromptWithMetaCompat:
@@ -347,3 +350,72 @@ class TestBuildSocraticInteractiveMessages:
         assert isinstance(pm, PromptMessages)
         assert "What next?" in pm.user
         assert "Socratic" in pm.system
+
+
+class TestPromptCacheStructure:
+    """L3.2: Verify prompt structure supports prompt caching."""
+
+    def test_stable_prefix_deterministic_across_turns(self) -> None:
+        """Same style + persona → identical first system message."""
+        persona = get_persona("colearni")
+        builder1, _ = build_tutor_messages(
+            query="What is DNA?",
+            evidence=_sample_evidence(),
+            persona=persona,
+            style="socratic",
+            document_summaries="Chapter 1: Biology basics",
+            assessment_context="score: 90%",
+        )
+        builder2, _ = build_tutor_messages(
+            query="Explain mitosis",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            document_summaries="Chapter 5: Cell division",
+            graph_context="cell → mitosis → prophase",
+        )
+        msgs1 = builder1.build()
+        msgs2 = builder2.build()
+        assert msgs1[0]["content"] == msgs2[0]["content"]
+
+    def test_variable_context_not_in_stable_prefix(self) -> None:
+        """Variable per-turn data must be in separate context messages."""
+        persona = get_persona("colearni")
+        doc_marker = "UNIQUE_DOC_SUMMARY_XYZ"
+        assess_marker = "UNIQUE_ASSESSMENT_ABC"
+        builder, _ = build_tutor_messages(
+            query="Q",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            document_summaries=doc_marker,
+            assessment_context=assess_marker,
+        )
+        msgs = builder.build()
+        prefix = msgs[0]["content"]
+        assert doc_marker not in prefix
+        assert assess_marker not in prefix
+        all_system = " ".join(m["content"] for m in msgs if m["role"] == "system")
+        assert doc_marker in all_system
+        assert assess_marker in all_system
+
+    def test_different_styles_produce_different_prefixes(self) -> None:
+        persona = get_persona("colearni")
+        socratic, _ = build_tutor_messages(
+            query="Q", evidence=[], persona=persona, style="socratic",
+        )
+        direct, _ = build_tutor_messages(
+            query="Q", evidence=[], persona=persona, style="direct",
+        )
+        assert socratic.build()[0]["content"] != direct.build()[0]["content"]
+
+    def test_prefix_substantial_for_caching(self) -> None:
+        """Stable prefix should be loaded from the template and be substantial."""
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="Q", evidence=[], persona=persona, style="socratic",
+        )
+        prefix = builder.build()[0]["content"]
+        # Template-derived prefix includes Role, Goal, Rules, Output contract
+        assert len(prefix) > 200
+        assert "---Role---" in prefix or "CoLearni" in prefix
