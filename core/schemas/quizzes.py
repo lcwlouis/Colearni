@@ -68,6 +68,7 @@ class PracticeQuizAttemptSummary(BaseModel):
     critical_misconception: bool
     overall_feedback: str = Field(min_length=1)
     graded_at: datetime
+    grading_items: list[QuizFeedbackItem] = Field(default_factory=list)
 
 
 class PracticeQuizHistoryEntry(BaseModel):

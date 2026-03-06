@@ -116,6 +116,10 @@ export function QuizViewer({
     for (const fb of result.items) {
       feedbackMap.set(fb.item_id, fb);
     }
+  } else if (quiz.latest_attempt?.grading_items) {
+    for (const fb of quiz.latest_attempt.grading_items) {
+      feedbackMap.set(fb.item_id, fb);
+    }
   }
 
   const showResults = !isRetry || result != null;

@@ -472,6 +472,7 @@ def _serialize_quiz_history_row(row: Any) -> dict[str, Any]:
             "critical_misconception": bool(grading.get("critical_misconception", False)),
             "overall_feedback": str(grading.get("overall_feedback", "")).strip() or "(no feedback)",
             "graded_at": row["graded_at"],
+            "grading_items": grading.get("items", []),
         }
     return {
         "quiz_id": int(row["quiz_id"]),

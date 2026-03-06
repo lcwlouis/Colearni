@@ -459,6 +459,7 @@ def test_practice_quiz_history_list_and_detail_with_latest_attempt() -> None:
             "critical_misconception",
             "overall_feedback",
             "graded_at",
+            "grading_items",
         }
 
         detail = client.get(

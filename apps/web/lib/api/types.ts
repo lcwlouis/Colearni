@@ -180,6 +180,7 @@ export interface PracticeQuizAttemptSummary {
   passed: boolean;
   critical_misconception: boolean;
   overall_feedback: string;
+  grading_items?: QuizFeedbackItem[];
   graded_at: string;
 }
 
