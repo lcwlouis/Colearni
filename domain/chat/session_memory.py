@@ -183,20 +183,27 @@ def maybe_compact_session_context(
     summary = raw_summary
     if settings is not None and len(raw_summary) > 800:
         try:
+            from core.llm_messages import MessageBuilder
             from domain.chat.response_service import build_tutor_llm_client
 
             llm_client = build_tutor_llm_client(settings=settings)
             if llm_client is not None:
-                compaction_prompt = (
-                    "Summarize the following tutor-learner conversation concisely. "
-                    "Preserve key topics discussed, questions asked, misconceptions identified, "
-                    "and learning progress. Keep the summary under 200 words.\n\n"
-                    f"CONVERSATION:\n{raw_summary}"
+                messages = (
+                    MessageBuilder()
+                    .system(
+                        "You are a conversation summarizer. "
+                        "Return only the summary, nothing else."
+                    )
+                    .user(
+                        "Summarize the following tutor-learner conversation concisely. "
+                        "Preserve key topics discussed, questions asked, misconceptions identified, "
+                        "and learning progress. Keep the summary under 200 words.\n\n"
+                        f"CONVERSATION:\n{raw_summary}"
+                    )
+                    .build()
                 )
-                summary = llm_client.generate_tutor_text(
-                    prompt=compaction_prompt,
-                    system_prompt="You are a conversation summarizer. Return only the summary, nothing else.",
-                ).strip()
+                text, _trace = llm_client.complete_messages(messages)
+                summary = text.strip()
                 if not summary:
                     summary = raw_summary
         except Exception:
