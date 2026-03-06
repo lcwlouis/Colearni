@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from core.schemas import EvidenceItem, EvidenceSourceType, GroundingMode
 from domain.chat.tutor_agent import (
     build_tutor_prompt,
@@ -13,6 +14,9 @@ from domain.chat.tutor_agent import (
 
 class FailingTutorClient:
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:  # noqa: ARG002
+        raise RuntimeError("llm unavailable")
+
+    def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
         raise RuntimeError("llm unavailable")
 
 

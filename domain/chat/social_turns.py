@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.contracts import GraphLLMClient
+from core.llm_messages import MessageBuilder
 from core.observability import observation_context
 from core.prompting.models import PromptMeta, TaskType
 from core.schemas import (
@@ -46,11 +47,12 @@ def try_social_response(
         )
         try:
             with observation_context(component="chat", operation="chat.social"):
-                social_text = social_llm.generate_tutor_text(
-                    prompt=query,
+                messages = MessageBuilder().system(system_prompt).user(query).build()
+                social_text, _ = social_llm.complete_messages(
+                    messages,
                     prompt_meta=_SOCIAL_PROMPT_META,
-                    system_prompt=system_prompt,
-                ).strip()
+                )
+                social_text = social_text.strip()
         except (RuntimeError, ValueError):
             social_text = ""
         if not social_text:

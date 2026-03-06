@@ -385,9 +385,13 @@ def build_tutor_messages(
     if history_summary:
         builder.context(history_summary, label="history")
 
-    # User message: evidence + query
-    evidence_block = build_evidence_block(evidence)
-    builder.user(f"{evidence_block}\n\nUSER_QUESTION: {query}")
+    # Evidence as its own context block (separate from user query)
+    if evidence:
+        evidence_block = build_evidence_block(evidence)
+        builder.context(evidence_block, label="evidence")
+
+    # User message: query only
+    builder.user(query)
 
     return builder, meta
 

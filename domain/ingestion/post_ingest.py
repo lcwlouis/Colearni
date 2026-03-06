@@ -9,6 +9,7 @@ from adapters.db.chunks import list_chunks_for_document
 from adapters.db.documents import update_document_status, update_document_summary
 from adapters.embeddings.factory import build_embedding_provider
 from core.contracts import EmbeddingProvider, GraphLLMClient
+from core.llm_messages import MessageBuilder
 from core.observability import (
     SPAN_KIND_CHAIN,
     observation_context,
@@ -49,9 +50,9 @@ def generate_document_summary(
         return None
     system_prompt, prompt, prompt_meta = _build_document_summary_prompt(sample_text.strip())
     try:
-        summary = llm_client.generate_tutor_text(
-            prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt
-        ).strip()
+        messages = MessageBuilder().system(system_prompt).user(prompt).build()
+        summary, _ = llm_client.complete_messages(messages, prompt_meta=prompt_meta)
+        summary = summary.strip()
         if summary and len(summary) > 10:
             return summary[:500]
     except (RuntimeError, ValueError):

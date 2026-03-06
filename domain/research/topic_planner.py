@@ -14,6 +14,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from core.llm_messages import MessageBuilder
 from domain.research.planner import SourceClass, TopicProposal
 
 if TYPE_CHECKING:
@@ -78,7 +79,8 @@ def _llm_plan_topics(
         max_proposals=max_proposals,
         max_subtopics=_MAX_SUBTOPICS,
     )
-    raw = llm_client.generate_tutor_text(prompt=prompt, prompt_meta=None)
+    messages = MessageBuilder().system("You are a research planner.").user(prompt).build()
+    raw, _ = llm_client.complete_messages(messages)
     return _parse_proposals(raw, max_proposals=max_proposals)
 
 

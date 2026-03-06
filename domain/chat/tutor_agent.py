@@ -44,21 +44,11 @@ def build_tutor_response_text(
     )
     if llm_client is not None:
         messages = MessageBuilder().system(system_prompt).user(user_prompt).build()
-        complete_fn = getattr(llm_client, "complete_messages", None)
-        if callable(complete_fn):
-            try:
-                text, _ = complete_fn(messages)
-                text = text.strip()
-            except (RuntimeError, ValueError):
-                text = ""
-        else:
-            try:
-                text = llm_client.generate_tutor_text(
-                    prompt=user_prompt,
-                    system_prompt=system_prompt,
-                ).strip()
-            except (RuntimeError, ValueError):
-                text = ""
+        try:
+            text, _ = llm_client.complete_messages(messages)
+            text = text.strip()
+        except (RuntimeError, ValueError):
+            text = ""
         if text:
             return text
     return _fallback_text(query=query, evidence=evidence, style=style)

@@ -7,7 +7,7 @@ import logging
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
-from typing import Any
+from typing import Any, TypeVar, overload
 
 from pydantic import BaseModel
 
@@ -31,6 +31,8 @@ from core.prompting import PromptRegistry
 from core.rate_limiter import get_llm_limiter
 
 log = logging.getLogger("adapters.llm.providers")
+
+_M = TypeVar("_M", bound=BaseModel)
 
 _registry = PromptRegistry()
 
@@ -258,12 +260,12 @@ class _BaseGraphLLMClient(ABC):
                 "Return valid JSON only."
             )
             prompt = f"Extract concept+edge JSON from this chunk.\n\nCHUNK:\n{chunk_text}"
-        return self._chat_json(
+        messages = MessageBuilder().system(system_prompt).user(prompt).build()
+        return self.complete_messages_json(
+            messages,
             schema_name="graph_raw_extraction",
             schema=_RAW_GRAPH_SCHEMA,
-            prompt=prompt,
             prompt_meta=prompt_meta,
-            system_prompt=system_prompt,
         )
 
     def batch_extract_raw_graph(
@@ -327,12 +329,12 @@ class _BaseGraphLLMClient(ABC):
                 f"CONTEXT: {context_snippet or ''}\n"
                 f"CANDIDATES_JSON: {candidates_json}"
             )
-        return self._chat_json(
+        messages = MessageBuilder().system(system_prompt).user(prompt).build()
+        return self.complete_messages_json(
+            messages,
             schema_name="graph_disambiguation",
             schema=_DISAMBIGUATION_SCHEMA,
-            prompt=prompt,
             prompt_meta=prompt_meta,
-            system_prompt=system_prompt,
         )
 
     def disambiguate_batch(
@@ -457,12 +459,12 @@ class _BaseGraphLLMClient(ABC):
                 f"{batch_json}"
             )
 
-        raw = self._chat_json(
+        messages = MessageBuilder().system(system_prompt).user(prompt).build()
+        raw = self.complete_messages_json(
+            messages,
             schema_name="graph_disambiguation_batch",
             schema=_DISAMBIGUATION_BATCH_SCHEMA,
-            prompt=prompt,
             prompt_meta=prompt_meta,
-            system_prompt=system_prompt,
         )
         decisions = raw.get("decisions", [])
         if not isinstance(decisions, list):
@@ -870,6 +872,28 @@ class _BaseGraphLLMClient(ABC):
             prompt_meta=prompt_meta,
         )
 
+    @overload
+    def complete_messages_json(
+        self,
+        messages: list[Message],
+        *,
+        schema_name: str | None = ...,
+        schema: dict[str, object] | None = ...,
+        response_model: type[_M],
+        prompt_meta: Any | None = ...,
+    ) -> _M: ...
+
+    @overload
+    def complete_messages_json(
+        self,
+        messages: list[Message],
+        *,
+        schema_name: str | None = ...,
+        schema: dict[str, object] | None = ...,
+        response_model: None = ...,
+        prompt_meta: Any | None = ...,
+    ) -> dict[str, Any]: ...
+
     def complete_messages_json(
         self,
         messages: list[Message],
@@ -878,7 +902,7 @@ class _BaseGraphLLMClient(ABC):
         schema: dict[str, object] | None = None,
         response_model: type[BaseModel] | None = None,
         prompt_meta: Any | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | BaseModel:
         """JSON-mode LLM call from pre-built messages with format fallback.
 
         This is the ``messages[]``-native entry point for structured JSON
@@ -964,7 +988,7 @@ class _BaseGraphLLMClient(ABC):
                 if not isinstance(response_payload, dict):
                     raise ValueError("Graph LLM response payload must decode to an object")
                 if response_model is not None:
-                    response_model.model_validate(response_payload)
+                    return response_model.model_validate(response_payload)
                 return response_payload
             except (json.JSONDecodeError, ValueError) as parse_exc:
                 if i < len(attempts) - 1:

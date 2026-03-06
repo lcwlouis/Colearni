@@ -13,7 +13,6 @@ from adapters.llm.providers import _BaseGraphLLMClient
 from core.llm_messages import MessageBuilder
 from core.llm_schemas import QueryAnalysisResponse
 
-
 # ── Stub client ──────────────────────────────────────────────────────
 
 
@@ -81,8 +80,8 @@ class TestResponseModelOnly:
             _MESSAGES,
             response_model=QueryAnalysisResponse,
         )
-        assert isinstance(result, dict)
-        assert result["intent"] == "learn"
+        assert isinstance(result, QueryAnalysisResponse)
+        assert result.intent == "learn"
 
     def test_schema_name_derived_from_model(self) -> None:
         client = _StubGraphLLMClient(response=_VALID_QA_RESPONSE)
@@ -145,7 +144,7 @@ class TestBothProvided:
             schema=custom_schema,
             response_model=QueryAnalysisResponse,
         )
-        assert isinstance(result, dict)
+        assert isinstance(result, QueryAnalysisResponse)
         # Explicit schema takes precedence — the hint embedded in the
         # messages should contain the custom schema, not the model-derived one.
         last_content = client._last_messages[-1]["content"]

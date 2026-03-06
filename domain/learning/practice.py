@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from core.contracts import GraphLLMClient
+from core.llm_messages import MessageBuilder
 from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_summary, start_span
 from core.prompting import PromptRegistry
 from domain.learning.practice_novelty import (
@@ -122,8 +123,10 @@ def generate_practice_flashcards(
         if span is not None:
             span.set_attribute("concept.id", concept_id)
             set_span_summary(span, input_summary=context["concept_name"])
+        messages = MessageBuilder().system(sys_prompt).user(prompt).build()
+        llm_text, _ = llm_client.complete_messages(messages, prompt_meta=prompt_meta)
         payload = _parse_json(
-            llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=sys_prompt),
+            llm_text,
             "Flashcard generation response is not valid JSON.",
         )
         if span is not None:
@@ -377,9 +380,9 @@ def _generate_practice_items_with_retries(
         try:
             with observation_context(retry_attempt=attempt):
                 try:
-                    llm_text = llm_client.generate_tutor_text(
-                        prompt=retry_prompt, prompt_meta=prompt_meta,
-                        system_prompt=system_prompt,
+                    messages = MessageBuilder().system(system_prompt).user(retry_prompt).build()
+                    llm_text, _ = llm_client.complete_messages(
+                        messages, prompt_meta=prompt_meta,
                     )
                 except Exception:
                     return _fallback_practice_items(
@@ -679,8 +682,10 @@ def generate_stateful_flashcards(
         if span is not None and concept_id is not None:
             span.set_attribute("concept.id", concept_id)
             set_span_summary(span, input_summary=context["concept_name"])
+        messages = MessageBuilder().system(sys_prompt).user(prompt).build()
+        llm_text, _ = llm_client.complete_messages(messages, prompt_meta=prompt_meta)
         payload = _parse_json(
-            llm_client.generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=sys_prompt),
+            llm_text,
             "Flashcard generation response is not valid JSON.",
         )
         if span is not None:

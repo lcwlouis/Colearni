@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import text
+
 from core.observability import configure_observability, set_event_sink
 from core.settings import get_settings
-from sqlalchemy import text
 from tests.db.test_level_up_quiz_flow_integration import (
     _client,
     _client_without_llm,
@@ -51,7 +52,8 @@ class PracticeLLM:
 
     def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
         user_text = next(m["content"] for m in messages if m["role"] == "user")
-        return self._grade_from_text(user_text), None
+        text = self.generate_tutor_text(prompt=user_text)
+        return text, None
 
 
 class FlakyPracticeLLM(PracticeLLM):
@@ -74,9 +76,17 @@ class FlakyPracticeLLM(PracticeLLM):
                 )
         return super().generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)
 
+    def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
+        user_text = next(m["content"] for m in messages if m["role"] == "user")
+        text = self.generate_tutor_text(prompt=user_text)
+        return text, None
+
 
 class ExplodingPracticeLLM:
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
+        raise RuntimeError("synthetic llm failure")
+
+    def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
         raise RuntimeError("synthetic llm failure")
 
 
@@ -90,6 +100,11 @@ class UniqueFlashcardLLM(PracticeLLM):
             ]
             return json.dumps({"flashcards": cards})
         return super().generate_tutor_text(prompt=prompt, prompt_meta=prompt_meta, system_prompt=system_prompt)
+
+    def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
+        user_text = next(m["content"] for m in messages if m["role"] == "user")
+        text = self.generate_tutor_text(prompt=user_text)
+        return text, None
 
 
 def _short_item() -> dict[str, Any]:

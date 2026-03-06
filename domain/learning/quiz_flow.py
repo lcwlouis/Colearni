@@ -19,6 +19,7 @@ from opentelemetry import trace
 from sqlalchemy.orm import Session
 
 from core.contracts import GraphLLMClient
+from core.llm_messages import MessageBuilder
 from core.observability import (
     SPAN_KIND_CHAIN,
     emit_event,
@@ -76,9 +77,6 @@ from domain.learning.quiz_grading import (
 )
 from domain.learning.quiz_grading import (
     grading_messages as _grading_messages,
-)
-from domain.learning.quiz_grading import (
-    grading_prompt as _grading_prompt,
 )
 from domain.learning.quiz_grading import (
     parse_grading as _parse_grading,
@@ -410,12 +408,8 @@ def submit_quiz(
                     short_grading = _grade_short_items_without_llm(short_items, answer_map)
                 else:
                     short_ids = [item["item_id"] for item in short_items]
-                    if callable(getattr(llm_client, "complete_messages", None)):
-                        messages = _grading_messages(short_items, answer_map)
-                        llm_text, _ = llm_client.complete_messages(messages)
-                    else:
-                        short_prompt = _grading_prompt(short_items, answer_map)
-                        llm_text = llm_client.generate_tutor_text(prompt=short_prompt)
+                    messages = _grading_messages(short_items, answer_map)
+                    llm_text, _ = llm_client.complete_messages(messages)
                     short_grading = _parse_grading(llm_text, short_ids)
                 short_overall_feedback = short_grading["overall_feedback"]
                 for graded_item in short_grading["items"]:
@@ -639,7 +633,7 @@ def _supports_quiz_generation(llm_client: GraphLLMClient) -> bool:
     """Check if the LLM client supports both graph extraction and text generation."""
     return (
         callable(getattr(llm_client, "extract_raw_graph", None))
-        and callable(getattr(llm_client, "generate_tutor_text", None))
+        and callable(getattr(llm_client, "complete_messages", None))
     )
 
 
@@ -690,9 +684,9 @@ def _generate_items_with_retries(
     retry_prompt = prompt
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         try:
-            llm_response = llm_client.generate_tutor_text(
-                prompt=retry_prompt, prompt_meta=prompt_meta,
-                system_prompt=system_prompt,
+            messages = MessageBuilder().system(system_prompt).user(retry_prompt).build()
+            llm_response, _ = llm_client.complete_messages(
+                messages, prompt_meta=prompt_meta,
             )
         except Exception:
             return None

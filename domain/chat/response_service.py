@@ -145,44 +145,15 @@ def generate_tutor_text(
         return tool_result
 
     if llm_client is not None:
-        # Prefer messages[]-native path; fall back to legacy API.
-        complete_fn = getattr(llm_client, "complete_messages", None)
-        if callable(complete_fn):
-            try:
-                text, trace = complete_fn(
-                    builder.build(), prompt_meta=prompt_meta,
-                )
-                text = text.strip()
-            except (RuntimeError, ValueError):
-                text, trace = "", None
-            if text:
-                return text, trace
-        else:
-            traced_fn = getattr(llm_client, "generate_tutor_text_traced", None)
-            flat = builder.messages
-            sys_text = "\n\n".join(m["content"] for m in flat if m["role"] == "system")
-            usr_text = "\n\n".join(m["content"] for m in flat if m["role"] == "user")
-            if callable(traced_fn):
-                try:
-                    text, trace = traced_fn(
-                        prompt=usr_text, prompt_meta=prompt_meta,
-                        system_prompt=sys_text,
-                    )
-                    text = text.strip()
-                except (RuntimeError, ValueError):
-                    text, trace = "", None
-                if text:
-                    return text, trace
-            else:
-                try:
-                    text = llm_client.generate_tutor_text(
-                        prompt=usr_text, prompt_meta=prompt_meta,
-                        system_prompt=sys_text,
-                    ).strip()
-                except (RuntimeError, ValueError):
-                    text = ""
-                if text:
-                    return text, None
+        try:
+            text, trace = llm_client.complete_messages(
+                builder.build(), prompt_meta=prompt_meta,
+            )
+            text = text.strip()
+        except (RuntimeError, ValueError):
+            text, trace = "", None
+        if text:
+            return text, trace
     fallback = build_tutor_response_text(
         query=query,
         evidence=evidence,

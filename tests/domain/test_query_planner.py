@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from domain.research.planner import TopicProposal
 from domain.research.query_planner import (
@@ -97,9 +97,9 @@ class TestBuildQueryPlan:
 
     def test_with_llm(self):
         client = MagicMock()
-        client.generate_tutor_text.return_value = json.dumps([
+        client.complete_messages.return_value = (json.dumps([
             {"query_text": "attention mechanism", "source_class": "paper", "max_results": 5},
-        ])
+        ]), None)
         proposal = TopicProposal(topic="Transformers")
         plan = build_query_plan(proposal=proposal, llm_client=client)
         assert len(plan.queries) == 1
@@ -107,7 +107,7 @@ class TestBuildQueryPlan:
 
     def test_llm_failure_fallback(self):
         client = MagicMock()
-        client.generate_tutor_text.side_effect = RuntimeError("LLM down")
+        client.complete_messages.side_effect = RuntimeError("LLM down")
         proposal = TopicProposal(topic="Transformers")
         plan = build_query_plan(proposal=proposal, llm_client=client)
         assert plan.topic == "Transformers"

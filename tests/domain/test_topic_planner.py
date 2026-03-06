@@ -114,14 +114,26 @@ class TestPlanTopics:
 
     def test_with_llm(self):
         client = MagicMock()
-        client.generate_tutor_text.return_value = json.dumps([
-            {"topic": "Attention Mechanisms", "subtopics": ["Self-attention"], "source_classes": ["paper"], "rationale": "Core concept", "priority": "high"},
-            {"topic": "Transformer Architecture", "subtopics": ["Encoder", "Decoder"], "source_classes": ["tutorial"], "rationale": "Full model", "priority": "medium"},
-        ])
+        client.complete_messages.return_value = (json.dumps([
+            {
+                "topic": "Attention Mechanisms",
+                "subtopics": ["Self-attention"],
+                "source_classes": ["paper"],
+                "rationale": "Core concept",
+                "priority": "high",
+            },
+            {
+                "topic": "Transformer Architecture",
+                "subtopics": ["Encoder", "Decoder"],
+                "source_classes": ["tutorial"],
+                "rationale": "Full model",
+                "priority": "medium",
+            },
+        ]), None)
         proposals = plan_topics(goal="Learn about transformers", llm_client=client)
         assert len(proposals) == 2
         assert proposals[0].topic == "Attention Mechanisms"
-        client.generate_tutor_text.assert_called_once()
+        client.complete_messages.assert_called_once()
 
     def test_llm_failure_fallback(self):
         client = MagicMock()

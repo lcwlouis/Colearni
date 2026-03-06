@@ -208,7 +208,7 @@ class TestBuildTutorMessages:
         assert msgs[-1]["role"] == "user"
         assert "Explain mitosis" in msgs[-1]["content"]
 
-    def test_evidence_in_user_message(self) -> None:
+    def test_evidence_in_context_block(self) -> None:
         persona = get_persona("colearni")
         builder, _ = build_tutor_messages(
             query="Explain photosynthesis",
@@ -217,9 +217,14 @@ class TestBuildTutorMessages:
             style="socratic",
         )
         msgs = builder.build()
+        # Evidence should be in a system context block, not in the user message
+        system_msgs = [m for m in msgs if m["role"] == "system"]
+        all_system = " ".join(m["content"] for m in system_msgs)
+        assert "Photosynthesis" in all_system
+        # User message should only have the query
         user_msg = msgs[-1]["content"]
-        assert "Photosynthesis" in user_msg
-        assert "USER_QUESTION:" in user_msg
+        assert "Explain photosynthesis" in user_msg
+        assert "USER_QUESTION:" not in user_msg
 
     def test_context_blocks_present(self) -> None:
         persona = get_persona("colearni")
@@ -300,7 +305,7 @@ class TestBuildFullTutorPromptWithMetaCompat:
         assert "Biology chapter 5" in pm.system
         assert "quiz passed" in pm.system
 
-    def test_user_contains_evidence_and_query(self) -> None:
+    def test_evidence_in_system_and_query_in_user(self) -> None:
         persona = get_persona("colearni")
         pm, _ = build_full_tutor_prompt_with_meta(
             query="Explain DNA",
@@ -309,7 +314,8 @@ class TestBuildFullTutorPromptWithMetaCompat:
             style="direct",
         )
         assert "Explain DNA" in pm.user
-        assert "Photosynthesis" in pm.user
+        # Evidence is now in the system (context block), not the user message
+        assert "Photosynthesis" in pm.system
 
 
 class TestBuildSocraticInteractiveMessages:

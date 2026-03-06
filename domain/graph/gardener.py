@@ -16,6 +16,7 @@ from adapters.db import graph_repository
 from adapters.db.graph.provenance import count_provenance_for_concepts
 from adapters.db.mastery import get_mastered_concept_ids
 from core.contracts import GraphLLMClient
+from core.llm_messages import MessageBuilder
 from core.observability import (
     SPAN_KIND_CHAIN,
     emit_event,
@@ -571,9 +572,9 @@ def _backfill_null_tiers(
             neighbor_names=neighbor_names,
         )
         try:
-            raw = llm_client.generate_tutor_text(
-                prompt=prompt_user, system_prompt=prompt_sys,
-            ).strip().lower()
+            messages = MessageBuilder().system(prompt_sys).user(prompt_user).build()
+            raw_text, _ = llm_client.complete_messages(messages)
+            raw = raw_text.strip().lower()
             tier = raw if raw in VALID_TIERS else DEFAULT_TIER
         except Exception:
             tier = DEFAULT_TIER

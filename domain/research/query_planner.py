@@ -11,6 +11,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from core.llm_messages import MessageBuilder
 from domain.research.planner import (
     ResearchQuery,
     ResearchQueryPlan,
@@ -79,7 +80,8 @@ def _llm_query_plan(
         subtopics=", ".join(proposal.subtopics) or "(none)",
         source_classes=", ".join(proposal.source_classes) or "(any)",
     )
-    raw = llm_client.generate_tutor_text(prompt=prompt, prompt_meta=None, system_prompt=system)
+    messages = MessageBuilder().system(system).user(prompt).build()
+    raw, _ = llm_client.complete_messages(messages)
     queries = _parse_queries(raw, max_queries=max_queries)
 
     return ResearchQueryPlan(
