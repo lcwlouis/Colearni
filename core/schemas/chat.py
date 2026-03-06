@@ -19,6 +19,8 @@ ConceptSwitchDecision = Literal["accept", "reject"]
 
 ChatMessageType = Literal["user", "assistant", "system", "tool", "card"]
 
+MessageStatus = Literal["complete", "generating", "failed", "superseded"]
+
 
 def _require_non_empty(value: str, field_name: str) -> str:
     normalized = value.strip()
@@ -68,6 +70,7 @@ class ChatMessageRecord(BaseModel):
     session_id: int = Field(gt=0)
     type: ChatMessageType
     payload: dict[str, object]
+    status: MessageStatus = "complete"
     created_at: datetime
 
 

@@ -182,20 +182,22 @@ def append_chat_message(
     user_id: int | None,
     message_type: str,
     payload: dict[str, Any],
+    status: str = "complete",
 ) -> dict[str, Any]:
     row = (
         session.execute(
             text(
                 """
-                INSERT INTO chat_messages (session_id, workspace_id, user_id, type, payload)
+                INSERT INTO chat_messages (session_id, workspace_id, user_id, type, payload, status)
                 VALUES (
                     :session_id,
                     :workspace_id,
                     :user_id,
                     :message_type,
-                    CAST(:payload AS jsonb)
+                    CAST(:payload AS jsonb),
+                    :status
                 )
-                RETURNING id, session_id, type, payload, created_at
+                RETURNING id, session_id, type, payload, status, created_at
                 """
             ),
             {
@@ -204,6 +206,7 @@ def append_chat_message(
                 "user_id": user_id,
                 "message_type": message_type,
                 "payload": _as_json(payload),
+                "status": status,
             },
         )
         .mappings()
@@ -224,6 +227,7 @@ def append_chat_message(
         "session_id": int(row["session_id"]),
         "type": str(row["type"]),
         "payload": row["payload"] if isinstance(row["payload"], dict) else {},
+        "status": str(row["status"]),
         "created_at": row["created_at"],
     }
 
