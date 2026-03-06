@@ -2,7 +2,7 @@
 
 Parent: `docs/llm/LLM_MASTER_PLAN.md`
 Track ID: `L5`
-Status: 🔄 in-progress
+Status: ✅ done
 
 ## Purpose
 
@@ -25,9 +25,9 @@ with proper Pydantic models, runtime model support checks, and client-side valid
 | Slice | Description | Status |
 |-------|-------------|--------|
 | L5.1 | Define Pydantic response models for all JSON schemas | ✅ done |
-| L5.2 | Add `response_format=PydanticModel` support to `complete_messages_json()` | ✅ done |
+| L5.2 | Add `response_format=PydanticModel` support to `complete_messages_json()` | ✅ done — returns Pydantic instance when `response_model` provided, dict otherwise |
 | L5.3 | Enable `litellm.enable_json_schema_validation` for client-side validation | ✅ done |
-| L5.4 | Migrate call sites to Pydantic models, remove manual parsing | ✅ done |
+| L5.4 | Migrate call sites to Pydantic models, remove manual parsing | ✅ done — graph extraction, disambiguation, research planners all use `response_model=` |
 | L5.5 | Add runtime model support checks via `supports_response_schema()` | ✅ done |
 
 ## Slice Definitions

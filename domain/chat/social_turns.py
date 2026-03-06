@@ -10,12 +10,12 @@ from core.schemas import (
     AssistantResponseKind,
     GroundingMode,
 )
+from core.settings import Settings
 from domain.chat.prompt_kit import (
     build_social_response,
     classify_social_intent,
     get_persona,
 )
-from core.settings import Settings
 
 _SOCIAL_PROMPT_META = PromptMeta(
     prompt_id="chat_social_v1",

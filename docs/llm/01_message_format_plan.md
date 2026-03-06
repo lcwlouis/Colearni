@@ -2,7 +2,7 @@
 
 Parent: `docs/llm/LLM_MASTER_PLAN.md`
 Track ID: `L1`
-Status: 🔄 in-progress
+Status: ✅ done
 
 ## Purpose
 
@@ -43,15 +43,15 @@ messages = [
 
 | Slice | Description | Status |
 |-------|-------------|--------|
-| L1.1 | Define `MessageBuilder` — typed message list builder | 🔄 pending |
-| L1.2 | Refactor `PromptMessages` → use `MessageBuilder` in prompt_kit.py | 🔄 pending |
-| L1.3 | Update LLM client methods to accept `messages[]` | 🔄 pending |
-| L1.4 | Migrate tutor response path (stream.py, tutor_agent.py, response_service.py) | 🔄 pending |
-| L1.5 | Migrate query analyzer to multi-message format | 🔄 pending |
-| L1.6 | Migrate graph extraction / disambiguation to multi-message format | 🔄 pending |
-| L1.7 | Migrate quiz grading to multi-message format | 🔄 pending |
-| L1.8 | Migrate session compaction (summary generation) to multi-message format | 🔄 pending |
-| L1.9 | Deprecate old `prompt + system_prompt` client methods (keep as thin wrappers) | 🔄 pending |
+| L1.1 | Define `MessageBuilder` — typed message list builder | ✅ done |
+| L1.2 | Refactor `PromptMessages` → use `MessageBuilder` in prompt_kit.py | ✅ done |
+| L1.3 | Update LLM client methods to accept `messages[]` | ✅ done |
+| L1.4 | Migrate tutor response path (stream.py, tutor_agent.py, response_service.py) | ✅ done |
+| L1.5 | Migrate query analyzer to multi-message format | ✅ done |
+| L1.6 | Migrate graph extraction / disambiguation to multi-message format | ✅ done |
+| L1.7 | Migrate quiz grading to multi-message format | ✅ done |
+| L1.8 | Migrate session compaction (summary generation) to multi-message format | ✅ done |
+| L1.9 | Deprecate old `prompt + system_prompt` client methods (keep as thin wrappers) | ✅ done |
 
 ## Slice Definitions
 

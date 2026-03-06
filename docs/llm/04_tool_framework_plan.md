@@ -19,7 +19,7 @@ limits per docs/CODEX.md.
 | L4.3 | Implement bounded `AgentLoop` — LLM → tool → repeat (max N) | ✅ done |
 | L4.4 | Add `tools` parameter support to LLM client methods | ✅ done |
 | L4.5 | Implement built-in tools: search, lookup_concept, check_mastery | ✅ done |
-| L4.6 | Wire tool framework into tutor agent (optional tool mode) | ✅ done |
+| L4.6 | Wire tool framework into tutor agent (optional tool mode) | ✅ done — `tool_augmented.py` + `response_service.py` integration, feature-flagged |
 
 ---
 

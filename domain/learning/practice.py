@@ -5,12 +5,12 @@ import logging
 import uuid
 from typing import Any
 
-from core.contracts import GraphLLMClient
-from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_summary, start_span
-from core.prompting import PromptRegistry
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from core.contracts import GraphLLMClient
+from core.observability import SPAN_KIND_CHAIN, observation_context, set_span_summary, start_span
+from core.prompting import PromptRegistry
 from domain.learning.practice_novelty import (
     fingerprint_text,
 )
@@ -38,6 +38,11 @@ from domain.learning.quiz_flow import (
 from domain.learning.quiz_flow import (
     submit_quiz as _submit_quiz,
 )
+from domain.learning.quiz_generation import (
+    QuizValidationError,
+    auto_items,
+    normalize_items,
+)
 from domain.learning.quiz_persistence import (
     list_quizzes_with_latest_attempt as _list_quizzes_with_latest_attempt,
 )
@@ -46,11 +51,6 @@ from domain.learning.quiz_persistence import (
 )
 from domain.learning.quiz_persistence import (
     load_quiz_with_latest_attempt as _load_quiz_with_latest_attempt,
-)
-from domain.learning.quiz_generation import (
-    QuizValidationError,
-    auto_items,
-    normalize_items,
 )
 
 MIN_FLASHCARDS = 3

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import logging
-
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 from uuid import uuid4
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from adapters.db import graph_repository
 from adapters.db.graph.provenance import count_provenance_for_concepts
 from adapters.db.mastery import get_mastered_concept_ids
 from core.contracts import GraphLLMClient
-from domain.graph.orphan_pruner import prune_orphan_graph_nodes
 from core.observability import (
     SPAN_KIND_CHAIN,
     emit_event,
@@ -22,11 +24,15 @@ from core.observability import (
     start_span,
 )
 from core.settings import Settings
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from sqlalchemy import text
-from sqlalchemy.orm import Session
-
-from domain.graph.types import CanonicalCandidate, DEFAULT_TIER, VALID_TIERS, build_tier_inference_prompt, normalize_alias, tier_rank
+from domain.graph.orphan_pruner import prune_orphan_graph_nodes
+from domain.graph.types import (
+    DEFAULT_TIER,
+    VALID_TIERS,
+    CanonicalCandidate,
+    build_tier_inference_prompt,
+    normalize_alias,
+    tier_rank,
+)
 
 log = logging.getLogger(__name__)
 
@@ -474,7 +480,9 @@ def run_graph_gardener(
                                     "UPDATE concepts_canon SET tier = :tier"
                                     " WHERE workspace_id = :workspace_id AND id = :concept_id"
                                 ),
-                                {"tier": decision.proposed_tier, "workspace_id": workspace_id, "concept_id": concept_id},
+                                {"tier": decision.proposed_tier,
+                                 "workspace_id": workspace_id,
+                                 "concept_id": concept_id},
                             )
                             tiers_updated += 1
 
@@ -772,7 +780,11 @@ def _batch_cluster_llm_decisions(
                     results[cluster_idx].append((concept_id, None))
 
             if span is not None:
-                set_span_summary(span, input_summary=f"batch_size={len(batch_items)}", output_summary=f"merges={merge_count}")
+                set_span_summary(
+                    span,
+                    input_summary=f"batch_size={len(batch_items)}",
+                    output_summary=f"merges={merge_count}",
+                )
 
         return results
     except (RuntimeError, ValueError) as exc:

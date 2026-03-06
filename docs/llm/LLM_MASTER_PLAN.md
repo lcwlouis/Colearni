@@ -146,8 +146,8 @@ What is critically broken or materially missing:
 
 | Track | Child Plan | Status |
 |---|---|---|
-| `L1` Message Format | `docs/llm/01_message_format_plan.md` | pending |
-| `L2` Message Persistence | `docs/llm/02_message_persistence_plan.md` | pending |
+| `L1` Message Format | `docs/llm/01_message_format_plan.md` | ✅ done |
+| `L2` Message Persistence | `docs/llm/02_message_persistence_plan.md` | ✅ done |
 | `L3` LLM Client Enhancement | `docs/llm/03_llm_client_enhancement_plan.md` | ✅ done |
 | `L4` Agentic Tool Framework | `docs/llm/04_tool_framework_plan.md` | ✅ done |
 | `L5` JSON Mode | `docs/llm/05_json_mode_plan.md` | ✅ done |
@@ -490,6 +490,40 @@ Dependencies between tracks:
 - WebSearchTool registers in ToolRegistry via factory
 - format_as_evidence produces valid EvidenceItem objects
 - All new settings accessible via get_settings()
+
+## Self-Audit Report — Cycle 2 (Independent Verification)
+
+**Date:** 2026-03-06
+**Result:** NEEDS_REPASS (7 gaps found across 3 tracks)
+
+7 issues identified: L1.2 evidence placement, L1.6 graph extraction not migrated,
+L1.7 quiz callers remain, L1.9 deprecated callers remain, L4.6 tutor not wired,
+L5.2 model_validate discarded, L5.4 call sites not migrated.
+
+All 7 issues were re-implemented in this cycle. See Cycle 3 report below.
+
+## Self-Audit Report — Cycle 3 (Post-Fix Verification)
+
+**Date:** 2026-03-06
+**Result:** CONVERGED (0 new issues found)
+
+### Test Suite
+- 1354 passed, 30 failures (all pre-existing)
+- Pre-existing failures: test_chat_respond (12), test_g1_progress (1),
+  test_phoenix_traces (2), test_ingestion_embeddings/pdf/integration (14),
+  test_graph_windows_tokens (2, untracked file)
+- No regressions introduced by any of the 7 fixes
+
+### Fixes Applied (Cycle 2 → 3)
+1. **L1.2**: Evidence separated into `.context(evidence_block, label="evidence")` in prompt_kit.py
+2. **L1.6**: `extract_raw_graph()`, `disambiguate()`, `_disambiguate_batch_single_call()` → MessageBuilder + `complete_messages_json()`
+3. **L1.7**: `quiz_flow.py` and `practice.py` migrated to `complete_messages()`
+4. **L1.9**: 6 remaining callers (tutor_agent, social_turns, response_service, post_ingest, gardener, quiz_flow) migrated
+5. **L4.6**: `tool_augmented.py` created, wired into `response_service.py` with feature flag
+6. **L5.2**: `complete_messages_json()` now returns Pydantic instance via `@overload`
+7. **L5.4**: Graph methods use `response_model=`; research planners fully migrated with new Pydantic models
+
+### Verdict: CONVERGED — All tracks audit-passed
 
 ## Verification Block Template
 

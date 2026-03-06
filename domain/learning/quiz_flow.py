@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from opentelemetry import trace
+from sqlalchemy.orm import Session
 
 from core.contracts import GraphLLMClient
 from core.observability import (
@@ -27,8 +28,6 @@ from core.observability import (
     start_span,
 )
 from core.prompting import PromptRegistry
-from sqlalchemy.orm import Session
-
 from domain.chat.session_memory import load_chat_context_for_quiz
 from domain.learning.quiz_generation import (
     QuizValidationError as _QVE,
@@ -91,6 +90,9 @@ from domain.learning.quiz_persistence import (
     check_session_scope as _check_session_scope,
 )
 from domain.learning.quiz_persistence import (
+    get_child_concept_ids as _get_child_concept_ids,
+)
+from domain.learning.quiz_persistence import (
     insert_attempt as _insert_attempt,
 )
 from domain.learning.quiz_persistence import (
@@ -115,6 +117,9 @@ from domain.learning.quiz_persistence import (
     lookup_active_concept as _lookup_active_concept,
 )
 from domain.learning.quiz_persistence import (
+    lookup_concept_tier as _lookup_concept_tier,
+)
+from domain.learning.quiz_persistence import (
     lookup_mastery as _lookup_mastery,
 )
 from domain.learning.quiz_persistence import (
@@ -122,12 +127,6 @@ from domain.learning.quiz_persistence import (
 )
 from domain.learning.quiz_persistence import (
     upsert_mastery as _upsert_mastery,
-)
-from domain.learning.quiz_persistence import (
-    get_child_concept_ids as _get_child_concept_ids,
-)
-from domain.learning.quiz_persistence import (
-    lookup_concept_tier as _lookup_concept_tier,
 )
 
 MIN_ITEMS = 5

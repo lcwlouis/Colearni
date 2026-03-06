@@ -18,8 +18,9 @@ from domain.research.planner import (
 )
 
 if TYPE_CHECKING:
-    from core.contracts import GraphLLMClient
     from sqlalchemy.orm import Session
+
+    from core.contracts import GraphLLMClient
 
 logger = logging.getLogger(__name__)
 
