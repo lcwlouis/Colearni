@@ -9,6 +9,8 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from core.contracts import TutorTextStream
 from core.llm_messages import Message, MessageBuilder
 from core.observability import (
@@ -806,8 +808,9 @@ class _BaseGraphLLMClient(ABC):
         self,
         messages: list[Message],
         *,
-        schema_name: str,
-        schema: dict[str, object],
+        schema_name: str | None = None,
+        schema: dict[str, object] | None = None,
+        response_model: type[BaseModel] | None = None,
         prompt_meta: Any | None = None,
     ) -> dict[str, Any]:
         """JSON-mode LLM call from pre-built messages with format fallback.
@@ -815,7 +818,25 @@ class _BaseGraphLLMClient(ABC):
         This is the ``messages[]``-native entry point for structured JSON
         calls.  ``_chat_json`` delegates here after constructing a simple
         two-message list.
+
+        Parameters
+        ----------
+        response_model:
+            Optional Pydantic model class.  When provided, the JSON schema
+            and schema name are derived automatically and the parsed response
+            is validated against the model.  If *schema* is also provided it
+            takes precedence (explicit wins).
         """
+        if response_model is not None and schema is None:
+            schema = response_model.model_json_schema()
+        if response_model is not None and schema_name is None:
+            schema_name = response_model.__name__
+
+        if schema is None or schema_name is None:
+            raise ValueError(
+                "Either 'response_model' or both 'schema_name' and 'schema' must be provided."
+            )
+
         schema_hint = json.dumps(schema, indent=2)
         schema_suffix = (
             f"\n\nYou MUST respond with a JSON object conforming to this schema:\n"
@@ -876,6 +897,8 @@ class _BaseGraphLLMClient(ABC):
                 response_payload = json.loads(content)
                 if not isinstance(response_payload, dict):
                     raise ValueError("Graph LLM response payload must decode to an object")
+                if response_model is not None:
+                    response_model.model_validate(response_payload)
                 return response_payload
             except (json.JSONDecodeError, ValueError) as parse_exc:
                 if i < len(attempts) - 1:
