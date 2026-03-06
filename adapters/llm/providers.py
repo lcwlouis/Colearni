@@ -6,7 +6,7 @@ import json
 import logging
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from typing import Any
 
 from core.contracts import TutorTextStream
@@ -984,6 +984,151 @@ class _BaseGraphLLMClient(ABC):
         )
         return text, trace
 
+    async def async_complete_messages(
+        self,
+        messages: list[Message],
+        *,
+        prompt_meta: Any | None = None,
+        reasoning_effort_override: str | None = None,
+    ) -> tuple[str, "GenerationTrace"]:
+        """Async non-streaming LLM call from pre-built messages.
+
+        Mirrors ``complete_messages()`` but uses the async SDK path.
+        """
+        import time as _time  # noqa: PLC0415
+
+        from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
+
+        t0 = _time.monotonic_ns()
+        sdk_messages = self._prepare_messages(messages)
+        # TODO: async rate limiter
+        result = await self._async_sdk_call(
+            messages=sdk_messages,
+            temperature=self._tutor_temperature,
+            response_format=None,
+        )
+        elapsed_ms = round((_time.monotonic_ns() - t0) / 1_000_000, 2)
+        text = self._extract_content(result).strip()
+        usage = extract_token_usage(result)
+        reasoning = self._extract_reasoning_tokens(result)
+        reasoning_content = self._extract_reasoning_content(result)
+        supported = self._model_supports_reasoning()
+        used = self._reasoning_enabled and supported
+        if reasoning_effort_override is not None and used:
+            effort = reasoning_effort_override
+            effort_source = "override"
+        else:
+            effort = self._reasoning_effort if used else None
+            effort_source = "settings" if effort is not None else None
+        if effort == "none":
+            used = False
+            effort = None
+            effort_source = None
+        trace = GenerationTrace(
+            provider=self._provider,
+            model=self._model,
+            timing_ms=elapsed_ms,
+            prompt_tokens=usage.get("token_prompt"),
+            completion_tokens=usage.get("token_completion"),
+            total_tokens=usage.get("token_total"),
+            reasoning_tokens=reasoning,
+            reasoning_content=reasoning_content,
+            cached_tokens=usage.get("token_cached"),
+            reasoning_requested=self._reasoning_enabled,
+            reasoning_supported=supported,
+            reasoning_used=used,
+            reasoning_effort=effort,
+            reasoning_effort_source=effort_source,
+        )
+        return text, trace
+
+    async def async_complete_messages_json(
+        self,
+        messages: list[Message],
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        prompt_meta: Any | None = None,
+    ) -> dict[str, Any]:
+        """Async JSON-mode LLM call from pre-built messages with format fallback.
+
+        Mirrors ``complete_messages_json()`` but uses the async SDK path.
+        """
+        schema_hint = json.dumps(schema, indent=2)
+        schema_suffix = (
+            f"\n\nYou MUST respond with a JSON object conforming to this schema:\n"
+            f"```json\n{schema_hint}\n```"
+        )
+
+        if self._model_supports_json_schema():
+            attempts: list[tuple[dict[str, object] | None, bool, str]] = [
+                (
+                    {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": schema_name,
+                            "strict": True,
+                            "schema": schema,
+                        },
+                    },
+                    False,
+                    "json_schema",
+                ),
+                ({"type": "json_object"}, True, "json_object+hint"),
+                (None, True, "prompt-only"),
+            ]
+        else:
+            attempts = [
+                ({"type": "json_object"}, True, "json_object+hint"),
+                (None, True, "prompt-only"),
+            ]
+
+        for i, (response_format, needs_hint, level) in enumerate(attempts):
+            attempt_messages = (
+                self._with_schema_hint(messages, schema_suffix) if needs_hint
+                else list(messages)
+            )
+            sdk_messages = self._prepare_messages(attempt_messages)
+            try:
+                # TODO: async rate limiter
+                result = await self._async_sdk_call(
+                    messages=sdk_messages,
+                    temperature=self._json_temperature,
+                    response_format=response_format,
+                )
+            except Exception as exc:
+                if i < len(attempts) - 1 and self._is_format_error(exc):
+                    log.warning(
+                        "JSON format level '%s' failed for model %s; "
+                        "falling back. Error: %s",
+                        level,
+                        self._model,
+                        exc,
+                    )
+                    continue
+                raise
+            try:
+                content = self._extract_content(result)
+                response_payload = json.loads(content)
+                if not isinstance(response_payload, dict):
+                    raise ValueError("Graph LLM response payload must decode to an object")
+                return response_payload
+            except (json.JSONDecodeError, ValueError) as parse_exc:
+                if i < len(attempts) - 1:
+                    log.warning(
+                        "JSON parse failed at level '%s' for model %s; "
+                        "falling back. Error: %s",
+                        level,
+                        self._model,
+                        parse_exc,
+                    )
+                    continue
+                raise
+
+        raise RuntimeError(
+            f"All JSON format attempts exhausted for model {self._model}"
+        )
+
     @staticmethod
     def _last_user_content_length(messages: list[Message]) -> int | None:
         """Return the length of the last user message's content, or *None*."""
@@ -1114,6 +1259,27 @@ class _BaseGraphLLMClient(ABC):
     ) -> Iterator[Mapping[str, Any]]:
         """Execute a provider-specific streaming SDK call and yield raw chunk dicts."""
 
+    async def _async_sdk_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict[str, object] | None,
+    ) -> Mapping[str, Any]:
+        """Async version of _sdk_call(). Override in subclasses."""
+        raise NotImplementedError
+
+    async def _async_sdk_stream_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        effort_override: str | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        """Async version of _sdk_stream_call(). Override in subclasses."""
+        raise NotImplementedError
+        yield  # pragma: no cover – makes this an async generator
+
     @staticmethod
     def _extract_stream_delta(chunk: Mapping[str, Any]) -> str | None:
         """Extract text delta content from a streaming chunk."""
@@ -1199,6 +1365,14 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
             max_retries=max_retries,
         )
 
+        from openai import AsyncOpenAI  # noqa: PLC0415
+
+        self._async_client = AsyncOpenAI(
+            api_key=api_key.strip(),
+            timeout=timeout_seconds,
+            max_retries=max_retries,
+        )
+
     def _sdk_call(
         self,
         *,
@@ -1233,6 +1407,44 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
         response = get_llm_limiter().execute(self._client.chat.completions.create, **kwargs)
         for chunk in response:
+            yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
+
+    async def _async_sdk_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict[str, object] | None,
+    ) -> Mapping[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+        }
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        # TODO: async rate limiter
+        response = await self._async_client.chat.completions.create(**kwargs)
+        return response.model_dump()
+
+    async def _async_sdk_stream_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        effort_override: str | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
+        # TODO: async rate limiter
+        response = await self._async_client.chat.completions.create(**kwargs)
+        async for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
 
 
@@ -1321,4 +1533,62 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
         response = get_llm_limiter().execute(litellm.completion, **kwargs)
         for chunk in response:
+            yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
+
+    async def _async_sdk_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        response_format: dict[str, object] | None,
+    ) -> Mapping[str, Any]:
+        import litellm  # noqa: PLC0415
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+            "timeout": self._timeout_seconds,
+            "num_retries": self._num_retries,
+        }
+        if self._context_window_fallback_dict:
+            kwargs["context_window_fallback_dict"] = self._context_window_fallback_dict
+        if self._base_url is not None:
+            kwargs["api_base"] = self._base_url
+        if self._api_key is not None:
+            kwargs["api_key"] = self._api_key
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        # TODO: async rate limiter
+        response = await litellm.acompletion(**kwargs)
+        return response.model_dump()
+
+    async def _async_sdk_stream_call(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        effort_override: str | None = None,
+    ) -> AsyncIterator[Mapping[str, Any]]:
+        import litellm  # noqa: PLC0415
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": temperature,
+            "messages": messages,
+            "timeout": self._timeout_seconds,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "num_retries": self._num_retries,
+        }
+        if self._context_window_fallback_dict:
+            kwargs["context_window_fallback_dict"] = self._context_window_fallback_dict
+        if self._base_url is not None:
+            kwargs["api_base"] = self._base_url
+        if self._api_key is not None:
+            kwargs["api_key"] = self._api_key
+        kwargs.update(self._build_reasoning_kwargs(effort_override=effort_override))
+        # TODO: async rate limiter
+        response = await litellm.acompletion(**kwargs)
+        async for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)

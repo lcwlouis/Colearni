@@ -6,6 +6,7 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
+from core.llm_messages import Message
 from core.schemas.assistant import GenerationTrace
 
 if TYPE_CHECKING:
@@ -63,6 +64,25 @@ class GraphLLMClient(Protocol):
         system_prompt: str | None = None,
     ) -> str:
         """Generate tutor-facing response text from an instruction prompt."""
+
+    def async_complete_messages(
+        self,
+        messages: list[Message],
+        *,
+        prompt_meta: Any | None = None,
+        reasoning_effort_override: str | None = None,
+    ) -> tuple[str, GenerationTrace]:
+        """Async non-streaming LLM call from pre-built messages."""
+
+    def async_complete_messages_json(
+        self,
+        messages: list[Message],
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        prompt_meta: Any | None = None,
+    ) -> dict[str, Any]:
+        """Async JSON-mode LLM call from pre-built messages."""
 
 
 class TutorTextStream:
