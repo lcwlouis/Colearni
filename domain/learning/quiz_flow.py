@@ -76,6 +76,9 @@ from domain.learning.quiz_grading import (
     grade_short_items_without_llm as _grade_short_items_without_llm,
 )
 from domain.learning.quiz_grading import (
+    grading_messages as _grading_messages,
+)
+from domain.learning.quiz_grading import (
     grading_prompt as _grading_prompt,
 )
 from domain.learning.quiz_grading import (
@@ -407,11 +410,14 @@ def submit_quiz(
                 if llm_client is None:
                     short_grading = _grade_short_items_without_llm(short_items, answer_map)
                 else:
-                    short_prompt = _grading_prompt(short_items, answer_map)
-                    short_grading = _parse_grading(
-                        llm_client.generate_tutor_text(prompt=short_prompt),
-                        [item["item_id"] for item in short_items],
-                    )
+                    short_ids = [item["item_id"] for item in short_items]
+                    if callable(getattr(llm_client, "complete_messages", None)):
+                        messages = _grading_messages(short_items, answer_map)
+                        llm_text, _ = llm_client.complete_messages(messages)
+                    else:
+                        short_prompt = _grading_prompt(short_items, answer_map)
+                        llm_text = llm_client.generate_tutor_text(prompt=short_prompt)
+                    short_grading = _parse_grading(llm_text, short_ids)
                 short_overall_feedback = short_grading["overall_feedback"]
                 for graded_item in short_grading["items"]:
                     graded_by_id[int(graded_item["item_id"])] = graded_item

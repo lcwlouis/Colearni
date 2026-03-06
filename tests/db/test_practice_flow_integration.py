@@ -25,6 +25,19 @@ class PracticeLLM:
             )
         )
 
+    def _grade_from_text(self, text: str) -> str:
+        ids = next(
+            json.loads(line.split("ITEM_IDS_JSON:", 1)[1].strip())
+            for line in text.splitlines()
+            if "ITEM_IDS_JSON:" in line
+        )
+        return json.dumps(
+            {
+                "items": [_graded_item(item_id) for item_id in ids],
+                "overall_feedback": "ok",
+            }
+        )
+
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
         if "CARD_COUNT:" in prompt:
             count = self._count(prompt, "CARD_COUNT:")
@@ -34,17 +47,11 @@ class PracticeLLM:
             count = self._count(prompt, "QUESTION_COUNT:")
             items = [_short_item(), *[_mcq_item(i) for i in range(2, count + 1)]]
             return json.dumps({"items": items})
-        ids = next(
-            json.loads(line.split("ITEM_IDS_JSON:", 1)[1].strip())
-            for line in prompt.splitlines()
-            if line.startswith("ITEM_IDS_JSON:")
-        )
-        return json.dumps(
-            {
-                "items": [_graded_item(item_id) for item_id in ids],
-                "overall_feedback": "ok",
-            }
-        )
+        return self._grade_from_text(prompt)
+
+    def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
+        user_text = next(m["content"] for m in messages if m["role"] == "user")
+        return self._grade_from_text(user_text), None
 
 
 class FlakyPracticeLLM(PracticeLLM):

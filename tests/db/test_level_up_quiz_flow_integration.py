@@ -24,14 +24,12 @@ class DeterministicQuizGrader:
         self.calls = 0
         self.last_prompt: str | None = None
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
-        self.calls += 1
-        self.last_prompt = prompt
+    def _grade_from_text(self, text: str) -> str:
         marker = "ITEM_IDS_JSON:"
         ids = next(
             json.loads(line.split(marker, maxsplit=1)[1].strip())
-            for line in prompt.splitlines()
-            if line.startswith(marker)
+            for line in text.splitlines()
+            if marker in line
         )
         return json.dumps(
             {
@@ -47,6 +45,17 @@ class DeterministicQuizGrader:
                 "overall_feedback": "ok",
             }
         )
+
+    def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt=None) -> str:
+        self.calls += 1
+        self.last_prompt = prompt
+        return self._grade_from_text(prompt)
+
+    def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
+        self.calls += 1
+        user_text = next(m["content"] for m in messages if m["role"] == "user")
+        self.last_prompt = user_text
+        return self._grade_from_text(user_text), None
 
 
 def _session_or_skip() -> Session:

@@ -6,10 +6,39 @@ import json
 import logging
 from typing import Any
 
+from core.llm_messages import Message, MessageBuilder
 from core.prompting import PromptRegistry
 
 log = logging.getLogger("domain.learning.quiz_grading")
 _registry = PromptRegistry()
+
+_GRADING_SYSTEM_PROMPT = (
+    "You are a strict short-answer grader for a mastery quiz.\n\n"
+    "Grade each short-answer item against the generation-time rubric context, "
+    "not against unstated world knowledge.\n\n"
+    "Non-negotiable rules:\n"
+    "1. Use payload._generation_context as the canonical source of truth for grading.\n"
+    "2. Score each answer on a 0..1 scale.\n"
+    "3. Set critical_misconception=true only when the answer shows a major conceptual error.\n"
+    "4. Feedback must be specific, brief, and actionable.\n"
+    "5. overall_feedback must be 15-40 words (never exceed 100 words). Be specific and actionable.\n"
+    "6. Return valid JSON only.\n\n"
+    "Return JSON with this shape:\n"
+    '{\n'
+    '  "items": [\n'
+    '    {\n'
+    '      "item_id": 1,\n'
+    '      "score": 0.0,\n'
+    '      "critical_misconception": false,\n'
+    '      "feedback": "string"\n'
+    '    }\n'
+    '  ],\n'
+    '  "overall_feedback": "string"\n'
+    '}\n\n'
+    "If the submission cannot be graded reliably from the supplied context, "
+    "give low-confidence partial credit only when clearly justified and explain "
+    "the uncertainty in overall_feedback."
+)
 
 
 class QuizGradingError(ValueError):
@@ -121,6 +150,26 @@ def _grading_prompt_inline(ids_json: str, submission_json: str) -> str:
         "overall_feedback must be 15-40 words, max 100. "
         f"ITEM_IDS_JSON: {ids_json}\n"
         f"QUIZ_SUBMISSION_JSON: {submission_json}"
+    )
+
+
+def grading_messages(
+    items: list[dict[str, Any]], answer_map: dict[int, str]
+) -> list[Message]:
+    """Build multi-message grading prompt for ``complete_messages()``.
+
+    System message: grading instructions and output contract.
+    User message: item IDs and quiz submission JSON.
+    """
+    ids = [item["item_id"] for item in items]
+    submission = [{**item, "answer": answer_map[item["item_id"]]} for item in items]
+    ids_json = json.dumps(ids, ensure_ascii=True)
+    submission_json = json.dumps(submission, ensure_ascii=True)
+    return (
+        MessageBuilder()
+        .system(_GRADING_SYSTEM_PROMPT)
+        .user(f"ITEM_IDS_JSON: {ids_json}\nQUIZ_SUBMISSION_JSON: {submission_json}")
+        .build()
     )
 
 
