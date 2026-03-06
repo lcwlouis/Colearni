@@ -285,3 +285,86 @@ def respond_chat_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Regeneration ──────────────────────────────────────────────────────
+
+
+class RegenerateRequest(BaseModel):
+    """Request body for the regeneration endpoint (currently empty, extensible)."""
+
+
+@router.post("/sessions/{session_id}/messages/{msg_id}/regenerate")
+def regenerate_message(
+    session_id: str,
+    msg_id: int,
+    ws: WorkspaceContext = Depends(get_workspace_context),
+    db: Session = Depends(get_db_session),
+    request: Request = None,  # type: ignore[assignment]
+) -> StreamingResponse:
+    """Supersede an assistant message and stream a regenerated response.
+
+    Marks the target assistant message as ``superseded``, retrieves the
+    original user query, and triggers a new streaming response.
+    """
+    from domain.chat.session_memory import (
+        RegenerationError,
+        supersede_and_get_user_query,
+    )
+
+    # Resolve session public_id → internal id
+    try:
+        resolved_session_id = resolve_session_by_public_id(
+            db,
+            public_id=session_id,
+            workspace_id=ws.workspace_id,
+            user_id=ws.user.id,
+        )
+    except ChatNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc),
+        ) from exc
+
+    # Supersede old message and get user query
+    try:
+        user_query = supersede_and_get_user_query(
+            db, message_id=msg_id, session_id=resolved_session_id,
+        )
+        db.commit()
+    except RegenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc),
+        ) from exc
+
+    # Build internal request for re-generation
+    settings_state = getattr(request.app.state, "settings", None) if request else None
+    settings = settings_state if isinstance(settings_state, Settings) else None
+
+    internal = ChatRespondRequest(
+        workspace_id=ws.workspace_id,
+        user_id=ws.user.id,
+        query=user_query,
+        session_id=resolved_session_id,
+    )
+
+    def _sse_generator():
+        event_count = 0
+        last_event_time = time.monotonic()
+        for event in generate_chat_response_stream(
+            session=db,
+            request=internal,
+            settings=settings,
+        ):
+            now = time.monotonic()
+            if now - last_event_time > KEEPALIVE_INTERVAL:
+                yield ": keepalive\n\n"
+            event_count += 1
+            data = event.model_dump_json()
+            yield f"event: {event.event}\ndata: {data}\n\n"
+            last_event_time = time.monotonic()
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

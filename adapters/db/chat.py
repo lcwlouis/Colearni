@@ -594,6 +594,60 @@ def _as_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=True)
 
 
+def mark_message_superseded(
+    session: Session,
+    *,
+    message_id: int,
+) -> bool:
+    """Mark a *complete* assistant message as superseded (for regeneration).
+
+    Returns True when a row was updated, False when the message was not
+    in a valid state for superseding (idempotent).
+    """
+    result = session.execute(
+        text(
+            """
+            UPDATE chat_messages
+            SET status = 'superseded'
+            WHERE id = :message_id
+              AND status = 'complete'
+              AND role = 'assistant'
+            """
+        ),
+        {"message_id": message_id},
+    )
+    return (result.rowcount or 0) > 0
+
+
+def get_preceding_user_message(
+    session: Session,
+    *,
+    message_id: int,
+    session_id: int,
+) -> dict[str, Any] | None:
+    """Return the user message immediately before *message_id* in the session.
+
+    Returns a dict with ``id``, ``content``, ``role`` or None if not found.
+    """
+    row = session.execute(
+        text(
+            """
+            SELECT id, role, payload->>'text' AS content
+            FROM chat_messages
+            WHERE chat_session_id = :session_id
+              AND id < :message_id
+              AND role = 'user'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ),
+        {"session_id": session_id, "message_id": message_id},
+    ).mappings().first()
+    if row is None:
+        return None
+    return {"id": row["id"], "role": row["role"], "content": row["content"]}
+
+
 __all__ = [
     "cleanup_stale_generating_messages",
     "ChatNotFoundError",
@@ -605,10 +659,12 @@ __all__ = [
     "fail_assistant_message",
     "finalize_assistant_message",
     "get_chat_session_concept_name",
+    "get_preceding_user_message",
     "latest_system_summary",
     "list_chat_messages",
     "list_chat_sessions",
     "list_recent_chat_messages",
+    "mark_message_superseded",
     "resolve_session_by_public_id",
     "set_chat_session_title_if_missing",
     "update_session_title",

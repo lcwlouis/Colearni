@@ -32,6 +32,7 @@ This document is the canonical reference for all FastAPI HTTP endpoints exposed 
 - `DELETE /workspaces/{ws_id}/chat/sessions/{session_id}`
 - `PATCH /workspaces/{ws_id}/chat/sessions/{session_id}`
 - `GET /workspaces/{ws_id}/chat/sessions/{session_id}/messages`
+- `POST /workspaces/{ws_id}/chat/sessions/{session_id}/messages/{msg_id}/regenerate`
 - `GET /workspaces/{ws_id}/graph/concepts`
 - `GET /workspaces/{ws_id}/graph/concepts/{concept_id}`
 - `GET /workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph`
@@ -605,6 +606,29 @@ Success responses:
 Error responses:
 
 - `404 Not Found` when the session is not scoped to workspace/user
+- `422 Unprocessable Entity` for validation failures
+
+### POST /workspaces/{ws_id}/chat/sessions/{session_id}/messages/{msg_id}/regenerate
+
+Tag/group: `chat`
+
+Purpose: supersede an assistant message and stream a regenerated response.
+
+Request contract:
+
+| Field | Location | Type | Required | Constraints / Notes |
+|---|---|---|---|---|
+| `session_id` | path | string | yes | UUID public_id |
+| `msg_id` | path | integer | yes | `> 0`, must be a complete assistant message |
+
+Success responses:
+
+- `200 OK` with SSE stream (same format as `/respond/stream`)
+
+Error responses:
+
+- `400 Bad Request` when message cannot be regenerated (wrong status/role)
+- `404 Not Found` when session not found
 - `422 Unprocessable Entity` for validation failures
 
 ### PATCH /workspaces/{ws_id}/chat/sessions/{session_id}

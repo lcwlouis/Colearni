@@ -23,6 +23,12 @@ from adapters.db.chat import (
 from adapters.db.chat import (
     finalize_assistant_message as _db_finalize_assistant_message,
 )
+from adapters.db.chat import (
+    get_preceding_user_message as _db_get_preceding_user_message,
+)
+from adapters.db.chat import (
+    mark_message_superseded as _db_mark_message_superseded,
+)
 from domain.chat.title_gen import generate_session_title
 
 log = logging.getLogger("domain.chat.session_memory")
@@ -338,6 +344,41 @@ def fail_assistant_message(
     return _db_fail_assistant_message(session, message_id=message_id, partial_text=partial_text)
 
 
+class RegenerationError(Exception):
+    """Raised when a message cannot be regenerated."""
+
+
+def supersede_and_get_user_query(
+    session: Session,
+    *,
+    message_id: int,
+    session_id: int,
+) -> str:
+    """Mark an assistant message as superseded and return the preceding user query.
+
+    Raises :class:`RegenerationError` if the message cannot be superseded
+    (wrong status, wrong role, or no preceding user message).
+    """
+    updated = _db_mark_message_superseded(session, message_id=message_id)
+    if not updated:
+        raise RegenerationError(
+            f"Message {message_id} cannot be regenerated "
+            "(not a complete assistant message)"
+        )
+
+    user_msg = _db_get_preceding_user_message(
+        session,
+        message_id=message_id,
+        session_id=session_id,
+    )
+    if user_msg is None:
+        raise RegenerationError(
+            f"No preceding user message found for message {message_id}"
+        )
+
+    return user_msg.get("content", "")
+
+
 __all__ = [
     "create_assistant_placeholder",
     "fail_assistant_message",
@@ -351,6 +392,8 @@ __all__ = [
     "persist_assessment_card",
     "persist_turn",
     "persist_user_message",
+    "RegenerationError",
+    "supersede_and_get_user_query",
 ]
 
 
