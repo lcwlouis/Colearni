@@ -143,6 +143,13 @@ def generate_chat_response(
             session, session_id=request.session_id
         )
 
+        # ── Session concept lookup (CUX1) ─────────────────────────────
+        session_topic_name: str | None = None
+        if hasattr(request, "session_id") and request.session_id:
+            from adapters.db.chat import get_chat_session_concept_name
+
+            session_topic_name = get_chat_session_concept_name(session, session_id=request.session_id)
+
         concept_resolution = resolve_concept_for_turn(
             session,
             workspace_id=request.workspace_id,
@@ -196,6 +203,12 @@ def generate_chat_response(
             session_id=getattr(request, "session_id", None),
         )
         learner_profile_summary = learner_snapshot.summary_text()
+
+        # Prepend current session topic so the LLM knows what the user is studying now
+        if session_topic_name:
+            learner_profile_summary = f"Current session topic: {session_topic_name}; {learner_profile_summary}"
+        elif resolved_name:
+            learner_profile_summary = f"Current session topic: {resolved_name}; {learner_profile_summary}"
 
         # ── Background trace state (AR6.5) ────────────────────────────
         from domain.chat.background_trace import fetch_background_trace_state

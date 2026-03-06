@@ -277,6 +277,12 @@ def _stream_inner(
     )
     learner_profile_summary = learner_snapshot.summary_text()
 
+    # Prepend current session topic so the LLM knows what the user is studying now
+    if session_topic_name:
+        learner_profile_summary = f"Current session topic: {session_topic_name}; {learner_profile_summary}"
+    elif resolved_name:
+        learner_profile_summary = f"Current session topic: {resolved_name}; {learner_profile_summary}"
+
     # ── Background trace state (AR6.5) ────────────────────────────────
     from domain.chat.background_trace import fetch_background_trace_state
 
