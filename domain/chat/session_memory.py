@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from adapters.db.chat import (
     append_chat_message,
     assert_chat_session,
@@ -14,9 +17,13 @@ from adapters.db.chat import (
     set_chat_session_title_if_missing,
     update_unbound_session_title,
 )
+from adapters.db.chat import (
+    fail_assistant_message as _db_fail_assistant_message,
+)
+from adapters.db.chat import (
+    finalize_assistant_message as _db_finalize_assistant_message,
+)
 from domain.chat.title_gen import generate_session_title
-from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 log = logging.getLogger("domain.chat.session_memory")
 
@@ -69,6 +76,59 @@ def load_history_text(
     return "\n\n".join(sections)
 
 
+def persist_user_message(
+    session: Session,
+    *,
+    session_id: int,
+    workspace_id: int,
+    user_id: int,
+    text: str,
+) -> int:
+    """Persist a user message before the LLM call starts.
+
+    Returns the message ID of the inserted row.
+    """
+    assert_chat_session(
+        session,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+    )
+    result = append_chat_message(
+        session,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        message_type="user",
+        payload={"text": text.strip()},
+        status="complete",
+    )
+    return result["message_id"]
+
+
+def create_assistant_placeholder(
+    session: Session,
+    *,
+    session_id: int,
+    workspace_id: int,
+    user_id: int,
+) -> int:
+    """Insert a placeholder assistant message with status ``generating``.
+
+    Returns the message ID so callers can later finalize or mark as failed.
+    """
+    result = append_chat_message(
+        session,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        message_type="assistant",
+        payload={"text": "", "status": "generating"},
+        status="generating",
+    )
+    return result["message_id"]
+
+
 def persist_turn(
     session: Session,
     *,
@@ -86,19 +146,12 @@ def persist_turn(
     if user_id is None:
         return
 
-    assert_chat_session(
+    persist_user_message(
         session,
         session_id=session_id,
         workspace_id=workspace_id,
         user_id=user_id,
-    )
-    append_chat_message(
-        session,
-        session_id=session_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-        message_type="user",
-        payload={"text": user_text.strip()},
+        text=user_text,
     )
     append_chat_message(
         session,
@@ -107,6 +160,7 @@ def persist_turn(
         user_id=user_id,
         message_type="assistant",
         payload=assistant_payload,
+        status="complete",
     )
     set_chat_session_title_if_missing(
         session,
@@ -264,7 +318,30 @@ def load_chat_context_for_quiz(
     return "\n".join(lines)
 
 
+def finalize_assistant_message(
+    session: Session,
+    *,
+    message_id: int,
+    payload: dict[str, Any],
+) -> bool:
+    """Mark a generating assistant message as complete with its final payload."""
+    return _db_finalize_assistant_message(session, message_id=message_id, payload=payload)
+
+
+def fail_assistant_message(
+    session: Session,
+    *,
+    message_id: int,
+    partial_text: str = "",
+) -> bool:
+    """Mark a generating assistant message as failed, preserving partial text."""
+    return _db_fail_assistant_message(session, message_id=message_id, partial_text=partial_text)
+
+
 __all__ = [
+    "create_assistant_placeholder",
+    "fail_assistant_message",
+    "finalize_assistant_message",
     "load_assessment_context",
     "load_chat_context_for_quiz",
     "load_flashcard_progress",
@@ -273,6 +350,7 @@ __all__ = [
     "maybe_compact_session_context",
     "persist_assessment_card",
     "persist_turn",
+    "persist_user_message",
 ]
 
 

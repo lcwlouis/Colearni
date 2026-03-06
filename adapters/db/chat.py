@@ -520,6 +520,70 @@ def get_chat_session_concept_id(session: Session, *, session_id: int) -> int | N
     return int(row["concept_id"]) if row else None
 
 
+def finalize_assistant_message(
+    session: Session,
+    *,
+    message_id: int,
+    payload: dict[str, Any],
+) -> bool:
+    """Atomically mark a *generating* message as complete with its final payload.
+
+    Returns True when a row was updated, False when the message was already
+    finalized or in a non-generating state (idempotent).
+    """
+    result = session.execute(
+        text(
+            """
+            UPDATE chat_messages
+            SET status = 'complete', payload = CAST(:payload AS jsonb)
+            WHERE id = :message_id
+              AND status = 'generating'
+            """
+        ),
+        {"message_id": message_id, "payload": _as_json(payload)},
+    )
+    return (result.rowcount or 0) > 0
+
+
+def fail_assistant_message(
+    session: Session,
+    *,
+    message_id: int,
+    partial_text: str = "",
+) -> bool:
+    """Atomically mark a *generating* message as failed.
+
+    Stores any partial text produced so far.  Returns True when a row was
+    updated, False when already finalized (idempotent).
+    """
+    fail_payload: dict[str, Any] = {"text": partial_text, "error": True}
+    result = session.execute(
+        text(
+            """
+            UPDATE chat_messages
+            SET status = 'failed', payload = CAST(:payload AS jsonb)
+            WHERE id = :message_id
+              AND status = 'generating'
+            """
+        ),
+        {"message_id": message_id, "payload": _as_json(fail_payload)},
+    )
+    return (result.rowcount or 0) > 0
+
+
+def cleanup_stale_generating_messages(db: Session) -> int:
+    """Mark orphaned 'generating' messages as 'failed'.
+
+    Called on app startup to clean up messages from interrupted streams.
+    Returns the count of cleaned-up messages.
+    """
+    result = db.execute(
+        text("UPDATE chat_messages SET status = 'failed' WHERE status = 'generating'")
+    )
+    db.commit()
+    return result.rowcount
+
+
 def _as_json(payload: dict[str, Any]) -> str:
     import json
 
@@ -527,12 +591,15 @@ def _as_json(payload: dict[str, Any]) -> str:
 
 
 __all__ = [
+    "cleanup_stale_generating_messages",
     "ChatNotFoundError",
     "append_chat_message",
     "assert_chat_session",
     "count_chat_messages",
     "create_chat_session",
     "delete_chat_session",
+    "fail_assistant_message",
+    "finalize_assistant_message",
     "get_chat_session_concept_name",
     "latest_system_summary",
     "list_chat_messages",
