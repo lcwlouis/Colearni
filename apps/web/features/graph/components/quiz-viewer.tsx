@@ -14,6 +14,7 @@ type Props = {
   workspaceId: string;
   quizId: number;
   isRetry: boolean;
+  source?: "practice" | "level_up";
   onBack: () => void;
   onRetryComplete?: () => void;
 };
@@ -22,6 +23,7 @@ export function QuizViewer({
   workspaceId,
   quizId,
   isRetry,
+  source = "practice",
   onBack,
   onRetryComplete,
 }: Props) {
@@ -40,7 +42,9 @@ export function QuizViewer({
       setLoading(true);
       setError(null);
       try {
-        const detail = await apiClient.getPracticeQuiz(workspaceId, quizId);
+        const detail = source === "level_up"
+          ? await apiClient.getLevelUpQuiz(workspaceId, quizId)
+          : await apiClient.getPracticeQuiz(workspaceId, quizId);
         if (!cancelled) setQuiz(detail);
       } catch (err) {
         if (!cancelled) setError("Failed to load quiz");
@@ -53,7 +57,7 @@ export function QuizViewer({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, quizId]);
+  }, [workspaceId, quizId, source]);
 
   function handleAnswer(itemId: number, value: string) {
     setAnswers((prev) => ({ ...prev, [itemId]: value }));
@@ -68,9 +72,9 @@ export function QuizViewer({
         item_id: item.item_id,
         answer: answers[item.item_id] ?? "",
       }));
-      const res = await apiClient.submitPracticeQuiz(workspaceId, quizId, {
-        answers: payload,
-      });
+      const res = source === "level_up"
+        ? await apiClient.submitLevelUpQuiz(workspaceId, quizId, { answers: payload })
+        : await apiClient.submitPracticeQuiz(workspaceId, quizId, { answers: payload });
       setResult(res);
       onRetryComplete?.();
     } catch (err) {

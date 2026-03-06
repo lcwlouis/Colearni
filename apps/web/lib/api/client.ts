@@ -243,6 +243,9 @@ export class ApiClient {
   // ── Quizzes (workspace-scoped) ──────────────────────────────────
   createLevelUpQuiz(wsId: string, p: CreateLevelUpQuizRequest) { return this.request<QuizCreateResponse>(`/workspaces/${wsId}/quizzes/level-up`, { method: "POST", body: JSON.stringify(p) }); }
   submitLevelUpQuiz(wsId: string, quizId: number, p: SubmitLevelUpQuizRequest) { return this.request<LevelUpQuizSubmitResponse>(`/workspaces/${wsId}/quizzes/${quizId}/submit`, { method: "POST", body: JSON.stringify(p) }); }
+  getLevelUpQuiz(wsId: string, quizId: number) {
+    return this.request<PracticeQuizDetailResponse>(`/workspaces/${wsId}/quizzes/level-up/${quizId}`, { method: "GET" });
+  }
   listLevelUpQuizzes(wsId: string, conceptId?: number, limit?: number) {
     return this.request<PracticeQuizHistoryListResponse>(`/workspaces/${wsId}/quizzes/level-up`, { method: "GET" }, { concept_id: conceptId, limit });
   }

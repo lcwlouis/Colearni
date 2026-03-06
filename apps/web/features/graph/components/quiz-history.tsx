@@ -18,8 +18,8 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
   const [quizzes, setQuizzes] = useState<QuizHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedQuizId, setSelectedQuizId] = useState<number | null>(null);
+  const [selectedSource, setSelectedSource] = useState<QuizSource>("practice");
   const [retryingQuizId, setRetryingQuizId] = useState<number | null>(null);
-  const [retryLoading, setRetryLoading] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const fetchQuizzes = useCallback(async () => {
@@ -69,23 +69,6 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
     };
   }, [workspaceId, conceptId]);
 
-  async function handleRetry(quiz: QuizHistoryItem) {
-    if (quiz.concept_id == null) return;
-    setRetryLoading(true);
-    setRetryingQuizId(quiz.quiz_id);
-    try {
-      const newQuiz = await apiClient.createPracticeQuiz(workspaceId, {
-        concept_id: quiz.concept_id,
-      });
-      setSelectedQuizId(newQuiz.quiz_id);
-    } catch (err) {
-      console.error("Failed to create retry quiz:", err);
-      setRetryingQuizId(null);
-    } finally {
-      setRetryLoading(false);
-    }
-  }
-
   async function handleCreate() {
     setCreating(true);
     try {
@@ -129,6 +112,7 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
         workspaceId={workspaceId}
         quizId={selectedQuizId}
         isRetry={retryingQuizId != null}
+        source={selectedSource}
         onBack={() => {
           setSelectedQuizId(null);
           setRetryingQuizId(null);
@@ -142,6 +126,11 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
 
   return (
     <div className="quiz-history">
+      <div style={{ padding: "0.5rem 0", textAlign: "right" }}>
+        <button type="button" disabled={creating} onClick={() => { void handleCreate(); }}>
+          {creating ? "Creating…" : "＋ New practice quiz"}
+        </button>
+      </div>
       <ul className="quiz-history__list">
         {quizzes.map((q) => (
           <li key={q.quiz_id} className="quiz-history__item">
@@ -175,18 +164,19 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
               <button
                 type="button"
                 className="secondary"
-                onClick={() => setSelectedQuizId(q.quiz_id)}
+                onClick={() => { setSelectedQuizId(q.quiz_id); setSelectedSource(q.source); }}
               >
                 View
               </button>
               <button
                 type="button"
-                disabled={retryLoading || q.concept_id == null}
-                onClick={() => handleRetry(q)}
+                onClick={() => {
+                  setSelectedQuizId(q.quiz_id);
+                  setSelectedSource(q.source);
+                  setRetryingQuizId(q.quiz_id);
+                }}
               >
-                {retryLoading && retryingQuizId === q.quiz_id
-                  ? "Creating…"
-                  : "Retry"}
+                Retry
               </button>
             </div>
           </li>
