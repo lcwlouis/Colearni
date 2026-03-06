@@ -221,6 +221,24 @@ class _BaseGraphLLMClient(ABC):
                 return True
             return False
 
+    def _build_extraction_messages(self, chunk_text: str) -> list[Message]:
+        """Build the message list for a single graph extraction call."""
+        try:
+            system_prompt, _ = _registry.render_with_meta(
+                "graph_extract_chunk_v1_system", {}
+            )
+            prompt, _ = _registry.render_with_meta(
+                "graph_extract_chunk_v1", {"chunk_text": chunk_text}
+            )
+        except Exception:
+            system_prompt = (
+                "You are a knowledge graph extraction component for a learning system. "
+                "Extract durable learning concepts and meaningful relationships from study material. "
+                "Return valid JSON only."
+            )
+            prompt = f"Extract concept+edge JSON from this chunk.\n\nCHUNK:\n{chunk_text}"
+        return MessageBuilder().system(system_prompt).user(prompt).build()
+
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         prompt_meta = None
         system_prompt = None
@@ -245,6 +263,36 @@ class _BaseGraphLLMClient(ABC):
             prompt_meta=prompt_meta,
             system_prompt=system_prompt,
         )
+
+    def batch_extract_raw_graph(
+        self, *, chunk_texts: Sequence[str]
+    ) -> Sequence[Mapping[str, Any]]:
+        """Extract graph candidates for multiple chunks in parallel.
+
+        Subclasses may override ``_batch_complete_messages_json`` to use
+        provider-specific batch APIs (e.g. ``litellm.batch_completion``).
+        """
+        if not chunk_texts:
+            return []
+        message_lists = [self._build_extraction_messages(ct) for ct in chunk_texts]
+        return self._batch_complete_messages_json(
+            message_lists,
+            schema_name="graph_raw_extraction",
+            schema=_RAW_GRAPH_SCHEMA,
+        )
+
+    def _batch_complete_messages_json(
+        self,
+        message_lists: Sequence[list[Message]],
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+    ) -> list[dict[str, Any]]:
+        """Process multiple JSON LLM calls.  Serial fallback — subclasses may override."""
+        return [
+            self.complete_messages_json(msgs, schema_name=schema_name, schema=schema)
+            for msgs in message_lists
+        ]
 
     def disambiguate(
         self,
@@ -1666,3 +1714,73 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         response = await litellm.acompletion(**kwargs)
         async for chunk in response:
             yield chunk.model_dump() if hasattr(chunk, "model_dump") else dict(chunk)
+
+    def _batch_complete_messages_json(
+        self,
+        message_lists: Sequence[list[Message]],
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+    ) -> list[dict[str, Any]]:
+        """Use ``litellm.batch_completion()`` for parallel JSON calls."""
+        import litellm as _litellm  # noqa: PLC0415
+
+        if not message_lists:
+            return []
+
+        schema_hint = json.dumps(schema, indent=2)
+        schema_suffix = (
+            "\n\nYou MUST respond with a JSON object conforming to this schema:\n"
+            f"```json\n{schema_hint}\n```"
+        )
+
+        if self._model_supports_json_schema():
+            response_format: dict[str, object] | None = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": True,
+                    "schema": schema,
+                },
+            }
+            needs_hint = False
+        else:
+            response_format = {"type": "json_object"}
+            needs_hint = True
+
+        all_sdk_messages: list[list[dict[str, str]]] = []
+        for msgs in message_lists:
+            prepared = (
+                self._with_schema_hint(list(msgs), schema_suffix) if needs_hint
+                else list(msgs)
+            )
+            all_sdk_messages.append(self._prepare_messages(prepared))
+
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": self._json_temperature,
+            "timeout": self._timeout_seconds,
+            "num_retries": self._num_retries,
+        }
+        if self._base_url is not None:
+            kwargs["api_base"] = self._base_url
+        if self._api_key is not None:
+            kwargs["api_key"] = self._api_key
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+
+        responses = get_llm_limiter().execute(
+            _litellm.batch_completion,
+            messages=all_sdk_messages,
+            **kwargs,
+        )
+
+        results: list[dict[str, Any]] = []
+        for resp in responses:
+            raw = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
+            content = self._extract_content(raw)
+            payload = json.loads(content)
+            if not isinstance(payload, dict):
+                raise ValueError("Batch response payload must decode to an object")
+            results.append(payload)
+        return results

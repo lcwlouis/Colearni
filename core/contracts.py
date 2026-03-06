@@ -33,6 +33,15 @@ class GraphLLMClient(Protocol):
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         """Extract schema-shaped concept and edge candidates from a chunk."""
 
+    def batch_extract_raw_graph(
+        self, *, chunk_texts: Sequence[str]
+    ) -> Sequence[Mapping[str, Any]]:
+        """Extract graph candidates for multiple chunks in parallel.
+
+        Returns results in the same order as *chunk_texts*.  Implementations
+        may use batch APIs or serial fallback.
+        """
+
     def disambiguate(
         self,
         *,

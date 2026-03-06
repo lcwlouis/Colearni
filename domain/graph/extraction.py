@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
+
 from core.contracts import GraphLLMClient
 from core.observability import observation_context
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -17,6 +20,7 @@ from domain.graph.types import (
     truncate_text,
 )
 
+_LOGGER = logging.getLogger(__name__)
 _MAX_CONTEXT_SNIPPET_CHARS = 240
 
 
@@ -63,6 +67,22 @@ def extract_raw_graph_from_chunk(
     except ValidationError as exc:
         raise ValueError(f"Graph extraction schema validation failed: {exc}") from exc
 
+    return _normalize_payload(
+        payload,
+        chunk_text=chunk_text,
+        concept_description_max_chars=concept_description_max_chars,
+        edge_description_max_chars=edge_description_max_chars,
+    )
+
+
+def _normalize_payload(
+    payload: _RawGraphPayload,
+    *,
+    chunk_text: str,
+    concept_description_max_chars: int,
+    edge_description_max_chars: int,
+) -> RawGraphExtraction:
+    """Normalize and deduplicate a validated extraction payload."""
     concept_by_alias: dict[str, ExtractedConcept] = {}
     for concept in payload.concepts:
         alias_norm = normalize_alias(concept.name)
@@ -143,3 +163,33 @@ def extract_raw_graph_from_chunk(
         edges=list(edge_by_key.values()),
         extracted_json=payload.model_dump(mode="python"),
     )
+
+
+def batch_extract_raw_graph_from_chunks(
+    *,
+    llm_client: GraphLLMClient,
+    chunk_texts: Sequence[str],
+    concept_description_max_chars: int,
+    edge_description_max_chars: int,
+) -> list[RawGraphExtraction]:
+    """Extract and normalize raw concepts/edges for multiple chunks in parallel."""
+    if not chunk_texts:
+        return []
+    raw_results = llm_client.batch_extract_raw_graph(chunk_texts=list(chunk_texts))
+    extractions: list[RawGraphExtraction] = []
+    for i, raw in enumerate(raw_results):
+        try:
+            payload = _RawGraphPayload.model_validate(raw)
+        except ValidationError as exc:
+            _LOGGER.warning("Batch extraction validation failed for chunk %d: %s", i, exc)
+            extractions.append(RawGraphExtraction(concepts=[], edges=[], extracted_json={}))
+            continue
+        extractions.append(
+            _normalize_payload(
+                payload,
+                chunk_text=chunk_texts[i],
+                concept_description_max_chars=concept_description_max_chars,
+                edge_description_max_chars=edge_description_max_chars,
+            )
+        )
+    return extractions
