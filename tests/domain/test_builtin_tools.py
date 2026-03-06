@@ -209,8 +209,24 @@ class TestRegistryFactory:
             retrieve_fn=lambda **_: [],
             concept_lookup_fn=lambda *a, **k: {},
             mastery_fn=lambda *a, **k: None,
+            web_search_api_key="test-key",
+        )
+        assert len(registry) == 4
+        assert "web_search" in registry
+
+    def test_all_deps_without_web_search(self):
+        from domain.tools.registry_factory import build_tool_registry
+
+        registry = build_tool_registry(
+            session=None,
+            workspace_id=1,
+            user_id=1,
+            retrieve_fn=lambda **_: [],
+            concept_lookup_fn=lambda *a, **k: {},
+            mastery_fn=lambda *a, **k: None,
         )
         assert len(registry) == 3
+        assert "web_search" not in registry
 
     def test_partial_deps(self):
         from domain.tools.registry_factory import build_tool_registry

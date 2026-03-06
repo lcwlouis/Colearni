@@ -1,8 +1,8 @@
 """Factory for building a ToolRegistry with the standard built-in tools.
 
 Call :func:`build_tool_registry` to get a registry pre-populated with
-search, concept lookup, and mastery check tools, wired to the given
-DB session and workspace/user context.
+search, concept lookup, mastery check, and web search tools, wired to
+the given DB session and workspace/user context.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from core.tools import ToolRegistry
 from domain.tools.check_mastery import CheckMasteryTool
 from domain.tools.lookup_concept import LookupConceptTool
 from domain.tools.search_knowledge import SearchKnowledgeTool
+from domain.tools.web_search import WebSearchTool
 
 
 def build_tool_registry(
@@ -23,6 +24,8 @@ def build_tool_registry(
     retrieve_fn: Any | None = None,
     concept_lookup_fn: Any | None = None,
     mastery_fn: Any | None = None,
+    web_search_api_key: str | None = None,
+    web_search_max_results: int = 5,
 ) -> ToolRegistry:
     """Build a :class:`ToolRegistry` with the standard built-in tools.
 
@@ -54,6 +57,14 @@ def build_tool_registry(
                 session=session,
                 workspace_id=workspace_id,
                 user_id=user_id,
+            )
+        )
+
+    if web_search_api_key:
+        registry.register(
+            WebSearchTool(
+                api_key=web_search_api_key,
+                max_results=web_search_max_results,
             )
         )
 
