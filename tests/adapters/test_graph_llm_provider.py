@@ -11,6 +11,15 @@ import pytest
 from adapters.llm.providers import _BaseGraphLLMClient
 
 
+def _text_of(content: Any) -> str:
+    """Extract plain text from string or structured content blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b["text"] for b in content if isinstance(b, dict) and "text" in b)
+    return str(content)
+
+
 class _StubGraphLLMClient(_BaseGraphLLMClient):
     """Minimal stub to test prompt rendering without a real SDK."""
 
@@ -56,7 +65,7 @@ class TestExtractRawGraphPrompt:
             response={"concepts": [], "edges": []}
         )
         client.extract_raw_graph(chunk_text="Photosynthesis is the process")
-        user_msg = client._last_messages[-1]["content"]
+        user_msg = _text_of(client._last_messages[-1]["content"])
         assert "Photosynthesis is the process" in user_msg
 
     def test_prompt_uses_asset_structure(self) -> None:
@@ -64,8 +73,8 @@ class TestExtractRawGraphPrompt:
             response={"concepts": [], "edges": []}
         )
         client.extract_raw_graph(chunk_text="test chunk")
-        system_msg = client._last_messages[0]["content"]
-        user_msg = client._last_messages[-1]["content"]
+        system_msg = _text_of(client._last_messages[0]["content"])
+        user_msg = _text_of(client._last_messages[-1]["content"])
         # System message should have the extraction instructions
         assert "knowledge graph" in system_msg.lower()
         # User message should contain the chunk text
@@ -98,7 +107,7 @@ class TestDisambiguatePrompt:
             context_snippet="copying DNA",
             candidates=[{"id": 1, "canonical_name": "DNA Replication"}],
         )
-        user_msg = client._last_messages[-1]["content"]
+        user_msg = _text_of(client._last_messages[-1]["content"])
         assert "DNA replication" in user_msg
 
     def test_prompt_contains_candidates(self) -> None:
@@ -116,7 +125,7 @@ class TestDisambiguatePrompt:
             context_snippet=None,
             candidates=[{"id": 1, "canonical_name": "DNA Replication"}],
         )
-        user_msg = client._last_messages[-1]["content"]
+        user_msg = _text_of(client._last_messages[-1]["content"])
         assert "DNA Replication" in user_msg
 
     def test_create_new_bias_in_prompt(self) -> None:
@@ -135,7 +144,7 @@ class TestDisambiguatePrompt:
             context_snippet="test",
             candidates=[],
         )
-        system_msg = client._last_messages[0]["content"]
+        system_msg = _text_of(client._last_messages[0]["content"])
         assert "CREATE_NEW" in system_msg
 
 

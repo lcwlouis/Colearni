@@ -101,7 +101,15 @@ class RateLimiter:
         """
         attempt = 0
         while True:
+            t0 = time.monotonic()
             self._semaphore.acquire()
+            wait_s = time.monotonic() - t0
+            if wait_s > 0.1:
+                log.warning(
+                    "%s semaphore wait %.2fs (max_concurrent may be too low or background tasks are saturating slots)",
+                    self._name,
+                    wait_s,
+                )
             try:
                 return fn(*args, **kwargs)
             except Exception as exc:

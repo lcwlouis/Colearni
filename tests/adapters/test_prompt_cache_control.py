@@ -51,70 +51,101 @@ class TestIsAnthropicModel:
         assert client._is_anthropic_model() is False
 
 
-class TestApplyCacheControl:
-    def test_annotates_first_system_message(self) -> None:
+class TestToContentBlocks:
+    """Tests for _to_content_blocks — converts system/user to structured blocks."""
+
+    def test_converts_system_and_user_to_blocks(self) -> None:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "You are a tutor."},
-            {"role": "system", "content": "Context: Biology"},
             {"role": "user", "content": "What is DNA?"},
         ]
-        result = _BaseGraphLLMClient._apply_cache_control(messages)
-        first = result[0]
-        assert isinstance(first["content"], list)
-        assert first["content"][0]["type"] == "text"
-        assert first["content"][0]["text"] == "You are a tutor."
-        assert first["content"][0]["cache_control"] == {"type": "ephemeral"}
+        result = _BaseGraphLLMClient._to_content_blocks(messages)
+        assert result[0]["content"] == [{"type": "text", "text": "You are a tutor."}]
+        assert result[1]["content"] == [{"type": "text", "text": "What is DNA?"}]
 
-    def test_leaves_subsequent_system_messages_unchanged(self) -> None:
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": "Prefix"},
-            {"role": "system", "content": "Context block"},
-            {"role": "user", "content": "Q"},
-        ]
-        result = _BaseGraphLLMClient._apply_cache_control(messages)
-        assert isinstance(result[1]["content"], str)
-        assert result[1]["content"] == "Context block"
-
-    def test_leaves_user_messages_unchanged(self) -> None:
+    def test_leaves_assistant_messages_as_strings(self) -> None:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "Sys"},
-            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Sure, DNA is..."},
+            {"role": "user", "content": "Thanks"},
         ]
-        result = _BaseGraphLLMClient._apply_cache_control(messages)
-        assert result[1]["content"] == "Hello"
+        result = _BaseGraphLLMClient._to_content_blocks(messages)
+        assert isinstance(result[1]["content"], str)
+        assert result[1]["content"] == "Sure, DNA is..."
 
-    def test_no_system_messages_returns_copy(self) -> None:
+    def test_leaves_tool_messages_as_strings(self) -> None:
         messages: list[dict[str, Any]] = [
-            {"role": "user", "content": "Hello"},
+            {"role": "tool", "content": '{"result": 42}', "tool_call_id": "x"},
         ]
-        result = _BaseGraphLLMClient._apply_cache_control(messages)
-        assert result == messages
+        result = _BaseGraphLLMClient._to_content_blocks(messages)
+        assert isinstance(result[0]["content"], str)
+
+    def test_already_list_content_unchanged(self) -> None:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": [{"type": "text", "text": "pre-converted"}]},
+        ]
+        result = _BaseGraphLLMClient._to_content_blocks(messages)
+        assert result[0]["content"] == [{"type": "text", "text": "pre-converted"}]
 
     def test_does_not_mutate_original(self) -> None:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "Original"},
             {"role": "user", "content": "Q"},
         ]
-        _BaseGraphLLMClient._apply_cache_control(messages)
+        _BaseGraphLLMClient._to_content_blocks(messages)
         assert isinstance(messages[0]["content"], str)
+        assert isinstance(messages[1]["content"], str)
 
 
 class TestPrepareMessages:
-    def test_applies_cache_control_for_anthropic(self) -> None:
+    def test_anthropic_adds_cache_control(self) -> None:
         client = _StubClient(model="claude-3-5-sonnet-20241022")
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "Prefix"},
             {"role": "user", "content": "Q"},
         ]
         result = client._prepare_messages(messages)
-        assert isinstance(result[0]["content"], list)
+        # System → content blocks with cache_control
+        sys_blocks = result[0]["content"]
+        assert isinstance(sys_blocks, list)
+        assert sys_blocks[0]["cache_control"] == {"type": "ephemeral"}
+        # User → content blocks without cache_control
+        user_blocks = result[1]["content"]
+        assert isinstance(user_blocks, list)
+        assert "cache_control" not in user_blocks[0]
 
-    def test_no_cache_control_for_openai(self) -> None:
+    def test_openai_uses_content_blocks_no_cache_control(self) -> None:
         client = _StubClient(model="gpt-4o")
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": "Prefix"},
             {"role": "user", "content": "Q"},
         ]
         result = client._prepare_messages(messages)
-        assert result is messages  # identity — no copy needed
-        assert isinstance(result[0]["content"], str)
+        # System → content blocks without cache_control
+        assert result[0]["content"] == [{"type": "text", "text": "Prefix"}]
+        # User → content blocks
+        assert result[1]["content"] == [{"type": "text", "text": "Q"}]
+
+    def test_anthropic_second_system_has_no_cache_control(self) -> None:
+        client = _StubClient(model="claude-3-5-sonnet-20241022")
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "Prefix"},
+            {"role": "system", "content": "Context block"},
+            {"role": "user", "content": "Q"},
+        ]
+        result = client._prepare_messages(messages)
+        # First system has cache_control
+        assert "cache_control" in result[0]["content"][0]
+        # Second system is content blocks but no cache_control
+        assert isinstance(result[1]["content"], list)
+        assert "cache_control" not in result[1]["content"][0]
+
+    def test_assistant_stays_plain_string(self) -> None:
+        client = _StubClient(model="gpt-4o")
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": "Sys"},
+            {"role": "assistant", "content": "Hi"},
+            {"role": "user", "content": "Q"},
+        ]
+        result = client._prepare_messages(messages)
+        assert isinstance(result[1]["content"], str)

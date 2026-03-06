@@ -76,48 +76,40 @@ class Settings(BaseSettings):
     )
 
     # ── Ingestion chunking ─────────────────────────────────────────────
-    # All sizes are in characters (≈ 4 chars per token for English prose).
+    # All chunk sizes are measured in **tokens** via litellm.token_counter.
     # Vector chunks are stored in the DB and used for retrieval (small).
     # Graph chunks are larger text windows fed to the LLM extractor;
     # adjacent vector chunks are batched together to reach this size.
     # Set INGEST_GRAPH_CHUNK_SIZE=0 to use one LLM call per vector chunk.
     ingest_vector_chunk_size: int = Field(
-        default=250,
+        default=350,
         validation_alias=AliasChoices(
             "APP_INGEST_VECTOR_CHUNK_SIZE",
             "INGEST_VECTOR_CHUNK_SIZE",
         ),
         ge=10,
-        description="Target size per vector chunk in the configured unit (words or chars).",
+        description="Target size per vector chunk in tokens (measured via litellm.token_counter).",
     )
     ingest_vector_chunk_overlap: int = Field(
-        default=40,
+        default=50,
         validation_alias=AliasChoices(
             "APP_INGEST_VECTOR_CHUNK_OVERLAP",
             "INGEST_VECTOR_CHUNK_OVERLAP",
         ),
         ge=0,
-        description="Overlap between adjacent vector chunks in the configured unit.",
-    )
-    ingest_chunk_unit: str = Field(
-        default="words",
-        validation_alias=AliasChoices(
-            "APP_INGEST_CHUNK_UNIT",
-            "INGEST_CHUNK_UNIT",
-        ),
-        pattern=r"^(chars|words)$",
-        description="Unit for chunk sizing: 'chars' or 'words'. Default 'words'.",
+        description="Overlap between adjacent vector chunks in tokens.",
     )
     ingest_graph_chunk_size: int = Field(
-        default=20000,
+        default=8000,
         validation_alias=AliasChoices(
             "APP_INGEST_GRAPH_CHUNK_SIZE",
             "INGEST_GRAPH_CHUNK_SIZE",
         ),
         ge=0,
         description=(
-            "Target size per graph-extraction LLM window in the configured unit. "
-            "Adjacent vector chunks are concatenated up to this size. "
+            "Target token budget per graph-extraction LLM window. "
+            "Adjacent vector chunks are concatenated up to this token count. "
+            "Measured via litellm.token_counter. "
             "0 = one LLM call per vector chunk."
         ),
     )
@@ -545,14 +537,19 @@ class Settings(BaseSettings):
         description="Max simultaneous embedding API calls.",
     )
     api_retry_max_attempts: int = Field(
-        default=3,
+        default=0,
         validation_alias=AliasChoices(
             "APP_API_RETRY_MAX_ATTEMPTS",
             "API_RETRY_MAX_ATTEMPTS",
         ),
         ge=0,
         le=10,
-        description="Max retry attempts on rate-limit (HTTP 429) errors.",
+        description=(
+            "Max retry attempts on rate-limit (HTTP 429) errors in the "
+            "concurrency gate.  Defaults to 0 because the OpenAI/LiteLLM "
+            "SDKs already retry internally (llm_sdk_max_retries); setting "
+            "this >0 stacks retries and multiplies backoff delays."
+        ),
     )
     api_retry_base_delay: float = Field(
         default=1.0,

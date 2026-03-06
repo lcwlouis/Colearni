@@ -9,22 +9,22 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from core.contracts import TutorTextStream
 from core.llm_messages import Message, MessageBuilder
 from core.observability import (
     LLM_REASONING_CONTENT,
     LLM_TOKEN_COUNT_REASONING,
+    SPAN_KIND_CHAIN,
     SPAN_KIND_LLM,
-    classify_usage_source,
     create_span,
     emit_event,
     extract_token_usage,
     get_observation_context,
     set_llm_span_attributes,
     set_prompt_metadata,
-    set_usage_source,
+    set_span_summary,
     start_span,
 )
 from core.prompting import PromptRegistry
@@ -164,43 +164,45 @@ class _BaseGraphLLMClient(ABC):
         return any(model_lower.startswith(p) for p in self._ANTHROPIC_PREFIXES)
 
     @staticmethod
-    def _apply_cache_control(
+    def _to_content_blocks(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Annotate the first system message with ``cache_control`` for prompt caching.
+        """Convert system/user string content to structured content blocks.
 
-        Returns a shallow copy with the first system message's ``content``
-        transformed to the content-blocks format expected by Anthropic / LiteLLM.
-        Subsequent messages are left unchanged.  Safe to call unconditionally;
-        if there are no system messages the list is returned as-is.
+        Follows the OpenAI multi-content-part format::
+
+            {"role": "system", "content": [{"type": "text", "text": "..."}]}
+
+        Assistant and tool messages keep plain string content per convention.
+        Content that is already a list (pre-converted) is left unchanged.
         """
         result: list[dict[str, Any]] = []
-        marked = False
         for msg in messages:
             msg_copy = dict(msg)
-            if not marked and msg_copy.get("role") == "system":
-                content = msg_copy.get("content", "")
-                if isinstance(content, str) and content:
-                    msg_copy["content"] = [
-                        {
-                            "type": "text",
-                            "text": content,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ]
-                marked = True
+            content = msg_copy.get("content", "")
+            role = msg_copy.get("role", "")
+            if role in ("system", "user") and isinstance(content, str) and content:
+                msg_copy["content"] = [{"type": "text", "text": content}]
             result.append(msg_copy)
         return result
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Apply provider-specific message transformations before SDK calls.
+        """Apply message transformations before SDK calls.
 
-        Currently adds ``cache_control`` to the first system message for
-        Anthropic models.  Returns *messages* unmodified for other providers.
+        1. Converts system/user content to structured content blocks
+           (enables prefix caching on OpenAI-compatible providers).
+        2. Adds Anthropic ``cache_control`` annotation to the first system
+           message when targeting Anthropic models.
         """
+        result = self._to_content_blocks(messages)
         if self._is_anthropic_model():
-            return self._apply_cache_control(messages)
-        return messages
+            for msg in result:
+                if msg.get("role") == "system":
+                    blocks = msg.get("content")
+                    if isinstance(blocks, list) and blocks:
+                        blocks[-1]["cache_control"] = {"type": "ephemeral"}
+                    break
+        return result
 
     def _model_supports_json_schema(self) -> bool:
         """Return True if the model supports ``{"type": "json_schema"}``."""
@@ -355,49 +357,65 @@ class _BaseGraphLLMClient(ABC):
             )
             return [{"concept_ref": str(item["raw_name"]), "operations": [result]}]
 
-        from core.settings import get_settings  # noqa: PLC0415
+        with start_span(
+            "graph.disambiguate_batch",
+            kind=SPAN_KIND_CHAIN,
+            component="graph",
+            operation="graph.disambiguate_batch",
+        ) as batch_span:
+            if batch_span is not None:
+                batch_span.set_attribute("graph.disambiguate_items", len(items))
+                set_span_summary(batch_span, input_summary=f"{len(items)} items")
 
-        settings = get_settings()
-        max_tokens = settings.disambiguate_max_tokens_per_batch
-        max_items = settings.disambiguate_max_items_per_batch
-        overhead = 500  # estimated system-prompt tokens
+            from core.settings import get_settings  # noqa: PLC0415
 
-        # Estimate tokens per item (rough chars-to-tokens ratio)
-        item_tokens = [len(json.dumps(item, ensure_ascii=True)) // 4 for item in items]
+            settings = get_settings()
+            max_tokens = settings.disambiguate_max_tokens_per_batch
+            max_items = settings.disambiguate_max_items_per_batch
+            overhead = 500  # estimated system-prompt tokens
 
-        # Build sub-batches respecting token and item-count limits
-        sub_batches: list[list[int]] = []
-        current_batch: list[int] = []
-        current_tokens = overhead
-        for i, tokens in enumerate(item_tokens):
-            if current_batch and (
-                current_tokens + tokens > max_tokens
-                or len(current_batch) >= max_items
-            ):
+            # Estimate tokens per item (rough chars-to-tokens ratio)
+            item_tokens = [len(json.dumps(item, ensure_ascii=True)) // 4 for item in items]
+
+            # Build sub-batches respecting token and item-count limits
+            sub_batches: list[list[int]] = []
+            current_batch: list[int] = []
+            current_tokens = overhead
+            for i, tokens in enumerate(item_tokens):
+                if current_batch and (
+                    current_tokens + tokens > max_tokens
+                    or len(current_batch) >= max_items
+                ):
+                    sub_batches.append(current_batch)
+                    current_batch = [i]
+                    current_tokens = overhead + tokens
+                else:
+                    current_batch.append(i)
+                    current_tokens += tokens
+            if current_batch:
                 sub_batches.append(current_batch)
-                current_batch = [i]
-                current_tokens = overhead + tokens
-            else:
-                current_batch.append(i)
-                current_tokens += tokens
-        if current_batch:
-            sub_batches.append(current_batch)
 
-        if len(sub_batches) == 1:
-            return self._disambiguate_batch_single_call(items)
+            if len(sub_batches) == 1:
+                return self._disambiguate_batch_single_call(items)
 
-        log.info(
-            "Splitting %d items into %d sub-batches for disambiguation",
-            len(items),
-            len(sub_batches),
-        )
-        all_results: list[Mapping[str, Any] | None] = [None] * len(items)
-        for indices in sub_batches:
-            sub_items = [items[i] for i in indices]
-            sub_results = self._disambiguate_batch_single_call(sub_items)
-            for idx, result in zip(indices, sub_results):
-                all_results[idx] = result
-        return all_results  # type: ignore[return-value]
+            log.info(
+                "Splitting %d items into %d sub-batches for disambiguation",
+                len(items),
+                len(sub_batches),
+            )
+            all_results: list[Mapping[str, Any] | None] = [None] * len(items)
+            for indices in sub_batches:
+                sub_items = [items[i] for i in indices]
+                sub_results = self._disambiguate_batch_single_call(sub_items)
+                for idx, result in zip(indices, sub_results):
+                    all_results[idx] = result
+            if batch_span is not None:
+                batch_span.set_attribute("graph.disambiguate_sub_batches", len(sub_batches))
+                set_span_summary(
+                    batch_span,
+                    output_summary=f"sub_batches={len(sub_batches)}, items={len(items)}",
+                )
+            return all_results  # type: ignore[return-value]
 
     def _disambiguate_batch_single_call(
         self,
@@ -1565,58 +1583,107 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         if not message_lists:
             return []
 
-        schema_hint = json.dumps(schema, indent=2)
-        schema_suffix = (
-            "\n\nYou MUST respond with a JSON object conforming to this schema:\n"
-            f"```json\n{schema_hint}\n```"
-        )
+        with start_span(
+            "llm.batch_extract",
+            kind=SPAN_KIND_CHAIN,
+            component="llm",
+            operation="llm.batch_extract",
+            provider=self._provider,
+            model=self._model,
+        ) as batch_span:
+            if batch_span is not None:
+                batch_span.set_attribute("llm.batch_size", len(message_lists))
+                set_span_summary(batch_span, input_summary=f"{len(message_lists)} calls")
 
-        if self._model_supports_json_schema():
-            response_format: dict[str, object] | None = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": schema,
-                },
-            }
-            needs_hint = False
-        else:
-            response_format = {"type": "json_object"}
-            needs_hint = True
-
-        async def _call_one(msgs: list[Message]) -> dict[str, Any]:
-            prepared = (
-                self._with_schema_hint(list(msgs), schema_suffix) if needs_hint
-                else list(msgs)
+            schema_hint = json.dumps(schema, indent=2)
+            schema_suffix = (
+                "\n\nYou MUST respond with a JSON object conforming to this schema:\n"
+                f"```json\n{schema_hint}\n```"
             )
-            sdk_messages = self._prepare_messages(prepared)
-            result = await self._async_sdk_call(
-                messages=sdk_messages,
-                temperature=self._json_temperature,
-                response_format=response_format,
-            )
-            content = self._extract_content(result)
-            payload = json.loads(content)
-            if not isinstance(payload, dict):
-                raise ValueError("Batch response payload must decode to an object")
-            return payload
 
-        async def _gather_all() -> list[dict[str, Any]]:
-            return list(await asyncio.gather(*[_call_one(msgs) for msgs in message_lists]))
+            if self._model_supports_json_schema():
+                response_format: dict[str, object] | None = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "strict": True,
+                        "schema": schema,
+                    },
+                }
+                needs_hint = False
+            else:
+                response_format = {"type": "json_object"}
+                needs_hint = True
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+            async def _call_one(idx: int, msgs: list[Message]) -> dict[str, Any]:
+                prepared = (
+                    self._with_schema_hint(list(msgs), schema_suffix) if needs_hint
+                    else list(msgs)
+                )
+                sdk_messages = self._prepare_messages(prepared)
+                with start_span(
+                    "llm.batch_item",
+                    kind=SPAN_KIND_LLM,
+                    component="llm",
+                    operation="graph.extract",
+                    provider=self._provider,
+                    model=self._model,
+                ) as item_span:
+                    set_llm_span_attributes(
+                        item_span,
+                        model=self._model,
+                        invocation_params={
+                            "model": self._model,
+                            "temperature": self._json_temperature,
+                            "provider": self._provider,
+                            "batch_index": idx,
+                        },
+                        messages=list(msgs),
+                        llm_system=self._provider,
+                        llm_provider=self._provider,
+                    )
+                    result = await self._async_sdk_call(
+                        messages=sdk_messages,
+                        temperature=self._json_temperature,
+                        response_format=response_format,
+                    )
+                    content = self._extract_content(result)
+                    token_usage = extract_token_usage(result)
+                    set_llm_span_attributes(
+                        item_span,
+                        response_message=content,
+                        token_usage=token_usage,
+                    )
+                    payload = json.loads(content)
+                    if not isinstance(payload, dict):
+                        raise ValueError("Batch response payload must decode to an object")
+                    return payload
 
-        if loop is not None and loop.is_running():
-            # Already inside an event loop — fall back to serial
-            return [
-                self.complete_messages_json(msgs, schema_name=schema_name, schema=schema)
-                for msgs in message_lists
-            ]
-        return asyncio.run(_gather_all())
+            # Capture OTel context so child spans parent correctly across asyncio.run()
+            from opentelemetry import context as context_api  # noqa: PLC0415
+
+            parent_ctx = context_api.get_current()
+
+            async def _gather_all() -> list[dict[str, Any]]:
+                context_api.attach(parent_ctx)
+                return list(await asyncio.gather(*[_call_one(i, msgs) for i, msgs in enumerate(message_lists)]))
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is not None and loop.is_running():
+                # Already inside an event loop — fall back to serial
+                results = [
+                    self.complete_messages_json(msgs, schema_name=schema_name, schema=schema)
+                    for msgs in message_lists
+                ]
+            else:
+                results = asyncio.run(_gather_all())
+            if batch_span is not None:
+                set_span_summary(batch_span, output_summary=f"{len(results)} completed")
+            return results
 
 
 class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
@@ -1794,59 +1861,92 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         if not message_lists:
             return []
 
-        schema_hint = json.dumps(schema, indent=2)
-        schema_suffix = (
-            "\n\nYou MUST respond with a JSON object conforming to this schema:\n"
-            f"```json\n{schema_hint}\n```"
-        )
+        with start_span(
+            "llm.batch_extract",
+            kind=SPAN_KIND_CHAIN,
+            component="llm",
+            operation="llm.batch_extract",
+            provider=self._provider,
+            model=self._model,
+        ) as batch_span:
+            if batch_span is not None:
+                batch_span.set_attribute("llm.batch_size", len(message_lists))
+                set_span_summary(batch_span, input_summary=f"{len(message_lists)} calls")
 
-        if self._model_supports_json_schema():
-            response_format: dict[str, object] | None = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": schema,
-                },
-            }
-            needs_hint = False
-        else:
-            response_format = {"type": "json_object"}
-            needs_hint = True
-
-        all_sdk_messages: list[list[dict[str, str]]] = []
-        for msgs in message_lists:
-            prepared = (
-                self._with_schema_hint(list(msgs), schema_suffix) if needs_hint
-                else list(msgs)
+            schema_hint = json.dumps(schema, indent=2)
+            schema_suffix = (
+                "\n\nYou MUST respond with a JSON object conforming to this schema:\n"
+                f"```json\n{schema_hint}\n```"
             )
-            all_sdk_messages.append(self._prepare_messages(prepared))
 
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "temperature": self._json_temperature,
-            "timeout": self._timeout_seconds,
-            "num_retries": self._num_retries,
-        }
-        if self._base_url is not None:
-            kwargs["api_base"] = self._base_url
-        if self._api_key is not None:
-            kwargs["api_key"] = self._api_key
-        if response_format is not None:
-            kwargs["response_format"] = response_format
+            if self._model_supports_json_schema():
+                response_format: dict[str, object] | None = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "strict": True,
+                        "schema": schema,
+                    },
+                }
+                needs_hint = False
+            else:
+                response_format = {"type": "json_object"}
+                needs_hint = True
 
-        responses = get_llm_limiter().execute(
-            _litellm.batch_completion,
-            messages=all_sdk_messages,
-            **kwargs,
-        )
+            all_sdk_messages: list[list[dict[str, str]]] = []
+            for msgs in message_lists:
+                prepared = (
+                    self._with_schema_hint(list(msgs), schema_suffix) if needs_hint
+                    else list(msgs)
+                )
+                all_sdk_messages.append(self._prepare_messages(prepared))
 
-        results: list[dict[str, Any]] = []
-        for resp in responses:
-            raw = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
-            content = self._extract_content(raw)
-            payload = json.loads(content)
-            if not isinstance(payload, dict):
-                raise ValueError("Batch response payload must decode to an object")
-            results.append(payload)
-        return results
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "temperature": self._json_temperature,
+                "timeout": self._timeout_seconds,
+                "num_retries": self._num_retries,
+            }
+            if self._base_url is not None:
+                kwargs["api_base"] = self._base_url
+            if self._api_key is not None:
+                kwargs["api_key"] = self._api_key
+            if response_format is not None:
+                kwargs["response_format"] = response_format
+
+            responses = get_llm_limiter().execute(
+                _litellm.batch_completion,
+                messages=all_sdk_messages,
+                **kwargs,
+            )
+
+            results: list[dict[str, Any]] = []
+            for i, (resp, msgs) in enumerate(zip(responses, message_lists)):
+                with start_span(
+                    "llm.batch_item",
+                    kind=SPAN_KIND_LLM,
+                    component="llm",
+                    operation="graph.extract",
+                    provider=self._provider,
+                    model=self._model,
+                ) as item_span:
+                    raw = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
+                    set_llm_span_attributes(
+                        item_span,
+                        model=self._model,
+                        messages=list(msgs),
+                        llm_system=self._provider,
+                        llm_provider=self._provider,
+                    )
+                    content = self._extract_content(raw)
+                    token_usage = extract_token_usage(raw)
+                    set_llm_span_attributes(
+                        item_span,
+                        response_message=content,
+                        token_usage=token_usage,
+                    )
+                    payload = json.loads(content)
+                    if not isinstance(payload, dict):
+                        raise ValueError("Batch response payload must decode to an object")
+                    results.append(payload)
+            return results

@@ -92,7 +92,12 @@ class TestResponseModelOnly:
         )
         # The stub model uses json_object fallback (no json_schema support),
         # so the schema hint is injected into the system message.
-        system_msg = client._last_messages[0]["content"]
+        system_content = client._last_messages[0]["content"]
+        # Content may be structured blocks after _prepare_messages
+        if isinstance(system_content, list):
+            system_msg = "\n".join(b["text"] for b in system_content if isinstance(b, dict) and "text" in b)
+        else:
+            system_msg = system_content
         assert "intent" in system_msg
 
 
@@ -143,7 +148,11 @@ class TestBothProvided:
         assert isinstance(result, dict)
         # Explicit schema takes precedence — the hint embedded in the
         # messages should contain the custom schema, not the model-derived one.
-        last_user = client._last_messages[-1]["content"]
+        last_content = client._last_messages[-1]["content"]
+        if isinstance(last_content, list):
+            last_user = "\n".join(b["text"] for b in last_content if isinstance(b, dict) and "text" in b)
+        else:
+            last_user = last_content
         # custom_schema doesn't have the pydantic $defs key; verify it was used
         assert "$defs" not in last_user
 
