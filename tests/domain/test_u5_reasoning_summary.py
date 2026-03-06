@@ -7,7 +7,7 @@ from collections.abc import Iterator
 
 from core.schemas.assistant import GenerationTrace
 from core.schemas.chat import ChatStreamReasoningSummaryEvent
-from domain.chat.prompt_kit import PromptMessages
+from core.llm_messages import MessageBuilder
 
 
 class TestReasoningSummaryEvent:
@@ -65,7 +65,7 @@ def _stub_stream_monkeypatches(monkeypatch: Any) -> None:
     monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
     monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
     monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-    monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: (PromptMessages(system="fake system", user="fake user"), None))
+    monkeypatch.setattr("domain.chat.stream.build_tutor_messages", lambda **kw: (MessageBuilder().system("fake system").user("fake user"), None))
     monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
 
@@ -103,7 +103,7 @@ class TestReasoningSummaryStreamTiming:
                 yield " world"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
+            def stream_messages(self, messages, *, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -144,7 +144,7 @@ class TestReasoningSummaryStreamTiming:
                 yield "Hello"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
+            def stream_messages(self, messages, *, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -179,7 +179,7 @@ class TestReasoningSummaryStreamTiming:
                 yield "Hello"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
+            def stream_messages(self, messages, *, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
@@ -218,7 +218,7 @@ class TestReasoningSummaryStreamTiming:
                 yield "Hello"
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
+            def stream_messages(self, messages, *, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())

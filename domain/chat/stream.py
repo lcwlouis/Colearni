@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 
+from sqlalchemy.orm import Session
+
 from core.contracts import TutorTextStream
 from core.observability import (
     SPAN_KIND_CHAIN,
@@ -38,28 +40,25 @@ from core.schemas.chat import (
     ChatStreamStatusEvent,
     ChatStreamTraceEvent,
 )
+from core.schemas.tutor_state import TutorState
 from core.settings import Settings, get_settings
 from core.verifier import verify_assistant_draft
-from sqlalchemy.orm import Session
-
+from domain.chat.answer_parts import split_answer_parts
 from domain.chat.concept_resolver import resolve_concept_for_turn
-from domain.chat.retrieval_context import build_ancestor_context, build_hierarchy_path, format_hierarchy_prompt_context
 from domain.chat.evidence_builder import (
     build_document_summaries_context,
     build_workspace_citations,
     build_workspace_evidence,
     filter_used_citations,
 )
+from domain.chat.prompt_kit import build_socratic_interactive_messages, build_tutor_messages, get_persona
 from domain.chat.query_analyzer import run_query_analysis
 from domain.chat.response_service import (
     build_quiz_context,
     build_tutor_llm_client,
     resolve_mastery_status,
 )
-from domain.retrieval.evidence_planner import (
-    build_evidence_plan,
-    execute_evidence_plan,
-)
+from domain.chat.retrieval_context import build_ancestor_context, build_hierarchy_path, format_hierarchy_prompt_context
 from domain.chat.session_memory import (
     load_assessment_context,
     load_flashcard_progress,
@@ -68,14 +67,15 @@ from domain.chat.session_memory import (
     persist_turn,
 )
 from domain.chat.social_turns import try_social_response
-from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, build_socratic_interactive_prompt, get_persona
-from domain.chat.tutor_commands import parse_command, apply_command
-from domain.chat.tutor_state_store import get_tutor_state, save_tutor_state
-from core.schemas.tutor_state import TutorState
-from domain.chat.tutor_agent import resolve_tutor_style
-from domain.chat.answer_parts import split_answer_parts
 from domain.chat.turn_plan import build_turn_plan
+from domain.chat.tutor_agent import resolve_tutor_style
+from domain.chat.tutor_commands import apply_command, parse_command
+from domain.chat.tutor_state_store import get_tutor_state, save_tutor_state
 from domain.readiness.analyzer import build_readiness_actions
+from domain.retrieval.evidence_planner import (
+    build_evidence_plan,
+    execute_evidence_plan,
+)
 
 log = logging.getLogger("domain.chat.stream")
 
@@ -196,7 +196,7 @@ def _stream_inner(
         session_topic_name: str | None = None
         session_concept_id: int | None = None
         if hasattr(request, "session_id") and request.session_id:
-            from adapters.db.chat import get_chat_session_concept_name, get_chat_session_concept_id
+            from adapters.db.chat import get_chat_session_concept_id, get_chat_session_concept_name
 
             session_topic_name = get_chat_session_concept_name(session, session_id=request.session_id)
             session_concept_id = get_chat_session_concept_id(session, session_id=request.session_id)
@@ -404,7 +404,12 @@ def _stream_inner(
         if assistant_text:
             yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
             responded = True
-    elif request.tutor_protocol and request.session_id and tutor_llm_client is not None and hasattr(tutor_llm_client, "generate_tutor_text_stream"):
+    elif (
+        request.tutor_protocol
+        and request.session_id
+        and tutor_llm_client is not None
+        and hasattr(tutor_llm_client, "stream_messages")
+    ):
         # ── Socratic interactive tutor protocol ──
         tutor_state = get_tutor_state(request.session_id)
         if not tutor_state.active:
@@ -419,7 +424,7 @@ def _stream_inner(
         else:
             tutor_state.last_user_answer = request.query
 
-        prompt_msgs, prompt_meta = build_socratic_interactive_prompt(
+        builder, prompt_meta = build_socratic_interactive_messages(
             query=request.query,
             evidence=evidence,
             tutor_state_text=tutor_state.state_block(),
@@ -433,9 +438,9 @@ def _stream_inner(
             ),
         )
 
-        text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
-            prompt=prompt_msgs.user, prompt_meta=prompt_meta,
-            system_prompt=prompt_msgs.system, operation="chat.stream.socratic",
+        text_stream: TutorTextStream = tutor_llm_client.stream_messages(
+            builder.build(), prompt_meta=prompt_meta,
+            operation="chat.stream.socratic",
         )
         text_parts: list[str] = []
         for delta in text_stream:
@@ -453,7 +458,7 @@ def _stream_inner(
         _update_tutor_state_from_response(tutor_state, assistant_text)
         save_tutor_state(request.session_id, tutor_state)
 
-    elif tutor_llm_client is not None and hasattr(tutor_llm_client, "generate_tutor_text_stream"):
+    elif tutor_llm_client is not None and hasattr(tutor_llm_client, "stream_messages"):
         style = resolve_tutor_style(mastery_status=mastery_status)
         persona = get_persona("colearni")
         combined_assessment = assessment_context
@@ -463,7 +468,7 @@ def _stream_inner(
                 if assessment_context
                 else quiz_context_text
             )
-        prompt_msgs, prompt_meta = build_full_tutor_prompt_with_meta(
+        builder, prompt_meta = build_tutor_messages(
             query=request.query,
             evidence=evidence,
             persona=persona,
@@ -481,9 +486,9 @@ def _stream_inner(
             flashcard_progress=flashcard_progress,
             learner_profile_summary=learner_profile_summary,
         )
-        text_stream: TutorTextStream = tutor_llm_client.generate_tutor_text_stream(
-            prompt=prompt_msgs.user, prompt_meta=prompt_meta,
-            system_prompt=prompt_msgs.system, operation="chat.stream",
+        text_stream: TutorTextStream = tutor_llm_client.stream_messages(
+            builder.build(), prompt_meta=prompt_meta,
+            operation="chat.stream",
         )
         text_parts: list[str] = []
         for delta in text_stream:

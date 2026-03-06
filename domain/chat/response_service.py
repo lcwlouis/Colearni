@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy.orm import Session
+
 from adapters.db.mastery import get_mastery_status
 from adapters.llm.factory import build_query_analyzer_llm_client as _build_qa_client
 from adapters.llm.factory import build_tutor_llm_client as _build_tutor_client
@@ -11,10 +13,9 @@ from core.contracts import GraphLLMClient
 from core.schemas import ChatRespondRequest, EvidenceItem, GroundingMode
 from core.schemas.assistant import GenerationTrace
 from core.settings import Settings
-from domain.chat.prompt_kit import build_full_tutor_prompt_with_meta, get_persona
+from domain.chat.prompt_kit import build_tutor_messages, get_persona
 from domain.chat.tutor_agent import build_tutor_response_text, resolve_tutor_style
 from domain.learning.quiz_persistence import get_latest_quiz_summary_for_concept
-from sqlalchemy.orm import Session
 
 log = logging.getLogger("domain.chat.response_service")
 
@@ -43,7 +44,7 @@ def generate_tutor_text(
     combined_assessment = assessment_context
     if quiz_context:
         combined_assessment = f"{assessment_context}\n\n{quiz_context}" if assessment_context else quiz_context
-    prompt_msgs, prompt_meta = build_full_tutor_prompt_with_meta(
+    builder, prompt_meta = build_tutor_messages(
         query=query,
         evidence=evidence,
         persona=persona,
@@ -56,23 +57,25 @@ def generate_tutor_text(
         flashcard_progress=flashcard_progress,
         learner_profile_summary=learner_profile_summary,
     )
+    msgs = builder.messages
+    system_len = sum(len(m["content"]) for m in msgs if m["role"] == "system")
+    user_len = sum(len(m["content"]) for m in msgs if m["role"] == "user")
     log.debug(
         "tutor prompt assembled: system=%d user=%d chars, history=%d, assessment=%d, docs=%d, flashcards=%d",
-        len(prompt_msgs.system),
-        len(prompt_msgs.user),
+        system_len,
+        user_len,
         len(history_text),
         len(combined_assessment),
         len(document_summaries),
         len(flashcard_progress),
     )
     if llm_client is not None:
-        # Try traced path (available on our adapters); fall back to plain generate.
-        traced_fn = getattr(llm_client, "generate_tutor_text_traced", None)
-        if callable(traced_fn):
+        # Prefer messages[]-native path; fall back to legacy API.
+        complete_fn = getattr(llm_client, "complete_messages", None)
+        if callable(complete_fn):
             try:
-                text, trace = traced_fn(
-                    prompt=prompt_msgs.user, prompt_meta=prompt_meta,
-                    system_prompt=prompt_msgs.system,
+                text, trace = complete_fn(
+                    builder.build(), prompt_meta=prompt_meta,
                 )
                 text = text.strip()
             except (RuntimeError, ValueError):
@@ -80,15 +83,31 @@ def generate_tutor_text(
             if text:
                 return text, trace
         else:
-            try:
-                text = llm_client.generate_tutor_text(
-                    prompt=prompt_msgs.user, prompt_meta=prompt_meta,
-                    system_prompt=prompt_msgs.system,
-                ).strip()
-            except (RuntimeError, ValueError):
-                text = ""
-            if text:
-                return text, None
+            traced_fn = getattr(llm_client, "generate_tutor_text_traced", None)
+            flat = builder.messages
+            sys_text = "\n\n".join(m["content"] for m in flat if m["role"] == "system")
+            usr_text = "\n\n".join(m["content"] for m in flat if m["role"] == "user")
+            if callable(traced_fn):
+                try:
+                    text, trace = traced_fn(
+                        prompt=usr_text, prompt_meta=prompt_meta,
+                        system_prompt=sys_text,
+                    )
+                    text = text.strip()
+                except (RuntimeError, ValueError):
+                    text, trace = "", None
+                if text:
+                    return text, trace
+            else:
+                try:
+                    text = llm_client.generate_tutor_text(
+                        prompt=usr_text, prompt_meta=prompt_meta,
+                        system_prompt=sys_text,
+                    ).strip()
+                except (RuntimeError, ValueError):
+                    text = ""
+                if text:
+                    return text, None
     fallback = build_tutor_response_text(
         query=query,
         evidence=evidence,

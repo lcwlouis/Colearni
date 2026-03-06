@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Literal
 
 from core.contracts import GraphLLMClient
+from core.llm_messages import MessageBuilder
 from core.prompting import PromptRegistry
 from core.schemas import EvidenceItem, GroundingMode
 
@@ -42,13 +43,22 @@ def build_tutor_response_text(
         grounding_mode=grounding_mode,
     )
     if llm_client is not None:
-        try:
-            text = llm_client.generate_tutor_text(
-                prompt=user_prompt,
-                system_prompt=system_prompt,
-            ).strip()
-        except (RuntimeError, ValueError):
-            text = ""
+        messages = MessageBuilder().system(system_prompt).user(user_prompt).build()
+        complete_fn = getattr(llm_client, "complete_messages", None)
+        if callable(complete_fn):
+            try:
+                text, _ = complete_fn(messages)
+                text = text.strip()
+            except (RuntimeError, ValueError):
+                text = ""
+        else:
+            try:
+                text = llm_client.generate_tutor_text(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                ).strip()
+            except (RuntimeError, ValueError):
+                text = ""
         if text:
             return text
     return _fallback_text(query=query, evidence=evidence, style=style)

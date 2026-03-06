@@ -5,7 +5,7 @@ from __future__ import annotations
 from core.schemas.assistant import AnswerParts, AssistantResponseEnvelope, AssistantResponseKind
 from core.schemas.chat import ChatStreamAnswerPartEvent
 from domain.chat.answer_parts import split_answer_parts
-from domain.chat.prompt_kit import PromptMessages
+from core.llm_messages import MessageBuilder
 
 
 class TestAnswerPartsSchema:
@@ -190,7 +190,7 @@ class TestAnswerPartsStreamOrdering:
         monkeypatch.setattr("domain.chat.stream.load_flashcard_progress", lambda s, **kw: None)
         monkeypatch.setattr("domain.chat.stream.resolve_tutor_style", lambda **kw: "balanced")
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
-        monkeypatch.setattr("domain.chat.stream.build_full_tutor_prompt_with_meta", lambda **kw: (PromptMessages(system="fake system", user="fake user"), None))
+        monkeypatch.setattr("domain.chat.stream.build_tutor_messages", lambda **kw: (MessageBuilder().system("fake system").user("fake user"), None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         class FakeStream:
@@ -201,7 +201,7 @@ class TestAnswerPartsStreamOrdering:
                 yield "\n\nHint: Think about it."
 
         class FakeLLM:
-            def generate_tutor_text_stream(self, prompt, prompt_meta=None, **kwargs):
+            def stream_messages(self, messages, *, prompt_meta=None, **kwargs):
                 return FakeStream()
 
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
