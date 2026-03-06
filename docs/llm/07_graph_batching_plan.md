@@ -31,7 +31,7 @@ can parallelize these calls.
 - `domain/graph/extraction.py` — add `batch_extract_raw_graph_from_chunks()`
 - `tests/domain/test_graph_batch_extraction.py` — tests
 
-Status: 🔄 pending
+Status: ✅ done
 
 ### L7.2 — Wire into pipeline with budget enforcement
 
@@ -40,7 +40,7 @@ Status: 🔄 pending
   `max_llm_calls_per_document` budget
 - `tests/domain/test_graph_pipeline_batch.py` — tests
 
-Status: 🔄 pending
+Status: ✅ done
 
 ### L7.3 — OpenAI SDK parallel path
 
@@ -49,7 +49,7 @@ Status: 🔄 pending
   in OpenAI subclass using `asyncio.gather` + `_async_sdk_call`
 - `tests/adapters/test_graph_batch_openai.py` — tests
 
-Status: 🔄 pending
+Status: ✅ done
 
 ## Verification Matrix
 

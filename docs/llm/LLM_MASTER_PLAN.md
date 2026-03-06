@@ -152,7 +152,7 @@ What is critically broken or materially missing:
 | `L4` Agentic Tool Framework | `docs/llm/04_tool_framework_plan.md` | ✅ done |
 | `L5` JSON Mode | `docs/llm/05_json_mode_plan.md` | ✅ done |
 | `L6` Regeneration | `docs/llm/06_regeneration_plan.md` | ✅ done |
-| `L7` Graph Batching | `docs/llm/07_graph_batching_plan.md` | pending |
+| `L7` Graph Batching | `docs/llm/07_graph_batching_plan.md` | ✅ done |
 | `L8` Web Search | `docs/llm/08_web_search_plan.md` | pending |
 
 ## Decision Log
@@ -464,7 +464,7 @@ Dependencies between tracks:
 | `L4` Agentic Tool Framework | ✅ done | All 6 slices complete |
 | `L5` JSON Mode | ✅ done | All 5 slices complete |
 | `L6` Regeneration | ✅ done | All 3 slices complete |
-| `L7` Graph Batching | 🔄 pending | Depends on L1 ✅ — ready |
+| `L7` Graph Batching | ✅ done | All 3 slices complete |
 | `L8` Web Search | 🔄 pending | Depends on L4 ✅ — ready |
 
 ## Verification Block Template
