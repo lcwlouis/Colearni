@@ -289,7 +289,7 @@ class TestJsonFormatFallback:
 
     def test_non_json_schema_model_tries_json_object_first(self) -> None:
         client = _FallbackStub(
-            model="deepseek/deepseek-chat", provider="litellm",
+            model="anthropic/claude-3-haiku", provider="litellm",
         )
         client._chat_json(schema_name="s", schema=self._SCHEMA, prompt="hi")
         assert len(client.captured_formats) == 1
@@ -307,7 +307,7 @@ class TestJsonFormatFallback:
 
     def test_fallback_json_object_to_prompt_only(self) -> None:
         client = _FallbackStub(
-            model="deepseek/deepseek-chat", provider="litellm", fail_count=1,
+            model="anthropic/claude-3-haiku", provider="litellm", fail_count=1,
         )
         client._chat_json(schema_name="s", schema=self._SCHEMA, prompt="hi")
         assert len(client.captured_formats) == 2
@@ -373,9 +373,9 @@ class TestJsonParseFallback:
     }
 
     def test_chat_json_parse_error_triggers_fallback(self) -> None:
-        """Invalid JSON on first attempt falls back to prompt-only."""
+        """Invalid JSON on first attempt falls back through the chain."""
         client = _ContentSequenceStub(
-            model="deepseek/deepseek-chat",
+            model="anthropic/claude-3-haiku",
             provider="litellm",
             contents=[
                 "not json at all",
@@ -394,7 +394,7 @@ class TestJsonParseFallback:
     def test_chat_json_parse_error_on_last_attempt_raises(self) -> None:
         """All attempts returning invalid JSON raises ValueError."""
         client = _ContentSequenceStub(
-            model="deepseek/deepseek-chat",
+            model="anthropic/claude-3-haiku",
             provider="litellm",
             contents=[
                 "not json",
@@ -410,7 +410,7 @@ class TestJsonParseFallback:
     def test_chat_json_non_dict_response_triggers_fallback(self) -> None:
         """Valid JSON array (non-dict) on first attempt falls back."""
         client = _ContentSequenceStub(
-            model="deepseek/deepseek-chat",
+            model="anthropic/claude-3-haiku",
             provider="litellm",
             contents=[
                 json.dumps([1, 2, 3]),

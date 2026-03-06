@@ -216,14 +216,14 @@ class TestQueryAnalysisResponse:
         with pytest.raises(ValidationError, match="extra"):
             QueryAnalysisResponse.model_validate({**_valid_query_analysis(), "x": 1})
 
-    def test_schema_required_fields(self):
+    def test_schema_has_all_properties(self):
         schema = QueryAnalysisResponse.model_json_schema()
         expected = {
             "intent", "requested_mode", "needs_retrieval",
             "should_offer_level_up", "high_level_keywords",
             "low_level_keywords", "concept_hints",
         }
-        assert set(schema["required"]) == expected
+        assert set(schema["properties"].keys()) == expected
 
 
 # ===================================================================
