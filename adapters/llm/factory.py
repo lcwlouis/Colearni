@@ -1,9 +1,18 @@
 """Factory helpers for graph LLM providers."""
 
+from __future__ import annotations
+
+import threading
+from typing import Any
+
 from core.contracts import GraphLLMClient
 from core.settings import Settings, get_settings
 
 from adapters.llm.providers import LiteLLMGraphLLMClient, OpenAIGraphLLMClient
+
+# ── Module-level client cache ────────────────────────────────────────
+_client_cache: dict[tuple[Any, ...], GraphLLMClient] = {}
+_cache_lock = threading.Lock()
 
 
 def _non_empty_or_none(value: str | None) -> str | None:
@@ -49,6 +58,20 @@ def _resolve_litellm_api_key(
     return _non_empty_or_none(settings.litellm_api_key)
 
 
+def _resolve_api_key_for_cache(
+    provider: str,
+    model: str,
+    settings: Settings,
+) -> str | None:
+    """Resolve the effective API key used for a given provider/model combo."""
+    if provider == "openai":
+        return _non_empty_or_none(settings.openai_api_key)
+    if provider == "litellm":
+        api_base = _non_empty_or_none(settings.litellm_base_url)
+        return _resolve_litellm_api_key(model, settings, api_base)
+    return None
+
+
 def build_graph_llm_client(
     settings: Settings | None = None,
     timeout_override: float | None = None,
@@ -57,15 +80,41 @@ def build_graph_llm_client(
     active_settings = settings or get_settings()
     timeout = timeout_override or active_settings.graph_llm_timeout_seconds
 
+    api_key = _resolve_api_key_for_cache(
+        active_settings.graph_llm_provider,
+        active_settings.graph_llm_model,
+        active_settings,
+    )
+
+    cache_key = (
+        "graph",
+        active_settings.graph_llm_provider,
+        active_settings.graph_llm_model,
+        timeout,
+        active_settings.graph_llm_json_temperature,
+        active_settings.graph_llm_tutor_temperature,
+        active_settings.llm_reasoning_chat,
+        active_settings.llm_reasoning_effort_chat,
+        active_settings.llm_sdk_max_retries,
+        api_key,
+        _non_empty_or_none(active_settings.litellm_base_url),
+    )
+
+    if api_key is not None:
+        with _cache_lock:
+            cached = _client_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
     if active_settings.graph_llm_provider == "openai":
-        api_key = active_settings.openai_api_key
-        if api_key is None or not api_key.strip():
+        api_key_val = active_settings.openai_api_key
+        if api_key_val is None or not api_key_val.strip():
             raise ValueError(
                 "APP_OPENAI_API_KEY (or OPENAI_API_KEY) must be set "
                 "when APP_GRAPH_LLM_PROVIDER=openai"
             )
-        return OpenAIGraphLLMClient(
-            api_key=api_key,
+        client: GraphLLMClient = OpenAIGraphLLMClient(
+            api_key=api_key_val,
             model=active_settings.graph_llm_model,
             timeout_seconds=timeout,
             json_temperature=active_settings.graph_llm_json_temperature,
@@ -75,16 +124,16 @@ def build_graph_llm_client(
             max_retries=active_settings.llm_sdk_max_retries,
         )
 
-    if active_settings.graph_llm_provider == "litellm":
+    elif active_settings.graph_llm_provider == "litellm":
         api_base = _non_empty_or_none(active_settings.litellm_base_url)
-        api_key = _resolve_litellm_api_key(
+        litellm_key = _resolve_litellm_api_key(
             active_settings.graph_llm_model, active_settings, api_base,
         )
-        return LiteLLMGraphLLMClient(
+        client = LiteLLMGraphLLMClient(
             model=active_settings.graph_llm_model,
             timeout_seconds=timeout,
             base_url=api_base,
-            api_key=api_key,
+            api_key=litellm_key,
             json_temperature=active_settings.graph_llm_json_temperature,
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
@@ -94,7 +143,13 @@ def build_graph_llm_client(
             json_schema_validation=active_settings.llm_json_schema_validation,
         )
 
-    raise ValueError(f"Unsupported graph_llm_provider: {active_settings.graph_llm_provider}")
+    else:
+        raise ValueError(f"Unsupported graph_llm_provider: {active_settings.graph_llm_provider}")
+
+    if api_key is not None:
+        with _cache_lock:
+            _client_cache[cache_key] = client
+    return client
 
 
 def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
@@ -114,14 +169,36 @@ def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
     model = active_settings.tutor_llm_model or active_settings.graph_llm_model
     timeout = active_settings.tutor_llm_timeout_seconds or active_settings.graph_llm_timeout_seconds
 
+    api_key = _resolve_api_key_for_cache(provider, model, active_settings)
+
+    cache_key = (
+        "tutor",
+        provider,
+        model,
+        timeout,
+        active_settings.graph_llm_json_temperature,
+        active_settings.graph_llm_tutor_temperature,
+        active_settings.llm_reasoning_chat,
+        active_settings.llm_reasoning_effort_chat,
+        active_settings.llm_sdk_max_retries,
+        api_key,
+        _non_empty_or_none(active_settings.litellm_base_url),
+    )
+
+    if api_key is not None:
+        with _cache_lock:
+            cached = _client_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
     if provider == "openai":
-        api_key = active_settings.openai_api_key
-        if api_key is None or not api_key.strip():
+        api_key_val = active_settings.openai_api_key
+        if api_key_val is None or not api_key_val.strip():
             raise ValueError(
                 "APP_OPENAI_API_KEY must be set when tutor provider is openai"
             )
-        return OpenAIGraphLLMClient(
-            api_key=api_key,
+        client: GraphLLMClient = OpenAIGraphLLMClient(
+            api_key=api_key_val,
             model=model,
             timeout_seconds=timeout,
             json_temperature=active_settings.graph_llm_json_temperature,
@@ -131,14 +208,14 @@ def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             max_retries=active_settings.llm_sdk_max_retries,
         )
 
-    if provider == "litellm":
+    elif provider == "litellm":
         api_base = _non_empty_or_none(active_settings.litellm_base_url)
-        api_key = _resolve_litellm_api_key(model, active_settings, api_base)
-        return LiteLLMGraphLLMClient(
+        litellm_key = _resolve_litellm_api_key(model, active_settings, api_base)
+        client = LiteLLMGraphLLMClient(
             model=model,
             timeout_seconds=timeout,
             base_url=api_base,
-            api_key=api_key,
+            api_key=litellm_key,
             json_temperature=active_settings.graph_llm_json_temperature,
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
@@ -148,7 +225,13 @@ def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             json_schema_validation=active_settings.llm_json_schema_validation,
         )
 
-    raise ValueError(f"Unsupported tutor_llm_provider: {provider}")
+    else:
+        raise ValueError(f"Unsupported tutor_llm_provider: {provider}")
+
+    if api_key is not None:
+        with _cache_lock:
+            _client_cache[cache_key] = client
+    return client
 
 
 def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLLMClient:
@@ -181,14 +264,36 @@ def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLL
         or active_settings.graph_llm_timeout_seconds
     )
 
+    api_key = _resolve_api_key_for_cache(provider, model, active_settings)
+
+    cache_key = (
+        "query_analyzer",
+        provider,
+        model,
+        timeout,
+        active_settings.graph_llm_json_temperature,
+        active_settings.graph_llm_tutor_temperature,
+        False,  # reasoning_enabled is always False for QA
+        None,   # reasoning_effort is always None for QA
+        active_settings.llm_sdk_max_retries,
+        api_key,
+        _non_empty_or_none(active_settings.litellm_base_url),
+    )
+
+    if api_key is not None:
+        with _cache_lock:
+            cached = _client_cache.get(cache_key)
+            if cached is not None:
+                return cached
+
     if provider == "openai":
-        api_key = active_settings.openai_api_key
-        if api_key is None or not api_key.strip():
+        api_key_val = active_settings.openai_api_key
+        if api_key_val is None or not api_key_val.strip():
             raise ValueError(
                 "APP_OPENAI_API_KEY must be set when query analyzer provider is openai"
             )
-        return OpenAIGraphLLMClient(
-            api_key=api_key,
+        client: GraphLLMClient = OpenAIGraphLLMClient(
+            api_key=api_key_val,
             model=model,
             timeout_seconds=timeout,
             json_temperature=active_settings.graph_llm_json_temperature,
@@ -198,14 +303,14 @@ def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLL
             max_retries=active_settings.llm_sdk_max_retries,
         )
 
-    if provider == "litellm":
+    elif provider == "litellm":
         api_base = _non_empty_or_none(active_settings.litellm_base_url)
-        api_key = _resolve_litellm_api_key(model, active_settings, api_base)
-        return LiteLLMGraphLLMClient(
+        litellm_key = _resolve_litellm_api_key(model, active_settings, api_base)
+        client = LiteLLMGraphLLMClient(
             model=model,
             timeout_seconds=timeout,
             base_url=api_base,
-            api_key=api_key,
+            api_key=litellm_key,
             json_temperature=active_settings.graph_llm_json_temperature,
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=False,
@@ -215,5 +320,11 @@ def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLL
             json_schema_validation=active_settings.llm_json_schema_validation,
         )
 
-    raise ValueError(f"Unsupported query_analyzer_llm_provider: {provider}")
+    else:
+        raise ValueError(f"Unsupported query_analyzer_llm_provider: {provider}")
+
+    if api_key is not None:
+        with _cache_lock:
+            _client_cache[cache_key] = client
+    return client
 

@@ -469,7 +469,7 @@ def _stream_inner(
         chunks=ranked_chunks,
     )
     citations = build_workspace_citations(evidence)
-    tutor_llm_client = build_tutor_llm_client(settings=settings)
+    tutor_llm_client = social_llm
     quiz_context_text = build_quiz_context(
         session=session,
         workspace_id=request.workspace_id,

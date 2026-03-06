@@ -517,14 +517,18 @@ class Settings(BaseSettings):
 
     # ── Rate limiting / concurrency ──────────────────────────────────
     llm_max_concurrent_calls: int = Field(
-        default=3,
+        default=10,
         validation_alias=AliasChoices(
             "APP_LLM_MAX_CONCURRENT_CALLS",
             "LLM_MAX_CONCURRENT_CALLS",
         ),
         ge=1,
         le=50,
-        description="Max simultaneous LLM API calls (prevents rate-limit errors).",
+        description=(
+            "Max simultaneous LLM API calls. Shared across chat, ingestion, "
+            "graph extraction, and summarisation — 10 avoids starving chat "
+            "while background tasks run."
+        ),
     )
     embedding_max_concurrent_calls: int = Field(
         default=5,
