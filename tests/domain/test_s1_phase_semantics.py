@@ -24,6 +24,11 @@ def _make_request(**overrides: Any) -> ChatRespondRequest:
     return ChatRespondRequest(**defaults)
 
 
+def _fake_session() -> Any:
+    """Return a minimal stand-in for ``sqlalchemy.orm.Session``."""
+    return type("FakeSession", (), {"commit": lambda self: None, "rollback": lambda self: None})()
+
+
 def _collect_events(
     events: Iterator[ChatStreamEvent],
 ) -> list[dict[str, Any]]:
@@ -58,7 +63,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         events = _collect_events(
-            generate_chat_response_stream(session=object(), request=_make_request())
+            generate_chat_response_stream(session=_fake_session(), request=_make_request())
         )
         phases = _extract_phases(events)
         assert "responding" not in phases
@@ -70,6 +75,10 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+        monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
         monkeypatch.setattr(
             "domain.chat.stream.resolve_concept_for_turn",
             lambda s, **kw: type("R", (), {
@@ -83,7 +92,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         events = _collect_events(
-            generate_chat_response_stream(session=object(), request=_make_request())
+            generate_chat_response_stream(session=_fake_session(), request=_make_request())
         )
         phases = _extract_phases(events)
         assert "responding" not in phases
@@ -94,6 +103,10 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+        monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
         monkeypatch.setattr(
             "domain.chat.stream.resolve_concept_for_turn",
             lambda s, **kw: type("R", (), {
@@ -139,7 +152,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
 
         events = _collect_events(
-            generate_chat_response_stream(session=object(), request=_make_request())
+            generate_chat_response_stream(session=_fake_session(), request=_make_request())
         )
 
         phases = _extract_phases(events)
@@ -166,6 +179,10 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+        monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
         monkeypatch.setattr(
             "domain.chat.stream.resolve_concept_for_turn",
             lambda s, **kw: type("R", (), {
@@ -207,7 +224,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
 
         events = _collect_events(
-            generate_chat_response_stream(session=object(), request=_make_request())
+            generate_chat_response_stream(session=_fake_session(), request=_make_request())
         )
         phases = _extract_phases(events)
         # Empty stream = no visible content = no responding phase
@@ -232,6 +249,10 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+        monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
         monkeypatch.setattr(
             "domain.chat.stream.resolve_concept_for_turn",
             lambda s, **kw: type("R", (), {
@@ -245,7 +266,7 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
 
         events = _collect_events(
-            generate_chat_response_stream(session=object(), request=_make_request())
+            generate_chat_response_stream(session=_fake_session(), request=_make_request())
         )
         activities = _extract_activities(events)
         assert "planning_turn" in activities
@@ -257,6 +278,10 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+        monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
         monkeypatch.setattr(
             "domain.chat.stream.resolve_concept_for_turn",
             lambda s, **kw: type("R", (), {
@@ -298,7 +323,7 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
 
         events = _collect_events(
-            generate_chat_response_stream(session=object(), request=_make_request())
+            generate_chat_response_stream(session=_fake_session(), request=_make_request())
         )
         activities = _extract_activities(events)
         assert "generating_reply" in activities
@@ -309,6 +334,10 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+        monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
         monkeypatch.setattr(
             "domain.chat.stream.resolve_concept_for_turn",
             lambda s, **kw: type("R", (), {
@@ -350,7 +379,7 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: FakeLLM())
 
         events = _collect_events(
-            generate_chat_response_stream(session=object(), request=_make_request())
+            generate_chat_response_stream(session=_fake_session(), request=_make_request())
         )
 
         # Find first "responding" status event and first delta

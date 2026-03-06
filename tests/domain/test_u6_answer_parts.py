@@ -192,6 +192,10 @@ class TestAnswerPartsStreamOrdering:
         monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
         monkeypatch.setattr("domain.chat.stream.build_tutor_messages", lambda **kw: (MessageBuilder().system("fake system").user("fake user"), None))
         monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
+        monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+        monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+        monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
 
         class FakeStream:
             def __init__(self):
@@ -211,7 +215,7 @@ class TestAnswerPartsStreamOrdering:
             session_id=1, grounding_mode=GroundingMode.HYBRID,
         )
         events = [e.model_dump(mode="json") for e in
-                  generate_chat_response_stream(session=object(), request=request)]
+                  generate_chat_response_stream(session=type("S", (), {"commit": lambda s: None, "rollback": lambda s: None})(), request=request)]
 
         event_types = [e["event"] for e in events]
         assert "answer_parts" in event_types, "answer_parts event should be emitted"

@@ -34,6 +34,11 @@ class TestReasoningSummaryEvent:
         )
 
 
+def _fake_session() -> "Any":
+    """Return a minimal stand-in for ``sqlalchemy.orm.Session``."""
+    return type("FakeSession", (), {"commit": lambda self: None, "rollback": lambda self: None})()
+
+
 def _stub_stream_monkeypatches(monkeypatch: Any) -> None:
     """Apply the common monkeypatches for stream tests."""
     monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
@@ -67,6 +72,10 @@ def _stub_stream_monkeypatches(monkeypatch: Any) -> None:
     monkeypatch.setattr("domain.chat.stream.get_persona", lambda name: "You are a tutor.")
     monkeypatch.setattr("domain.chat.stream.build_tutor_messages", lambda **kw: (MessageBuilder().system("fake system").user("fake user"), None))
     monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
+    monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
+    monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
+    monkeypatch.setattr("domain.chat.stream.finalize_assistant_message", lambda s, **kw: True)
+    monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)
 
 
 class TestReasoningSummaryStreamTiming:
@@ -112,7 +121,7 @@ class TestReasoningSummaryStreamTiming:
         monkeypatch.setattr(settings, "reasoning_summary_enabled", True)
 
         events = self._collect(
-            generate_chat_response_stream(session=object(), request=self._make_request(), settings=settings)
+            generate_chat_response_stream(session=_fake_session(), request=self._make_request(), settings=settings)
         )
 
         event_types = [e["event"] for e in events]
@@ -153,7 +162,7 @@ class TestReasoningSummaryStreamTiming:
         monkeypatch.setattr(settings, "reasoning_summary_enabled", False)
 
         events = self._collect(
-            generate_chat_response_stream(session=object(), request=self._make_request(), settings=settings)
+            generate_chat_response_stream(session=_fake_session(), request=self._make_request(), settings=settings)
         )
 
         event_types = [e["event"] for e in events]
@@ -188,7 +197,7 @@ class TestReasoningSummaryStreamTiming:
         monkeypatch.setattr(settings, "reasoning_summary_enabled", True)
 
         events = self._collect(
-            generate_chat_response_stream(session=object(), request=self._make_request(), settings=settings)
+            generate_chat_response_stream(session=_fake_session(), request=self._make_request(), settings=settings)
         )
 
         final_events = [e for e in events if e.get("event") == "final"]
@@ -227,7 +236,7 @@ class TestReasoningSummaryStreamTiming:
         monkeypatch.setattr(settings, "reasoning_summary_enabled", True)
 
         events = self._collect(
-            generate_chat_response_stream(session=object(), request=self._make_request(), settings=settings)
+            generate_chat_response_stream(session=_fake_session(), request=self._make_request(), settings=settings)
         )
 
         event_types = [e["event"] for e in events]

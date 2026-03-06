@@ -60,11 +60,16 @@ from domain.chat.response_service import (
 )
 from domain.chat.retrieval_context import build_ancestor_context, build_hierarchy_path, format_hierarchy_prompt_context
 from domain.chat.session_memory import (
+    create_assistant_placeholder,
+    fail_assistant_message,
+    finalize_assistant_message,
     load_assessment_context,
     load_flashcard_progress,
     load_history_text,
     load_quiz_progress_snapshot,
+    maybe_compact_session_context,
     persist_turn,
+    persist_user_message,
 )
 from domain.chat.social_turns import try_social_response
 from domain.chat.turn_plan import build_turn_plan
@@ -78,6 +83,48 @@ from domain.retrieval.evidence_planner import (
 )
 
 log = logging.getLogger("domain.chat.stream")
+
+
+def _session_title_and_compact(
+    session: Session,
+    *,
+    request: ChatRespondRequest,
+    concept_name: str | None = None,
+    session_concept_name: str | None = None,
+    settings: Settings | None = None,
+) -> None:
+    """Run session title generation and compaction after finalization."""
+    from adapters.db.chat import set_chat_session_title_if_missing, update_unbound_session_title
+    from domain.chat.title_gen import generate_session_title
+
+    if request.session_id is None or request.user_id is None:
+        return
+    set_chat_session_title_if_missing(
+        session,
+        session_id=request.session_id,
+        title=generate_session_title(
+            user_query=request.query,
+            concept_name=concept_name,
+            session_concept_name=session_concept_name,
+        ),
+    )
+    if concept_name and not session_concept_name:
+        update_unbound_session_title(
+            session,
+            session_id=request.session_id,
+            title=generate_session_title(
+                user_query=request.query,
+                concept_name=concept_name,
+            ),
+        )
+    maybe_compact_session_context(
+        session,
+        workspace_id=request.workspace_id,
+        session_id=request.session_id,
+        user_id=request.user_id,
+        settings=settings,
+    )
+    session.commit()
 
 
 def generate_chat_response_stream(
@@ -108,6 +155,10 @@ def generate_chat_response_stream(
         if request.concept_id is not None:
             span.set_attribute("concept.id", request.concept_id)
 
+    # L2.4: mutable state shared with _stream_inner so the outer
+    # error handler can mark the placeholder as failed on exceptions.
+    _wa_state: dict[str, object] = {"placeholder_id": None, "partial_text": ""}
+
     try:
         final_text: str | None = None
         for event in _stream_inner(
@@ -116,6 +167,7 @@ def generate_chat_response_stream(
             settings=active_settings,
             grounding_mode=grounding_mode,
             parent_span=span,
+            _wa_state=_wa_state,
         ):
             if isinstance(event, ChatStreamFinalEvent) and event.envelope:
                 final_text = event.envelope.text
@@ -126,6 +178,17 @@ def generate_chat_response_stream(
             span.set_status(_trace.StatusCode.OK)
     except Exception as exc:
         log.exception("stream error: %s", exc)
+        # L2.4: mark placeholder as failed so it doesn't stay 'generating'
+        if _wa_state["placeholder_id"] is not None:
+            try:
+                fail_assistant_message(
+                    session,
+                    message_id=int(_wa_state["placeholder_id"]),
+                    partial_text=str(_wa_state["partial_text"] or ""),
+                )
+                session.commit()
+            except Exception:
+                log.warning("failed to mark assistant message as failed", exc_info=True)
         if span is not None:
             from opentelemetry import trace as _trace
             span.set_status(_trace.StatusCode.ERROR, str(exc))
@@ -143,6 +206,7 @@ def _stream_inner(
     settings: Settings,
     grounding_mode: GroundingMode,
     parent_span=None,
+    _wa_state: dict[str, object],
 ) -> Iterator[ChatStreamEvent]:
     # ── Phase: thinking ───────────────────────────────────────────────
     yield ChatStreamStatusEvent(phase=ChatPhase.THINKING)
@@ -168,6 +232,26 @@ def _stream_inner(
         )
         yield ChatStreamFinalEvent(envelope=social_envelope)
         return
+
+    # ── L2.4: write-ahead persistence ─────────────────────────────────
+    if request.session_id is not None and request.user_id is not None:
+        persist_user_message(
+            session,
+            session_id=request.session_id,
+            workspace_id=request.workspace_id,
+            user_id=request.user_id,
+            text=request.query,
+        )
+        try:
+            _wa_state["placeholder_id"] = create_assistant_placeholder(
+                session,
+                session_id=request.session_id,
+                workspace_id=request.workspace_id,
+                user_id=request.user_id,
+            )
+        except Exception:
+            log.warning("failed to create assistant placeholder, continuing without write-ahead")
+        session.commit()
 
     # ── Phase: searching ──────────────────────────────────────────────
     yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="planning_turn", step_label="Analyzing question")
@@ -348,17 +432,34 @@ def _stream_inner(
             response_mode="onboarding",
             actions=[],
         )
-        persist_turn(
-            session,
-            workspace_id=request.workspace_id,
-            session_id=request.session_id,
-            user_id=request.user_id,
-            user_text=request.query,
-            assistant_payload=empty_env.model_dump(mode="json"),
-            concept_name=resolved_name,
-            session_concept_name=session_topic_name,
-            settings=settings,
-        )
+        if _wa_state["placeholder_id"] is not None:
+            try:
+                finalize_assistant_message(
+                    session,
+                    message_id=int(_wa_state["placeholder_id"]),
+                    payload=empty_env.model_dump(mode="json"),
+                )
+                _session_title_and_compact(
+                    session,
+                    request=request,
+                    concept_name=resolved_name,
+                    session_concept_name=session_topic_name,
+                    settings=settings,
+                )
+            except Exception:
+                log.warning("finalize failed for empty-workspace path", exc_info=True)
+        else:
+            persist_turn(
+                session,
+                workspace_id=request.workspace_id,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                user_text=request.query,
+                assistant_payload=empty_env.model_dump(mode="json"),
+                concept_name=resolved_name,
+                session_concept_name=session_topic_name,
+                settings=settings,
+            )
         yield ChatStreamFinalEvent(envelope=empty_env)
         return
 
@@ -549,6 +650,7 @@ def _stream_inner(
 
     if not assistant_text:
         assistant_text = "(no response generated)"
+    _wa_state["partial_text"] = assistant_text
 
     # ── Structured answer parts (U6) ─────────────────────────────────
     answer_parts = split_answer_parts(assistant_text)
@@ -664,17 +766,34 @@ def _stream_inner(
     # ── Phase: finalizing ─────────────────────────────────────────────
     yield ChatStreamStatusEvent(phase=ChatPhase.FINALIZING)
 
-    persist_turn(
-        session,
-        workspace_id=request.workspace_id,
-        session_id=request.session_id,
-        user_id=request.user_id,
-        user_text=request.query,
-        assistant_payload=envelope.model_dump(mode="json"),
-        concept_name=resolved_name,
-        session_concept_name=session_topic_name,
-        settings=settings,
-    )
+    if _wa_state["placeholder_id"] is not None:
+        try:
+            finalize_assistant_message(
+                session,
+                message_id=int(_wa_state["placeholder_id"]),
+                payload=envelope.model_dump(mode="json"),
+            )
+            _session_title_and_compact(
+                session,
+                request=request,
+                concept_name=resolved_name,
+                session_concept_name=session_topic_name,
+                settings=settings,
+            )
+        except Exception:
+            log.warning("finalize failed for main streaming path", exc_info=True)
+    else:
+        persist_turn(
+            session,
+            workspace_id=request.workspace_id,
+            session_id=request.session_id,
+            user_id=request.user_id,
+            user_text=request.query,
+            assistant_payload=envelope.model_dump(mode="json"),
+            concept_name=resolved_name,
+            session_concept_name=session_topic_name,
+            settings=settings,
+        )
 
     yield ChatStreamFinalEvent(envelope=envelope)
 
