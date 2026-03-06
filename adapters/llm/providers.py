@@ -12,6 +12,7 @@ from typing import Any
 from core.contracts import TutorTextStream
 from core.llm_messages import Message, MessageBuilder
 from core.observability import (
+    LLM_REASONING_CONTENT,
     LLM_TOKEN_COUNT_REASONING,
     SPAN_KIND_LLM,
     classify_usage_source,
@@ -611,12 +612,14 @@ class _BaseGraphLLMClient(ABC):
         # Extract usage from the final chunk
         usage = self.extract_stream_usage(last_chunk)
         reasoning_tokens = self._extract_reasoning_tokens(last_chunk)
+        reasoning_content = self._extract_reasoning_content(last_chunk)
         stream_obj.set_usage(
             prompt_tokens=usage.get("token_prompt"),
             completion_tokens=usage.get("token_completion"),
             total_tokens=usage.get("token_total"),
             reasoning_tokens=reasoning_tokens,
             cached_tokens=usage.get("token_cached"),
+            reasoning_content=reasoning_content,
         )
         cached = usage.get("token_cached")
         if cached:
@@ -630,6 +633,8 @@ class _BaseGraphLLMClient(ABC):
         )
         if reasoning_tokens is not None and span is not None:
             span.set_attribute(LLM_TOKEN_COUNT_REASONING, int(reasoning_tokens))
+        if reasoning_content is not None and span is not None:
+            span.set_attribute(LLM_REASONING_CONTENT, reasoning_content[:256])
 
         emit_event(
             "llm.call",
@@ -658,6 +663,40 @@ class _BaseGraphLLMClient(ABC):
             val = details.get("reasoning_tokens")
             if isinstance(val, int):
                 return val
+        return None
+
+    @staticmethod
+    def _extract_reasoning_content(payload: Mapping[str, Any]) -> str | None:
+        """Extract reasoning/thinking text from provider responses.
+
+        Checks two formats:
+        - ``choices[0].message.reasoning_content`` (Anthropic/DeepSeek via OpenAI-compat)
+        - ``choices[0].message.content`` as list with ``type="thinking"`` blocks (Claude native)
+        """
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        message = choices[0].get("message") if isinstance(choices[0], Mapping) else None
+        if not isinstance(message, Mapping):
+            return None
+
+        # Format 1: top-level reasoning_content field
+        rc = message.get("reasoning_content")
+        if isinstance(rc, str) and rc.strip():
+            return rc
+
+        # Format 2: content blocks with type="thinking"
+        content = message.get("content")
+        if isinstance(content, list):
+            thinking_parts = [
+                item.get("thinking", "")
+                for item in content
+                if isinstance(item, Mapping) and item.get("type") == "thinking"
+            ]
+            combined = "".join(thinking_parts)
+            if combined.strip():
+                return combined
+
         return None
 
     @staticmethod
@@ -866,6 +905,7 @@ class _BaseGraphLLMClient(ABC):
         text = self._extract_content(result).strip()
         usage = extract_token_usage(result)
         reasoning = self._extract_reasoning_tokens(result)
+        reasoning_content = self._extract_reasoning_content(result)
         supported = self._model_supports_reasoning()
         used = self._reasoning_enabled and supported
         if reasoning_effort_override is not None and used:
@@ -886,6 +926,7 @@ class _BaseGraphLLMClient(ABC):
             completion_tokens=usage.get("token_completion"),
             total_tokens=usage.get("token_total"),
             reasoning_tokens=reasoning,
+            reasoning_content=reasoning_content,
             cached_tokens=usage.get("token_cached"),
             reasoning_requested=self._reasoning_enabled,
             reasoning_supported=supported,
@@ -981,6 +1022,7 @@ class _BaseGraphLLMClient(ABC):
             if cached:
                 log.debug("prefix cache hit: %d tokens cached", cached)
             reasoning_tokens = self._extract_reasoning_tokens(result)
+            reasoning_content = self._extract_reasoning_content(result)
             response_content = self._extract_content_safe(result)
 
             set_llm_span_attributes(
@@ -990,6 +1032,8 @@ class _BaseGraphLLMClient(ABC):
             )
             if reasoning_tokens is not None and span is not None:
                 span.set_attribute(LLM_TOKEN_COUNT_REASONING, int(reasoning_tokens))
+            if reasoning_content is not None and span is not None:
+                span.set_attribute(LLM_REASONING_CONTENT, reasoning_content[:256])
             emit_event(
                 "llm.call",
                 status="success",
@@ -1084,6 +1128,7 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         tutor_temperature: float = 0.0,
         reasoning_enabled: bool = False,
         reasoning_effort: str | None = None,
+        max_retries: int = 2,
     ) -> None:
         if not api_key.strip():
             raise ValueError("OpenAI API key is required for graph_llm_provider=openai")
@@ -1098,7 +1143,12 @@ class OpenAIGraphLLMClient(_BaseGraphLLMClient):
         )
         from openai import OpenAI  # noqa: PLC0415
 
-        self._client = OpenAI(api_key=api_key.strip(), timeout=timeout_seconds)
+        self._max_retries = max_retries
+        self._client = OpenAI(
+            api_key=api_key.strip(),
+            timeout=timeout_seconds,
+            max_retries=max_retries,
+        )
 
     def _sdk_call(
         self,
@@ -1151,6 +1201,8 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         api_key: str | None = None,
         reasoning_enabled: bool = False,
         reasoning_effort: str | None = None,
+        num_retries: int = 2,
+        context_window_fallback_dict: dict[str, str] | None = None,
     ) -> None:
         super().__init__(
             model=model,
@@ -1163,6 +1215,8 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         )
         self._base_url = base_url.rstrip("/") if base_url and base_url.strip() else None
         self._api_key = api_key.strip() if api_key and api_key.strip() else None
+        self._num_retries = num_retries
+        self._context_window_fallback_dict = context_window_fallback_dict or {}
 
     def _sdk_call(
         self,
@@ -1178,7 +1232,10 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             "temperature": temperature,
             "messages": messages,
             "timeout": self._timeout_seconds,
+            "num_retries": self._num_retries,
         }
+        if self._context_window_fallback_dict:
+            kwargs["context_window_fallback_dict"] = self._context_window_fallback_dict
         if self._base_url is not None:
             kwargs["api_base"] = self._base_url
         if self._api_key is not None:
@@ -1204,7 +1261,10 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
             "timeout": self._timeout_seconds,
             "stream": True,
             "stream_options": {"include_usage": True},
+            "num_retries": self._num_retries,
         }
+        if self._context_window_fallback_dict:
+            kwargs["context_window_fallback_dict"] = self._context_window_fallback_dict
         if self._base_url is not None:
             kwargs["api_base"] = self._base_url
         if self._api_key is not None:

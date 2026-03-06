@@ -564,6 +564,27 @@ class Settings(BaseSettings):
         le=60.0,
         description="Base delay in seconds for exponential backoff on retries.",
     )
+    llm_sdk_max_retries: int = Field(
+        default=2,
+        validation_alias=AliasChoices(
+            "APP_LLM_SDK_MAX_RETRIES",
+            "LLM_SDK_MAX_RETRIES",
+        ),
+        ge=0,
+        le=10,
+        description="Retry count passed to OpenAI/LiteLLM SDKs for transient errors.",
+    )
+    llm_context_window_fallbacks: dict[str, str] = Field(
+        default_factory=lambda: {"gpt-4o": "gpt-4o-mini"},
+        validation_alias=AliasChoices(
+            "APP_LLM_CONTEXT_WINDOW_FALLBACKS",
+            "LLM_CONTEXT_WINDOW_FALLBACKS",
+        ),
+        description=(
+            "Model fallback map for LiteLLM context-window errors. "
+            "Keys are primary models, values are smaller fallback models."
+        ),
+    )
 
     # ── Auth settings ──────────────────────────────────────────────────
     auth_magic_link_ttl_minutes: int = Field(

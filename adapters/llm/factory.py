@@ -72,6 +72,7 @@ def build_graph_llm_client(
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
             reasoning_effort=active_settings.llm_reasoning_effort_chat,
+            max_retries=active_settings.llm_sdk_max_retries,
         )
 
     if active_settings.graph_llm_provider == "litellm":
@@ -88,6 +89,8 @@ def build_graph_llm_client(
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
             reasoning_effort=active_settings.llm_reasoning_effort_chat,
+            num_retries=active_settings.llm_sdk_max_retries,
+            context_window_fallback_dict=active_settings.llm_context_window_fallbacks,
         )
 
     raise ValueError(f"Unsupported graph_llm_provider: {active_settings.graph_llm_provider}")
@@ -124,6 +127,7 @@ def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
             reasoning_effort=active_settings.llm_reasoning_effort_chat,
+            max_retries=active_settings.llm_sdk_max_retries,
         )
 
     if provider == "litellm":
@@ -138,6 +142,8 @@ def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=active_settings.llm_reasoning_chat,
             reasoning_effort=active_settings.llm_reasoning_effort_chat,
+            num_retries=active_settings.llm_sdk_max_retries,
+            context_window_fallback_dict=active_settings.llm_context_window_fallbacks,
         )
 
     raise ValueError(f"Unsupported tutor_llm_provider: {provider}")
@@ -187,6 +193,7 @@ def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLL
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=False,
             reasoning_effort=None,
+            max_retries=active_settings.llm_sdk_max_retries,
         )
 
     if provider == "litellm":
@@ -201,6 +208,8 @@ def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLL
             tutor_temperature=active_settings.graph_llm_tutor_temperature,
             reasoning_enabled=False,
             reasoning_effort=None,
+            num_retries=active_settings.llm_sdk_max_retries,
+            context_window_fallback_dict=active_settings.llm_context_window_fallbacks,
         )
 
     raise ValueError(f"Unsupported query_analyzer_llm_provider: {provider}")
