@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from core.contracts import GraphLLMClient
 from core.observability import observation_context
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -19,6 +19,9 @@ from domain.graph.types import (
     tier_rank as _tier_rank,
     truncate_text,
 )
+
+if TYPE_CHECKING:
+    from core.contracts import GraphLLMClient
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_CONTEXT_SNIPPET_CHARS = 240

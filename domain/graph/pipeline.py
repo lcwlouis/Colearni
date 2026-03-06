@@ -113,19 +113,26 @@ def build_graph_for_chunks(
             for i, (chunk_id, window_text) in enumerate(windows):
                 _LOGGER.debug("graph.window_%d_chunk_id: %s", i, chunk_id)
                 _LOGGER.debug("graph.window_%d_text: %s", i, window_text)
-        for window_chunk_id, window_text in windows:
+
+        # Batch extraction: one parallel LLM call for all windows
+        from domain.graph.extraction import batch_extract_raw_graph_from_chunks  # noqa: PLC0415
+
+        window_texts = [wt for _, wt in windows]
+        extractions = batch_extract_raw_graph_from_chunks(
+            llm_client=llm_client,
+            chunk_texts=window_texts,
+            concept_description_max_chars=settings.resolver_concept_description_max_chars,
+            edge_description_max_chars=settings.resolver_edge_description_max_chars,
+        )
+
+        # Resolution must stay serial (DB state depends on prior chunks)
+        for (window_chunk_id, window_text), extraction in zip(windows, extractions):
             with observation_context(chunk_id=window_chunk_id), start_span(
                 "graph.resolver.chunk",
                 kind=SPAN_KIND_CHAIN,
                 chunk_id=window_chunk_id,
             ) as chunk_span:
                 budgets.reset_chunk()
-                extraction = extract_raw_graph_from_chunk(
-                    llm_client=llm_client,
-                    chunk_text=window_text,
-                    concept_description_max_chars=settings.resolver_concept_description_max_chars,
-                    edge_description_max_chars=settings.resolver_edge_description_max_chars,
-                )
                 if chunk_span is not None:
                     chunk_span.set_attribute("graph.concepts_extracted", len(extraction.concepts))
                     chunk_span.set_attribute("graph.edges_extracted", len(extraction.edges))
