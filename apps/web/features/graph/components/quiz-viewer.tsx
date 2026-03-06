@@ -72,9 +72,12 @@ export function QuizViewer({
         item_id: item.item_id,
         answer: answers[item.item_id] ?? "",
       }));
-      const res = source === "level_up"
-        ? await apiClient.submitLevelUpQuiz(workspaceId, quizId, { answers: payload })
-        : await apiClient.submitPracticeQuiz(workspaceId, quizId, { answers: payload });
+      // Retries always grade as practice (no mastery impact).
+      // Only first-time level-up submissions use the level-up endpoint.
+      const usePracticeSubmit = isRetry || source !== "level_up";
+      const res = usePracticeSubmit
+        ? await apiClient.submitPracticeQuiz(workspaceId, quizId, { answers: payload })
+        : await apiClient.submitLevelUpQuiz(workspaceId, quizId, { answers: payload });
       setResult(res);
       onRetryComplete?.();
     } catch (err) {

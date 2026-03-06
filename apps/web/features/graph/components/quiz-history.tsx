@@ -168,18 +168,16 @@ export function QuizHistory({ workspaceId, conceptId, onCreateQuiz }: Props) {
               >
                 View
               </button>
-              {q.latest_attempt != null && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedQuizId(q.quiz_id);
-                    setSelectedSource(q.source);
-                    setRetryingQuizId(q.quiz_id);
-                  }}
-                >
-                  Retry
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedQuizId(q.quiz_id);
+                  setSelectedSource(q.source);
+                  setRetryingQuizId(q.quiz_id);
+                }}
+              >
+                {q.latest_attempt != null ? "Retry" : "Try"}
+              </button>
             </div>
           </li>
         ))}

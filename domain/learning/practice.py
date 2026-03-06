@@ -278,6 +278,7 @@ def submit_practice_quiz(
             answers=answers,
             llm_client=llm_client,
             quiz_type="practice",
+            load_quiz_type=None,  # accept any quiz (level-up retries)
             update_mastery=False,
             retry_hint=RETRY_HINT,
         )

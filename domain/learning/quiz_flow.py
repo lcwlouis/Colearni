@@ -256,6 +256,7 @@ def submit_quiz(
     answers: list[dict[str, Any]],
     llm_client: GraphLLMClient | None,
     quiz_type: str = "level_up",
+    load_quiz_type: str | None = ...,  # sentinel: use quiz_type by default
     update_mastery: bool = True,
     retry_hint: str = RETRY_HINT,
     run_id: str | None = None,
@@ -264,6 +265,9 @@ def submit_quiz(
     event_prefix = "grading.level_up" if quiz_type == "level_up" else "grading.practice"
     operation = f"{event_prefix}.submit"
     stage = "load_quiz"
+    # When load_quiz_type is not explicitly set, default to quiz_type.
+    # Pass None to skip the quiz_type filter (e.g. practice retries of level-up quizzes).
+    effective_load_type = quiz_type if load_quiz_type is ... else load_quiz_type
 
     with observation_context(
         component="grading",
@@ -286,7 +290,7 @@ def submit_quiz(
                 session,
                 quiz_id=quiz_id,
                 workspace_id=workspace_id,
-                quiz_type=quiz_type,
+                quiz_type=effective_load_type,
             )
             if quiz is None:
                 raise QuizNotFoundError("Quiz not found in workspace.")

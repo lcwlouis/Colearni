@@ -139,9 +139,31 @@ def load_quiz_for_grading(
     *,
     quiz_id: int,
     workspace_id: int,
-    quiz_type: str,
+    quiz_type: str | None = None,
 ) -> Any | None:
-    """Load a quiz row with ``FOR UPDATE`` lock, or *None*."""
+    """Load a quiz row with ``FOR UPDATE`` lock, or *None*.
+
+    When *quiz_type* is ``None`` the filter is skipped so that practice
+    retries can grade level-up quizzes without mastery impact.
+    """
+    if quiz_type is not None:
+        return (
+            session.execute(
+                text(
+                    """
+                    SELECT id, user_id, concept_id
+                    FROM quizzes
+                    WHERE id = :quiz_id
+                      AND workspace_id = :workspace_id
+                      AND quiz_type = :quiz_type
+                    FOR UPDATE
+                    """
+                ),
+                {"quiz_id": quiz_id, "workspace_id": workspace_id, "quiz_type": quiz_type},
+            )
+            .mappings()
+            .first()
+        )
     return (
         session.execute(
             text(
@@ -150,11 +172,10 @@ def load_quiz_for_grading(
                 FROM quizzes
                 WHERE id = :quiz_id
                   AND workspace_id = :workspace_id
-                  AND quiz_type = :quiz_type
                 FOR UPDATE
                 """
             ),
-            {"quiz_id": quiz_id, "workspace_id": workspace_id, "quiz_type": quiz_type},
+            {"quiz_id": quiz_id, "workspace_id": workspace_id},
         )
         .mappings()
         .first()
