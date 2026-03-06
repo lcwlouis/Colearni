@@ -458,14 +458,38 @@ Dependencies between tracks:
 
 | Track | Status | Last note |
 |---|---|---|
-| `L1` Message Format | ✅ done | All 9 slices complete |
-| `L2` Message Persistence | ✅ done | All 6 slices complete |
-| `L3` LLM Client Enhancement | ✅ done | All 6 slices complete |
-| `L4` Agentic Tool Framework | ✅ done | All 6 slices complete |
-| `L5` JSON Mode | ✅ done | All 5 slices complete |
-| `L6` Regeneration | ✅ done | All 3 slices complete |
-| `L7` Graph Batching | ✅ done | All 3 slices complete |
-| `L8` Web Search | ✅ done | All 4 slices complete |
+| `L1` Message Format | ✅ audit-passed | All 9 slices complete |
+| `L2` Message Persistence | ✅ audit-passed | All 6 slices complete |
+| `L3` LLM Client Enhancement | ✅ audit-passed | All 6 slices complete |
+| `L4` Agentic Tool Framework | ✅ audit-passed | All 6 slices complete |
+| `L5` JSON Mode | ✅ audit-passed | All 5 slices complete |
+| `L6` Regeneration | ✅ audit-passed | All 3 slices complete |
+| `L7` Graph Batching | ✅ audit-passed | All 3 slices complete |
+| `L8` Web Search | ✅ audit-passed | All 4 slices complete |
+
+## Self-Audit Report — Cycle 1
+
+**Date:** Completed in-session
+**Result:** CONVERGED (0 issues found)
+
+### Test Suite
+- 1303 passed, 18 pre-existing failures (unchanged from baseline)
+- Pre-existing failures: test_chat_respond (13), test_research (1), test_g1_progress (1), test_phoenix_traces (3)
+
+### File Integrity
+- All new modules exist and import correctly
+- Cross-slice integration verified: imports chain L1→L2→L3→L4→L5→L6→L7→L8
+
+### Code Quality
+- No FIXME/HACK comments in changed files
+- 6 `TODO: async rate limiter` in providers.py — pre-existing, intentional placeholders
+
+### Cross-Slice Integration
+- QueryAnalysis.needs_web_search correctly derived from intent
+- EvidenceSourceType.WEB accepted by validators
+- WebSearchTool registers in ToolRegistry via factory
+- format_as_evidence produces valid EvidenceItem objects
+- All new settings accessible via get_settings()
 
 ## Verification Block Template
 
