@@ -1469,6 +1469,7 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         reasoning_effort: str | None = None,
         num_retries: int = 2,
         context_window_fallback_dict: dict[str, str] | None = None,
+        json_schema_validation: bool = True,
     ) -> None:
         super().__init__(
             model=model,
@@ -1483,6 +1484,10 @@ class LiteLLMGraphLLMClient(_BaseGraphLLMClient):
         self._api_key = api_key.strip() if api_key and api_key.strip() else None
         self._num_retries = num_retries
         self._context_window_fallback_dict = context_window_fallback_dict or {}
+        if json_schema_validation:
+            import litellm  # noqa: PLC0415
+
+            litellm.enable_json_schema_validation = True
 
     def _sdk_call(
         self,

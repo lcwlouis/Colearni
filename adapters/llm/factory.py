@@ -91,6 +91,7 @@ def build_graph_llm_client(
             reasoning_effort=active_settings.llm_reasoning_effort_chat,
             num_retries=active_settings.llm_sdk_max_retries,
             context_window_fallback_dict=active_settings.llm_context_window_fallbacks,
+            json_schema_validation=active_settings.llm_json_schema_validation,
         )
 
     raise ValueError(f"Unsupported graph_llm_provider: {active_settings.graph_llm_provider}")
@@ -144,6 +145,7 @@ def build_tutor_llm_client(settings: Settings | None = None) -> GraphLLMClient:
             reasoning_effort=active_settings.llm_reasoning_effort_chat,
             num_retries=active_settings.llm_sdk_max_retries,
             context_window_fallback_dict=active_settings.llm_context_window_fallbacks,
+            json_schema_validation=active_settings.llm_json_schema_validation,
         )
 
     raise ValueError(f"Unsupported tutor_llm_provider: {provider}")
@@ -210,6 +212,7 @@ def build_query_analyzer_llm_client(settings: Settings | None = None) -> GraphLL
             reasoning_effort=None,
             num_retries=active_settings.llm_sdk_max_retries,
             context_window_fallback_dict=active_settings.llm_context_window_fallbacks,
+            json_schema_validation=active_settings.llm_json_schema_validation,
         )
 
     raise ValueError(f"Unsupported query_analyzer_llm_provider: {provider}")

@@ -586,6 +586,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    llm_json_schema_validation: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "APP_LLM_JSON_SCHEMA_VALIDATION",
+            "LLM_JSON_SCHEMA_VALIDATION",
+        ),
+        description="Enable LiteLLM client-side JSON schema validation.",
+    )
+
     # ── Auth settings ──────────────────────────────────────────────────
     auth_magic_link_ttl_minutes: int = Field(
         default=30,
