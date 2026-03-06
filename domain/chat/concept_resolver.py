@@ -65,6 +65,13 @@ def resolve_concept_for_turn(
         workspace_id=workspace_id,
         concept_id=current_concept_id,
     )
+    # Fall back to session-bound concept when frontend doesn't send concept_id
+    if current is None and session_concept_id is not None:
+        current = _concept_by_id(
+            session,
+            workspace_id=workspace_id,
+            concept_id=session_concept_id,
+        )
     suggested = _concept_by_id(
         session,
         workspace_id=workspace_id,

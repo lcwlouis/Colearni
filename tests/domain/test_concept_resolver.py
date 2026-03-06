@@ -414,3 +414,39 @@ def test_infer_concept_allows_null_tier_legacy_concepts() -> None:
     assert inferred.concept_id == 1
     assert inferred.tier is None
     assert score > 0
+
+
+def test_session_concept_id_fallback_when_no_current(monkeypatch: Any) -> None:
+    """When current_concept_id is None, session_concept_id is used as fallback."""
+    concept_session = ConceptInfo(concept_id=42, canonical_name="Disk-based Database", tier="topic")
+
+    def fake_by_id(
+        _session: Any, *, workspace_id: int, concept_id: int | None,
+    ) -> ConceptInfo | None:
+        return {42: concept_session}.get(concept_id)  # type: ignore[arg-type]
+
+    def fake_subtree(
+        _session: Any, *, workspace_id: int, root_concept_id: int,
+    ) -> set[int]:
+        return {42}
+
+    monkeypatch.setattr("domain.chat.concept_resolver._concept_by_id", fake_by_id)
+    monkeypatch.setattr("domain.chat.concept_resolver._get_subtree_concept_ids", fake_subtree)
+    monkeypatch.setattr(
+        "domain.chat.concept_resolver._infer_concept",
+        lambda *a, **kw: (None, 0.0),
+    )
+
+    resolution = resolve_concept_for_turn(
+        _SessionWithExecute(),
+        workspace_id=1,
+        query="I/o time is in ms and cpu time is in ns",
+        history_text="Teach me about Disk-based Database",
+        current_concept_id=None,
+        suggested_concept_id=None,
+        switch_decision=None,
+        session_concept_id=42,
+    )
+    assert resolution.resolved_concept is not None
+    assert resolution.resolved_concept.concept_id == 42
+    assert resolution.resolved_concept.canonical_name == "Disk-based Database"

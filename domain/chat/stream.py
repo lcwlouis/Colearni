@@ -253,6 +253,11 @@ def _stream_inner(
             active_concept_tier=resolved_tier,
             ancestor_context=ancestor_context,
         )
+        log.info(
+            "hierarchy_context resolved=%s session_topic=%s tier=%s has_context=%s",
+            resolved_name, session_topic_name, resolved_tier,
+            bool(hierarchy_prompt_context),
+        )
 
     yield ChatStreamStatusEvent(phase=ChatPhase.SEARCHING, activity="checking_mastery", step_label="Checking mastery level")
     mastery_status = resolve_mastery_status(
