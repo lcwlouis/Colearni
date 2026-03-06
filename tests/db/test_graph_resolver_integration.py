@@ -7,14 +7,15 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
 from adapters.db.chunks import list_chunks_for_document
 from core.contracts import GraphLLMClient
 from core.settings import get_settings
 from domain.graph.pipeline import build_graph_for_chunks
 from domain.graph.types import normalize_alias
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
 
 class IntegrationGraphLLM(GraphLLMClient):
@@ -61,12 +62,23 @@ class IntegrationGraphLLM(GraphLLMClient):
         items: Sequence[Mapping[str, object]],
     ) -> Sequence[Mapping[str, Any]]:
         return [
-            {"concept_ref": str(item.get("raw_name", "")), "operations": [{"decision": "CREATE_NEW", "confidence": 1.0}]}
+            {
+                "concept_ref": str(item.get("raw_name", "")),
+                "operations": [{"decision": "CREATE_NEW", "confidence": 1.0}],
+            }
             for item in items
         ]
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt: str | None = None) -> str:
         return "Integration test summary."
+
+    def batch_extract_raw_graph(self, *, chunk_texts: Sequence[str]) -> Sequence[Mapping[str, Any]]:
+        return [self.extract_raw_graph(chunk_text=t) for t in chunk_texts]
+
+    def async_complete_messages(
+        self, messages: Any, *, prompt_meta: Any = None, reasoning_effort_override: str | None = None,
+    ) -> tuple[str, Any]:
+        return ("Integration test summary.", None)
 
 
 def _connect_or_skip() -> tuple[Any, Any]:

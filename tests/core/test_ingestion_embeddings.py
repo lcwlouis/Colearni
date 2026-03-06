@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import pytest
+
 from adapters.db.chunks import ChunkRow
 from adapters.db.documents import DocumentRow
 from core.contracts import EmbeddingProvider, GraphLLMClient
@@ -82,12 +83,23 @@ class _StubGraphLLM(GraphLLMClient):
         items: Sequence[dict[str, object]],
     ) -> Sequence[dict[str, object]]:
         return [
-            {"concept_ref": str(item.get("raw_name", "")), "operations": [{"decision": "CREATE_NEW", "confidence": 1.0}]}
+            {
+                "concept_ref": str(item.get("raw_name", "")),
+                "operations": [{"decision": "CREATE_NEW", "confidence": 1.0}],
+            }
             for item in items
         ]
 
     def generate_tutor_text(self, *, prompt: str, prompt_meta=None, system_prompt: str | None = None) -> str:
         return "Stub summary for testing."
+
+    def batch_extract_raw_graph(self, *, chunk_texts: Sequence[str]) -> Sequence[dict[str, object]]:
+        return [self.extract_raw_graph(chunk_text=t) for t in chunk_texts]
+
+    def async_complete_messages(
+        self, messages: Any, *, prompt_meta: Any = None, reasoning_effort_override: str | None = None,
+    ) -> tuple[str, Any]:
+        return ("Stub summary.", None)
 
 
 def _request() -> IngestionRequest:
@@ -317,7 +329,7 @@ def test_ingest_graph_enabled_calls_builder_with_settings_and_provider_fallback(
             llm_disambiguations=0,
         )
 
-    monkeypatch.setattr("domain.ingestion.service.build_graph_for_chunks", _fake_graph_build)
+    monkeypatch.setattr("domain.graph.pipeline.build_graph_for_chunks", _fake_graph_build)
 
     result = ingest_text_document(
         session,  # type: ignore[arg-type]
@@ -357,7 +369,7 @@ def test_ingest_graph_disabled_skips_builder_even_when_client_is_present(
     session = _FakeSession()
     settings = get_settings().model_copy(update={"ingest_build_graph": False, "ingest_populate_embeddings": False})
     monkeypatch.setattr(
-        "domain.ingestion.service.build_graph_for_chunks",
+        "domain.graph.pipeline.build_graph_for_chunks",
         lambda *args, **kwargs: (_ for _ in ()).throw(  # noqa: ARG005
             AssertionError("graph builder should not run when disabled")
         ),

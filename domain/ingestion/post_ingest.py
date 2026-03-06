@@ -51,7 +51,7 @@ def generate_document_summary(
     system_prompt, prompt, prompt_meta = _build_document_summary_prompt(sample_text.strip())
     try:
         messages = MessageBuilder().system(system_prompt).user(prompt).build()
-        summary, _ = llm_client.complete_messages(messages, prompt_meta=prompt_meta)
+        summary, _ = llm_client.async_complete_messages(messages, prompt_meta=prompt_meta)
         summary = summary.strip()
         if summary and len(summary) > 10:
             return summary[:500]
@@ -226,7 +226,10 @@ def run_post_ingest_tasks(
             _log.info("post_ingest_tasks DONE ws=%s doc=%s", workspace_id, document_id)
             set_span_summary(
                 span,
-                output_summary=f"chunks={len(chunk_texts)}, graph={'yes' if active_settings.ingest_build_graph else 'no'}",
+                output_summary=(
+                    f"chunks={len(chunk_texts)}, "
+                    f"graph={'yes' if active_settings.ingest_build_graph else 'no'}"
+                ),
             )
     except Exception as exc:
         _log.exception("Post-ingest background task failed ws=%s doc=%s", workspace_id, document_id)

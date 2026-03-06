@@ -113,6 +113,14 @@ class Settings(BaseSettings):
             "0 = one LLM call per vector chunk."
         ),
     )
+    ingest_chunk_unit: str = Field(
+        default="tokens",
+        validation_alias=AliasChoices(
+            "APP_INGEST_CHUNK_UNIT",
+            "INGEST_CHUNK_UNIT",
+        ),
+        description="Unit used when measuring chunk sizes: 'tokens' or 'words'.",
+    )
 
     embedding_backfill_max_chunks: int = Field(
         default=500,
@@ -277,7 +285,7 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("APP_LITELLM_MODEL", "LITELLM_MODEL"),
     )
-    
+
     # This portion is for adding API keys for various LLM providers, which can be set via environment variables.
     litellm_api_key: str | None = Field(
         default=None,
@@ -299,7 +307,7 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("APP_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
     )
-    
+
     resolver_lexical_top_k: int = Field(
         default=5,
         validation_alias=AliasChoices("APP_RESOLVER_LEXICAL_TOP_K", "RESOLVER_LEXICAL_TOP_K"),

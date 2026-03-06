@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from core.schemas.chat import ChatPhase
-from domain.chat.progress import NoOpProgressSink, ProgressSink, noop_sink
+from domain.chat.progress import ProgressSink, noop_sink
 
 
 class RecordingSink:
@@ -84,6 +84,7 @@ class TestOrchestrationPhaseOrder:
     def test_onboarding_path_emits_thinking_searching_finalizing(self, monkeypatch) -> None:
         """Empty workspace path should emit thinking -> searching -> finalizing."""
         from core.settings import Settings
+        from domain.chat.query_analyzer import QueryAnalysis
 
         monkeypatch.setattr(
             "domain.chat.respond.try_social_response",
@@ -92,6 +93,10 @@ class TestOrchestrationPhaseOrder:
         monkeypatch.setattr(
             "domain.chat.respond.build_tutor_llm_client",
             lambda settings: None,
+        )
+        monkeypatch.setattr(
+            "domain.chat.respond.run_query_analysis",
+            lambda **kwargs: QueryAnalysis(intent="clarify", needs_retrieval=True),
         )
         monkeypatch.setattr(
             "domain.chat.respond.load_history_text",

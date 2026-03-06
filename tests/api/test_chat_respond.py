@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
+
 from adapters.db.dependencies import get_db_session
 from adapters.db.documents import DocumentRow
 from apps.api.dependencies import WorkspaceContext, get_workspace_context
@@ -14,7 +16,6 @@ from domain.chat.query_analyzer import QueryAnalysis
 from domain.retrieval.hybrid_retriever import HybridRetriever
 from domain.retrieval.types import RankedChunk
 from domain.retrieval.vector_retriever import PgVectorRetriever
-from fastapi.testclient import TestClient
 
 _FAKE_USER = type("FakeUser", (), {"id": 5, "public_id": "u-fake", "email": "t@t.com", "display_name": None})()
 _FAKE_WS_CTX = WorkspaceContext(workspace_id=7, user=_FAKE_USER)
@@ -41,6 +42,23 @@ class DummyTutorLLMClient:
             return "DIRECT: concise explanation"
         return "SOCRATIC: guiding question first"
 
+    def complete_messages(self, messages, *, prompt_meta=None, reasoning_effort_override=None):
+        user_text = next(m["content"] for m in messages if m["role"] == "user")
+        system_text = next((m["content"] for m in messages if m["role"] == "system"), None)
+        text = self.generate_tutor_text(prompt=user_text, system_prompt=system_text)
+        return text, None
+
+    def complete_messages_json(self, messages, *, schema_name=None, schema=None):
+        return {
+            "intent": "learn",
+            "requested_mode": "unknown",
+            "needs_retrieval": True,
+            "should_offer_level_up": False,
+            "high_level_keywords": [],
+            "low_level_keywords": [],
+            "concept_hints": [],
+        }
+
 
 def _override_db() -> Any:
     yield object()
@@ -49,7 +67,11 @@ def _override_db() -> Any:
 def _patch_tutor_llm(monkeypatch: Any, client: DummyTutorLLMClient | None = None) -> None:
     resolved_client = client or DummyTutorLLMClient()
     monkeypatch.setattr(
-        "domain.chat.response_service.build_graph_llm_client",
+        "domain.chat.respond.build_tutor_llm_client",
+        lambda settings: resolved_client,
+    )
+    monkeypatch.setattr(
+        "domain.chat.respond.build_query_analyzer_client",
         lambda settings: resolved_client,
     )
 

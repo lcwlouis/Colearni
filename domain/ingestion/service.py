@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from adapters.db.chunks import (
     count_chunks_for_document,
@@ -15,20 +19,15 @@ from adapters.db.documents import (
     get_document_by_content_hash,
     insert_document,
     update_document_status,
+    update_document_summary,
 )
 from adapters.embeddings.factory import build_embedding_provider
 from adapters.parsers.chunker import chunk_text_deterministic
 from adapters.parsers.text import parse_text_payload
-from domain.embeddings.pipeline import NewChunkInput, populate_new_chunk_embeddings
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-
-from adapters.db.documents import update_document_summary
-from domain.graph.pipeline import build_graph_for_chunks
-from domain.ingestion.post_ingest import generate_document_summary
-
 from core.contracts import EmbeddingProvider, GraphLLMClient
 from core.settings import Settings, get_settings
+from domain.embeddings.pipeline import NewChunkInput, populate_new_chunk_embeddings
+from domain.ingestion.post_ingest import generate_document_summary
 
 
 class IngestionValidationError(ValueError):
@@ -45,9 +44,6 @@ class IngestionGraphUnavailableError(RuntimeError):
 
 class IngestionGraphProviderError(RuntimeError):
     """Raised when graph LLM provider returns an error during ingestion."""
-
-
-from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -263,6 +259,8 @@ def ingest_text_document(
             raise IngestionGraphUnavailableError(
                 "Graph builder is unavailable while APP_INGEST_BUILD_GRAPH=true."
             )
+        from domain.graph.pipeline import build_graph_for_chunks  # noqa: PLC0415
+
         effective_graph_embedding_provider = graph_embedding_provider or chunk_embedding_provider
         try:
             build_graph_for_chunks(

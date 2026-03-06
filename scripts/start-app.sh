@@ -58,7 +58,7 @@ if $RUN_BACKEND; then
     --host "${APP_HOST:-0.0.0.0}" \
     --port "${APP_PORT:-8000}" &
   PIDS+=($!)
-  green "✓ Backend PID ${PIDS[-1]}"
+  green "✓ Backend PID $!"
 fi
 
 # ── Frontend ─────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ if $RUN_FRONTEND; then
   cd "$ROOT_DIR/apps/web"
   npm run dev &
   PIDS+=($!)
-  green "✓ Frontend PID ${PIDS[-1]}"
+  green "✓ Frontend PID $!"
   cd "$ROOT_DIR"
 fi
 
