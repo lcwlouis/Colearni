@@ -9,10 +9,10 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from core.contracts import TutorTextStream
-from core.llm_messages import Message
+from core.llm_messages import Message, MessageBuilder
 from core.observability import (
-    SPAN_KIND_LLM,
     LLM_TOKEN_COUNT_REASONING,
+    SPAN_KIND_LLM,
     classify_usage_source,
     create_span,
     emit_event,
@@ -669,10 +669,7 @@ class _BaseGraphLLMClient(ABC):
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
         base_system = system_prompt or "Return only JSON that satisfies the provided schema."
-        messages: list[Message] = [
-            {"role": "system", "content": base_system},
-            {"role": "user", "content": prompt},
-        ]
+        messages = MessageBuilder().system(base_system).user(prompt).build()
         return self.complete_messages_json(
             messages,
             schema_name=schema_name,
