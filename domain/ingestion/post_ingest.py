@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from adapters.db.chunks import list_chunks_for_document
-from adapters.db.documents import update_document_summary, update_document_status
+from adapters.db.documents import update_document_status, update_document_summary
 from adapters.embeddings.factory import build_embedding_provider
-from domain.embeddings.pipeline import NewChunkInput, populate_new_chunk_embeddings
-from domain.graph.pipeline import build_graph_for_chunks
-
 from core.contracts import EmbeddingProvider, GraphLLMClient
 from core.observability import (
     SPAN_KIND_CHAIN,
@@ -19,6 +17,9 @@ from core.observability import (
 )
 from core.prompting import PromptRegistry
 from core.settings import Settings, get_settings
+from core.tokenization import count_text_tokens
+from domain.embeddings.pipeline import NewChunkInput, populate_new_chunk_embeddings
+from domain.graph.pipeline import build_graph_for_chunks
 
 _log = logging.getLogger(__name__)
 _registry = PromptRegistry()
@@ -29,19 +30,21 @@ def generate_document_summary(
     chunks: list[str],
     llm_client: GraphLLMClient,
     max_chunks: int = 50,
-    max_words: int = 20000,
+    max_tokens: int = 8000,
+    model: str = "gpt-4o-mini",
 ) -> str | None:
     """Generate a short 2-3 sentence summary from the first few chunks."""
     if not chunks:
         return None
     sample_text = ""
     for chunk in chunks[:max_chunks]:
-        if len(sample_text.split()) + len(chunk.split()) > max_words:
-            remaining = max_words - len(sample_text.split())
-            if remaining > 15:
-                sample_text += " ".join(chunk.split()[:remaining])
+        candidate = sample_text + chunk + "\n\n"
+        if count_text_tokens(candidate, model) > max_tokens:
+            remaining_tokens = max_tokens - count_text_tokens(sample_text, model)
+            if remaining_tokens > 20:
+                sample_text += chunk + "\n\n"
             break
-        sample_text += chunk + "\n\n"
+        sample_text = candidate
     if not sample_text.strip():
         return None
     system_prompt, prompt, prompt_meta = _build_document_summary_prompt(sample_text.strip())
@@ -117,70 +120,106 @@ def run_post_ingest_tasks(
                         _log.warning("Chunk embedding provider unavailable for background task")
                         provider = None
                 if provider is not None:
-                    _log.info("post_ingest embedding START doc=%s chunks=%d", document_id, len(chunk_texts))
-                    try:
-                        populate_new_chunk_embeddings(
-                            session=db,
-                            provider=provider,
-                            chunks=[
-                                NewChunkInput(
-                                    workspace_id=workspace_id,
-                                    document_id=document_id,
-                                    chunk_index=i,
-                                    text=chunk_texts[i],
-                                )
-                                for i in range(len(chunk_texts))
-                            ],
-                            batch_size=active_settings.embedding_batch_size,
-                        )
-                        _log.info("post_ingest embedding DONE doc=%s", document_id)
-                    except Exception:
-                        _log.exception("Background embedding population failed doc=%s", document_id)
-                        db.rollback()
+                    with start_span(
+                        "ingestion.embed_chunks",
+                        kind=SPAN_KIND_CHAIN,
+                        component="ingestion",
+                        operation="ingestion.embed_chunks",
+                        document_id=document_id,
+                    ) as embed_span:
+                        if embed_span is not None:
+                            set_span_summary(embed_span, input_summary=f"{len(chunk_texts)} chunks")
+                        _log.info("post_ingest embedding START doc=%s chunks=%d", document_id, len(chunk_texts))
+                        try:
+                            populate_new_chunk_embeddings(
+                                session=db,
+                                provider=provider,
+                                chunks=[
+                                    NewChunkInput(
+                                        workspace_id=workspace_id,
+                                        document_id=document_id,
+                                        chunk_index=i,
+                                        text=chunk_texts[i],
+                                    )
+                                    for i in range(len(chunk_texts))
+                                ],
+                                batch_size=active_settings.embedding_batch_size,
+                            )
+                            _log.info("post_ingest embedding DONE doc=%s", document_id)
+                            if embed_span is not None:
+                                set_span_summary(embed_span, output_summary=f"{len(chunk_texts)} embedded")
+                        except Exception:
+                            _log.exception("Background embedding population failed doc=%s", document_id)
+                            db.rollback()
 
             # 2) Summary (runs whenever an LLM client is available)
             if graph_llm_client is not None:
-                _log.info("post_ingest summary START doc=%s", document_id)
-                summary = generate_document_summary(
-                    chunks=chunk_texts,
-                    llm_client=graph_llm_client,
-                )
-                if summary:
-                    _log.info("post_ingest summary generated doc=%s len=%d", document_id, len(summary))
-                    update_document_summary(
-                        db,
-                        workspace_id=workspace_id,
-                        document_id=document_id,
-                        summary=summary,
+                with start_span(
+                    "ingestion.summarize",
+                    kind=SPAN_KIND_CHAIN,
+                    component="ingestion",
+                    operation="ingestion.summarize",
+                    document_id=document_id,
+                ) as summary_span:
+                    _log.info("post_ingest summary START doc=%s", document_id)
+                    summary = generate_document_summary(
+                        chunks=chunk_texts,
+                        llm_client=graph_llm_client,
                     )
+                    if summary:
+                        _log.info("post_ingest summary generated doc=%s len=%d", document_id, len(summary))
+                        update_document_summary(
+                            db,
+                            workspace_id=workspace_id,
+                            document_id=document_id,
+                            summary=summary,
+                        )
+                    if summary_span is not None:
+                        s_status = "generated" if summary else "none"
+                        s_len = len(summary) if summary else 0
+                        set_span_summary(
+                            summary_span,
+                            output_summary=f"summary={s_status}, len={s_len}",
+                        )
 
             # 3) Graph extraction (only when graph building is enabled)
             if active_settings.ingest_build_graph and graph_llm_client is not None:
-                _log.info("post_ingest graph START doc=%s", document_id)
-                effective_graph_embedding_provider = (
-                    graph_embedding_provider or chunk_embedding_provider
-                )
-                try:
-                    build_graph_for_chunks(
-                        db,
-                        workspace_id=workspace_id,
-                        chunks=chunks_rows,
-                        llm_client=graph_llm_client,
-                        settings=active_settings,
-                        embedding_provider=effective_graph_embedding_provider,
+                with start_span(
+                    "ingestion.build_graph",
+                    kind=SPAN_KIND_CHAIN,
+                    component="ingestion",
+                    operation="ingestion.build_graph",
+                    document_id=document_id,
+                ) as graph_span:
+                    if graph_span is not None:
+                        set_span_summary(graph_span, input_summary=f"{len(chunks_rows)} chunks")
+                    _log.info("post_ingest graph START doc=%s", document_id)
+                    effective_graph_embedding_provider = (
+                        graph_embedding_provider or chunk_embedding_provider
                     )
-                    update_document_status(
-                        db, workspace_id=workspace_id, document_id=document_id,
-                        graph_status="extracted",
-                    )
-                    _log.info("post_ingest graph DONE doc=%s", document_id)
-                except Exception as exc:
-                    _log.exception("Background graph extraction failed doc=%s", document_id)
-                    update_document_status(
-                        db, workspace_id=workspace_id, document_id=document_id,
-                        graph_status="failed",
-                        error_message=f"Graph extraction failed: {exc}",
-                    )
+                    try:
+                        build_graph_for_chunks(
+                            db,
+                            workspace_id=workspace_id,
+                            chunks=chunks_rows,
+                            llm_client=graph_llm_client,
+                            settings=active_settings,
+                            embedding_provider=effective_graph_embedding_provider,
+                        )
+                        update_document_status(
+                            db, workspace_id=workspace_id, document_id=document_id,
+                            graph_status="extracted",
+                        )
+                        _log.info("post_ingest graph DONE doc=%s", document_id)
+                        if graph_span is not None:
+                            set_span_summary(graph_span, output_summary="extracted")
+                    except Exception as exc:
+                        _log.exception("Background graph extraction failed doc=%s", document_id)
+                        update_document_status(
+                            db, workspace_id=workspace_id, document_id=document_id,
+                            graph_status="failed",
+                            error_message=f"Graph extraction failed: {exc}",
+                        )
 
             db.commit()
             _log.info("post_ingest_tasks DONE ws=%s doc=%s", workspace_id, document_id)
@@ -208,11 +247,14 @@ def run_post_ingest_tasks(
 
 def _build_document_summary_prompt(sample_text: str) -> tuple[str, str, Any]:
     """Return (system_prompt, user_prompt, prompt_meta)."""
-    system_prompt = (
-        "You are a document summarizer for a learning platform. "
-        "Summarize document excerpts in 2-3 concise sentences. "
-        "Focus on the main topics and key concepts covered."
-    )
+    try:
+        system_prompt = _registry.render("document_document_summary_v1_system", {})
+    except Exception:
+        system_prompt = (
+            "You are a document summarizer for a learning platform. "
+            "Summarize document excerpts in 2-3 concise sentences. "
+            "Focus on the main topics and key concepts covered."
+        )
     try:
         user_prompt, prompt_meta = _registry.render_with_meta("document_document_summary_v1", {
             "chunks": sample_text,

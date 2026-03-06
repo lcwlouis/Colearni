@@ -37,30 +37,16 @@ class TestLevelupGenerateAsset:
         assert "Light reactions" in rendered
         assert "Calvin cycle" in rendered
 
-    def test_asset_contains_json_output_contract(self, registry: PromptRegistry) -> None:
-        rendered = registry.render("assessment_levelup_generate_v1", {
-            "target_count": "5",
-            "concept_name": "X",
-            "concept_description": "Y",
-            "adjacent_concepts": "Z",
-            "chunk_excerpts": "none",
-            "chat_history": "none",
-        })
+    def test_system_asset_contains_json_output_contract(self, registry: PromptRegistry) -> None:
+        rendered = registry.render("assessment_levelup_generate_v1_system", {})
         assert "item_type" in rendered
         assert "short_answer" in rendered
         assert "mcq" in rendered
         assert "rubric_keywords" in rendered
         assert "critical_misconception_keywords" in rendered
 
-    def test_asset_enforces_mastery_gating_language(self, registry: PromptRegistry) -> None:
-        rendered = registry.render("assessment_levelup_generate_v1", {
-            "target_count": "5",
-            "concept_name": "X",
-            "concept_description": "Y",
-            "adjacent_concepts": "Z",
-            "chunk_excerpts": "none",
-            "chat_history": "none",
-        })
+    def test_system_asset_enforces_mastery_gating_language(self, registry: PromptRegistry) -> None:
+        rendered = registry.render("assessment_levelup_generate_v1_system", {})
         assert "mastery" in rendered.lower()
 
 

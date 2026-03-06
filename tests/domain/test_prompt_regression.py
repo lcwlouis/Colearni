@@ -32,11 +32,15 @@ EXPECTED_PROMPT_IDS = [
     "graph_merge_summary_v1",
     "graph_repair_json_v1",
     "assessment_levelup_generate_v1",
+    "assessment_levelup_generate_v1_system",
     "assessment_levelup_grade_v1",
     "practice_practice_quiz_generate_v1",
+    "practice_practice_quiz_generate_v1_system",
     "practice_practice_flashcards_generate_v1",
+    "practice_practice_flashcards_generate_v1_system",
     "suggestion_suggestion_hook_v1",
     "document_document_summary_v1",
+    "document_document_summary_v1_system",
 ]
 
 
@@ -60,10 +64,12 @@ class TestPromptIdRegression:
 REQUIRED_SECTIONS = {
     "tutor_socratic_v1": ["guiding question", "study partner"],
     "tutor_direct_v1": ["direct", "mastery"],
-    "assessment_levelup_generate_v1": ["mastery", "item_type", "rubric_keywords"],
+    "assessment_levelup_generate_v1_system": ["mastery", "item_type", "rubric_keywords"],
     "assessment_levelup_grade_v1": ["_generation_context", "score", "critical_misconception"],
     "graph_extract_chunk_v1_system": ["concept", "relationship"],
-    "document_document_summary_v1": ["500", "plain text"],
+    "document_document_summary_v1_system": ["500", "plain text"],
+    "practice_practice_flashcards_generate_v1_system": ["front", "back", "hint"],
+    "practice_practice_quiz_generate_v1_system": ["short_answer", "mcq", "rubric_keywords"],
     "suggestion_suggestion_hook_v1": ["do not choose", "hook"],
 }
 
@@ -159,7 +165,8 @@ PROMPT_LENGTH_BOUNDS = {
     "tutor_direct_v1": (100, 5000),
     "assessment_levelup_generate_v1": (200, 5000),
     "assessment_levelup_grade_v1": (100, 3000),
-    "document_document_summary_v1": (100, 2000),
+    "document_document_summary_v1": (20, 200),
+    "document_document_summary_v1_system": (100, 2000),
 }
 
 

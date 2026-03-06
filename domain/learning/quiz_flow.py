@@ -680,7 +680,7 @@ def _generate_items_with_retries(
             "struggled with, or showed curiosity about):\n"
             f"{chat_history}\n"
         )
-    prompt, prompt_meta = _build_quiz_generation_prompt(
+    prompt, prompt_meta, system_prompt = _build_quiz_generation_prompt(
         concept_name=concept_name,
         concept_desc=concept_desc,
         adjacent_str=adjacent_str,
@@ -693,6 +693,7 @@ def _generate_items_with_retries(
         try:
             llm_response = llm_client.generate_tutor_text(
                 prompt=retry_prompt, prompt_meta=prompt_meta,
+                system_prompt=system_prompt,
             )
         except Exception:
             return None
@@ -731,10 +732,15 @@ def _build_quiz_generation_prompt(
     chunks_block: str,
     chat_block: str,
     target_count: int,
-) -> tuple[str, Any]:
+) -> tuple[str, Any, str | None]:
     """Build the quiz generation prompt from the asset or inline fallback."""
     try:
-        return _registry.render_with_meta("assessment_levelup_generate_v1", {
+        system_prompt = _registry.render("assessment_levelup_generate_v1_system", {})
+    except Exception:
+        system_prompt = None
+
+    try:
+        prompt, meta = _registry.render_with_meta("assessment_levelup_generate_v1", {
             "target_count": str(target_count),
             "concept_name": concept_name,
             "concept_description": concept_desc,
@@ -742,19 +748,22 @@ def _build_quiz_generation_prompt(
             "chunk_excerpts": chunks_block or "(none)",
             "chat_history": chat_block or "(none)",
         })
+        return prompt, meta, system_prompt
     except Exception:
         log.debug("asset render failed for levelup_generate_v1, using inline fallback")
-        return (
-            "You are creating a quiz to assess understanding of a concept.\n"
+        system = (
+            "You are generating a mastery-gating level-up quiz. "
+            "Create a bounded mixed-format quiz testing concept understanding. "
+            "Include both short_answer and mcq types. "
+            "Progress from recall to application to analysis. "
+            "Return valid JSON only."
+        )
+        user = (
+            f"TARGET_COUNT: {target_count}\n"
             f"CONCEPT: {concept_name}\n"
             f"DESCRIPTION: {concept_desc}\n"
             f"RELATED CONCEPTS: {adjacent_str}\n"
             f"{chunks_block}"
-            f"{chat_block}\n"
-            "Return ONLY valid JSON with this schema:\n"
-            '{"items":[{"item_type":"short_answer"|"mcq","prompt":"...","payload":{...}}]}\n\n'
-            "Rules:\n"
-            f"- Produce exactly {target_count} items with a mix of short_answer and mcq.\n"
-            "- Each question must be SPECIFIC to the concept.\n"
-            "- Make questions progressively harder.\n"
-        ), None
+            f"{chat_block}"
+        )
+        return user, None, system

@@ -541,6 +541,24 @@ def _context(session: Session, *, workspace_id: int, concept_id: int) -> dict[st
     ).mappings().all()
     concept_name = str(concept["canonical_name"])
 
+    # Load source material chunks via provenance
+    chunk_rows = session.execute(
+        text(
+            """
+            SELECT ch.text
+            FROM provenance p
+            JOIN chunks ch ON ch.id = p.chunk_id AND ch.workspace_id = p.workspace_id
+            WHERE p.workspace_id = :workspace_id
+              AND p.target_type = 'concept'
+              AND p.target_id = :concept_id
+            ORDER BY p.chunk_id ASC
+            LIMIT 10
+            """
+        ),
+        {"workspace_id": workspace_id, "concept_id": concept_id},
+    ).mappings().all()
+    chunk_excerpts = [str(r["text"]) for r in chunk_rows]
+
     return {
         "concept_name": concept_name,
         "concept_description": str(concept["description"] or ""),
@@ -548,6 +566,7 @@ def _context(session: Session, *, workspace_id: int, concept_id: int) -> dict[st
             str(row["tgt_name"]) if str(row["src_name"]) == concept_name else str(row["src_name"])
             for row in rows
         ],
+        "chunk_excerpts": chunk_excerpts,
     }
 
 
@@ -641,8 +660,9 @@ def generate_stateful_flashcards(
         item_type="flashcard",
     )
 
-    # Ask for extra cards to compensate for dedup
-    request_count = card_count + min(len(existing_fps), card_count)
+    # Ask for exact count – LLM has existing cards in context for dedup,
+    # and fingerprint post-filter handles remaining duplicates.
+    request_count = card_count
 
     prompt, prompt_meta, sys_prompt = _build_flashcard_prompt(card_count=request_count, context=context)
     with observation_context(
@@ -1062,16 +1082,26 @@ def _serialize_flashcard_run_row(row: Any) -> dict[str, Any]:
 
 def _build_practice_quiz_prompt(*, question_count: int, context: dict[str, Any]) -> tuple[str, Any, str | None]:
     """Build the practice quiz generation prompt from asset or inline fallback."""
+    chunk_excerpts = context.get("chunk_excerpts", [])
+    source_excerpts = "\n".join(f"- {excerpt}" for excerpt in chunk_excerpts) if chunk_excerpts else "(none)"
+
+    try:
+        system_prompt = _registry.render("practice_practice_quiz_generate_v1_system", {})
+    except Exception:
+        system_prompt = None
+
     try:
         prompt, meta = _registry.render_with_meta("practice_practice_quiz_generate_v1", {
             "question_count": str(question_count),
             "context_json": json.dumps(context, ensure_ascii=True),
             "novelty_seed": str(uuid.uuid4()),
+            "source_excerpts": source_excerpts,
         })
-        return prompt, meta, None
+        return prompt, meta, system_prompt
     except Exception:
         log.debug("asset render failed for practice_quiz_generate_v1, using inline fallback")
         system = (
+            "You are generating a practice quiz for concept reinforcement. "
             "Return JSON practice quiz only. "
             "Schema: {\"items\":[{\"item_type\":\"short_answer|mcq\",\"prompt\":\"...\","
             "\"payload\":{...}}]}\n"
@@ -1094,13 +1124,22 @@ def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> tupl
     else:
         existing_text = "None yet."
 
+    chunk_excerpts = context.get("chunk_excerpts", [])
+    source_excerpts = "\n".join(f"- {excerpt}" for excerpt in chunk_excerpts) if chunk_excerpts else "(none)"
+
+    try:
+        system_prompt = _registry.render("practice_practice_flashcards_generate_v1_system", {})
+    except Exception:
+        system_prompt = None
+
     try:
         prompt, meta = _registry.render_with_meta("practice_practice_flashcards_generate_v1", {
             "card_count": str(card_count),
             "context_json": json.dumps(context, ensure_ascii=True),
             "existing_flashcards_text": existing_text,
+            "source_excerpts": source_excerpts,
         })
-        return prompt, meta, None
+        return prompt, meta, system_prompt
     except Exception:
         log.debug("asset render failed for practice_flashcards_generate_v1, using inline fallback")
         dedup_block = ""
@@ -1112,6 +1151,7 @@ def _build_flashcard_prompt(*, card_count: int, context: dict[str, Any]) -> tupl
                 f"{existing_text}\n"
             )
         system = (
+            "You are generating flashcards for spaced-repetition concept review. "
             "Return JSON flashcards only. "
             "Schema: {\"flashcards\":[{\"front\":\"...\",\"back\":\"...\","
             "\"hint\":\"...\"}]}"
