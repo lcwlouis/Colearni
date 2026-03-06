@@ -13,9 +13,9 @@ the same user query, and persists a new assistant message.
 
 | Slice | Description | Status |
 |-------|-------------|--------|
-| L6.1 | Add `mark_message_superseded()` in adapters/db/chat.py | 🔄 pending |
-| L6.2 | Implement `regenerate_response()` in domain/chat/ | 🔄 pending |
-| L6.3 | Add regenerate endpoint in apps/api/routes/chat.py | 🔄 pending |
+| L6.1 | Add `mark_message_superseded()` in adapters/db/chat.py | ✅ done |
+| L6.2 | Implement `regenerate_response()` in domain/chat/ | ✅ done |
+| L6.3 | Add regenerate endpoint in apps/api/routes/chat.py | ✅ done |
 
 Note: L6.4 (frontend) is out of scope for this backend-focused LLM refactoring.
 The `superseded` status and history-loading exclusion already exist from L2.
