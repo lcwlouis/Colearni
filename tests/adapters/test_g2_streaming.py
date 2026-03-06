@@ -551,3 +551,177 @@ class TestNoneEffortSemantics:
         assert stream.trace.reasoning_used is False
         assert stream.trace.reasoning_effort is None
         assert stream.trace.reasoning_effort_source is None
+
+
+# ── L3.4: reasoning_content extraction tests ─────────────────────────
+
+
+class TestReasoningContentExtraction:
+    """L3.4: extract reasoning_content from LLM responses."""
+
+    def test_non_streaming_reasoning_content_field(self) -> None:
+        """Non-streaming: reasoning_content from message.reasoning_content."""
+        response = {
+            "choices": [{"message": {
+                "content": "The answer is 42.",
+                "reasoning_content": "Let me think step by step...",
+            }}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        }
+        client = MockStreamingClient(chunks=[], blocking_response=response)
+        text, trace = client.complete_messages(
+            [{"role": "user", "content": "question"}],
+        )
+        assert text == "The answer is 42."
+        assert trace.reasoning_content == "Let me think step by step..."
+
+    def test_non_streaming_thinking_blocks(self) -> None:
+        """Non-streaming: reasoning_content from content blocks with type=thinking."""
+        response = {
+            "choices": [{"message": {
+                "content": [
+                    {"type": "thinking", "thinking": "First, consider X."},
+                    {"type": "thinking", "thinking": " Then Y."},
+                    {"type": "text", "text": "Final answer."},
+                ],
+            }}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 15, "total_tokens": 20},
+        }
+        client = MockStreamingClient(chunks=[], blocking_response=response)
+        text, trace = client.complete_messages(
+            [{"role": "user", "content": "question"}],
+        )
+        assert text == "Final answer."
+        assert trace.reasoning_content == "First, consider X. Then Y."
+
+    def test_non_streaming_no_reasoning_content(self) -> None:
+        """Non-streaming: reasoning_content is None when not present."""
+        response = {
+            "choices": [{"message": {"content": "Just a normal answer."}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15},
+        }
+        client = MockStreamingClient(chunks=[], blocking_response=response)
+        _, trace = client.complete_messages(
+            [{"role": "user", "content": "question"}],
+        )
+        assert trace.reasoning_content is None
+
+    def test_streaming_reasoning_content_field(self) -> None:
+        """Streaming: reasoning_content captured from final chunk's message."""
+        chunks = [
+            {"choices": [{"delta": {"content": "streamed"}}]},
+            {
+                "choices": [{"delta": {}, "message": {
+                    "content": "streamed",
+                    "reasoning_content": "I reasoned about this.",
+                }}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15},
+            },
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        stream = client.generate_tutor_text_stream(prompt="test")
+        list(stream)
+        assert stream.trace.reasoning_content == "I reasoned about this."
+
+    def test_streaming_no_reasoning_content(self) -> None:
+        """Streaming: reasoning_content is None when not present."""
+        chunks = [
+            {"choices": [{"delta": {"content": "hello"}}]},
+            {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        stream = client.generate_tutor_text_stream(prompt="test")
+        list(stream)
+        assert stream.trace.reasoning_content is None
+
+    def test_streaming_thinking_blocks(self) -> None:
+        """Streaming: reasoning_content from thinking blocks in final chunk."""
+        chunks = [
+            {"choices": [{"delta": {"content": "answer"}}]},
+            {
+                "choices": [{"delta": {}, "message": {
+                    "content": [
+                        {"type": "thinking", "thinking": "Step 1. Step 2."},
+                        {"type": "text", "text": "answer"},
+                    ],
+                }}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 7, "total_tokens": 10},
+            },
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        stream = client.generate_tutor_text_stream(prompt="test")
+        list(stream)
+        assert stream.trace.reasoning_content == "Step 1. Step 2."
+
+    def test_set_usage_with_reasoning_content(self) -> None:
+        """TutorTextStream.set_usage propagates reasoning_content to trace."""
+        stream = TutorTextStream(iter([]), provider="mock", model="test")
+        list(stream)
+        stream.set_usage(
+            prompt_tokens=10,
+            completion_tokens=20,
+            reasoning_content="chain of thought",
+        )
+        assert stream.trace.reasoning_content == "chain of thought"
+
+    def test_set_usage_without_reasoning_content(self) -> None:
+        """TutorTextStream.set_usage defaults reasoning_content to None."""
+        stream = TutorTextStream(iter([]), provider="mock", model="test")
+        list(stream)
+        stream.set_usage(prompt_tokens=10, completion_tokens=20)
+        assert stream.trace.reasoning_content is None
+
+    def test_empty_reasoning_content_ignored(self) -> None:
+        """Whitespace-only reasoning_content is treated as absent."""
+        response = {
+            "choices": [{"message": {
+                "content": "answer",
+                "reasoning_content": "   ",
+            }}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+        }
+        client = MockStreamingClient(chunks=[], blocking_response=response)
+        _, trace = client.complete_messages(
+            [{"role": "user", "content": "q"}],
+        )
+        assert trace.reasoning_content is None
+
+
+class TestReasoningContentSpanAttribute:
+    """L3.4: reasoning_content added as truncated span attribute."""
+
+    def _llm_spans(self, exporter):
+        return [
+            s for s in exporter.get_finished_spans()
+            if s.attributes.get("openinference.span.kind") == "LLM"
+        ]
+
+    def test_streaming_span_has_reasoning_content(self, otel_exporter) -> None:
+        """Streaming span includes truncated reasoning_content."""
+        chunks = [
+            {"choices": [{"delta": {"content": "ok"}}]},
+            {
+                "choices": [{"delta": {}, "message": {
+                    "content": "ok",
+                    "reasoning_content": "Thinking hard.",
+                }}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        list(client.generate_tutor_text_stream(prompt="test"))
+
+        llm_spans = self._llm_spans(otel_exporter)
+        assert llm_spans[0].attributes.get("llm.reasoning_content") == "Thinking hard."
+
+    def test_streaming_span_no_reasoning_content(self, otel_exporter) -> None:
+        """Streaming span omits reasoning_content when absent."""
+        chunks = [
+            {"choices": [{"delta": {"content": "ok"}}]},
+            {"choices": [{"delta": {}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ]
+        client = MockStreamingClient(chunks=chunks)
+        list(client.generate_tutor_text_stream(prompt="test"))
+
+        llm_spans = self._llm_spans(otel_exporter)
+        assert llm_spans[0].attributes.get("llm.reasoning_content") is None

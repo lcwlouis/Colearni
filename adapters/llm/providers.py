@@ -153,6 +153,53 @@ class _BaseGraphLLMClient(ABC):
     # ── Providers that support OpenAI-style json_schema response_format ──
     _JSON_SCHEMA_PROVIDERS = frozenset({"openai"})
 
+    # ── Prompt caching (Anthropic) ──
+    _ANTHROPIC_PREFIXES = ("claude", "anthropic/")
+
+    def _is_anthropic_model(self) -> bool:
+        """Return True if the current model targets Anthropic."""
+        model_lower = self._model.lower()
+        return any(model_lower.startswith(p) for p in self._ANTHROPIC_PREFIXES)
+
+    @staticmethod
+    def _apply_cache_control(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Annotate the first system message with ``cache_control`` for prompt caching.
+
+        Returns a shallow copy with the first system message's ``content``
+        transformed to the content-blocks format expected by Anthropic / LiteLLM.
+        Subsequent messages are left unchanged.  Safe to call unconditionally;
+        if there are no system messages the list is returned as-is.
+        """
+        result: list[dict[str, Any]] = []
+        marked = False
+        for msg in messages:
+            msg_copy = dict(msg)
+            if not marked and msg_copy.get("role") == "system":
+                content = msg_copy.get("content", "")
+                if isinstance(content, str) and content:
+                    msg_copy["content"] = [
+                        {
+                            "type": "text",
+                            "text": content,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                marked = True
+            result.append(msg_copy)
+        return result
+
+    def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Apply provider-specific message transformations before SDK calls.
+
+        Currently adds ``cache_control`` to the first system message for
+        Anthropic models.  Returns *messages* unmodified for other providers.
+        """
+        if self._is_anthropic_model():
+            return self._apply_cache_control(messages)
+        return messages
+
     def _model_supports_json_schema(self) -> bool:
         """Return True if the model supports ``{"type": "json_schema"}``."""
         if self._provider in self._JSON_SCHEMA_PROVIDERS:
@@ -580,10 +627,11 @@ class _BaseGraphLLMClient(ABC):
         )
         set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
 
+        sdk_messages = self._prepare_messages(messages)
         last_chunk: Mapping[str, Any] = {}
         try:
             for chunk in self._sdk_stream_call(
-                messages=messages,
+                messages=sdk_messages,
                 temperature=temperature,
                 effort_override=effort_override,
             ):
@@ -994,9 +1042,10 @@ class _BaseGraphLLMClient(ABC):
             )
             set_prompt_metadata(span, prompt_meta, rendered_length=rendered_length)
 
+            sdk_messages = self._prepare_messages(messages)
             try:
                 result = self._sdk_call(
-                    messages=messages,
+                    messages=sdk_messages,
                     temperature=temperature,
                     response_format=response_format,
                 )

@@ -279,6 +279,7 @@ class GenerationTrace(BaseModel):
     completion_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
+    reasoning_content: str | None = None
     cached_tokens: int | None = Field(default=None, ge=0)
     reasoning_requested: bool | None = None
     reasoning_supported: bool | None = None

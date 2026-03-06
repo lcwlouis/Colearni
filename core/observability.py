@@ -56,6 +56,7 @@ LLM_SYSTEM = "llm.system"
 LLM_PROVIDER = "llm.provider"
 LLM_TOKEN_COUNT_CACHE_READ = "llm.token_count.prompt_details.cache_read"
 LLM_TOKEN_COUNT_REASONING = "llm.token_count.completion_details.reasoning"
+LLM_REASONING_CONTENT = "llm.reasoning_content"
 
 # Span kind constants (values recognised by Phoenix)
 SPAN_KIND_LLM = "LLM"
@@ -120,6 +121,7 @@ _SAFE_KEYS = {
     LLM_PROVIDER,
     LLM_TOKEN_COUNT_CACHE_READ,
     LLM_TOKEN_COUNT_REASONING,
+    LLM_REASONING_CONTENT,
 }
 _SENSITIVE_MARKERS = (
     "api_key",
@@ -778,4 +780,6 @@ __all__ = [
     "set_usage_source",
     "start_span",
     "create_span",
+    "LLM_TOKEN_COUNT_REASONING",
+    "LLM_REASONING_CONTENT",
 ]
