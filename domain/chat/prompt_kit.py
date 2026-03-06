@@ -16,6 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from core.llm_messages import MessageBuilder
 from core.prompting import PromptRegistry
 from core.schemas import EvidenceItem, GroundingMode
 
@@ -271,6 +272,110 @@ def build_full_tutor_prompt(
         return f"{system}\n{evidence_block}\n\nUSER_QUESTION: {query}"
 
 
+def _build_persona_prefix(
+    *,
+    persona: dict[str, str],
+    style: Literal["socratic", "direct"],
+) -> str:
+    """Build the stable persona + teaching-style prefix (cacheable)."""
+    lines: list[str] = [
+        persona.get("system_prefix", PERSONA_COLEARNI["system_prefix"]),
+        "",
+    ]
+    if style == "socratic":
+        lines.extend([
+            "TEACHING STYLE: Socratic",
+            "- Do NOT give the final answer directly.",
+            "- Ask one guiding question first, then give a brief hint.",
+            "- Encourage the student to reason through the problem.",
+        ])
+    else:
+        lines.extend([
+            "TEACHING STYLE: Direct",
+            "- Provide a clear, concise explanation.",
+            "- Be grounded in the cited evidence.",
+            "- Summarize key points efficiently.",
+        ])
+    return "\n".join(lines)
+
+
+def build_tutor_messages(
+    *,
+    query: str,
+    evidence: Sequence[EvidenceItem],
+    persona: dict[str, str],
+    style: Literal["socratic", "direct"],
+    grounding_mode: GroundingMode = GroundingMode.STRICT,
+    assessment_context: str = "",
+    history_summary: str = "",
+    document_summaries: str = "",
+    graph_context: str = "",
+    flashcard_progress: str = "",
+    learner_profile_summary: str = "",
+) -> tuple[MessageBuilder, object]:
+    """Build the tutor prompt as a :class:`MessageBuilder`.
+
+    Returns ``(MessageBuilder, PromptMeta | None)``.  The builder separates
+    the stable persona prefix from variable per-turn context blocks so that
+    providers can leverage prompt-caching on the prefix.
+    """
+    # Try to obtain PromptMeta from the registry (for tracing / versioning).
+    asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
+    strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
+    meta = None
+    try:
+        _, meta = _registry.render_with_meta(asset_id, {
+            "strict_grounded_mode": strict_grounded_mode,
+            "mastery_status": "learned" if style == "direct" else "locked",
+            "document_summaries": document_summaries or "(none)",
+            "graph_context": graph_context or "(none)",
+            "assessment_context": assessment_context or "(none)",
+            "flashcard_progress": flashcard_progress or "(none)",
+            "learner_profile_summary": learner_profile_summary or "(none)",
+            "history_summary": history_summary or "(none)",
+            "evidence_block": "(see user message)",
+            "query": "(see user message)",
+        })
+    except Exception:
+        log.debug("asset render_with_meta failed for %s, meta unavailable", asset_id)
+
+    builder = MessageBuilder()
+
+    # Stable prefix (cacheable – doesn't change per turn for a given style)
+    builder.system(_build_persona_prefix(persona=persona, style=style))
+
+    # Variable context blocks (skipped when empty)
+    if document_summaries:
+        builder.context(document_summaries, label="documents")
+    if graph_context:
+        builder.context(graph_context, label="graph")
+    if assessment_context:
+        builder.context(assessment_context, label="assessment")
+    if flashcard_progress:
+        builder.context(flashcard_progress, label="flashcards")
+    if learner_profile_summary:
+        builder.context(learner_profile_summary, label="learner_profile")
+    if history_summary:
+        builder.context(history_summary, label="history")
+
+    # User message: evidence + query
+    evidence_block = build_evidence_block(evidence)
+    builder.user(f"{evidence_block}\n\nUSER_QUESTION: {query}")
+
+    return builder, meta
+
+
+def _flatten_builder(builder: MessageBuilder) -> PromptMessages:
+    """Collapse a MessageBuilder into a single PromptMessages (compat helper)."""
+    msgs = builder.messages
+    system_parts = [m["content"] for m in msgs if m["role"] == "system"]
+    user_parts = [m["content"] for m in msgs if m["role"] == "user"]
+    return PromptMessages(
+        system="\n\n".join(system_parts),
+        user="\n\n".join(user_parts),
+    )
+
+
 def build_full_tutor_prompt_with_meta(
     *,
     query: str,
@@ -287,42 +392,71 @@ def build_full_tutor_prompt_with_meta(
 ) -> tuple[PromptMessages, object]:
     """Build the complete prompt and return (PromptMessages, PromptMeta | None).
 
-    Returns a :class:`PromptMessages` with system and user content split so
-    that the system message contains the full protocol/rules template and the
-    user message contains only the evidence and query for this turn.
+    Compatibility wrapper around :func:`build_tutor_messages`.  Flattens the
+    structured ``MessageBuilder`` back into a single ``PromptMessages`` so
+    that existing callers continue to work without changes.
     """
-    evidence_block = build_evidence_block(evidence)
-    asset_id = _TUTOR_ASSET_IDS.get(style, "tutor_socratic_v1")
-    strict_grounded_mode = "true" if grounding_mode == GroundingMode.STRICT else "false"
+    builder, meta = build_tutor_messages(
+        query=query,
+        evidence=evidence,
+        persona=persona,
+        style=style,
+        grounding_mode=grounding_mode,
+        assessment_context=assessment_context,
+        history_summary=history_summary,
+        document_summaries=document_summaries,
+        graph_context=graph_context,
+        flashcard_progress=flashcard_progress,
+        learner_profile_summary=learner_profile_summary,
+    )
+    return _flatten_builder(builder), meta
 
+
+def build_socratic_interactive_messages(
+    *,
+    query: str,
+    evidence: Sequence[EvidenceItem],
+    tutor_state_text: str,
+    command_context: str = "",
+    history_summary: str = "",
+    document_summaries: str = "",
+) -> tuple[MessageBuilder, object]:
+    """Build Socratic interactive prompt as a :class:`MessageBuilder`.
+
+    Returns ``(MessageBuilder, PromptMeta | None)``.
+    """
+    meta = None
     try:
-        system_text, meta = _registry.render_with_meta(asset_id, {
-            "strict_grounded_mode": strict_grounded_mode,
-            "mastery_status": "learned" if style == "direct" else "locked",
-            "document_summaries": document_summaries or "(none)",
-            "graph_context": graph_context or "(none)",
-            "assessment_context": assessment_context or "(none)",
-            "flashcard_progress": flashcard_progress or "(none)",
-            "learner_profile_summary": learner_profile_summary or "(none)",
-            "history_summary": history_summary or "(none)",
+        _, meta = _registry.render_with_meta("tutor_socratic_interactive_v1", {
+            "tutor_state": tutor_state_text,
+            "command_context": command_context or "(no command — regular message)",
             "evidence_block": "(see user message)",
+            "history_summary": history_summary or "(none)",
             "query": "(see user message)",
+            "document_summaries": document_summaries or "(none)",
         })
     except Exception:
-        log.debug("asset render_with_meta failed for %s, using inline fallback", asset_id)
-        system_text = _build_system_prompt_inline(
-            persona=persona,
-            style=style,
-            assessment_context=assessment_context,
-            history_summary=history_summary,
-            document_summaries=document_summaries,
-            graph_context=graph_context,
-            flashcard_progress=flashcard_progress,
-        )
-        meta = None
+        log.debug("socratic interactive asset failed, meta unavailable")
 
-    user_text = f"{evidence_block}\n\nUSER_QUESTION: {query}"
-    return PromptMessages(system=system_text, user=user_text), meta
+    builder = MessageBuilder()
+
+    # Stable prefix
+    builder.system("You are a Socratic tutor.")
+
+    # Variable context blocks
+    builder.context(f"STATE:\n{tutor_state_text}", label="tutor_state")
+    if command_context:
+        builder.context(f"COMMAND: {command_context}", label="command")
+    if document_summaries:
+        builder.context(document_summaries, label="documents")
+    if history_summary:
+        builder.context(history_summary, label="history")
+
+    # User message: evidence + query
+    evidence_block = build_evidence_block(evidence)
+    builder.user(f"{evidence_block}\n\nUSER: {query}")
+
+    return builder, meta
 
 
 def build_socratic_interactive_prompt(
@@ -336,30 +470,18 @@ def build_socratic_interactive_prompt(
 ) -> tuple[PromptMessages, object]:
     """Build prompt for the Socratic interactive protocol.
 
-    Returns ``(PromptMessages, PromptMeta | None)`` with the protocol and
-    tutor state in the system message and the evidence + user query in the
-    user message.
+    Compatibility wrapper around :func:`build_socratic_interactive_messages`.
+    Returns ``(PromptMessages, PromptMeta | None)``.
     """
-    evidence_block = build_evidence_block(evidence)
-    try:
-        system_text, meta = _registry.render_with_meta("tutor_socratic_interactive_v1", {
-            "tutor_state": tutor_state_text,
-            "command_context": command_context or "(no command — regular message)",
-            "evidence_block": "(see user message)",
-            "history_summary": history_summary or "(none)",
-            "query": "(see user message)",
-            "document_summaries": document_summaries or "(none)",
-        })
-    except Exception:
-        log.debug("socratic interactive asset failed, using inline fallback")
-        system_text = (
-            f"You are a Socratic tutor.\n\nSTATE:\n{tutor_state_text}\n\n"
-            f"COMMAND: {command_context}"
-        )
-        meta = None
-
-    user_text = f"{evidence_block}\n\nUSER: {query}"
-    return PromptMessages(system=system_text, user=user_text), meta
+    builder, meta = build_socratic_interactive_messages(
+        query=query,
+        evidence=evidence,
+        tutor_state_text=tutor_state_text,
+        command_context=command_context,
+        history_summary=history_summary,
+        document_summaries=document_summaries,
+    )
+    return _flatten_builder(builder), meta
 
 
 __all__ = [
@@ -368,9 +490,11 @@ __all__ = [
     "build_evidence_block",
     "build_full_tutor_prompt",
     "build_full_tutor_prompt_with_meta",
+    "build_socratic_interactive_messages",
     "build_socratic_interactive_prompt",
     "build_social_response",
     "build_system_prompt",
+    "build_tutor_messages",
     "classify_social_intent",
     "get_persona",
 ]

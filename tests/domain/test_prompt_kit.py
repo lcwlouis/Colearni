@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import pytest
+from core.llm_messages import MessageBuilder
 from core.schemas import EvidenceItem, EvidenceSourceType, GroundingMode
 from domain.chat.prompt_kit import (
+    PromptMessages,
     build_full_tutor_prompt,
+    build_full_tutor_prompt_with_meta,
+    build_socratic_interactive_messages,
+    build_socratic_interactive_prompt,
     build_social_response,
     build_system_prompt,
+    build_tutor_messages,
     classify_social_intent,
     get_persona,
 )
@@ -158,3 +164,186 @@ class TestPromptBuilder:
         )
         assert "Thermodynamics" in prompt
         assert "Mechanics" in prompt
+
+
+class TestBuildTutorMessages:
+    """Tests for the new MessageBuilder-based build_tutor_messages()."""
+
+    def test_returns_message_builder_and_meta(self) -> None:
+        persona = get_persona("colearni")
+        builder, meta = build_tutor_messages(
+            query="What is recursion?",
+            evidence=_sample_evidence(),
+            persona=persona,
+            style="socratic",
+        )
+        assert isinstance(builder, MessageBuilder)
+
+    def test_builder_has_system_prefix(self) -> None:
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="What is recursion?",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+        )
+        msgs = builder.build()
+        system_msgs = [m for m in msgs if m["role"] == "system"]
+        assert len(system_msgs) >= 1
+        prefix = system_msgs[0]["content"]
+        assert "CoLearni" in prefix
+        assert "Socratic" in prefix
+
+    def test_builder_ends_with_user_message(self) -> None:
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="Explain mitosis",
+            evidence=_sample_evidence(),
+            persona=persona,
+            style="direct",
+        )
+        msgs = builder.build()
+        assert msgs[-1]["role"] == "user"
+        assert "Explain mitosis" in msgs[-1]["content"]
+
+    def test_evidence_in_user_message(self) -> None:
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="Explain photosynthesis",
+            evidence=_sample_evidence(),
+            persona=persona,
+            style="socratic",
+        )
+        msgs = builder.build()
+        user_msg = msgs[-1]["content"]
+        assert "Photosynthesis" in user_msg
+        assert "USER_QUESTION:" in user_msg
+
+    def test_context_blocks_present(self) -> None:
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="Question",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            document_summaries="Chapter 1 overview",
+            graph_context="A -> B -> C",
+            assessment_context="score: 80%",
+        )
+        msgs = builder.build()
+        system_msgs = [m for m in msgs if m["role"] == "system"]
+        # prefix + 3 context blocks
+        assert len(system_msgs) == 4
+        all_system = " ".join(m["content"] for m in system_msgs)
+        assert "Chapter 1 overview" in all_system
+        assert "A -> B -> C" in all_system
+        assert "score: 80%" in all_system
+
+    def test_empty_context_blocks_skipped(self) -> None:
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="Question",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            document_summaries="",
+            graph_context="",
+            assessment_context="",
+        )
+        msgs = builder.build()
+        system_msgs = [m for m in msgs if m["role"] == "system"]
+        # Only the persona prefix — no context blocks
+        assert len(system_msgs) == 1
+
+    def test_direct_style_prefix(self) -> None:
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="Q",
+            evidence=[],
+            persona=persona,
+            style="direct",
+        )
+        msgs = builder.build()
+        prefix = msgs[0]["content"]
+        assert "Direct" in prefix
+
+
+class TestBuildFullTutorPromptWithMetaCompat:
+    """Backward compatibility: build_full_tutor_prompt_with_meta returns PromptMessages."""
+
+    def test_returns_prompt_messages(self) -> None:
+        persona = get_persona("colearni")
+        pm, meta = build_full_tutor_prompt_with_meta(
+            query="What is recursion?",
+            evidence=_sample_evidence(),
+            persona=persona,
+            style="socratic",
+        )
+        assert isinstance(pm, PromptMessages)
+        assert isinstance(pm.system, str)
+        assert isinstance(pm.user, str)
+
+    def test_system_contains_persona_and_context(self) -> None:
+        persona = get_persona("colearni")
+        pm, _ = build_full_tutor_prompt_with_meta(
+            query="Q",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            document_summaries="Biology chapter 5",
+            assessment_context="quiz passed",
+        )
+        assert "CoLearni" in pm.system
+        assert "Biology chapter 5" in pm.system
+        assert "quiz passed" in pm.system
+
+    def test_user_contains_evidence_and_query(self) -> None:
+        persona = get_persona("colearni")
+        pm, _ = build_full_tutor_prompt_with_meta(
+            query="Explain DNA",
+            evidence=_sample_evidence(),
+            persona=persona,
+            style="direct",
+        )
+        assert "Explain DNA" in pm.user
+        assert "Photosynthesis" in pm.user
+
+
+class TestBuildSocraticInteractiveMessages:
+    """Tests for build_socratic_interactive_messages()."""
+
+    def test_returns_message_builder(self) -> None:
+        builder, meta = build_socratic_interactive_messages(
+            query="Tell me more",
+            evidence=[],
+            tutor_state_text="phase: explain",
+        )
+        assert isinstance(builder, MessageBuilder)
+
+    def test_builder_structure(self) -> None:
+        builder, _ = build_socratic_interactive_messages(
+            query="Why?",
+            evidence=_sample_evidence(),
+            tutor_state_text="phase: question",
+            command_context="/hint",
+            document_summaries="Doc summary",
+        )
+        msgs = builder.build()
+        assert msgs[-1]["role"] == "user"
+        assert "Why?" in msgs[-1]["content"]
+        system_msgs = [m for m in msgs if m["role"] == "system"]
+        all_system = " ".join(m["content"] for m in system_msgs)
+        assert "Socratic" in all_system
+        assert "phase: question" in all_system
+        assert "/hint" in all_system
+        assert "Doc summary" in all_system
+
+    def test_compat_wrapper_returns_prompt_messages(self) -> None:
+        pm, meta = build_socratic_interactive_prompt(
+            query="What next?",
+            evidence=[],
+            tutor_state_text="phase: hint",
+        )
+        assert isinstance(pm, PromptMessages)
+        assert "What next?" in pm.user
+        assert "Socratic" in pm.system
