@@ -1,13 +1,15 @@
 """FastAPI app entrypoint."""
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from adapters.llm.factory import build_graph_llm_client
-from core.observability import configure_observability
-from core.settings import Settings, get_settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from adapters.db.chat import cleanup_stale_generating_messages
+from adapters.db.session import new_session
+from adapters.llm.factory import build_graph_llm_client
 from apps.api.middleware import CorrelationIdMiddleware
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.chat import router as chat_router
@@ -22,6 +24,23 @@ from apps.api.routes.quizzes import router as quizzes_router
 from apps.api.routes.readiness import router as readiness_router
 from apps.api.routes.research import router as research_router
 from apps.api.routes.workspaces import router as workspaces_router
+from core.observability import configure_observability
+from core.settings import Settings, get_settings
+
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    db = new_session()
+    try:
+        count = cleanup_stale_generating_messages(db)
+        log.info("Cleaned up %d stale generating messages", count)
+    except Exception:
+        log.warning("Stale message cleanup skipped (table may not exist yet)")
+    finally:
+        db.close()
+    yield
 
 
 def create_app(*, settings: Settings | None = None) -> FastAPI:
@@ -36,7 +55,7 @@ def create_app(*, settings: Settings | None = None) -> FastAPI:
     )
 
     configure_observability(resolved_settings)
-    app = FastAPI(title="CoLearni API", version="0.1.0", redirect_slashes=False)
+    app = FastAPI(title="CoLearni API", version="0.1.0", redirect_slashes=False, lifespan=_lifespan)
     app.state.settings = resolved_settings
     app.state.graph_llm_client = (
         build_graph_llm_client(settings=resolved_settings)

@@ -250,9 +250,10 @@ def list_chat_messages(
         session.execute(
             text(
                 """
-                SELECT id, session_id, type, payload, created_at
+                SELECT id, session_id, type, payload, status, created_at
                 FROM chat_messages
                 WHERE session_id = :session_id
+                  AND status != 'superseded'
                 ORDER BY created_at ASC, id ASC
                 LIMIT :limit
                 """
@@ -268,6 +269,7 @@ def list_chat_messages(
             "session_id": int(row["session_id"]),
             "type": str(row["type"]),
             "payload": row["payload"] if isinstance(row["payload"], dict) else {},
+            "status": str(row["status"]),
             "created_at": row["created_at"],
         }
         for row in rows
@@ -331,6 +333,7 @@ def list_recent_chat_messages(
                 SELECT id, type, payload, created_at
                 FROM chat_messages
                 WHERE session_id = :session_id
+                  AND status NOT IN ('generating', 'failed', 'superseded')
                 ORDER BY created_at DESC, id DESC
                 LIMIT :limit
                 """
@@ -376,6 +379,7 @@ def latest_system_summary(session: Session, *, session_id: int) -> str | None:
                 FROM chat_messages
                 WHERE session_id = :session_id
                   AND type = 'system'
+                  AND status NOT IN ('generating', 'failed', 'superseded')
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """
