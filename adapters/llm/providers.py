@@ -202,12 +202,17 @@ class _BaseGraphLLMClient(ABC):
 
     def _model_supports_json_schema(self) -> bool:
         """Return True if the model supports ``{"type": "json_schema"}``."""
-        if self._provider in self._JSON_SCHEMA_PROVIDERS:
-            return True
-        model_lower = self._model.lower()
-        if model_lower.startswith("openai/") or "gpt-" in model_lower:
-            return True
-        return False
+        try:
+            import litellm
+            return litellm.supports_response_schema(model=self._model, custom_llm_provider=self._provider)
+        except Exception:
+            # Fallback to heuristic if litellm check unavailable
+            if self._provider in self._JSON_SCHEMA_PROVIDERS:
+                return True
+            model_lower = self._model.lower()
+            if model_lower.startswith("openai/") or "gpt-" in model_lower:
+                return True
+            return False
 
     def extract_raw_graph(self, *, chunk_text: str) -> Mapping[str, Any]:
         prompt_meta = None
