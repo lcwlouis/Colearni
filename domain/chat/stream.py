@@ -544,12 +544,16 @@ def _stream_inner(
             operation="chat.stream.socratic",
         )
         text_parts: list[str] = []
-        for delta in text_stream:
-            if not responded and delta:
-                yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
-                responded = True
-            text_parts.append(delta)
-            yield ChatStreamDeltaEvent(text=delta)
+        try:
+            for delta in text_stream:
+                if not responded and delta:
+                    yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
+                    responded = True
+                text_parts.append(delta)
+                yield ChatStreamDeltaEvent(text=delta)
+        except Exception:
+            log.exception("LLM streaming error (socratic)")
+            raise
         assistant_text = "".join(text_parts).strip()
         generation_trace = text_stream.trace
         if generation_trace is not None:
@@ -592,12 +596,16 @@ def _stream_inner(
             operation="chat.stream",
         )
         text_parts: list[str] = []
-        for delta in text_stream:
-            if not responded and delta:
-                yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
-                responded = True
-            text_parts.append(delta)
-            yield ChatStreamDeltaEvent(text=delta)
+        try:
+            for delta in text_stream:
+                if not responded and delta:
+                    yield ChatStreamStatusEvent(phase=ChatPhase.RESPONDING)
+                    responded = True
+                text_parts.append(delta)
+                yield ChatStreamDeltaEvent(text=delta)
+        except Exception:
+            log.exception("LLM streaming error")
+            raise
         assistant_text = "".join(text_parts).strip()
         generation_trace = text_stream.trace
         if generation_trace is not None:

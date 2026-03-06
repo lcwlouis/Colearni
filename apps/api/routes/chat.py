@@ -255,23 +255,29 @@ def respond_chat_stream(
         event_types: Counter[str] = Counter()
         log.info("stream start ws=%s session=%s", ws.workspace_id, resolved_session_id)
         last_event_time = time.monotonic()
-        for event in generate_chat_response_stream(
-            session=db,
-            request=internal,
-            settings=settings,
-        ):
-            now = time.monotonic()
-            if now - last_event_time > KEEPALIVE_INTERVAL:
-                yield ": keepalive\n\n"
-            event_count += 1
-            event_types[event.event] += 1
-            data = event.model_dump_json()
-            log.debug(
-                "stream event #%d type=%s ws=%s",
-                event_count, event.event, ws.workspace_id,
-            )
-            yield f"event: {event.event}\ndata: {data}\n\n"
-            last_event_time = time.monotonic()
+        try:
+            for event in generate_chat_response_stream(
+                session=db,
+                request=internal,
+                settings=settings,
+            ):
+                now = time.monotonic()
+                if now - last_event_time > KEEPALIVE_INTERVAL:
+                    yield ": keepalive\n\n"
+                event_count += 1
+                event_types[event.event] += 1
+                data = event.model_dump_json()
+                log.debug(
+                    "stream event #%d type=%s ws=%s",
+                    event_count, event.event, ws.workspace_id,
+                )
+                yield f"event: {event.event}\ndata: {data}\n\n"
+                last_event_time = time.monotonic()
+        except Exception:
+            log.exception("SSE generator error ws=%s session=%s", ws.workspace_id, resolved_session_id)
+            from core.schemas.chat_stream import ChatStreamErrorEvent
+            err_event = ChatStreamErrorEvent(message="Internal streaming error")
+            yield f"event: error\ndata: {err_event.model_dump_json()}\n\n"
         log.info(
             "stream complete ws=%s session=%s events=%d breakdown=%s",
             ws.workspace_id,
