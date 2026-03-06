@@ -370,6 +370,9 @@ def generate_chat_response(
                 quiz_context=combined_quiz_context,
                 flashcard_progress=flashcard_progress,
                 learner_profile_summary=learner_profile_summary,
+                session=session,
+                workspace_id=request.workspace_id,
+                user_id=request.user_id,
             )
 
         draft = AssistantDraft(
