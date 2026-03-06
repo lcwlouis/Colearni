@@ -204,7 +204,12 @@ class _BaseGraphLLMClient(ABC):
         """Return True if the model supports ``{"type": "json_schema"}``."""
         try:
             import litellm
-            return litellm.supports_response_schema(model=self._model, custom_llm_provider=self._provider)
+            # Don't pass custom_llm_provider="litellm" — litellm is a routing
+            # layer, not a provider.  Let it parse the model string instead.
+            kwargs: dict[str, str] = {"model": self._model}
+            if self._provider not in ("litellm", "unknown"):
+                kwargs["custom_llm_provider"] = self._provider
+            return litellm.supports_response_schema(**kwargs)
         except Exception:
             # Fallback to heuristic if litellm check unavailable
             if self._provider in self._JSON_SCHEMA_PROVIDERS:

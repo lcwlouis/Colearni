@@ -55,7 +55,7 @@ class TestModelSupportsJsonSchema:
     def test_returns_false_for_unsupported_model(self, mock_srs: MagicMock) -> None:
         client = _StubClient(model="old-model-v1", provider="litellm")
         assert client._model_supports_json_schema() is False
-        mock_srs.assert_called_once_with(model="old-model-v1", custom_llm_provider="litellm")
+        mock_srs.assert_called_once_with(model="old-model-v1")
 
     @patch("litellm.supports_response_schema", side_effect=Exception("unavailable"))
     def test_fallback_openai_provider(self, mock_srs: MagicMock) -> None:
@@ -99,7 +99,7 @@ class TestJsonSchemaWithLiteLLMProvider:
     def test_litellm_provider_supported(self, mock_srs: MagicMock) -> None:
         client = _StubClient(model="openai/gpt-4o", provider="litellm")
         assert client._model_supports_json_schema() is True
-        mock_srs.assert_called_once_with(model="openai/gpt-4o", custom_llm_provider="litellm")
+        mock_srs.assert_called_once_with(model="openai/gpt-4o")
 
     @patch("litellm.supports_response_schema", return_value=False)
     def test_litellm_provider_unsupported(self, mock_srs: MagicMock) -> None:

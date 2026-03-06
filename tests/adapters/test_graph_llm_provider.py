@@ -179,7 +179,8 @@ class TestJsonSchemaDowngrade:
         assert client._captured_format is not None
         assert client._captured_format["type"] == "json_schema"
 
-    def test_deepseek_model_uses_json_object(self) -> None:
+    def test_deepseek_model_uses_json_schema(self) -> None:
+        """DeepSeek supports json_schema via litellm runtime check."""
         client = _FormatCapturingStub(
             model="deepseek/deepseek-chat", provider="litellm",
         )
@@ -189,10 +190,10 @@ class TestJsonSchemaDowngrade:
             prompt="test",
         )
         assert client._captured_format is not None
-        assert client._captured_format["type"] == "json_object"
+        assert client._captured_format["type"] == "json_schema"
 
-    def test_deepseek_model_includes_schema_hint(self) -> None:
-        """Non-json_schema models always include schema hint in system prompt."""
+    def test_deepseek_model_json_schema_includes_schema(self) -> None:
+        """DeepSeek json_schema response includes the schema definition."""
         client = _FormatCapturingStub(
             model="deepseek/deepseek-chat", provider="litellm",
         )
@@ -202,9 +203,9 @@ class TestJsonSchemaDowngrade:
             schema=schema,
             prompt="test",
         )
-        system_msg = client._captured_messages[0]["content"]
-        assert "json" in system_msg.lower()
-        assert '"name"' in system_msg
+        assert client._captured_format is not None
+        assert client._captured_format["type"] == "json_schema"
+        assert "schema" in client._captured_format["json_schema"]
 
     def test_openai_prefixed_litellm_model_uses_json_schema(self) -> None:
         client = _FormatCapturingStub(
