@@ -9,6 +9,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from core.contracts import TutorTextStream
+from core.llm_messages import Message
 from core.observability import (
     SPAN_KIND_LLM,
     LLM_TOKEN_COUNT_REASONING,
@@ -385,8 +386,6 @@ class _BaseGraphLLMClient(ABC):
 
     def generate_tutor_text_traced(self, *, prompt: str, prompt_meta: Any | None = None, system_prompt: str | None = None) -> tuple[str, "GenerationTrace"]:
         """Generate tutor text and return (text, trace) tuple."""
-        from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
-
         text, trace = self._chat_text_traced(
             prompt=prompt,
             system_instruction=(
@@ -419,10 +418,33 @@ class _BaseGraphLLMClient(ABC):
         ``operation`` names the LLM span for Phoenix.  Defaults to the
         active observation context's ``operation`` field, then ``llm.stream``.
         """
-        messages = [
+        messages: list[Message] = [
             {"role": "system", "content": system_prompt or "You are a grounded tutor. Follow style instructions exactly and stay concise."},
             {"role": "user", "content": prompt},
         ]
+        return self.stream_messages(
+            messages,
+            prompt_meta=prompt_meta,
+            reasoning_effort_override=reasoning_effort_override,
+            operation=operation or "",
+        )
+
+    # -- messages[]-native methods -----------------------------------------
+
+    def stream_messages(
+        self,
+        messages: list[Message],
+        *,
+        prompt_meta: Any | None = None,
+        reasoning_effort_override: str | None = None,
+        operation: str = "",
+    ) -> TutorTextStream:
+        """Stream LLM response from pre-built messages.
+
+        This is the ``messages[]``-native entry point for streaming calls.
+        ``generate_tutor_text_stream`` delegates here after constructing a
+        simple two-message list.
+        """
         supported = self._model_supports_reasoning()
         used = self._reasoning_enabled and supported
         if reasoning_effort_override is not None and used:
@@ -431,13 +453,12 @@ class _BaseGraphLLMClient(ABC):
         else:
             effort = self._reasoning_effort if used else None
             effort_source = "settings" if effort is not None else None
-        # "none" means disable explicit reasoning — no params sent to provider
         if effort == "none":
             used = False
             effort = None
             effort_source = None
         stream_obj = TutorTextStream(
-            self._iter_nothing(),  # placeholder, replaced below
+            self._iter_nothing(),
             provider=self._provider,
             model=self._model,
             reasoning_requested=self._reasoning_enabled,
@@ -446,14 +467,15 @@ class _BaseGraphLLMClient(ABC):
             reasoning_effort=effort,
             reasoning_effort_source=effort_source,
         )
+        rendered_length = self._last_user_content_length(messages) if prompt_meta else None
         stream_obj._delta_iter = self._stream_with_usage(
             messages=messages,
             temperature=self._tutor_temperature,
             stream_obj=stream_obj,
             prompt_meta=prompt_meta,
-            rendered_length=len(prompt) if prompt_meta else None,
+            rendered_length=rendered_length,
             effort_override=reasoning_effort_override if used else None,
-            operation=operation,
+            operation=operation or None,
         )
         return stream_obj
 
@@ -647,6 +669,31 @@ class _BaseGraphLLMClient(ABC):
         system_prompt: str | None = None,
     ) -> dict[str, Any]:
         base_system = system_prompt or "Return only JSON that satisfies the provided schema."
+        messages: list[Message] = [
+            {"role": "system", "content": base_system},
+            {"role": "user", "content": prompt},
+        ]
+        return self.complete_messages_json(
+            messages,
+            schema_name=schema_name,
+            schema=schema,
+            prompt_meta=prompt_meta,
+        )
+
+    def complete_messages_json(
+        self,
+        messages: list[Message],
+        *,
+        schema_name: str,
+        schema: dict[str, object],
+        prompt_meta: Any | None = None,
+    ) -> dict[str, Any]:
+        """JSON-mode LLM call from pre-built messages with format fallback.
+
+        This is the ``messages[]``-native entry point for structured JSON
+        calls.  ``_chat_json`` delegates here after constructing a simple
+        two-message list.
+        """
         schema_hint = json.dumps(schema, indent=2)
         schema_suffix = (
             f"\n\nYou MUST respond with a JSON object conforming to this schema:\n"
@@ -654,7 +701,7 @@ class _BaseGraphLLMClient(ABC):
         )
 
         if self._model_supports_json_schema():
-            attempts: list[tuple[dict[str, object] | None, str, str]] = [
+            attempts: list[tuple[dict[str, object] | None, bool, str]] = [
                 (
                     {
                         "type": "json_schema",
@@ -664,30 +711,32 @@ class _BaseGraphLLMClient(ABC):
                             "schema": schema,
                         },
                     },
-                    base_system,
+                    False,
                     "json_schema",
                 ),
-                ({"type": "json_object"}, base_system + schema_suffix, "json_object+hint"),
-                (None, base_system + schema_suffix, "prompt-only"),
+                ({"type": "json_object"}, True, "json_object+hint"),
+                (None, True, "prompt-only"),
             ]
         else:
             attempts = [
-                ({"type": "json_object"}, base_system + schema_suffix, "json_object+hint"),
-                (None, base_system + schema_suffix, "prompt-only"),
+                ({"type": "json_object"}, True, "json_object+hint"),
+                (None, True, "prompt-only"),
             ]
 
-        for i, (response_format, system_content, level) in enumerate(attempts):
-            messages = [
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": prompt},
-            ]
+        rendered_length = self._last_user_content_length(messages) if prompt_meta else None
+
+        for i, (response_format, needs_hint, level) in enumerate(attempts):
+            attempt_messages = (
+                self._with_schema_hint(messages, schema_suffix) if needs_hint
+                else list(messages)
+            )
             try:
                 result = self._call_with_observability(
-                    messages=messages,
+                    messages=attempt_messages,
                     temperature=self._json_temperature,
                     response_format=response_format,
                     prompt_meta=prompt_meta,
-                    rendered_length=len(prompt) if prompt_meta else None,
+                    rendered_length=rendered_length,
                 )
             except Exception as exc:
                 if i < len(attempts) - 1 and self._is_format_error(exc):
@@ -700,7 +749,6 @@ class _BaseGraphLLMClient(ABC):
                     )
                     continue
                 raise
-            # Parse the response — fall back to next level on malformed JSON.
             try:
                 content = self._extract_content(result)
                 response_payload = json.loads(content)
@@ -740,21 +788,41 @@ class _BaseGraphLLMClient(ABC):
         ``reasoning_effort_override`` is a reserved seam for future first-layer
         per-call effort selection.
         """
+        messages: list[Message] = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": prompt},
+        ]
+        return self.complete_messages(
+            messages,
+            prompt_meta=prompt_meta,
+            reasoning_effort_override=reasoning_effort_override,
+        )
+
+    def complete_messages(
+        self,
+        messages: list[Message],
+        *,
+        prompt_meta: Any | None = None,
+        reasoning_effort_override: str | None = None,
+    ) -> tuple[str, "GenerationTrace"]:
+        """Non-streaming LLM call from pre-built messages.
+
+        This is the ``messages[]``-native entry point for blocking calls.
+        ``_chat_text_traced`` delegates here after constructing a simple
+        two-message list.
+        """
         import time as _time  # noqa: PLC0415
 
         from core.schemas.assistant import GenerationTrace  # noqa: PLC0415
 
-        messages = [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": prompt},
-        ]
+        rendered_length = self._last_user_content_length(messages) if prompt_meta else None
         t0 = _time.monotonic_ns()
         result = self._call_with_observability(
             messages=messages,
             temperature=self._tutor_temperature,
             response_format=None,
             prompt_meta=prompt_meta,
-            rendered_length=len(prompt) if prompt_meta else None,
+            rendered_length=rendered_length,
         )
         elapsed_ms = round((_time.monotonic_ns() - t0) / 1_000_000, 2)
         text = self._extract_content(result).strip()
@@ -768,7 +836,6 @@ class _BaseGraphLLMClient(ABC):
         else:
             effort = self._reasoning_effort if used else None
             effort_source = "settings" if effort is not None else None
-        # "none" means disable explicit reasoning — no params sent to provider
         if effort == "none":
             used = False
             effort = None
@@ -789,6 +856,28 @@ class _BaseGraphLLMClient(ABC):
             reasoning_effort_source=effort_source,
         )
         return text, trace
+
+    @staticmethod
+    def _last_user_content_length(messages: list[Message]) -> int | None:
+        """Return the length of the last user message's content, or *None*."""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                return len(msg.get("content", ""))
+        return None
+
+    @staticmethod
+    def _with_schema_hint(
+        messages: list[Message],
+        suffix: str,
+    ) -> list[dict[str, str]]:
+        """Return a copy of *messages* with *suffix* appended to the first system message."""
+        result: list[dict[str, str]] = [dict(m) for m in messages]
+        for msg in result:
+            if msg.get("role") == "system":
+                msg["content"] = msg.get("content", "") + suffix
+                return result
+        result.insert(0, {"role": "system", "content": suffix.lstrip()})
+        return result
 
     def _call_with_observability(
         self,
