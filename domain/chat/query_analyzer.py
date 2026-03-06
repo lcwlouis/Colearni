@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from core.llm_messages import MessageBuilder
 from core.prompting import PromptRegistry
 
 log = logging.getLogger("domain.chat.query_analyzer")
@@ -28,6 +29,36 @@ _QUERY_ANALYZER_SYSTEM = (
     "Classify the learner's request so the system can choose the right response path. "
     "Do not answer the learner's question. Return valid JSON only."
 )
+
+_QUERY_ANALYSIS_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "intent": {
+            "type": "string",
+            "enum": ["learn", "practice", "level_up", "explore", "social", "clarify"],
+        },
+        "requested_mode": {
+            "type": "string",
+            "enum": ["socratic", "direct", "unknown"],
+        },
+        "needs_retrieval": {"type": "boolean"},
+        "should_offer_level_up": {"type": "boolean"},
+        "high_level_keywords": {"type": "array", "items": {"type": "string"}},
+        "low_level_keywords": {"type": "array", "items": {"type": "string"}},
+        "concept_hints": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "intent",
+        "requested_mode",
+        "needs_retrieval",
+        "should_offer_level_up",
+        "high_level_keywords",
+        "low_level_keywords",
+        "concept_hints",
+    ],
+    "additionalProperties": False,
+}
+_QUERY_ANALYSIS_SCHEMA_NAME = "query_analysis"
 
 
 @dataclass(frozen=True)
@@ -63,6 +94,23 @@ def build_query_analysis_prompt(*, query: str, history_summary: str = "") -> tup
             "query": query,
             "history_summary": history_summary or "(none)",
         }), None
+
+
+def build_query_analysis_messages(*, query: str, history_summary: str = "") -> MessageBuilder:
+    """Build multi-message list for query analysis.
+
+    Returns a :class:`MessageBuilder` with a system instruction and a user
+    message containing the query and history context.
+    """
+    prompt_text, _ = build_query_analysis_prompt(
+        query=query,
+        history_summary=history_summary,
+    )
+    return (
+        MessageBuilder()
+        .system(_QUERY_ANALYZER_SYSTEM)
+        .user(prompt_text)
+    )
 
 
 def parse_query_analysis(raw_json: str) -> QueryAnalysis:
@@ -121,15 +169,16 @@ def run_query_analysis(
         log.debug("query analysis skipped: no LLM client")
         return _FALLBACK
 
-    prompt_text, prompt_meta = build_query_analysis_prompt(
+    messages = build_query_analysis_messages(
         query=query,
         history_summary=history_summary,
-    )
+    ).build()
 
     try:
-        raw_text = llm_client.generate_tutor_text(
-            prompt=prompt_text, prompt_meta=prompt_meta,
-            system_prompt=_QUERY_ANALYZER_SYSTEM,
+        data = llm_client.complete_messages_json(
+            messages,
+            schema_name=_QUERY_ANALYSIS_SCHEMA_NAME,
+            schema=_QUERY_ANALYSIS_SCHEMA,
         )
     except (RuntimeError, ValueError) as exc:
         log.warning("query analysis LLM call failed: %s", exc)
@@ -138,11 +187,12 @@ def run_query_analysis(
         log.warning("query analysis LLM call failed unexpectedly", exc_info=True)
         return _FALLBACK
 
-    return parse_query_analysis(raw_text)
+    return parse_query_analysis(json.dumps(data))
 
 
 __all__ = [
     "QueryAnalysis",
+    "build_query_analysis_messages",
     "build_query_analysis_prompt",
     "parse_query_analysis",
     "run_query_analysis",

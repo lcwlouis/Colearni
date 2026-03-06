@@ -6,6 +6,7 @@ import json
 
 from domain.chat.query_analyzer import (
     QueryAnalysis,
+    build_query_analysis_messages,
     build_query_analysis_prompt,
     parse_query_analysis,
     run_query_analysis,
@@ -30,6 +31,30 @@ class TestBuildPrompt:
     def test_renders_without_history(self) -> None:
         prompt, meta = build_query_analysis_prompt(query="What is a cell?")
         assert "(none)" in prompt
+
+
+class TestBuildQueryAnalysisMessages:
+    """Test multi-message builder."""
+
+    def test_returns_message_builder(self) -> None:
+        from core.llm_messages import MessageBuilder
+
+        builder = build_query_analysis_messages(query="Explain DNA")
+        assert isinstance(builder, MessageBuilder)
+
+    def test_builds_system_and_user(self) -> None:
+        msgs = build_query_analysis_messages(query="Explain DNA").build()
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "system"
+        assert msgs[1]["role"] == "user"
+        assert "Explain DNA" in msgs[1]["content"]
+
+    def test_includes_history_summary(self) -> None:
+        msgs = build_query_analysis_messages(
+            query="Continue",
+            history_summary="Discussed mitosis",
+        ).build()
+        assert "Discussed mitosis" in msgs[1]["content"]
 
 
 class TestParseQueryAnalysis:
@@ -159,10 +184,12 @@ class _FakeLLM:
     def __init__(self, response: str | Exception) -> None:
         self._response = response
 
-    def generate_tutor_text(self, *, prompt: str, prompt_meta: object = None, system_prompt: str | None = None) -> str:
+    def complete_messages_json(
+        self, messages: list, *, schema_name: str, schema: dict
+    ) -> dict:
         if isinstance(self._response, Exception):
             raise self._response
-        return self._response
+        return json.loads(self._response)
 
 
 class TestRunQueryAnalysis:
