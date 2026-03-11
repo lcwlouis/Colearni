@@ -37,6 +37,7 @@ def _apply_streaming_patches(monkeypatch: Any) -> None:
     """Common monkeypatches for streaming tests (non-social path)."""
     monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
     monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+    monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
     monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
     monkeypatch.setattr("domain.chat.stream.persist_turn", lambda *a, **kw: None)
     monkeypatch.setattr("domain.chat.stream._session_title_and_compact", lambda s, **kw: None)

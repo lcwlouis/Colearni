@@ -339,6 +339,8 @@ def build_tutor_messages(
     graph_context: str = "",
     flashcard_progress: str = "",
     learner_profile_summary: str = "",
+    history_turns: list[tuple[str, str]] | None = None,
+    compacted_summary: str = "",
 ) -> tuple[MessageBuilder, object]:
     """Build the tutor prompt as a :class:`MessageBuilder`.
 
@@ -382,13 +384,22 @@ def build_tutor_messages(
         builder.context(flashcard_progress, label="flashcards")
     if learner_profile_summary:
         builder.context(learner_profile_summary, label="learner_profile")
-    if history_summary:
+
+    # History: prefer discrete turns over summary block
+    if history_turns is not None:
+        if compacted_summary:
+            builder.context(compacted_summary, label="compacted_history")
+    elif history_summary:
         builder.context(history_summary, label="history")
 
     # Evidence as its own context block (separate from user query)
     if evidence:
         evidence_block = build_evidence_block(evidence)
         builder.context(evidence_block, label="evidence")
+
+    # Discrete history turns (user/assistant pairs) — after all system blocks
+    if history_turns is not None:
+        builder.history(history_turns)
 
     # User message: query only
     builder.user(query)

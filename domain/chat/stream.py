@@ -66,6 +66,7 @@ from domain.chat.session_memory import (
     load_assessment_context,
     load_flashcard_progress,
     load_history_text,
+    load_history_turns,
     load_quiz_progress_snapshot,
     maybe_compact_session_context,
     persist_turn,
@@ -260,6 +261,7 @@ def _stream_inner(
     # Each block must be yield-free to avoid cross-thread context issues.
     with use_span_context(parent_span):
         history_text = load_history_text(session, session_id=request.session_id)
+        compacted_summary, history_turns = load_history_turns(session, session_id=request.session_id)
 
         # ── Query analysis (AR1.1) ────────────────────────────────────────
         query_analysis = run_query_analysis(
@@ -590,6 +592,8 @@ def _stream_inner(
             graph_context="\n".join(filter(None, [hierarchy_prompt_context, evidence_plan.graph_evidence_context])),
             flashcard_progress=flashcard_progress,
             learner_profile_summary=learner_profile_summary,
+            history_turns=history_turns,
+            compacted_summary=compacted_summary,
         )
         text_stream: TutorTextStream = tutor_llm_client.stream_messages(
             builder.build(), prompt_meta=prompt_meta,
@@ -650,6 +654,9 @@ def _stream_inner(
             quiz_context=quiz_context_text,
             flashcard_progress=flashcard_progress,
             learner_profile_summary=learner_profile_summary,
+            history_turns=history_turns,
+            compacted_summary=compacted_summary,
+            needs_web_search=query_analysis.needs_web_search,
         )
         # S1: emit responding only after blocking generation yields content
         if assistant_text:

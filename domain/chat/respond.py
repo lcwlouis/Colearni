@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy.orm import Session
+
 from core.observability import (
     SPAN_KIND_CHAIN,
     observation_context,
@@ -15,6 +17,7 @@ from core.schemas import (
     AssistantDraft,
     AssistantResponseEnvelope,
     AssistantResponseKind,
+    ChatRespondRequest,  # noqa: E402
     ConceptSwitchSuggestion,
     ConversationMeta,
     GenerationTrace,
@@ -23,10 +26,8 @@ from core.schemas import (
 from core.schemas.chat import ChatPhase
 from core.settings import Settings, get_settings
 from core.verifier import verify_assistant_draft
-from sqlalchemy.orm import Session
-
+from domain.chat.answer_parts import split_answer_parts
 from domain.chat.concept_resolver import resolve_concept_for_turn
-from domain.chat.retrieval_context import build_ancestor_context
 from domain.chat.evidence_builder import (
     build_document_summaries_context,
     build_workspace_citations,
@@ -42,23 +43,22 @@ from domain.chat.response_service import (
     generate_tutor_text,
     resolve_mastery_status,
 )
-from domain.retrieval.evidence_planner import (
-    build_evidence_plan,
-    execute_evidence_plan,
-)
+from domain.chat.retrieval_context import build_ancestor_context
 from domain.chat.session_memory import (
     load_assessment_context,
     load_flashcard_progress,
     load_history_text,
+    load_history_turns,
     load_quiz_progress_snapshot,
     persist_turn,
 )
 from domain.chat.social_turns import try_social_response
-from domain.chat.answer_parts import split_answer_parts
 from domain.chat.turn_plan import build_turn_plan
 from domain.readiness.analyzer import build_readiness_actions
-
-from core.schemas import ChatRespondRequest  # noqa: E402
+from domain.retrieval.evidence_planner import (
+    build_evidence_plan,
+    execute_evidence_plan,
+)
 
 log = logging.getLogger("domain.chat.respond")
 
@@ -124,6 +124,7 @@ def generate_chat_response(
         # ── Phase: searching ──────────────────────────────────────────
         sink.on_phase(ChatPhase.SEARCHING)
         history_text = load_history_text(session, session_id=request.session_id)
+        compacted_summary, history_turns = load_history_turns(session, session_id=request.session_id)
 
         # ── Query analysis (AR1.1) ────────────────────────────────────
         qa_llm = build_query_analyzer_client(settings=active_settings) or social_llm
@@ -373,6 +374,9 @@ def generate_chat_response(
                 session=session,
                 workspace_id=request.workspace_id,
                 user_id=request.user_id,
+                history_turns=history_turns,
+                compacted_summary=compacted_summary,
+                needs_web_search=query_analysis.needs_web_search,
             )
 
         draft = AssistantDraft(

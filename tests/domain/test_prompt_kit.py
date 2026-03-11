@@ -275,6 +275,85 @@ class TestBuildTutorMessages:
         # Template-loaded prefix includes direct-style phrasing
         assert "clear" in prefix.lower() or "concise" in prefix.lower()
 
+    def test_history_turns_produce_discrete_messages(self) -> None:
+        """L1.2: history_turns produces user/assistant pairs, not a context block."""
+        persona = get_persona("colearni")
+        turns = [("What is DNA?", "DNA is a molecule."), ("Tell me more", "It has a double helix.")]
+        builder, _ = build_tutor_messages(
+            query="Continue",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            history_turns=turns,
+        )
+        msgs = builder.build()
+        # Should contain discrete user/assistant messages from history
+        user_msgs = [m for m in msgs if m["role"] == "user"]
+        asst_msgs = [m for m in msgs if m["role"] == "assistant"]
+        # 2 history user + 1 final query = 3 user messages
+        assert len(user_msgs) == 3
+        assert len(asst_msgs) == 2
+        assert user_msgs[0]["content"] == "What is DNA?"
+        assert asst_msgs[0]["content"] == "DNA is a molecule."
+        assert user_msgs[1]["content"] == "Tell me more"
+        assert asst_msgs[1]["content"] == "It has a double helix."
+        assert user_msgs[2]["content"] == "Continue"
+
+    def test_history_turns_with_compacted_summary(self) -> None:
+        """L1.2: compacted summary is added as context when history_turns provided."""
+        persona = get_persona("colearni")
+        turns = [("Hi", "Hello!")]
+        builder, _ = build_tutor_messages(
+            query="Go on",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            history_turns=turns,
+            compacted_summary="Previously discussed photosynthesis.",
+        )
+        msgs = builder.build()
+        system_msgs = [m for m in msgs if m["role"] == "system"]
+        all_system = " ".join(m["content"] for m in system_msgs)
+        assert "photosynthesis" in all_system.lower()
+        # No "[history]" context block — uses compacted_history label instead
+        assert "[compacted_history]" in all_system
+
+    def test_history_turns_overrides_history_summary(self) -> None:
+        """L1.2: when history_turns is provided, history_summary is ignored."""
+        persona = get_persona("colearni")
+        turns = [("Q1", "A1")]
+        builder, _ = build_tutor_messages(
+            query="Q2",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            history_summary="OLD SUMMARY TEXT",
+            history_turns=turns,
+        )
+        msgs = builder.build()
+        all_text = " ".join(m["content"] for m in msgs)
+        # Old summary should NOT appear
+        assert "OLD SUMMARY TEXT" not in all_text
+        # But discrete messages should
+        assert "Q1" in all_text
+        assert "A1" in all_text
+
+    def test_history_summary_fallback_still_works(self) -> None:
+        """L1.2 backward compat: history_summary works when history_turns is None."""
+        persona = get_persona("colearni")
+        builder, _ = build_tutor_messages(
+            query="Question",
+            evidence=[],
+            persona=persona,
+            style="socratic",
+            history_summary="User asked about biology.",
+        )
+        msgs = builder.build()
+        system_msgs = [m for m in msgs if m["role"] == "system"]
+        all_system = " ".join(m["content"] for m in system_msgs)
+        assert "biology" in all_system.lower()
+        assert "[history]" in all_system
+
 
 class TestBuildFullTutorPromptWithMetaCompat:
     """Backward compatibility: build_full_tutor_prompt_with_meta returns PromptMessages."""

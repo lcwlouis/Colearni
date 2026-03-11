@@ -74,6 +74,7 @@ class TestRespondingPhaseSemantics:
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
         monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
@@ -102,6 +103,7 @@ class TestRespondingPhaseSemantics:
         """When LLM streams, responding appears after first non-empty delta."""
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
         monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
@@ -178,6 +180,7 @@ class TestRespondingPhaseSemantics:
         """If LLM streams only empty deltas, responding is skipped."""
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
         monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
@@ -248,6 +251,7 @@ class TestStreamActivityEvents:
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.build_tutor_llm_client", lambda settings: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
         monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
@@ -277,6 +281,7 @@ class TestStreamActivityEvents:
         """Full streaming path should emit generating_reply and verifying_citations."""
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
         monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)
@@ -333,6 +338,7 @@ class TestStreamActivityEvents:
         """responding phase must not appear before actual text content."""
         monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
         monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+        monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
         monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
         monkeypatch.setattr("domain.chat.stream.persist_user_message", lambda s, **kw: 1)
         monkeypatch.setattr("domain.chat.stream.create_assistant_placeholder", lambda s, **kw: 1)

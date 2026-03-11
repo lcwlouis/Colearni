@@ -240,6 +240,30 @@ class TestRegistryFactory:
         assert len(registry) == 1
         assert "search_knowledge_base" in registry
 
+    def test_enable_web_search_false_suppresses_registration(self):
+        from domain.tools.registry_factory import build_tool_registry
+
+        registry = build_tool_registry(
+            session=None,
+            workspace_id=1,
+            user_id=1,
+            web_search_api_key="test-key",
+            enable_web_search=False,
+        )
+        assert "web_search" not in registry
+
+    def test_enable_web_search_true_allows_registration(self):
+        from domain.tools.registry_factory import build_tool_registry
+
+        registry = build_tool_registry(
+            session=None,
+            workspace_id=1,
+            user_id=1,
+            web_search_api_key="test-key",
+            enable_web_search=True,
+        )
+        assert "web_search" in registry
+
     def test_no_deps(self):
         from domain.tools.registry_factory import build_tool_registry
 

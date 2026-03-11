@@ -43,6 +43,7 @@ def _stub_stream_monkeypatches(monkeypatch: Any) -> None:
     """Apply the common monkeypatches for stream tests."""
     monkeypatch.setattr("domain.chat.stream.try_social_response", lambda **kw: None)
     monkeypatch.setattr("domain.chat.stream.load_history_text", lambda s, session_id: "")
+    monkeypatch.setattr("domain.chat.stream.load_history_turns", lambda s, session_id: ("", []))
     monkeypatch.setattr("domain.chat.stream.load_assessment_context", lambda s, session_id: "")
     monkeypatch.setattr(
         "domain.chat.stream.resolve_concept_for_turn",

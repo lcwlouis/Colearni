@@ -26,6 +26,7 @@ def build_tool_registry(
     mastery_fn: Any | None = None,
     web_search_api_key: str | None = None,
     web_search_max_results: int = 5,
+    enable_web_search: bool = True,
 ) -> ToolRegistry:
     """Build a :class:`ToolRegistry` with the standard built-in tools.
 
@@ -60,7 +61,7 @@ def build_tool_registry(
             )
         )
 
-    if web_search_api_key:
+    if web_search_api_key and enable_web_search:
         registry.register(
             WebSearchTool(
                 api_key=web_search_api_key,

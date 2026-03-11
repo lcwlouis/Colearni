@@ -27,6 +27,7 @@ def _try_tool_augmented(
     session: Session | None,
     workspace_id: int | None,
     user_id: int | None,
+    needs_web_search: bool = False,
 ) -> tuple[str, GenerationTrace | None] | None:
     """Attempt tool-augmented generation; return None to fall through.
 
@@ -47,6 +48,7 @@ def _try_tool_augmented(
             user_id=user_id or 0,
             web_search_api_key=settings.web_search_api_key,
             web_search_max_results=settings.web_search_max_results,
+            enable_web_search=needs_web_search,
         )
         if not registry.list_tools():
             return None
@@ -93,6 +95,9 @@ def generate_tutor_text(
     session: Session | None = None,
     workspace_id: int | None = None,
     user_id: int | None = None,
+    history_turns: list[tuple[str, str]] | None = None,
+    compacted_summary: str = "",
+    needs_web_search: bool = False,
 ) -> tuple[str, GenerationTrace | None]:
     """Build a rich tutor prompt via prompt_kit and call the LLM.
 
@@ -119,6 +124,8 @@ def generate_tutor_text(
         graph_context=graph_context,
         flashcard_progress=flashcard_progress,
         learner_profile_summary=learner_profile_summary,
+        history_turns=history_turns,
+        compacted_summary=compacted_summary,
     )
     msgs = builder.messages
     system_len = sum(len(m["content"]) for m in msgs if m["role"] == "system")
@@ -140,6 +147,7 @@ def generate_tutor_text(
         session=session,
         workspace_id=workspace_id,
         user_id=user_id,
+        needs_web_search=needs_web_search,
     )
     if tool_result is not None:
         return tool_result

@@ -82,6 +82,55 @@ def load_history_text(
     return "\n\n".join(sections)
 
 
+def load_history_turns(
+    session: Session,
+    *,
+    session_id: int | None,
+) -> tuple[str, list[tuple[str, str]]]:
+    """Load chat history as structured turn pairs.
+
+    Returns ``(compaction_summary, recent_turns)`` where *recent_turns* is a
+    list of ``(user_text, assistant_text)`` pairs suitable for
+    :meth:`MessageBuilder.history`.
+    """
+    if session_id is None:
+        return "", []
+
+    summary = latest_system_summary(session, session_id=session_id) or ""
+    recent = list_recent_chat_messages(session, session_id=session_id, limit=10)
+
+    # Extract (role, text) pairs from raw messages
+    entries: list[tuple[str, str]] = []
+    for message in recent:
+        payload = message.get("payload") if isinstance(message, dict) else {}
+        if not isinstance(payload, dict):
+            continue
+        text_value = str(payload.get("text", "")).strip()
+        if not text_value:
+            continue
+        role = str(message.get("type", ""))
+        if role in ("user", "assistant"):
+            entries.append((role, text_value))
+
+    # Pair consecutive user+assistant messages into turn tuples.
+    turns: list[tuple[str, str]] = []
+    i = 0
+    while i < len(entries):
+        role, text_value = entries[i]
+        if role == "user":
+            assistant_text = ""
+            if i + 1 < len(entries) and entries[i + 1][0] == "assistant":
+                assistant_text = entries[i + 1][1]
+                i += 1
+            turns.append((text_value, assistant_text))
+        else:
+            # Orphan assistant message (no preceding user) — include it
+            turns.append(("", text_value))
+        i += 1
+
+    return summary, turns
+
+
 def persist_user_message(
     session: Session,
     *,
@@ -388,6 +437,7 @@ __all__ = [
     "load_flashcard_progress",
     "load_quiz_progress_snapshot",
     "load_history_text",
+    "load_history_turns",
     "maybe_compact_session_context",
     "persist_assessment_card",
     "persist_turn",
