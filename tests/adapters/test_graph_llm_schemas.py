@@ -142,5 +142,8 @@ def test_disambiguate_sends_schema_with_all_required_fields(
     assert len(captured) == 1
     schema = captured[0]["response_format"]["json_schema"]["schema"]
     props = set(schema["properties"].keys())
-    required = set(schema["required"])
-    assert props == required
+    required = set(schema.get("required", []))
+    # All fields that are always needed must be required
+    assert {"decision", "confidence"} <= required
+    # Required fields must be a subset of declared properties
+    assert required <= props

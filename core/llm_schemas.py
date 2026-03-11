@@ -46,14 +46,14 @@ class DisambiguationResponse(BaseModel):
 
     decision: Literal["MERGE_INTO", "CREATE_NEW", "LINK_ONLY"]
     confidence: float
-    merge_into_id: int | None
-    merge_into_name: str | None
-    alias_to_add: str | None
-    proposed_description: str | None
-    link_to_id: int | None
-    link_to_name: str | None
-    link_relation_type: str | None
-    proposed_tier: str | None
+    merge_into_id: int | None = None
+    merge_into_name: str | None = None
+    alias_to_add: str | None = None
+    proposed_description: str | None = None
+    link_to_id: int | None = None
+    link_to_name: str | None = None
+    link_relation_type: str | None = None
+    proposed_tier: str | None = None
 
 
 class DisambiguationBatchDecision(BaseModel):

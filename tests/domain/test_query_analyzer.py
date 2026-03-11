@@ -185,11 +185,20 @@ class _FakeLLM:
         self._response = response
 
     def complete_messages_json(
-        self, messages: list, *, schema_name: str, schema: dict
+        self,
+        messages: list,
+        *,
+        schema_name: str | None = None,
+        schema: dict | None = None,
+        response_model: type | None = None,
     ) -> dict:
         if isinstance(self._response, Exception):
             raise self._response
-        return json.loads(self._response)
+        parsed = json.loads(self._response)
+        if response_model is not None:
+            obj = response_model.model_validate(parsed)
+            return obj
+        return parsed
 
 
 class TestRunQueryAnalysis:

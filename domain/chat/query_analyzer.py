@@ -166,9 +166,9 @@ def run_query_analysis(
     try:
         data = llm_client.complete_messages_json(
             messages,
-            schema_name=_QUERY_ANALYSIS_SCHEMA_NAME,
-            schema=_QUERY_ANALYSIS_SCHEMA,
+            response_model=QueryAnalysisResponse,
         )
+        data = data.model_dump()
     except (RuntimeError, ValueError) as exc:
         log.warning("query analysis LLM call failed: %s", exc)
         return _FALLBACK

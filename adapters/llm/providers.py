@@ -13,6 +13,11 @@ from pydantic import BaseModel
 
 from core.contracts import TutorTextStream
 from core.llm_messages import Message, MessageBuilder
+from core.llm_schemas import (
+    DisambiguationBatchResponse,
+    DisambiguationResponse,
+    RawGraphResponse,
+)
 from core.observability import (
     LLM_REASONING_CONTENT,
     LLM_TOKEN_COUNT_REASONING,
@@ -261,12 +266,12 @@ class _BaseGraphLLMClient(ABC):
             )
             prompt = f"Extract concept+edge JSON from this chunk.\n\nCHUNK:\n{chunk_text}"
         messages = MessageBuilder().system(system_prompt).user(prompt).build()
-        return self.complete_messages_json(
+        result = self.complete_messages_json(
             messages,
-            schema_name="graph_raw_extraction",
-            schema=_RAW_GRAPH_SCHEMA,
+            response_model=RawGraphResponse,
             prompt_meta=prompt_meta,
         )
+        return result.model_dump()
 
     def batch_extract_raw_graph(
         self, *, chunk_texts: Sequence[str]
@@ -330,12 +335,12 @@ class _BaseGraphLLMClient(ABC):
                 f"CANDIDATES_JSON: {candidates_json}"
             )
         messages = MessageBuilder().system(system_prompt).user(prompt).build()
-        return self.complete_messages_json(
+        result = self.complete_messages_json(
             messages,
-            schema_name="graph_disambiguation",
-            schema=_DISAMBIGUATION_SCHEMA,
+            response_model=DisambiguationResponse,
             prompt_meta=prompt_meta,
         )
+        return result.model_dump()
 
     def disambiguate_batch(
         self,
@@ -462,10 +467,10 @@ class _BaseGraphLLMClient(ABC):
         messages = MessageBuilder().system(system_prompt).user(prompt).build()
         raw = self.complete_messages_json(
             messages,
-            schema_name="graph_disambiguation_batch",
-            schema=_DISAMBIGUATION_BATCH_SCHEMA,
+            response_model=DisambiguationBatchResponse,
             prompt_meta=prompt_meta,
         )
+        raw = raw.model_dump()
         decisions = raw.get("decisions", [])
         if not isinstance(decisions, list):
             log.warning("Batch disambiguation returned non-list decisions; treating all as CREATE_NEW")
