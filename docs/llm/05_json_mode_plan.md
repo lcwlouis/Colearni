@@ -27,7 +27,7 @@ with proper Pydantic models, runtime model support checks, and client-side valid
 | L5.1 | Define Pydantic response models for all JSON schemas | ✅ done |
 | L5.2 | Add `response_format=PydanticModel` support to `complete_messages_json()` | ✅ done — returns Pydantic instance when `response_model` provided, dict otherwise |
 | L5.3 | Enable `litellm.enable_json_schema_validation` for client-side validation | ✅ done |
-| L5.4 | Migrate call sites to Pydantic models, remove manual parsing | ✅ done — graph extraction, disambiguation, research planners all use `response_model=` |
+| L5.4 | Migrate call sites to Pydantic models, remove manual parsing | ✅ done — all call sites use `response_model=PydanticModel` with `.model_dump()` for backward compat |
 | L5.5 | Add runtime model support checks via `supports_response_schema()` | ✅ done |
 
 ## Slice Definitions

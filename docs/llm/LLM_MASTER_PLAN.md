@@ -458,14 +458,14 @@ Dependencies between tracks:
 
 | Track | Status | Last note |
 |---|---|---|
-| `L1` Message Format | ✅ audit-passed | All 9 slices complete |
-| `L2` Message Persistence | ✅ audit-passed | All 6 slices complete |
-| `L3` LLM Client Enhancement | ✅ audit-passed | All 6 slices complete |
-| `L4` Agentic Tool Framework | ✅ audit-passed | All 6 slices complete |
-| `L5` JSON Mode | ✅ audit-passed | All 5 slices complete |
-| `L6` Regeneration | ✅ audit-passed | All 3 slices complete |
-| `L7` Graph Batching | ✅ audit-passed | All 3 slices complete |
-| `L8` Web Search | ✅ audit-passed | All 4 slices complete |
+| `L1` Message Format | ✅ audit-passed | L1.2 fixed: history_turns param + `.history()` for discrete user/assistant pairs |
+| `L2` Message Persistence | ✅ audit-passed | All 6 slices verified |
+| `L3` LLM Client Enhancement | ✅ audit-passed | All 6 slices verified |
+| `L4` Agentic Tool Framework | ✅ audit-passed | All 6 slices verified |
+| `L5` JSON Mode | ✅ audit-passed | L5.4 fixed: all call sites use `response_model=PydanticModel` |
+| `L6` Regeneration | ✅ audit-passed | All 3 slices verified |
+| `L7` Graph Batching | ✅ audit-passed | All 3 slices verified |
+| `L8` Web Search | ✅ audit-passed | L8.3 fixed: `needs_web_search` wired through response_service → registry_factory |
 
 ## Self-Audit Report — Cycle 1
 
@@ -529,6 +529,133 @@ All 7 issues were re-implemented in this cycle. See Cycle 3 report below.
 - All imports clean after `ruff check --fix`
 
 ### Verdict: CONVERGED — All tracks audit-passed
+
+## Self-Audit Report — Cycle 5 (Post-Cycle-4 Fix Verification)
+
+**Date:** 2026-03-06
+**Result:** CONVERGED (0 issues found)
+
+### Fixes Applied (Cycle 4 → 5)
+
+1. **L1.2**: Added `load_history_turns()` in `session_memory.py` returning structured
+   `(summary, [(user, assistant), ...])` pairs. `build_tutor_messages()` now accepts
+   `history_turns` + `compacted_summary` params, uses `builder.history()` for discrete
+   user/assistant messages. Callers in `stream.py` and `respond.py` updated. Old
+   `history_summary` path preserved for backward compat. 5 new tests.
+2. **L5.4**: All 4 production call sites (`extract_raw_graph`, `disambiguate`,
+   `_disambiguate_batch_single_call`, `run_query_analysis`) now use
+   `response_model=PydanticModel`. Results converted via `.model_dump()` for
+   backward-compatible dict returns. Pydantic validation active in production.
+3. **L8.3**: `needs_web_search` signal now flows from `query_analyzer` → `stream.py`/
+   `respond.py` → `generate_tutor_text(needs_web_search=)` → `_try_tool_augmented()`
+   → `build_tool_registry(enable_web_search=)`. WebSearchTool only registered when
+   both API key is set AND query intent is `explore`.
+
+### Test Suite
+- 1357 passed, 0 failures, 12 skipped
+- No regressions: verified by stashing changes and confirming previously-passing
+  tests still pass with our changes
+- 4 test files updated to mock `load_history_turns` alongside `load_history_text`
+
+### Code Quality
+- `ruff check` on all changed files: 0 new errors
+- No FIXME/HACK/TODO added by these changes
+- 351 lines added, 47 removed (20 files)
+
+### Verdict: CONVERGED — All tracks audit-passed
+
+## Self-Audit Report — Cycle 4 (External Independent Verification)
+
+**Date:** 2026-03-06
+**Result:** NEEDS_REPASS (3 gaps found across 3 tracks)
+
+### Methodology
+
+Fresh-eyes audit performed by dispatching 4 parallel verification agents, each
+independently checking 2 tracks against actual codebase. Every file was opened
+and code was read line-by-line. No claims were trusted — only code was trusted.
+
+### Test Suite
+
+- Not re-run in this cycle (code audit only, no implementation changes)
+
+### Gaps Found
+
+1. **[medium] L1.2 — Chat history not structured as discrete turns**
+   - File(s): `domain/chat/prompt_kit.py` (line 385-386)
+   - Expected (from plan): Chat history as explicit user/assistant message pairs
+     using `MessageBuilder.history()`. Plan states: "Recent turns as explicit
+     user/assistant message pairs" and "actual user/assistant message pairs will
+     be included in the messages array."
+   - Actual: `history_summary` is a pre-formatted text string passed via
+     `.context(history_summary, label="history")` — a single system context
+     block. Not discrete user/assistant turns.
+   - Why tests didn't catch it: Tests verify the builder works, not that the
+     specific prompt_kit function uses the right builder method.
+   - Impact: Prevents prompt caching of history turns (each history change
+     invalidates the context block). Prevents LLMs from seeing natural
+     conversation flow. Violates the core L1 goal of multi-message format.
+   - Action: Reopen L1.2 — refactor `build_tutor_messages()` to accept
+     structured history turns and use `.history()` instead of `.context()`.
+
+2. **[medium] L5.4 — response_model= unused in production**
+   - File(s): `adapters/llm/providers.py` (lines 333, 463),
+     `domain/chat/query_analyzer.py` (line 167)
+   - Expected (from plan): "Migrate call sites to Pydantic models, remove
+     manual parsing." All JSON output paths should use `response_model=` with
+     the Pydantic models defined in L5.1.
+   - Actual: All 3 production call sites (`extract_raw_graph`,
+     `_disambiguate_batch_single_call`, `query_analyzer`) still pass
+     `schema=_RAW_DICT_SCHEMA`. The `response_model=` parameter is only
+     exercised in `test_response_model.py`. The Pydantic models in
+     `core/llm_schemas.py` exist but are never imported by any caller.
+   - Why tests didn't catch it: Tests verify the plumbing works via mocks,
+     but don't check that production callers actually use it.
+   - Impact: No type-safe validation of LLM output in production. Manual
+     `json.loads()` + dict access continues. Pydantic model guarantees are
+     not realized.
+   - Action: Reopen L5.4 — migrate graph extraction, disambiguation, and
+     query analyzer to `response_model=RawGraphResponse` etc.
+
+3. **[medium] L8.3 — needs_web_search is a dead signal**
+   - File(s): `domain/chat/query_analyzer.py` (line 135)
+   - Expected (from plan): "Wire web search into query analyzer routing
+     (research intent → enable web search tool)." The signal should flow from
+     query analyzer → orchestrator → tool registry to conditionally enable
+     the web search tool.
+   - Actual: `needs_web_search = (intent == "explore")` is computed and stored
+     on `QueryAnalysis`, but no downstream code reads it. Grep confirms the
+     field only appears in `query_analyzer.py`, its test file, and docs.
+     Web search tool registration in `registry_factory.py` depends only on
+     `web_search_api_key` being set — it's always-on or always-off regardless
+     of query intent.
+   - Why tests didn't catch it: Tests verify the field is computed correctly,
+     not that it's consumed by anything.
+   - Impact: Web search cannot be selectively enabled per-query. Either it's
+     always available (if API key set) or never available. The routing logic
+     is dead code.
+   - Action: Reopen L8.3 — wire `needs_web_search` into `response_service.py`
+     or `tool_augmented.py` to conditionally include `WebSearchTool` in the
+     tool registry for the current turn.
+
+### Items Verified Clean (no issues)
+
+- L1.1, L1.3, L1.4, L1.5, L1.6, L1.7, L1.8, L1.9: All verified against code
+- L2.1–L2.6: All 6 slices verified (migration, write-ahead, finalize, stream, filtering, cleanup)
+- L3.1–L3.6: All 6 slices verified (trimming, caching, retries, reasoning, async, observability)
+- L4.1–L4.6: All 6 slices verified (protocol, executor, agent loop, tools param, built-ins, wiring)
+- L5.1, L5.2, L5.3, L5.5: Verified (models exist, plumbing works, validation enabled, support checks)
+- L6.1–L6.3: All 3 slices verified (supersede, domain function, endpoint)
+- L7.1–L7.3: All 3 slices verified (batch extraction, pipeline wiring, OpenAI parallel)
+- L8.1, L8.2, L8.4: Verified (tool, registration, evidence formatting)
+
+### Correction from Prior Audits
+
+- **L1.6** was flagged as ❌ MISSING in the initial pass but **confirmed ✅ VERIFIED**
+  on second inspection. Both `extract_raw_graph()` and `_disambiguate_batch_single_call()`
+  use `MessageBuilder().system(...).user(...).build()` → `complete_messages_json()`.
+
+### Verdict: NEEDS_REPASS — 3 slices reopened (L1.2, L5.4, L8.3)
 
 ## Verification Block Template
 

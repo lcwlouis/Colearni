@@ -55,12 +55,13 @@ Status: ✅ done
   (True when intent == "explore")
 - `tests/domain/test_query_analyzer.py` — 4 new tests
 
-Status: ✅ done
+Status: ✅ done — `needs_web_search` wired through `response_service.py` → `registry_factory.py`
 
 **Verification Block:**
-- 32 tests pass (`test_query_analyzer.py`)
-- needs_web_search derived from intent == "explore"
-- Commit: `feat(L8.3): add needs_web_search routing to query analyzer`
+- 38 tests pass (`test_builtin_tools.py`)
+- `needs_web_search` flows: `query_analyzer` → `stream.py`/`respond.py` → `generate_tutor_text()` → `_try_tool_augmented()` → `build_tool_registry(enable_web_search=)`
+- WebSearchTool only registered when both API key present AND `needs_web_search=True`
+- Commit: `fix(L8.3): wire needs_web_search from query analyzer to tool registry`
 
 ### L8.4 — Evidence formatting
 
