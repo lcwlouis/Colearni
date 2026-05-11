@@ -1,104 +1,174 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file gives Claude Code guidance for working in this repository.
 
-## Key docs to read first
+## Current State
 
-Before making changes, read the relevant doc:
-- `docs/CODEX.md` — contributor rules (PR size, layer constraints, DoD checklist)
-- `docs/ARCHITECTURE.md` — system design and data flows
-- `docs/GRAPH.md` — knowledge graph budgets and resolver/gardener rules
-- `docs/FRONTEND.md` — required when touching `apps/web/`
+CoLearni was reset to start fresh for the actual MVP. Some historical files may still exist in git history, but the current rebuild should follow the docs in `docs/`.
 
-## Commands
+Do not assume the old ingestion-first app still exists. The new MVP is local-ready, graph-first, and Trail-centered.
 
-**Backend:**
-```bash
-make dev          # uvicorn --reload on :8000
-make lint         # ruff check .
-make test         # pytest -q (all tests)
-pytest tests/domain/chat/ -v   # run a specific test directory
-pytest tests/api/test_chat.py::test_foo -v  # run a single test
-make db-upgrade   # alembic upgrade head
-make db-revision m="add new table"  # create migration
-make db-reset     # drop and recreate (dev only)
-make graph-gardener   # offline graph consolidation job
-make quiz-gardener    # offline quiz generation job
+## Read These First
+
+Before making changes, read the relevant docs:
+
+- `docs/CODEX.md` - contributor rules, safety rules, verification format.
+- `docs/REBUILD_PLAN.md` - phased MVP execution plan.
+- `docs/ARCHITECTURE.md` - system architecture, data model, and layer structure.
+- `docs/API.md` - full API contract (endpoints, schemas, streaming spec).
+- `docs/PROMPTS.md` - prompt registry format and skeletons for all LLM tasks.
+- `docs/PRODUCT_SPEC.md` - MVP product behavior and non-goals.
+- `docs/GRAPH.md` - graph validation and budget rules.
+- `docs/MASTERY_MODEL.md` - mastery statuses, state transitions, scoring, practice mode.
+- `docs/TUTOR_BEHAVIOUR.md` - tutor modes, context management, streaming.
+- `docs/SOURCE_PROVENANCE.md` - source safety and export rules.
+- `docs/TEST_PLAN.md` - required test coverage by phase.
+- `docs/FRONTEND.md` - required when touching `apps/web/`.
+
+## Product Direction
+
+CoLearni is:
+
+```text
+personal learning workspace
++ concept graph / Trail
++ Socratic tutor
++ mastery state
++ source-aware retrieval
++ safe community Trail sharing
 ```
 
-**Frontend (`apps/web/`):**
-```bash
-npm run dev       # next dev on :3000
-npm run lint      # eslint
-npm run typecheck # tsc --noEmit
-npm run test      # vitest run
+The product should feel like a mentor or coach, not a search engine.
+
+Build local-ready first. Keep SaaS compatibility in the architecture, but do not start with auth, billing, moderation, or a public marketplace.
+
+## MVP Build Order
+
+1. Foundation cleanup.
+2. Workspace + Trail database models.
+3. Trail generation endpoint.
+4. Graph viewer.
+5. Tutor chat for one concept.
+6. Mastery + level-up quiz.
+7. Source provenance + export sanitizer.
+8. Trail Pack export.
+9. Research trace.
+10. Hydration.
+11. Trail Pack import.
+12. Demo polish.
+13. SaaS prep.
+
+Do not start with PDF ingestion.
+
+## Architecture Rules
+
+- Keep FastAPI routes thin: validate input, call services, return output.
+- Put business logic in service/domain modules.
+- Keep LLM prompts isolated, versioned, and testable.
+- Keep source provenance explicit.
+- Never mix public Trail Pack content with private workspace content.
+- Preserve evidence-first behavior: user-visible sourced answers cite allowed evidence or refuse in strict grounded mode.
+- Obey graph resolver and gardener budgets in `docs/GRAPH.md`.
+- Avoid unbounded loops and whole-workspace retrieval by default.
+
+## Layer Structure
+
+The canonical layout for this rebuild:
+
+```text
+backend/
+  app/
+    api/        # FastAPI routes only — validate input, call service, return output
+    services/   # Business logic: Trail, tutor, mastery, source, research, export/import
+    agents/     # LLM orchestration and prompt rendering
+      prompts/  # Versioned Markdown prompt files (see docs/PROMPTS.md)
+    models/     # SQLAlchemy ORM models
+    schemas/    # Pydantic request/response models
+  alembic/      # Alembic migrations
+  tests/        # pytest
+
+apps/
+  web/          # Next.js frontend
+
+docs/
 ```
 
-**Infrastructure:**
-```bash
-./scripts/start-infra.sh   # start PostgreSQL (Docker)
-make phoenix               # start Arize Phoenix trace UI on :6006
-```
+Do not use `apps/api/`, `domain/`, `core/`, or `adapters/` — those belonged to the old structure. Follow the layout above.
 
-## Architecture
+Do not inline LLM prompt strings in Python code. Use the prompt registry in `agents/prompts/`.
 
-Colearni is a Socratic AI tutor that grounds all responses in user-uploaded documents. Users upload files → a knowledge graph is built → a tutor answers questions using retrieved evidence, gated by mastery.
+## Environment Variables
 
-### Layer boundaries (strictly enforced)
+Required variables for the backend (document in `.env.example`):
 
-```
-apps/api/     ← thin HTTP routes only; may import core/, domain/, adapters/
-core/         ← schemas, contracts, prompting, verifier; NO imports from apps/ or domain/
-domain/       ← business logic; may import core/ and adapters/; NO imports from apps/
-adapters/     ← DB, LLM, embeddings, parsers
-apps/web/     ← Next.js frontend (no server business logic)
-```
-
-Routes must only: validate input → call domain/core → return output. No business logic in routes.
-
-### Core data flow
-
-**Ingestion:** Upload → parse/chunk → embed + store tsvector → extract raw concepts/edges (LLM) → online resolver → upsert canonical graph → mark dirty nodes for gardener.
-
-**Chat query:** User message → hybrid retrieval (pgvector + FTS, RRF fusion) → `EvidenceItem[]` with provenance → TutorAgent (Socratic vs Direct based on mastery) → verifier (citations check) → streamed response or card payload.
-
-**Level-up quiz:** Mastery check → generate quiz card → submit answers → grade (MCQ deterministic, short-answer via LLM rubric) → update mastery. Strict grounded mode: refuse if evidence is insufficient.
-
-**Practice (non-leveling):** Same flow as level-up quiz but submissions never update mastery to `learned`.
-
-### Key domain modules
-
-| Module | Purpose |
+| Variable | Description |
 |---|---|
-| `domain/chat/respond.py` | Main chat orchestration entry point |
-| `domain/chat/tutor_agent.py` | Socratic vs direct answer decision |
-| `domain/graph/resolver.py` | Online graph resolution (budgeted) |
-| `domain/graph/gardener.py` | Offline consolidation job (budgeted) |
-| `domain/retrieval/` (in `adapters/`) | Hybrid vector + FTS retrieval |
-| `core/contracts.py` | Protocol interfaces (EmbeddingProvider, ChunkRetriever, etc.) |
-| `core/verifier.py` | Grounded answer verification |
-| `core/prompting/` | File-based prompt registry (`assets/` = versioned Markdown files) |
+| `DATABASE_URL` | PostgreSQL connection string (e.g. `postgresql+asyncpg://...`) |
+| `LLM_PROVIDER` | LiteLLM model string (e.g. `openai/gpt-4o`) |
+| `LLM_API_KEY` | API key for the LLM provider |
+| `OPENAI_API_KEY` | Set if using OpenAI directly |
+| `ANTHROPIC_API_KEY` | Set if using Anthropic |
+| `APP_ENV` | `development` or `production` |
+| `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
+| `OBSERVABILITY_ENABLED` | `true` to enable OpenTelemetry traces (optional) |
+| `OTLP_ENDPOINT` | OTLP endpoint for Phoenix (optional) |
 
-### Budgets (hard stops — never remove)
+Variables for the frontend:
 
-- Resolver: max 3 LLM calls/chunk, 50/document
-- Gardener: max 30 LLM calls/run, 50 clusters/run
-- Chat: max tool calls per turn
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Backend base URL (e.g. `http://localhost:8000`) |
 
-Always emit explicit stop reasons when budgets are hit.
+## Planned Commands
 
-### Frontend graph rendering
+These commands are targets for the scaffold. If implementation chooses different commands, update this file and `README.md`.
 
-`/graph/explore` API → `apps/web/lib/graph/transform.ts` → `apps/web/components/sigma-graph/` (Sigma.js WebGL + graphology + force-atlas layout + MiniSearch overlay).
+Backend:
 
-### Database
+```bash
+pytest
+alembic upgrade head
+uvicorn backend.app.main:app --reload
+```
 
-PostgreSQL 16 + pgvector. Alembic manages migrations. Key table groups: auth sessions, workspaces, documents/chunks/embeddings, concepts/edges (raw + canonical), mastery, quiz attempts, flashcard progress, research sources.
+Frontend:
 
-## Patterns
+```bash
+cd apps/web
+npm run dev
+npm run typecheck
+npm run test
+```
 
-- **All inputs/outputs use Pydantic models** — including tool schemas and API payloads.
-- **Evidence-first:** every user-visible tutor answer is built from `EvidenceItem[]` + `Citation[]`.
-- **Prompt versioning:** prompts live in `core/prompting/assets/` as Markdown files with front-matter (TaskType, Version). Use `PromptRegistry` to load/render them — never inline prompt strings.
-- **Observability is opt-in:** set `APP_OBSERVABILITY_ENABLED=true` + `APP_OBSERVABILITY_OTLP_ENDPOINT` to enable OpenTelemetry traces (Phoenix on `:6006`). Always instrument new agent/grading paths.
-- **PR size:** target ≤ 400 LOC net. Split if larger.
+Infrastructure:
+
+```bash
+docker compose up -d
+```
+
+## Safety Rules
+
+- Never include user-uploaded content in public exports.
+- Never include chunks or embeddings in public exports.
+- Never include private notes or chat history in public exports.
+- Never include mastery records in public exports by default.
+- Public research-agent sources may export links and metadata only by default.
+- Unknown license means no redistribution of content.
+- Public access is not the same as redistribution rights.
+
+## Verification
+
+Do not claim completion without fresh verification.
+
+Every implementation closeout should include:
+
+```md
+## Verification
+
+Root cause / task:
+Files changed:
+Tests added:
+Commands run:
+Manual checks:
+Known limitations:
+```

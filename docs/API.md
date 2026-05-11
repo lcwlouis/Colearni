@@ -1,2109 +1,759 @@
-# docs/API.md
+# CoLearni API Contract
 
-## Backend HTTP API Reference
+## Overview
 
-This document is the canonical reference for all FastAPI HTTP endpoints exposed by `apps/api`.
+All routes are prefixed with `/api`. The backend is a FastAPI application. Routes stay thin: they validate input, call a service, and return a response. No business logic in routes.
 
-### Conventions
+## Workspace Scoping
 
-- Base URL: `http://localhost:8000`
-- Authentication: Bearer session token (obtained via `/auth/verify`). Some routes require workspace membership.
-- Transport: JSON unless otherwise noted
-- Validation errors are returned as HTTP `422` (`HTTPValidationError` schema)
+For the local-ready MVP there is no auth. The active workspace is identified by `workspace_id` in the URL path. A default workspace is auto-created on first run. Clients should store the workspace id locally (e.g. in localStorage) and include it in all requests.
 
-### Endpoint Index
+Every endpoint that operates on workspace data uses the pattern:
 
-- `GET /healthz`
-- `GET /settings/features`
-- `POST /auth/magic-link`
-- `POST /auth/verify`
-- `POST /auth/logout`
-- `GET /auth/me`
-- `GET /auth/me/tutor-profile`
-- `POST /documents/upload` *(deprecated — see KB upload)*
-- `GET /workspaces`
-- `POST /workspaces`
-- `DELETE /workspaces/{ws_id}`
-- `GET /workspaces/{ws_id}`
-- `PATCH /workspaces/{ws_id}/settings`
-- `POST /workspaces/{ws_id}/chat/respond`
-- `POST /workspaces/{ws_id}/chat/sessions`
-- `GET /workspaces/{ws_id}/chat/sessions`
-- `DELETE /workspaces/{ws_id}/chat/sessions/{session_id}`
-- `PATCH /workspaces/{ws_id}/chat/sessions/{session_id}`
-- `GET /workspaces/{ws_id}/chat/sessions/{session_id}/messages`
-- `POST /workspaces/{ws_id}/chat/sessions/{session_id}/messages/{msg_id}/regenerate`
-- `GET /workspaces/{ws_id}/graph/concepts`
-- `GET /workspaces/{ws_id}/graph/concepts/{concept_id}`
-- `GET /workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph`
-- `POST /workspaces/{ws_id}/graph/gardener/run`
-- `GET /workspaces/{ws_id}/graph/lucky`
-- `GET /workspaces/{ws_id}/knowledge-base/documents`
-- `POST /workspaces/{ws_id}/knowledge-base/documents/upload`
-- `DELETE /workspaces/{ws_id}/knowledge-base/documents/{document_id}`
-- `POST /workspaces/{ws_id}/knowledge-base/documents/{document_id}/reprocess`
-- `POST /workspaces/{ws_id}/practice/flashcards`
-- `POST /workspaces/{ws_id}/practice/flashcards/rate`
-- `POST /workspaces/{ws_id}/practice/flashcards/stateful`
-- `GET /workspaces/{ws_id}/practice/flashcards/runs`
-- `GET /workspaces/{ws_id}/practice/flashcards/runs/{run_id}`
-- `POST /workspaces/{ws_id}/practice/quizzes`
-- `GET /workspaces/{ws_id}/practice/quizzes`
-- `GET /workspaces/{ws_id}/practice/quizzes/{quiz_id}`
-- `POST /workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit`
-- `GET /workspaces/{ws_id}/practice/concepts/{concept_id}/activity`
-- `POST /workspaces/{ws_id}/quizzes/level-up`
-- `GET /workspaces/{ws_id}/quizzes/level-up`
-- `GET /workspaces/{ws_id}/quizzes/level-up/{quiz_id}`
-- `POST /workspaces/{ws_id}/quizzes/level-up/{quiz_id}/promote`
-- `POST /workspaces/{ws_id}/quizzes/{quiz_id}/submit`
-- `GET /workspaces/{ws_id}/readiness/snapshot`
-- `GET /workspaces/{ws_id}/research/candidates`
-- `PATCH /workspaces/{ws_id}/research/candidates/{candidate_id}`
-- `POST /workspaces/{ws_id}/research/runs`
-- `GET /workspaces/{ws_id}/research/runs`
-- `POST /workspaces/{ws_id}/research/sources`
-- `GET /workspaces/{ws_id}/research/sources`
-- `DELETE /workspaces/{ws_id}/research/sources/{source_id}`
-
-### GET /healthz
-
-Tag/group: untagged
-
-Purpose: liveness probe for the backend service.
-
-Request contract:
-
-- Path params: none
-- Query params: none
-- Body: none
-
-Success responses:
-
-- `200 OK` with payload `{"status": "ok"}`
-
-Error responses:
-
-- none application-specific
-
-Example:
-
-```bash
-curl -sS http://localhost:8000/healthz
 ```
+/api/workspaces/{workspace_id}/...
+```
+
+This keeps the API SaaS-compatible without requiring auth in the MVP.
+
+## Common Types
+
+```python
+# Concept levels (intrinsic node attribute, not inferred from edges)
+ConceptLevel = Literal["umbrella", "topic", "subtopic", "granular"]
+
+# Bloom taxonomy levels
+BloomLevel = Literal["remember", "understand", "apply", "analyze", "evaluate", "create"]
+
+# Mastery statuses
+MasteryStatus = Literal["not_started", "learning", "needs_review", "mastered"]
+
+# Node types
+NodeType = Literal["concept", "skill", "misconception", "example"]
+
+# Edge relation types
+RelationType = Literal["prerequisite", "contains", "application", "related"]
+
+# Tutor modes
+TutorMode = Literal["socratic", "direct", "repair", "quiz_prompt", "explore"]
+
+# Source origins
+SourceOrigin = Literal["research_agent", "user_upload", "manual", "system"]
+
+# Source access levels
+SourceAccess = Literal["public", "private", "restricted", "unknown"]
+
+# Difficulty levels
+Difficulty = Literal["beginner", "intermediate", "advanced"]
+
+# Target depth (same values as BloomLevel, used on Trail creation)
+TargetDepth = Literal["remember", "understand", "apply", "analyze", "evaluate", "create"]
+
+# Quiz type
+QuizType = Literal["level_up", "practice"]
+```
+
+## Schemas
+
+### Workspace
 
 ```json
 {
-  "status": "ok"
+  "id": "uuid",
+  "name": "string",
+  "created_at": "ISO 8601 datetime"
 }
 ```
 
-### GET /settings/features
+### Trail
 
-Tag/group: settings
-
-Purpose: return backend-configured feature flags for the frontend.
-
-Request contract:
-
-- Path params: none
-- Query params: none
-- Body: none
-
-Success responses:
-
-- `200 OK` — JSON:
 ```json
 {
-  "socratic_mode_default": false,
-  "include_dev_stats": false
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "title": "string",
+  "topic": "string",
+  "goal": "string",
+  "target_depth": "TargetDepth",
+  "created_at": "ISO 8601 datetime",
+  "node_count": "int",
+  "edge_count": "int"
 }
 ```
 
-### POST /auth/magic-link
-
-Tag/group: `auth`
-
-Purpose: issue a magic-link token for the given email address. In dev mode the token is echoed back; in production it would be emailed.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `email` | JSON body | string (email) | yes | valid email address |
-
-Success responses:
-
-- `200 OK` with `MagicLinkResponse`
-
-`MagicLinkResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `message` | string | confirmation message |
-| `debug_token` | string/null | raw token echoed in dev mode |
-
-Error responses:
-
-- `422 Unprocessable Entity` for validation failures
-
-### POST /auth/verify
-
-Tag/group: `auth`
-
-Purpose: exchange a magic-link token for a session token and user record.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `token` | JSON body | string | yes | non-empty magic-link token |
-
-Success responses:
-
-- `200 OK` with `VerifyTokenResponse`
-
-`VerifyTokenResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `session_token` | string | Bearer session token |
-| `user` | object | `UserPublic` with `public_id`, `email`, `display_name` |
-
-Error responses:
-
-- `401 Unauthorized` when token is invalid or expired
-- `422 Unprocessable Entity` for validation failures
-
-### POST /auth/logout
-
-Tag/group: `auth`
-
-Purpose: revoke the current session token. Requires Bearer auth.
-
-Request contract:
-
-- Body: none
-- Headers: `Authorization: Bearer <session_token>`
-
-Success responses:
-
-- `204 No Content`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-
-### GET /auth/me
-
-Tag/group: `auth`
-
-Purpose: return the authenticated user profile.
-
-Request contract:
-
-- Body: none
-- Headers: `Authorization: Bearer <session_token>`
-
-Success responses:
-
-- `200 OK` with `UserPublic`
-
-`UserPublic` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `public_id` | string | UUID public identifier |
-| `email` | string | user email |
-| `display_name` | string/null | optional display name |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-
-### GET /auth/me/tutor-profile
-
-Tag/group: `auth`
-
-Purpose: return or initialize the tutor profile for the authenticated user.
-
-Request contract:
-
-- Body: none
-- Headers: `Authorization: Bearer <session_token>`
-
-Success responses:
-
-- `200 OK` with `TutorProfileResponse`
-
-`TutorProfileResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `readiness_summary` | string | aggregated readiness notes |
-| `learning_style_notes` | string | inferred learning style |
-| `last_activity_at` | string/null | ISO timestamp |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-
-### POST /workspaces
-
-Tag/group: `workspaces`
-
-Purpose: create a workspace and add the current user as owner-member.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `name` | JSON body | string | yes | 1–255 chars |
-| `description` | JSON body | string | no | optional description |
-
-Success responses:
-
-- `201 Created` with `WorkspaceSummary`
-
-`WorkspaceSummary` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace row ID |
-| `public_id` | string | UUID public identifier |
-| `name` | string | workspace name |
-| `description` | string/null | optional description |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces
-
-Tag/group: `workspaces`
-
-Purpose: list workspaces the current user is a member of.
-
-Request contract:
-
-- Body: none
-- Headers: `Authorization: Bearer <session_token>`
-
-Success responses:
-
-- `200 OK` with `WorkspaceListResponse`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-
-### GET /workspaces/{ws_id}
-
-Tag/group: `workspaces`
-
-Purpose: get workspace details including settings (requires membership).
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-
-Success responses:
-
-- `200 OK` with `WorkspaceDetail`
-
-`WorkspaceDetail` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace row ID |
-| `public_id` | string | UUID public identifier |
-| `name` | string | workspace name |
-| `description` | string/null | optional description |
-| `settings` | object | JSONB settings blob |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when workspace does not exist
-
-### PATCH /workspaces/{ws_id}
-
-Tag/group: `workspaces`
-
-Purpose: update workspace name and description.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | string | yes | workspace public ID |
-| `name` | body | string | yes | new workspace name |
-| `description` | body | string/null | no | optional description |
-
-Success responses:
-
-- `200 OK` with `WorkspaceDetail`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when workspace does not exist
-
-### DELETE /workspaces/{ws_id}
-
-Tag/group: `workspaces`
-
-Purpose: delete a workspace and all its data.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | string | yes | workspace public ID |
-
-Success responses:
-
-- `204 No Content`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when workspace does not exist
-
-### PATCH /workspaces/{ws_id}/settings
-
-Tag/group: `workspaces`
-
-Purpose: merge new settings into the workspace JSONB settings column.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `settings` | JSON body | object | yes | key-value pairs to merge |
-
-Success responses:
-
-- `200 OK` with `WorkspaceDetail`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when workspace does not exist
-- `422 Unprocessable Entity` for validation failures
-
-### POST /workspaces/{ws_id}/chat/respond
-
-Tag/group: `chat`
-
-Purpose: generate one verified assistant response envelope with evidence/citations and grounding policy applied.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `query` | JSON body | string | yes | non-empty |
-| `user_id` | JSON body | integer | no | `> 0`; used with `concept_id` for mastery gating |
-| `concept_id` | JSON body | integer | no | `> 0`; used with `user_id` for mastery gating |
-| `top_k` | JSON body | integer | no | default `5`, minimum `1` |
-| `grounding_mode` | JSON body | enum | no | `"hybrid"` or `"strict"`; defaults from app settings |
-
-Success responses:
-
-- `200 OK` with `AssistantResponseEnvelope`
-
-`AssistantResponseEnvelope` key fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `kind` | enum | `"answer"` or `"refusal"` |
-| `text` | string | assistant output text |
-| `grounding_mode` | enum | `"hybrid"` or `"strict"` |
-| `evidence` | array | evidence snippets with provenance metadata |
-| `citations` | array | citations linked to `evidence_id` |
-| `refusal_reason` | enum/null | `"insufficient_evidence"` or `"invalid_citations"` when `kind="refusal"` |
-
-Error responses:
-
-- `422 Unprocessable Entity` for request validation failures
-
-Example:
-
-```bash
-curl -sS http://localhost:8000/chat/respond \
-  -H 'content-type: application/json' \
-  -d '{
-    "workspace_id": 7,
-    "query": "Describe linear maps",
-    "user_id": 5,
-    "concept_id": 11,
-    "grounding_mode": "strict"
-  }'
-```
+### ConceptNode
 
 ```json
 {
-  "kind": "answer",
-  "text": "SOCRATIC: What property must hold for both addition and scalar multiplication?",
-  "grounding_mode": "strict",
-  "evidence": [
-    {
-      "evidence_id": "e1",
-      "source_type": "workspace",
-      "content": "Linear maps preserve vector addition and scalar multiplication.",
-      "document_id": 9,
-      "chunk_id": 21,
-      "chunk_index": 0,
-      "document_title": "Linear Algebra Notes",
-      "source_uri": "file://notes.md",
-      "score": 0.93
-    }
-  ],
-  "citations": [
-    {
-      "citation_id": "c1",
-      "evidence_id": "e1",
-      "label": "From your notes",
-      "quote": "Linear maps preserve vector addition and scalar multiplication."
-    }
-  ],
-  "refusal_reason": null
+  "id": "uuid",
+  "trail_id": "uuid",
+  "slug": "string (unique within trail)",
+  "title": "string",
+  "node_type": "NodeType",
+  "concept_level": "ConceptLevel",
+  "difficulty": "Difficulty",
+  "bloom_level": "BloomLevel",
+  "mastery_check_labels": ["string"],
+  "metadata_json": {}
 }
 ```
 
-### POST /workspaces/{ws_id}/chat/respond/stream
-
-Tag/group: `chat`
-
-Purpose: streaming variant of `/chat/respond`. Returns Server-Sent Events (SSE) with lifecycle phases, text deltas, and a final envelope.
-
-Feature-gated: requires `APP_CHAT_STREAMING_ENABLED=true`. Returns `404` when disabled.
-
-Request contract: same as `POST /chat/respond`.
-
-SSE event types:
-
-| Event | Data fields | Notes |
-|---|---|---|
-| `status` | `phase` (thinking/searching/responding/finalizing) | Lifecycle phase change |
-| `delta` | `text` | Incremental text token |
-| `trace` | `trace` (GenerationTrace) | Operational timing/token metrics |
-| `final` | `envelope` (AssistantResponseEnvelope) | Complete response |
-| `error` | `message` | Error description |
-
-Phase semantics (S1):
-
-| Phase | Meaning | Emitted when |
-|---|---|---|
-| `thinking` | Request started, no visible output yet | On request start |
-| `searching` | Retrieval and context assembly in progress | After social fast-path check |
-| `responding` | First visible text delta has arrived | On first non-empty text delta from LLM |
-| `finalizing` | Post-generation verification and persistence | After all text generated |
-
-The `responding` phase is never emitted before actual text output begins. Fast-paths (social, onboarding) skip `responding` entirely since they produce final content without an incremental generation phase.
-
-GenerationTrace fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `provider` | `string \| null` | LLM provider name |
-| `model` | `string \| null` | Model identifier |
-| `timing_ms` | `number \| null` | Wall-clock generation time |
-| `prompt_tokens` | `int \| null` | Input tokens consumed |
-| `completion_tokens` | `int \| null` | Output tokens consumed |
-| `total_tokens` | `int \| null` | Total tokens |
-| `reasoning_tokens` | `int \| null` | Tokens consumed by internal reasoning |
-| `cached_tokens` | `int \| null` | Prompt tokens served from provider prefix cache (e.g. OpenAI automatic caching) |
-| `reasoning_requested` | `bool \| null` | Whether reasoning was requested |
-| `reasoning_supported` | `bool \| null` | Whether the model supports reasoning |
-| `reasoning_used` | `bool \| null` | Whether reasoning params were sent |
-
-Raw chain-of-thought text is never exposed through this contract.
-
-Transport notes:
-
-- The Next.js `/api` rewrite proxy may buffer SSE responses. Set `NEXT_PUBLIC_STREAM_BASE_URL` to the direct backend origin (e.g., `http://127.0.0.1:8000`) to bypass the proxy for streaming.
-- Backend CORS must allow the frontend origin when using direct backend streaming. Set `APP_CORS_ALLOWED_ORIGINS` accordingly.
-- Response headers include `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
-
-Error responses:
-
-- `404 Not Found` when streaming is not enabled
-- `422 Unprocessable Entity` for request validation failures
-
-### POST /workspaces/{ws_id}/chat/sessions
-
-Tag/group: `chat`
-
-Purpose: create a chat session for one `workspace_id` + `user_id`.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `user_id` | JSON body | integer | yes | `> 0` |
-| `title` | JSON body | string | no | optional custom title |
-
-Success responses:
-
-- `201 Created` with `ChatSessionSummary`
-
-Error responses:
-
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/chat/sessions
-
-Tag/group: `chat`
-
-Purpose: list sessions for one `workspace_id` + `user_id`.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `user_id` | query | integer | yes | `> 0` |
-| `limit` | query | integer | no | default `30`, range `1..100` |
-
-Success responses:
-
-- `200 OK` with `ChatSessionListResponse`
-
-Error responses:
-
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/chat/sessions/{session_id}/messages
-
-Tag/group: `chat`
-
-Purpose: fetch timeline messages for one session.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `session_id` | path | integer | yes | `> 0` |
-| `workspace_id` | query | integer | yes | `> 0` |
-| `user_id` | query | integer | yes | `> 0` |
-| `limit` | query | integer | no | default `300`, range `1..1000` |
-
-Success responses:
-
-- `200 OK` with `ChatMessagesResponse`
-
-Error responses:
-
-- `404 Not Found` when the session is not scoped to workspace/user
-- `422 Unprocessable Entity` for validation failures
-
-### POST /workspaces/{ws_id}/chat/sessions/{session_id}/messages/{msg_id}/regenerate
-
-Tag/group: `chat`
-
-Purpose: supersede an assistant message and stream a regenerated response.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `session_id` | path | string | yes | UUID public_id |
-| `msg_id` | path | integer | yes | `> 0`, must be a complete assistant message |
-
-Success responses:
-
-- `200 OK` with SSE stream (same format as `/respond/stream`)
-
-Error responses:
-
-- `400 Bad Request` when message cannot be regenerated (wrong status/role)
-- `404 Not Found` when session not found
-- `422 Unprocessable Entity` for validation failures
-
-### PATCH /workspaces/{ws_id}/chat/sessions/{session_id}
-
-Tag/group: `chat`
-
-Purpose: rename (update the title of) a chat session.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `session_id` | path | string | yes | UUID public_id |
-| `title` | body | string | yes | 1-120 chars |
-
-Success responses:
-
-- `200 OK` with `ChatSessionSummary`
-
-Error responses:
-
-- `404 Not Found` when the session is not scoped to workspace/user
-- `422 Unprocessable Entity` for validation failures
-
-### DELETE /workspaces/{ws_id}/chat/sessions/{session_id}
-
-Tag/group: `chat`
-
-Purpose: delete a chat session and its timeline messages.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `session_id` | path | integer | yes | `> 0` |
-| `workspace_id` | query | integer | yes | `> 0` |
-| `user_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `204 No Content`
-
-Error responses:
-
-- `404 Not Found` when the session is not scoped to workspace/user
-- `422 Unprocessable Entity` for validation failures
-
-### POST /documents/upload
-
-> **Deprecated — compatibility only.** Use `POST /workspaces/{ws_id}/knowledge-base/documents/upload` instead.
-> This route remains available for backward compatibility but delegates to the shared upload flow internally.
-> It may be removed in a future release.
-
-Tag/group: `documents`
-
-Purpose: ingest `.md`, `.txt`, or text-extractable `.pdf` content into a workspace.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `uploaded_by_user_id` | query | integer | yes | `> 0` |
-| `title` | query | string | no | optional explicit title |
-| `source_uri` | query | string | no | optional source URI |
-
-Body transport options:
-
-- `multipart/form-data` with file part named `file` (required)
-- raw body with content type `text/plain`, `text/markdown`, or `application/pdf`
-
-Success responses:
-
-- `201 Created` with `DocumentUploadResponse` when a new document is created
-- `200 OK` with `DocumentUploadResponse` when duplicate content is detected (`created=false`)
-
-`DocumentUploadResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `document_id` | integer | document row ID |
-| `workspace_id` | integer | owning workspace |
-| `title` | string | resolved title |
-| `mime_type` | string | canonical MIME type |
-| `content_hash` | string | SHA-256 hash of normalized text |
-| `chunk_count` | integer | number of persisted chunks |
-| `created` | boolean | `true` for new ingest, `false` for duplicate |
-
-Error responses:
-
-- `415 Unsupported Media Type` when payload is not `.md`, `.txt`, or `.pdf`, or text decoding fails
-- `422 Unprocessable Entity` for semantic validation issues (missing multipart `file`, empty body/file, no extractable text layer, no chunks)
-- `503 Service Unavailable` when embedding or graph dependencies are required but unavailable
-
-Example (multipart):
-
-```bash
-curl -sS -X POST \
-  'http://localhost:8000/documents/upload?workspace_id=1&uploaded_by_user_id=1&title=Notes' \
-  -F 'file=@./notes.md;type=text/markdown'
-```
+### ConceptEdge
 
 ```json
 {
-  "document_id": 10,
-  "workspace_id": 1,
-  "title": "Notes",
-  "mime_type": "text/markdown",
-  "content_hash": "abc123...",
-  "chunk_count": 2,
-  "created": true
+  "id": "uuid",
+  "trail_id": "uuid",
+  "source_node_id": "uuid",
+  "target_node_id": "uuid",
+  "relation_type": "RelationType"
 }
 ```
 
-### GET /workspaces/{ws_id}/graph/concepts
-
-Tag/group: `graph`
-
-Purpose: list canonical concepts in a workspace, optionally enriched with user mastery.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `user_id` | query | integer | no | `> 0`; includes mastery fields when provided |
-| `q` | query | string | no | optional name/alias search |
-| `limit` | query | integer | no | default `50`, range `1..200` |
-
-Success responses:
-
-- `200 OK` with `GraphConceptListResponse`
-
-Error responses:
-
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/graph/concepts/{concept_id}
-
-Tag/group: `graph`
-
-Purpose: fetch detail for one canonical concept in a workspace.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `concept_id` | path | integer | yes | `> 0` |
-| `workspace_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `200 OK` with `GraphConceptDetailResponse`
-
-`GraphConceptDetailResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace scope |
-| `concept` | object | concept payload |
-| `concept.concept_id` | integer | canonical concept ID |
-| `concept.canonical_name` | string | canonical label |
-| `concept.description` | string | concept summary |
-| `concept.aliases` | string[] | known aliases |
-| `concept.degree` | integer | active incident edge count |
-
-Error responses:
-
-- `404 Not Found` when the concept is not in the workspace
-- `422 Unprocessable Entity` for validation failures
-
-Example:
-
-```bash
-curl -sS 'http://localhost:8000/graph/concepts/42?workspace_id=7'
-```
+### TrailGraph
 
 ```json
 {
-  "workspace_id": 7,
-  "concept": {
-    "concept_id": 42,
-    "canonical_name": "Linear Map",
-    "description": "Preserves vector addition and scalar multiplication.",
-    "aliases": ["Linear Transformation"],
-    "degree": 6
+  "nodes": ["ConceptNode"],
+  "edges": ["ConceptEdge"],
+  "mastery": {
+    "<concept_id>": "MasteryRecord"
   }
 }
 ```
 
-### GET /workspaces/{ws_id}/graph/concepts/{concept_id}/subgraph
-
-Tag/group: `graph`
-
-Purpose: return a bounded k-hop neighborhood for a seed concept.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `concept_id` | path | integer | yes | `> 0` |
-| `workspace_id` | query | integer | yes | `> 0` |
-| `max_hops` | query | integer | no | default `1`, range `1..3` |
-| `max_nodes` | query | integer | no | default `40`, range `1..80` |
-| `max_edges` | query | integer | no | default `80`, range `1..160` |
-
-Success responses:
-
-- `200 OK` with `GraphSubgraphResponse`
-
-`GraphSubgraphResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace scope |
-| `root_concept_id` | integer | requested concept ID |
-| `max_hops` | integer | applied hop cap |
-| `nodes` | array | subgraph nodes with `hop_distance` |
-| `edges` | array | bounded edge set, ordered by weight desc |
-
-Error responses:
-
-- `404 Not Found` when the concept is not in the workspace
-- `422 Unprocessable Entity` for validation failures (including bounds outside caps)
-
-Example:
-
-```bash
-curl -sS \
-  'http://localhost:8000/graph/concepts/42/subgraph?workspace_id=7&max_hops=2&max_nodes=20&max_edges=30'
-```
+### MasteryRecord
 
 ```json
 {
-  "workspace_id": 7,
-  "root_concept_id": 42,
-  "max_hops": 2,
-  "nodes": [
-    {
-      "concept_id": 42,
-      "canonical_name": "Linear Map",
-      "description": "Preserves vector operations.",
-      "hop_distance": 0
-    }
-  ],
-  "edges": []
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "concept_id": "uuid",
+  "status": "MasteryStatus",
+  "bloom_level": "BloomLevel",
+  "score": "float (0.0–1.0)",
+  "updated_at": "ISO 8601 datetime"
 }
 ```
 
-### GET /workspaces/{ws_id}/graph/full
-
-Tag/group: `graph`
-
-Purpose: retrieve the full knowledge graph for a workspace (capped to prevent overload).
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | string | yes | workspace public ID |
-| `max_nodes` | query | integer | no | default 100, range 1–500 |
-| `max_edges` | query | integer | no | default 300, range 1–1000 |
-
-Success responses:
-
-- `200 OK` with `GraphSubgraphResponse`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### POST /workspaces/{ws_id}/graph/gardener/run
-
-Tag/group: `graph`
-
-Purpose: trigger the graph gardener to merge clusters and prune orphans.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | string | yes | workspace public ID |
-
-Success responses:
-
-- `200 OK` with gardener run summary
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### GET /workspaces/{ws_id}/graph/lucky
-
-Tag/group: `graph`
-
-Purpose: choose one suggested concept using either adjacent-hop scoring or wildcard scoring.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `concept_id` | query | integer | yes | seed concept ID, `> 0` |
-| `mode` | query | enum | yes | `"adjacent"` or `"wildcard"` |
-| `k_hops` | query | integer | no | default `1`, range `1..3` |
-
-Success responses:
-
-- `200 OK` with `GraphLuckyResponse`
-
-`GraphLuckyResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace scope |
-| `seed_concept_id` | integer | input concept |
-| `mode` | enum | `adjacent` or `wildcard` |
-| `pick` | object | mode-specific pick payload |
-
-`pick` shape by mode:
-
-- `adjacent`: includes `hop_distance` and `score_components.strongest_link_weight`
-- `wildcard`: includes `hop_distance: null` and `score_components.{degree,total_incident_weight}`
-
-Error responses:
-
-- `404 Not Found` when the seed concept is missing or no eligible candidate exists
-- `422 Unprocessable Entity` for validation failures
-
-Example:
-
-```bash
-curl -sS 'http://localhost:8000/graph/lucky?workspace_id=7&concept_id=42&mode=adjacent&k_hops=2'
-```
+### QuizQuestion
 
 ```json
 {
-  "workspace_id": 7,
-  "seed_concept_id": 42,
-  "mode": "adjacent",
-  "pick": {
-    "concept_id": 99,
-    "canonical_name": "Kernel",
-    "description": "Vectors mapped to zero.",
-    "hop_distance": 1,
-    "score_components": {
-      "hop_distance": 1,
-      "strongest_link_weight": 8.0
-    }
+  "id": "string (stable within a card)",
+  "type": "explain | apply | compare",
+  "prompt": "string",
+  "mastery_label": "string"
+}
+```
+
+### LevelUpCard
+
+```json
+{
+  "concept_id": "uuid",
+  "quiz_type": "QuizType",
+  "questions": ["QuizQuestion"]
+}
+```
+
+### GradeResult
+
+```json
+{
+  "passed": "bool",
+  "score": "float (0.0–1.0)",
+  "feedback": "string",
+  "mastery_status": "MasteryStatus",
+  "attempt_id": "uuid"
+}
+```
+
+### QuizAttempt
+
+```json
+{
+  "id": "uuid",
+  "concept_id": "uuid",
+  "quiz_type": "QuizType",
+  "questions": ["QuizQuestion"],
+  "answers": [{"question_id": "string", "answer": "string"}],
+  "evaluator_feedback": "string",
+  "passed": "bool",
+  "score": "float (0.0–1.0)",
+  "created_at": "ISO 8601 datetime"
+}
+```
+
+### ConversationMessage
+
+```json
+{
+  "id": "uuid",
+  "role": "user | assistant",
+  "content": "string",
+  "mode": "TutorMode",
+  "created_at": "ISO 8601 datetime"
+}
+```
+
+### SourceRecord
+
+```json
+{
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "title": "string",
+  "url": "string | null",
+  "origin": "SourceOrigin",
+  "access": "SourceAccess",
+  "license": "string | null",
+  "include_on_public_export": "bool",
+  "metadata_json": {}
+}
+```
+
+### ExportReport
+
+```json
+{
+  "included": {
+    "concepts": "int",
+    "edges": "int",
+    "source_links": "int",
+    "has_research_trace": "bool"
+  },
+  "excluded": {
+    "uploaded_files": "int",
+    "chunks": "int",
+    "embeddings": "int",
+    "private_notes": "int",
+    "mastery_records": "bool"
   }
 }
 ```
 
-### GET /workspaces/{ws_id}/practice/concepts/{concept_id}/activity
-
-Tag/group: `practice`
-
-Purpose: return aggregate study activity for a concept, including practice quizzes, level-up quizzes, and flashcard runs with affordance metadata.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `concept_id` | path | integer | yes | concept ID |
-
-Success responses:
-
-- `200 OK` with `ConceptActivityResponse`
-
-`ConceptActivityResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace ID |
-| `user_id` | integer | current user ID |
-| `concept_id` | integer | concept ID |
-| `practice_quizzes` | object | `{ count, average_score, quizzes[] }` |
-| `level_up_quizzes` | object | `{ count, passed_count, quizzes[] }` |
-| `flashcard_runs` | object | `{ count, total_cards_generated, runs[] }` |
-| `affordances` | object | `{ can_generate_flashcards, can_create_practice_quiz, ... }` |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `422 Unprocessable Entity` for validation failures
-
-### POST /workspaces/{ws_id}/quizzes/level-up
-
-Tag/group: `quizzes`
-
-Purpose: create a level-up quiz for one concept.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `user_id` | JSON body | integer | yes | `> 0` |
-| `concept_id` | JSON body | integer | yes | `> 0` |
-| `session_id` | JSON body | integer | no | `> 0` when present |
-| `question_count` | JSON body | integer | no | default `5`, range `5..10` |
-| `items` | JSON body | array<object> | no | optional pre-specified quiz items |
-
-Success responses:
-
-- `201 Created` with `QuizCreateResponse`
-
-`QuizCreateResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `quiz_id` | integer | created quiz ID |
-| `workspace_id` | integer | workspace scope |
-| `user_id` | integer | quiz owner |
-| `concept_id` | integer | target concept |
-| `status` | string | quiz lifecycle state |
-| `items` | array | item summaries (`item_id`, `position`, `item_type`, `prompt`, `choices`) |
-
-Error responses:
-
-- `404 Not Found` when workspace/user/concept scope is invalid
-- `422 Unprocessable Entity` for validation or domain quiz-shape errors
-
-Example:
-
-```bash
-curl -sS -X POST http://localhost:8000/quizzes/level-up \
-  -H 'content-type: application/json' \
-  -d '{
-    "workspace_id": 7,
-    "user_id": 5,
-    "concept_id": 42,
-    "question_count": 5
-  }'
-```
+### ImportReport
 
 ```json
 {
-  "quiz_id": 101,
-  "workspace_id": 7,
-  "user_id": 5,
-  "concept_id": 42,
-  "status": "ready",
-  "items": [
-    {
-      "item_id": 1001,
-      "position": 1,
-      "item_type": "mcq",
-      "prompt": "Which statement best describes a linear map?",
-      "choices": [
-        {"id": "a", "text": "Preserves vector addition and scalar multiplication."},
-        {"id": "b", "text": "Maps every vector to zero."}
-      ]
-    }
+  "trail_id": "uuid",
+  "concepts_imported": "int",
+  "edges_imported": "int",
+  "sources_available": "int",
+  "sources_missing": "int",
+  "hydration_required": "bool",
+  "warnings": ["string"]
+}
+```
+
+## Error Format
+
+All errors return a consistent JSON body:
+
+```json
+{
+  "error": {
+    "code": "string (machine-readable)",
+    "message": "string (human-readable)",
+    "details": {}
+  }
+}
+```
+
+Common error codes:
+
+| HTTP Status | Code | Meaning |
+|---|---|---|
+| 400 | `invalid_input` | Request body failed validation |
+| 404 | `not_found` | Resource does not exist |
+| 409 | `conflict` | Duplicate slug, etc. |
+| 422 | `validation_error` | Pydantic validation failed |
+| 500 | `llm_error` | LLM call failed or returned malformed output |
+| 503 | `budget_exceeded` | Resolver or gardener budget hit |
+
+---
+
+## Endpoints
+
+### Health
+
+#### `GET /health`
+
+Returns service health. Always succeeds unless the process is dead.
+
+**Response 200:**
+
+```json
+{
+  "status": "ok",
+  "version": "string",
+  "db": "ok | error"
+}
+```
+
+---
+
+### Workspaces
+
+#### `POST /api/workspaces`
+
+Create a new workspace.
+
+**Request body:**
+
+```json
+{
+  "name": "string"
+}
+```
+
+**Response 201:** `Workspace`
+
+---
+
+#### `GET /api/workspaces`
+
+List all workspaces.
+
+**Response 200:**
+
+```json
+{
+  "workspaces": ["Workspace"]
+}
+```
+
+---
+
+#### `GET /api/workspaces/{workspace_id}`
+
+Get a workspace.
+
+**Response 200:** `Workspace`
+
+---
+
+### Trails
+
+#### `POST /api/workspaces/{workspace_id}/trails/generate`
+
+Generate a new Trail from a topic description. Calls the graph generator LLM, validates the output, and stores the graph.
+
+**Request body:**
+
+```json
+{
+  "topic": "string",
+  "goal": "string",
+  "target_depth": "TargetDepth"
+}
+```
+
+**Response 201:**
+
+```json
+{
+  "trail": "Trail",
+  "graph": "TrailGraph"
+}
+```
+
+**Errors:**
+- `500 llm_error` — LLM returned malformed output after one repair attempt
+- `503 budget_exceeded` — resolver budget hit during generation
+
+---
+
+#### `GET /api/workspaces/{workspace_id}/trails`
+
+List all Trails in a workspace.
+
+**Response 200:**
+
+```json
+{
+  "trails": ["Trail"]
+}
+```
+
+---
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}`
+
+Get a Trail with its full graph and mastery summary.
+
+**Response 200:**
+
+```json
+{
+  "trail": "Trail",
+  "graph": "TrailGraph",
+  "mastery_summary": {
+    "total": "int",
+    "not_started": "int",
+    "learning": "int",
+    "needs_review": "int",
+    "mastered": "int"
+  }
+}
+```
+
+---
+
+#### `DELETE /api/workspaces/{workspace_id}/trails/{trail_id}`
+
+Delete a Trail and all associated data.
+
+**Response 204:** No body.
+
+---
+
+### Concepts
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}`
+
+Get a concept with its graph context and mastery state.
+
+**Response 200:**
+
+```json
+{
+  "concept": "ConceptNode",
+  "prerequisites": ["ConceptNode"],
+  "children": ["ConceptNode"],
+  "related": ["ConceptNode"],
+  "mastery": "MasteryRecord",
+  "sources": ["SourceRecord"]
+}
+```
+
+---
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/level-up`
+
+Generate a level-up quiz card for a concept. Cards are generated from `mastery_check_labels` and never include private/source-derived content.
+
+**Response 200:** `LevelUpCard` (with `quiz_type: "level_up"`)
+
+---
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/grade`
+
+Grade a level-up quiz attempt. If passed, updates mastery to `mastered`. If failed, updates to `needs_review`.
+
+**Request body:**
+
+```json
+{
+  "answers": [
+    {"question_id": "string", "answer": "string"}
   ]
 }
 ```
 
-### GET /workspaces/{ws_id}/quizzes/level-up
+**Response 200:** `GradeResult`
 
-Tag/group: `quizzes`
+Note: This endpoint only updates mastery for `level_up` attempts. See `/practice/grade` for practice attempts.
 
-Purpose: list recent level-up quizzes for the current user in a workspace, optionally scoped by concept.
+---
 
-Request contract:
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/practice`
 
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `user_id` | query | integer | yes | user scope |
-| `concept_id` | query | integer | no | optional concept scope |
-| `limit` | query | integer | no | bounded recent window |
+Generate a practice quiz card. Identical to level-up card generation but marks the card as `quiz_type: "practice"`.
 
-Success responses:
+**Response 200:** `LevelUpCard` (with `quiz_type: "practice"`)
 
-- `200 OK` with level-up quiz summaries including latest attempt status when present.
+---
 
-Error responses:
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/practice/grade`
 
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `422 Unprocessable Entity` for validation failures
+Grade a practice quiz attempt. Stores the attempt and returns feedback but **never updates mastery status**.
 
-### GET /workspaces/{ws_id}/quizzes/level-up/{quiz_id}
+**Request body:**
 
-Tag/group: `quizzes`
+```json
+{
+  "answers": [
+    {"question_id": "string", "answer": "string"}
+  ]
+}
+```
 
-Purpose: retrieve one level-up quiz detail, including items and latest attempt summary.
+**Response 200:** `GradeResult` (mastery_status reflects current state, unchanged)
 
-Request contract:
+---
 
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `quiz_id` | path | integer | yes | level-up quiz ID |
-| `user_id` | query | integer | yes | owner scope |
+### Tutor Chat
 
-Success responses:
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat`
 
-- `200 OK` with level-up quiz detail payload.
+Send a message to the Socratic tutor for a concept. Returns a **Server-Sent Events (SSE)** stream.
 
-Error responses:
+**Request body:**
 
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member or quiz not in scope
-- `404 Not Found` when quiz does not exist
-- `422 Unprocessable Entity` for validation failures
+```json
+{
+  "message": "string",
+  "conversation_id": "uuid | null"
+}
+```
 
-### POST /workspaces/{ws_id}/quizzes/level-up/{quiz_id}/promote
+**Response headers:**
 
-Tag/group: `quizzes`
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+X-Accel-Buffering: no
+```
 
-Purpose: copy a level-up quiz into a new practice quiz for reuse without mutating mastery state.
+**SSE event types (each line is `data: <json>\n\n`):**
 
-Request contract:
+```json
+{ "type": "mode", "mode": "TutorMode" }
+```
+Emitted first, before tokens, so the client knows which mode was selected.
 
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `quiz_id` | path | integer | yes | source level-up quiz ID |
-| `user_id` | JSON body | integer | yes | owner scope |
+```json
+{ "type": "token", "content": "string" }
+```
+Streamed tokens as they arrive from the LLM.
 
-Success responses:
+```json
+{ "type": "done", "conversation_id": "uuid", "message": "ConversationMessage" }
+```
+Emitted once at the end. Includes the full assembled message for storage.
 
-- `201 Created` with promotion result including new practice `quiz_id`.
+```json
+{ "type": "error", "code": "string", "message": "string" }
+```
+Emitted if the LLM call fails. The stream then closes.
 
-Error responses:
+**Mastery side-effect:** The first message in a conversation sets concept mastery to `learning` if it is currently `not_started`.
 
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member or source quiz not in scope
-- `404 Not Found` when source quiz does not exist
-- `422 Unprocessable Entity` for validation failures
+---
 
-### POST /workspaces/{ws_id}/quizzes/{quiz_id}/submit
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversation`
 
-Tag/group: `quizzes`
+Retrieve the conversation history for a concept in the current workspace.
 
-Purpose: submit answers for a level-up quiz and return grading plus mastery state.
+**Query params:**
 
-Request contract:
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `limit` | int | 20 | Max messages to return |
 
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `quiz_id` | path | integer | yes | integer route parameter |
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `user_id` | JSON body | integer | yes | `> 0` |
-| `answers` | JSON body | array<object> | yes | minimum length `1` |
+**Response 200:**
 
-Success responses:
+```json
+{
+  "conversation_id": "uuid | null",
+  "messages": ["ConversationMessage"]
+}
+```
 
-- `200 OK` with `LevelUpQuizSubmitResponse`
+---
 
-`LevelUpQuizSubmitResponse` fields:
+### Sources
 
-| Field | Type | Notes |
+#### `GET /api/workspaces/{workspace_id}/sources`
+
+List all source records in a workspace.
+
+**Query params:**
+
+| Param | Type | Description |
 |---|---|---|
-| `quiz_id` | integer | quiz ID |
-| `attempt_id` | integer | graded attempt ID |
-| `score` | number | `0.0..1.0` |
-| `passed` | boolean | pass/fail decision |
-| `critical_misconception` | boolean | true if critical misconception detected |
-| `overall_feedback` | string | overall grading feedback |
-| `items` | array | per-item feedback (`result`, `feedback`, `score`, etc.) |
-| `replayed` | boolean | true when returning previously graded attempt |
-| `retry_hint` | string/null | hint for retry path |
-| `mastery_status` | enum | `locked`, `learning`, or `learned` |
-| `mastery_score` | number | `0.0..1.0` |
+| `origin` | SourceOrigin | Filter by origin |
+| `access` | SourceAccess | Filter by access level |
 
-Error responses:
+**Response 200:**
 
-- `404 Not Found` when quiz/workspace/user scope is invalid
-- `422 Unprocessable Entity` for validation or grading payload errors
-- `503 Service Unavailable` when required grading dependencies are unavailable
+```json
+{
+  "sources": ["SourceRecord"]
+}
+```
 
-Example:
+---
 
-```bash
-curl -sS -X POST http://localhost:8000/quizzes/101/submit \
-  -H 'content-type: application/json' \
-  -d '{
-    "workspace_id": 7,
-    "user_id": 5,
-    "answers": [
-      {"item_id": 1001, "answer": "a"}
+#### `POST /api/workspaces/{workspace_id}/sources/upload`
+
+Upload a source file. Stored as a private source. Defaults: `origin: user_upload`, `access: private`, `include_on_public_export: false`.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `file` | binary | yes | File to upload |
+| `title` | string | no | Defaults to filename |
+
+**Response 201:** `SourceRecord`
+
+---
+
+### Research
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/research`
+
+Run the research agent on the Trail. Searches public sources, selects relevant links, and stores a research trace. Stores links and metadata only — never copied content.
+
+**Request body:**
+
+```json
+{
+  "concept_id": "uuid | null",
+  "max_sources": "int (default: 5, max: 20)"
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "sources_found": "int",
+  "sources_selected": "int",
+  "trace": {
+    "topic": "string",
+    "queries": ["string"],
+    "selected_sources": ["SourceRecord"],
+    "excluded_sources": [
+      {"title": "string", "reason": "string"}
     ]
-  }'
-```
-
-```json
-{
-  "quiz_id": 101,
-  "attempt_id": 5001,
-  "score": 0.8,
-  "passed": true,
-  "critical_misconception": false,
-  "overall_feedback": "Good work. Focus on edge cases next.",
-  "items": [
-    {
-      "item_id": 1001,
-      "item_type": "mcq",
-      "result": "correct",
-      "is_correct": true,
-      "critical_misconception": false,
-      "feedback": "Correct.",
-      "score": 1.0
-    }
-  ],
-  "replayed": false,
-  "retry_hint": null,
-  "mastery_status": "learned",
-  "mastery_score": 0.8
+  }
 }
 ```
 
-### POST /workspaces/{ws_id}/practice/flashcards
+---
 
-Tag/group: `practice`
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/research`
 
-Purpose: generate bounded practice flashcards for a concept (non-leveling).
+Get the stored research trace for a Trail.
 
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `concept_id` | JSON body | integer | yes | `> 0` |
-| `card_count` | JSON body | integer | no | default `6`, range `3..12` |
-
-Success responses:
-
-- `200 OK` with `PracticeFlashcardsResponse`
-
-`PracticeFlashcardsResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace scope |
-| `concept_id` | integer | target concept |
-| `concept_name` | string | canonical concept name |
-| `flashcards` | array | each card has `front`, `back`, `hint` |
-
-Error responses:
-
-- `404 Not Found` when concept/workspace scope is invalid
-- `422 Unprocessable Entity` for validation or generation-shape errors
-- `503 Service Unavailable` when generation dependencies are unavailable
-
-Example:
-
-```bash
-curl -sS -X POST http://localhost:8000/practice/flashcards \
-  -H 'content-type: application/json' \
-  -d '{
-    "workspace_id": 7,
-    "concept_id": 42,
-    "card_count": 4
-  }'
-```
+**Response 200:**
 
 ```json
 {
-  "workspace_id": 7,
-  "concept_id": 42,
-  "concept_name": "Linear Map",
-  "flashcards": [
-    {
-      "front": "What property must f(u + v) satisfy?",
-      "back": "f(u + v) = f(u) + f(v)",
-      "hint": "Think additivity"
-    }
-  ]
-}
-```
-
-### POST /workspaces/{ws_id}/practice/flashcards/stateful
-
-Tag/group: `practice`
-
-Purpose: generate stateful flashcards persisted to the bank with novelty dedup.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `concept_id` | JSON body | integer | yes | `> 0` |
-| `card_count` | JSON body | integer | no | default `6`, range `3..12` |
-
-Success responses:
-
-- `200 OK` with `StatefulFlashcardsResponse`
-
-`StatefulFlashcardsResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace scope |
-| `concept_id` | integer | target concept |
-| `concept_name` | string | canonical concept name |
-| `run_id` | string | UUID of the generation run |
-| `flashcards` | array | `StatefulFlashcard` objects with `flashcard_id`, `front`, `back`, `hint` |
-| `has_more` | boolean | whether more cards can be generated |
-| `exhausted_reason` | string/null | reason when no more cards available |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `404 Not Found` when concept/workspace scope is invalid
-- `422 Unprocessable Entity` for validation or generation errors
-- `503 Service Unavailable` when LLM is unavailable
-
-### POST /workspaces/{ws_id}/practice/flashcards/rate
-
-Tag/group: `practice`
-
-Purpose: submit a self-rating for a stateful flashcard.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `flashcard_id` | JSON body | string | yes | UUID of the flashcard |
-| `self_rating` | JSON body | enum | yes | `"again"`, `"hard"`, `"good"`, or `"easy"` |
-
-Success responses:
-
-- `200 OK` with `FlashcardRateResponse`
-
-`FlashcardRateResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `flashcard_id` | string | echoed flashcard UUID |
-| `self_rating` | enum | recorded rating |
-| `passed` | boolean | true for `good`/`easy`, false for `again`/`hard` |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `404 Not Found` when flashcard not found
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/practice/flashcards/runs
-
-Tag/group: `practice`
-
-Purpose: list recent stateful flashcard runs for the current user, optionally filtered by concept.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `user_id` | query | integer | yes | user scope |
-| `concept_id` | query | integer | no | optional concept scope |
-| `limit` | query | integer | no | bounded recent window |
-
-Success responses:
-
-- `200 OK` with flashcard run summaries.
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/practice/flashcards/runs/{run_id}
-
-Tag/group: `practice`
-
-Purpose: retrieve one stateful flashcard run detail including per-card progress fields.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `run_id` | path | string | yes | run UUID |
-| `user_id` | query | integer | yes | owner scope |
-
-Success responses:
-
-- `200 OK` with run detail including `self_rating`, `passed`, and due metadata when present.
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member or run not in scope
-- `404 Not Found` when run does not exist
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/practice/flashcards/due
-
-Tag/group: `practice`
-
-Purpose: retrieve flashcards due for spaced-repetition review.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | string | yes | workspace public ID |
-| `limit` | query | integer | no | default 10, max 50 |
-
-Success responses:
-
-- `200 OK` with `{ workspace_id, due_flashcards: [...] }`
-
-Each flashcard in `due_flashcards`:
-
-| Field | Type | Notes |
-|---|---|---|
-| `flashcard_id` | integer | bank row ID |
-| `front` | string | question side |
-| `back` | string | answer side |
-| `hint` | string/null | optional hint |
-| `concept_name` | string | canonical concept name |
-| `due_at` | string | ISO-8601 timestamp |
-| `interval_days` | float | current interval |
-| `last_rating` | string/null | most recent self-rating |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### POST /workspaces/{ws_id}/practice/quizzes
-
-Tag/group: `practice`
-
-Purpose: create a practice quiz for a concept (does not update mastery to learned).
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `user_id` | JSON body | integer | yes | `> 0` |
-| `concept_id` | JSON body | integer | yes | `> 0` |
-| `session_id` | JSON body | integer | no | `> 0` when present |
-| `question_count` | JSON body | integer | no | default `4`, range `3..6` |
-
-Success responses:
-
-- `201 Created` with `QuizCreateResponse`
-
-Error responses:
-
-- `404 Not Found` when concept/workspace scope is invalid
-- `422 Unprocessable Entity` for validation or generation-shape errors
-- `503 Service Unavailable` when generation dependencies are unavailable
-
-Example:
-
-```bash
-curl -sS -X POST http://localhost:8000/practice/quizzes \
-  -H 'content-type: application/json' \
-  -d '{
-    "workspace_id": 7,
-    "user_id": 5,
-    "concept_id": 42,
-    "question_count": 4
-  }'
-```
-
-```json
-{
-  "quiz_id": 201,
-  "workspace_id": 7,
-  "user_id": 5,
-  "concept_id": 42,
-  "status": "ready",
-  "items": [
-    {
-      "item_id": 2001,
-      "position": 1,
-      "item_type": "short_answer",
-      "prompt": "Explain why kernels matter.",
-      "choices": null
-    }
-  ]
-}
-```
-
-### GET /workspaces/{ws_id}/practice/quizzes
-
-Tag/group: `practice`
-
-Purpose: list recent practice quizzes for the current user, optionally filtered by concept.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `user_id` | query | integer | yes | user scope |
-| `concept_id` | query | integer | no | optional concept scope |
-| `limit` | query | integer | no | bounded recent window |
-
-Success responses:
-
-- `200 OK` with practice quiz summaries including latest attempt when present.
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/practice/quizzes/{quiz_id}
-
-Tag/group: `practice`
-
-Purpose: retrieve one practice quiz detail including items and latest attempt summary.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | integer | yes | workspace ID |
-| `quiz_id` | path | integer | yes | practice quiz ID |
-| `user_id` | query | integer | yes | owner scope |
-
-Success responses:
-
-- `200 OK` with practice quiz detail payload.
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member or quiz not in scope
-- `404 Not Found` when quiz does not exist
-- `422 Unprocessable Entity` for validation failures
-
-### POST /workspaces/{ws_id}/practice/quizzes/{quiz_id}/submit
-
-Tag/group: `practice`
-
-Purpose: submit practice quiz answers and receive graded feedback (no mastery promotion).
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `quiz_id` | path | integer | yes | integer route parameter |
-| `workspace_id` | JSON body | integer | yes | `> 0` |
-| `user_id` | JSON body | integer | yes | `> 0` |
-| `answers` | JSON body | array<object> | yes | minimum length `1` |
-
-Success responses:
-
-- `200 OK` with `PracticeQuizSubmitResponse`
-
-`PracticeQuizSubmitResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `quiz_id` | integer | quiz ID |
-| `attempt_id` | integer | graded attempt ID |
-| `score` | number | `0.0..1.0` |
-| `passed` | boolean | thresholded practice pass flag |
-| `critical_misconception` | boolean | misconception signal |
-| `overall_feedback` | string | overall feedback |
-| `items` | array | per-item feedback |
-| `replayed` | boolean | true on idempotent replay |
-| `retry_hint` | string/null | retry guidance |
-
-Error responses:
-
-- `404 Not Found` when quiz/workspace/user scope is invalid
-- `422 Unprocessable Entity` for validation, generation, or grading errors
-- `503 Service Unavailable` when grading dependencies are unavailable
-
-Example:
-
-```bash
-curl -sS -X POST http://localhost:8000/practice/quizzes/201/submit \
-  -H 'content-type: application/json' \
-  -d '{
-    "workspace_id": 7,
-    "user_id": 5,
-    "answers": [
-      {"item_id": 2001, "answer": "Because they characterize injectivity."}
+  "trace": {
+    "topic": "string",
+    "generated_by": "string",
+    "queries": ["string"],
+    "selected_sources": ["SourceRecord"],
+    "excluded_sources": [
+      {"title": "string", "reason": "string"}
     ]
-  }'
-```
-
-```json
-{
-  "quiz_id": 201,
-  "attempt_id": 6001,
-  "score": 0.75,
-  "passed": true,
-  "critical_misconception": false,
-  "overall_feedback": "Good. Add a formal definition next time.",
-  "items": [
-    {
-      "item_id": 2001,
-      "item_type": "short_answer",
-      "result": "partial",
-      "is_correct": false,
-      "critical_misconception": false,
-      "feedback": "Partially correct; include null-space wording.",
-      "score": 0.75
-    }
-  ],
-  "replayed": false,
-  "retry_hint": null
+  }
 }
 ```
 
-### GET /workspaces/{ws_id}/knowledge-base/documents
-
-Tag/group: `knowledge-base`
-
-Purpose: list documents in the workspace knowledge base with chunk counts.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `200 OK` with `KBDocumentListResponse`
-
-`KBDocumentListResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace scope |
-| `documents` | array | list of `KBDocumentSummary` |
-
-`KBDocumentSummary` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `document_id` | integer | document row ID |
-| `public_id` | string | UUID public identifier |
-| `title` | string/null | document title |
-| `source_uri` | string/null | original source URI |
-| `chunk_count` | integer | number of chunks |
-| `ingestion_status` | string | `pending` \| `ingested` |
-| `graph_status` | string | `disabled` \| `pending` \| `extracted` |
-| `graph_concept_count` | integer | distinct concept links extracted for this document |
-| `created_at` | datetime | ingestion timestamp |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### DELETE /workspaces/{ws_id}/knowledge-base/documents/{document_id}
-
-Tag/group: `knowledge-base`
-
-Purpose: delete a document and its chunks from the knowledge base (cascading delete). Optionally prune orphaned canonical graph nodes.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `document_id` | path | integer | yes | document ID |
-| `workspace_id` | query | integer | yes | `> 0` |
-| `prune_orphan_graph` | query | boolean | no | default `false`; when `true`, removes canonical concepts/edges with no remaining provenance after deletion |
-
-Success responses:
-
-- `204 No Content`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when document not found in workspace
-
-### POST /workspaces/{ws_id}/knowledge-base/documents/upload
-
-Tag/group: `knowledge-base`
-
-Purpose: upload a document (txt, md, pdf) to the workspace knowledge base. **This is the canonical upload endpoint.**
-
-Request contract (multipart/form-data):
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `file` | body (multipart) | file | yes | txt, md, or pdf; max 20 MB |
-| `workspace_id` | body (form) | integer | yes | `> 0` |
-| `title` | body (form) | string | no | optional document title |
-
-Success responses:
-
-- `201 Created` with payload `{"document_id", "workspace_id", "title", "chunk_count", "created"}`
-
-Error responses:
-
-- `400 Bad Request` when uploaded file is empty
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `413 Request Entity Too Large` when file exceeds 20 MB
-- `422 Unprocessable Entity` when document content is invalid
-- `503 Service Unavailable` when graph dependencies unavailable
-
-### POST /workspaces/{ws_id}/knowledge-base/documents/{document_id}/reprocess
-
-Tag/group: `knowledge-base`
-
-Purpose: re-chunk and re-embed a document (returns 202 — async stub).
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `document_id` | path | integer | yes | document ID |
-| `workspace_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `202 Accepted` with status payload `{"document_id", "workspace_id", "status": "queued", "message"}`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when document not found in workspace
-
-### GET /workspaces/{ws_id}/readiness/snapshot
-
-Tag/group: `readiness`
-
-Purpose: return per-topic readiness scores for the current user in a workspace.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `200 OK` with `ReadinessSnapshotResponse`
-
-`ReadinessSnapshotResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `workspace_id` | integer | workspace scope |
-| `user_id` | integer | user scope |
-| `topics` | array | list of `ReadinessTopicState` |
-
-`ReadinessTopicState` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `concept_id` | integer | canonical concept ID |
-| `concept_name` | string | canonical concept name |
-| `readiness_score` | number | `0.0..1.0`, exponential-decay adjusted |
-| `recommend_quiz` | boolean | true when readiness < 0.5 and mastery >= 0.3 |
-| `last_assessed_at` | datetime/null | last mastery assessment timestamp |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-
-### POST /workspaces/{ws_id}/research/sources
-
-Tag/group: `research`
-
-Purpose: register a new research source URL for the workspace.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `url` | JSON body | string | yes | non-empty URL |
-| `label` | JSON body | string | no | optional display label |
-
-Success responses:
-
-- `201 Created` with `ResearchSourceSummary`
-
-`ResearchSourceSummary` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `source_id` | integer | source row ID |
-| `url` | string | source URL |
-| `label` | string/null | display label |
-| `active` | boolean | whether source is active |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `422 Unprocessable Entity` for validation failures
-
-### GET /workspaces/{ws_id}/research/sources
-
-Tag/group: `research`
-
-Purpose: list registered research sources for the workspace.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `200 OK` with array of `ResearchSourceSummary`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### DELETE /workspaces/{ws_id}/research/sources/{source_id}
-
-Tag/group: `research`
-
-Purpose: deactivate (soft-delete) a research source.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `source_id` | path | integer | yes | source ID |
-| `workspace_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `204 No Content`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### POST /workspaces/{ws_id}/research/runs
-
-Tag/group: `research`
-
-Purpose: trigger a new research run (actual crawling is async).
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-
-Success responses:
-
-- `201 Created` with `ResearchRunSummary`
-
-`ResearchRunSummary` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `run_id` | integer | run row ID |
-| `status` | string | run lifecycle state |
-| `candidates_found` | integer | number of candidates discovered |
-| `started_at` | datetime | run start timestamp |
-| `finished_at` | datetime/null | run completion timestamp |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### GET /workspaces/{ws_id}/research/runs
-
-Tag/group: `research`
-
-Purpose: list recent research runs for the workspace.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `limit` | query | integer | no | default `10`, range `1..50` |
-
-Success responses:
-
-- `200 OK` with array of `ResearchRunSummary`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### GET /workspaces/{ws_id}/research/candidates
-
-Tag/group: `research`
-
-Purpose: list research candidates, optionally filtered by run or status.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `run_id` | query | integer | no | filter by run ID |
-| `status` | query | string | no | filter by candidate status |
-
-Success responses:
-
-- `200 OK` with array of `ResearchCandidateSummary`
-
-`ResearchCandidateSummary` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `candidate_id` | integer | candidate row ID |
-| `source_url` | string | origin source URL |
-| `title` | string/null | extracted title |
-| `snippet` | string/null | text snippet |
-| `status` | string | `pending`, `approved`, `rejected`, `ingested` |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-
-### PATCH /workspaces/{ws_id}/research/candidates/{candidate_id}
-
-Tag/group: `research`
-
-Purpose: approve or reject a research candidate.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `candidate_id` | path | integer | yes | candidate ID |
-| `workspace_id` | query | integer | yes | `> 0` |
-| `status` | JSON body | string | yes | `"approved"` or `"rejected"` |
-
-Success responses:
-
-- `200 OK` with `ResearchCandidateSummary`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when candidate not found
+---
+
+### Hydration
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/hydrate`
+
+Hydrate a Trail with private local evidence. Fetches allowed public sources and indexes content privately. Hydrated content stays private.
+
+**Request body:**
+
+```json
+{
+  "concept_id": "uuid | null",
+  "source_ids": ["uuid"],
+  "use_model_knowledge": "bool (default: false)"
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "hydrated_concepts": "int",
+  "private_records_created": "int",
+  "skipped_sources": [
+    {"source_id": "uuid", "reason": "string"}
+  ]
+}
+```
 
 ---
 
-### POST /workspaces/{ws_id}/research/candidates/{candidate_id}/promote
+### Trail Pack Export
 
-Tag/group: `research`
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/export`
 
-Purpose: evaluate and optionally promote an approved candidate through the learning-gated promotion policy.
+Export a Trail as a safe public Trail Pack. Runs the export sanitizer before generating output.
 
-Request contract:
+**Query params:**
 
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `candidate_id` | path | integer | yes | candidate ID |
-| `ws_id` | path | string | yes | workspace public ID |
-| `has_quiz_gate` | JSON body | boolean | no | default false |
-| `quiz_passed` | JSON body | boolean | no | default false |
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `format` | `json` or `yaml` | `json` | Output format |
 
-Success responses:
+**Response 200:**
 
-- `200 OK` with `CandidatePromotionResponse`
+```json
+{
+  "pack": {
+    "manifest": {},
+    "graph": {},
+    "concepts": {},
+    "sources": [],
+    "research_trace": {}
+  },
+  "report": "ExportReport"
+}
+```
 
-`CandidatePromotionResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `candidate_id` | integer | candidate row ID |
-| `action` | string | `promote`, `defer`, `reject`, or `quiz_gate` |
-| `reason` | string | explanation of the decision |
-| `promoted` | boolean | whether the candidate was actually promoted |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `404 Not Found` when candidate not found
-
----
-
-### POST /workspaces/{ws_id}/research/topics/plan
-
-Tag/group: `research`
-
-Purpose: generate topic proposals from a research goal. Returns reviewable proposals — no external content is fetched or ingested.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `workspace_id` | query | integer | yes | `> 0` |
-| `goal` | JSON body | string | yes | 1–500 chars, the research goal |
-
-Success responses:
-
-- `200 OK` with `list[TopicProposalResponse]`
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `422 Unprocessable Entity` when goal is empty or too long
+The sanitizer enforces these rules before generating the response:
+- `user_upload` sources are excluded.
+- `private` or `restricted` sources are excluded.
+- Chunks, embeddings, private notes, chat history, and mastery records are excluded.
+- Only `research_agent` + `public` sources appear, as links/metadata only.
 
 ---
 
-### POST /workspaces/{ws_id}/research/topics/execute
+### Trail Pack Import
 
-Tag/group: `research`
+#### `POST /api/workspaces/{workspace_id}/trail-packs/import`
 
-Purpose: build a query plan from an approved topic and enqueue planned candidates. No external content is fetched — candidates represent search intent.
+Import a Trail Pack into a workspace. Forks the Trail. Validates the pack before import.
 
-Request contract:
+**Request:** `multipart/form-data` or `application/json`
 
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | string | yes | workspace public ID |
-| `topic` | JSON body | string | yes | min 1 char |
-| `subtopics` | JSON body | list[string] | no | subtopic list |
-| `source_classes` | JSON body | list[string] | no | preferred source types |
-| `rationale` | JSON body | string | no | why this topic was chosen |
-| `priority` | JSON body | string | no | "high", "medium", or "low" |
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `pack` | JSON object or file | yes | Trail Pack payload |
 
-Success responses:
+**Validation rejects:**
+- Missing required manifest fields.
+- Unknown node references in edges.
+- Duplicate node ids.
+- Unknown `concept_level` values.
+- Packs containing raw chunks, embeddings, uploaded files, private notes, or mastery records.
+- Malformed YAML/JSON.
 
-- `201 Created` with `QueryPlanResponse`
+**Response 201:**
 
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
-- `422 Unprocessable Entity` when topic is empty
+```json
+{
+  "trail": "Trail",
+  "graph": "TrailGraph",
+  "report": "ImportReport"
+}
+```
 
 ---
 
-## Onboarding
+## Streaming Notes
 
-### GET /workspaces/{ws_id}/onboarding/status
+The tutor chat endpoint uses SSE. Clients should:
 
-Tag/group: `onboarding`
+1. Open the connection with a `POST` request (body is the chat payload).
+2. Read events line by line (`data: ...`).
+3. Handle `mode` event to update UI indicator.
+4. Accumulate `token` events to display streamed text.
+5. On `done`, persist the `conversation_id` for future turns.
+6. On `error`, display the message and close the connection.
 
-Purpose: check workspace readiness and get suggested starting topics.
-
-Request contract:
-
-| Field | Location | Type | Required | Constraints / Notes |
-|---|---|---|---|---|
-| `ws_id` | path | string | yes | workspace public ID |
-| `topic_limit` | query | integer | no | default 5, range 1–20 |
-
-Success responses:
-
-- `200 OK` with `OnboardingStatusResponse`
-
-`OnboardingStatusResponse` fields:
-
-| Field | Type | Notes |
-|---|---|---|
-| `has_documents` | boolean | true if workspace has uploaded docs |
-| `has_active_concepts` | boolean | true if workspace has active graph concepts |
-| `suggested_topics` | array | top-N concepts by degree |
-
-Error responses:
-
-- `401 Unauthorized` when not authenticated
-- `403 Forbidden` when not a workspace member
+FastAPI implementation should use `StreamingResponse` with `media_type="text/event-stream"` and an async generator.
