@@ -1,4 +1,4 @@
-.PHONY: install dev test lint infra-up infra-down
+.PHONY: install dev test lint infra-up infra-down db-upgrade db-revision
 
 install:
 	pip install -e ".[dev]"
@@ -17,3 +17,9 @@ infra-up:
 
 infra-down:
 	docker compose down
+
+db-upgrade:
+	alembic upgrade head
+
+db-revision:
+	alembic revision --autogenerate -m "$(m)"
