@@ -2,6 +2,8 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict
 
+from .types import BloomLevel, ConceptLevel, Difficulty, NodeType, RelationType
+
 
 class ConceptNodeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -10,10 +12,10 @@ class ConceptNodeRead(BaseModel):
     trail_id: uuid.UUID
     slug: str
     title: str
-    node_type: str
-    concept_level: str
-    difficulty: str
-    bloom_level: str
+    node_type: NodeType
+    concept_level: ConceptLevel
+    difficulty: Difficulty
+    bloom_level: BloomLevel
     mastery_check_labels: list[str]
     metadata_json: dict
 
@@ -25,4 +27,4 @@ class ConceptEdgeRead(BaseModel):
     trail_id: uuid.UUID
     source_node_id: uuid.UUID
     target_node_id: uuid.UUID
-    relation_type: str
+    relation_type: RelationType

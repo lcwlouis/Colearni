@@ -2,14 +2,16 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict
 
+from .types import SourceAccess, SourceOrigin
+
 
 class SourceRecordRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     workspace_id: uuid.UUID
-    origin: str
-    access: str
+    origin: SourceOrigin
+    access: SourceAccess
     title: str
     url: str | None
     license: str | None
