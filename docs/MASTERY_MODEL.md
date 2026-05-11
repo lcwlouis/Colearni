@@ -50,9 +50,12 @@ mastery_records
 quiz_attempts
 - id
 - concept_id
-- user_answer
+- quiz_type
+- questions_json
+- answers_json
 - evaluator_feedback
 - passed
+- score
 - created_at
 ```
 

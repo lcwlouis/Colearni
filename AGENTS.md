@@ -21,7 +21,7 @@ CoLearni was reset to start fresh for the actual MVP. Treat the docs in `docs/` 
 
 ## Repo Expectations
 
-- Small PR-sized changes, target 700 net LOC or less.
+- Small PR-sized changes, target 400 net LOC or less. Split larger work into phases.
 - FastAPI routes must stay thin; no business logic in routes.
 - Tests are required for new core behavior.
 - Evidence-first: user-visible sourced answers must include citations or refuse in strict mode.

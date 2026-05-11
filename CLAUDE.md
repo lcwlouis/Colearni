@@ -63,7 +63,7 @@ Do not start with PDF ingestion.
 ## Architecture Rules
 
 - Keep FastAPI routes thin: validate input, call services, return output.
-- Put business logic in service/domain modules.
+- Put business logic in services. If domain modules are later introduced, keep them separate from HTTP routes.
 - Keep LLM prompts isolated, versioned, and testable.
 - Keep source provenance explicit.
 - Never mix public Trail Pack content with private workspace content.

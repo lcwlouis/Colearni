@@ -1,102 +1,68 @@
-# docs/CODEX.md
+# Codex Rules For CoLearni
 
-## Purpose
-These rules exist so Codex can contribute code safely without turning the repo into spaghetti.
+## General Rules
 
-Codex must follow this doc in every PR.
+- Make small PR-sized changes; target 400 net LOC or less. Split larger work into phases.
+- Prefer implementation compatible with the existing repo structure.
+- Do not rewrite unrelated parts of the app.
+- Update docs when architecture changes.
+- Add tests for every core behavior.
+- Do not claim completion without running checks.
+- If checks cannot run, document why.
+- Respect dirty worktrees; do not revert changes you did not make.
 
----
+## Architecture Rules
 
-## Golden rules (non-negotiable)
+- Keep FastAPI routes thin.
+- Put business logic in services. If domain modules are later introduced, keep them separate from HTTP routes.
+- Keep LLM prompts isolated, versioned, and testable.
+- Keep source provenance explicit.
+- Never mix public Trail Pack content with private workspace content.
+- Do not add multi-agent complexity unless needed.
+- Preserve evidence-first behavior: user-visible sourced answers must cite allowed evidence or refuse in strict grounded mode.
+- Obey graph resolver and gardener budgets in `docs/GRAPH.md`; no unbounded loops.
 
-### 1) Small PRs
-- Target: **<= 400 LOC net** per PR.
-- If bigger, split into multiple PRs.
+## Product Rules
 
-### 2) Routes are thin
-FastAPI routes must:
-- validate input (Pydantic)
-- call domain/core functions
-- return output
-No business logic in routes.
+- CoLearni is a learning workspace, not a generic RAG chatbot.
+- Treat Workspace, Trail, Trail Pack, Source Manifest, Research Trace, Hydration, and Mastery as stable product terms.
+- The graph and mastery model are core primitives.
+- Concept graph nodes must carry explicit levels: `umbrella`, `topic`, `subtopic`, or `granular`.
+- The tutor should feel like a mentor/coach, not a search engine.
+- Build local-ready first and keep SaaS as a later thin layer.
+- Do not start the MVP with PDF ingestion, SaaS billing/auth, or a public marketplace.
 
-### 3) Tests required
-- Every behavior change requires tests.
-- Prefer unit tests for pure logic.
-- Add integration tests only when needed (DB retrieval, migrations).
+## Safety Rules
 
-### 4) Evidence-first output
-All tutor responses must be built from:
-- `EvidenceItem[]` + `Citation[]`
+- Never include user-uploaded content in public exports.
+- Never include chunks or embeddings in public exports.
+- Never include private notes or chat history in public exports.
+- Never include mastery records in public exports by default.
+- Never include generated summaries from private/user-uploaded sources in public exports.
+- Never include generated quizzes from private/user-uploaded sources in public exports.
+- Public research-agent sources may export links and metadata only by default.
+- Unknown license means no redistribution of content.
+- Public access is not the same as redistribution rights.
 
-If the user enables **strict grounded mode**, the system must refuse or ask for more sources when evidence is insufficient.
+## Testing Expectations
 
-### 5) Budgets prevent runaway costs
-Agent loops and the Graph Gardener must obey explicit budgets:
-- max tool calls per chat turn
-- max LLM calls per chunk/doc
-- max clusters per gardener run
-Hard-stop when budgets are hit.
+- Backend behavior needs pytest coverage.
+- Frontend behavior should use the repo's existing typecheck/test tooling.
+- Export/import safety behavior requires regression tests.
+- LLM-facing code should test prompt context assembly and schema validation without requiring live provider calls where possible.
+- Manual checks are acceptable only as a supplement, not as a replacement for core safety tests.
 
-### 6) No cross-import violations
-- `core/` and `domain/` must not import from `apps/`.
-- Keep clear boundaries between layers.
+## Verification Block
 
----
+Every implementation PR should include:
 
-## Style & tooling
-- Python: ruff + pytest (and type checks if configured)
-- Use clear typing and docstrings for public functions
-- Pydantic models for all inputs/outputs (tools, cards, API payloads)
-- Prefer pure functions and small modules
+```md
+## Verification
 
----
-
-## PR workflow (Codex should follow this)
-For every PR:
-
-1) **Design-only proposal (no code)**
-   - Outline approach, new files, modified files
-   - Define schemas and endpoints
-   - Define tests to add
-
-2) **Implementation**
-   - Implement per plan
-   - Keep routes thin
-   - Add tests
-
-3) **Fix pass**
-   - Ensure `ruff` and `pytest` pass
-   - Fix typing/import issues
-
-4) **PR summary**
-   - Provide short description + demo commands (curl)
-   - Mention any migrations and how to apply
-
----
-
-## Command expectations (typical)
-Codex should assume these exist or create them if missing:
-- `ruff check .`
-- `pytest -q`
-- Optional (if configured): `ruff format .`, `mypy .`
-
----
-
-## What Codex must NOT do
-- Don’t add large new dependencies without explanation in PR summary.
-- Don’t redesign architecture without updating docs and clearly stating why.
-- Don’t implement a frontend unless the task explicitly asks for it.
-- Don’t remove logs/provenance fields that enable explainability.
-- Don’t create unbounded loops (chat agents, gardener, retrieval retries).
-
----
-
-## Definition of Done (DoD) checklist
-A PR is done only if:
-- tests added/updated and passing
-- migrations included if schema changed
-- endpoints documented (briefly)
-- no business logic in routes
-- Evidence/citations preserved for user-visible answers
-- budgets are respected and enforced in code
+Root cause / task:
+Files changed:
+Tests added:
+Commands run:
+Manual checks:
+Known limitations:
+```

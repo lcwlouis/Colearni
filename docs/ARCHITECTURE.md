@@ -242,7 +242,7 @@ Tutor context should be scoped in this order:
 
 1. Current concept.
 2. Prerequisites.
-3. Containing nodes and contained child nodes.
+3. Containing nodes and contained nodes.
 4. Current Trail.
 5. Explicitly linked sources.
 6. Broader workspace only when needed.

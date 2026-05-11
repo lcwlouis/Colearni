@@ -2,7 +2,7 @@
 
 ## Overview
 
-All routes are prefixed with `/api`. The backend is a FastAPI application. Routes stay thin: they validate input, call a service, and return a response. No business logic in routes.
+Application routes are prefixed with `/api`. The health endpoint is the only planned unprefixed route. The backend is a FastAPI application. Routes stay thin: they validate input, call a service, and return a response. No business logic in routes.
 
 ## Workspace Scoping
 
@@ -421,7 +421,8 @@ Get a concept with its graph context and mastery state.
 {
   "concept": "ConceptNode",
   "prerequisites": ["ConceptNode"],
-  "children": ["ConceptNode"],
+  "contained_nodes": ["ConceptNode"],
+  "containing_nodes": ["ConceptNode"],
   "related": ["ConceptNode"],
   "mastery": "MasteryRecord",
   "sources": ["SourceRecord"]
@@ -580,6 +581,8 @@ List all source records in a workspace.
 #### `POST /api/workspaces/{workspace_id}/sources/upload`
 
 Upload a source file. Stored as a private source. Defaults: `origin: user_upload`, `access: private`, `include_on_public_export: false`.
+
+This endpoint supports hydration/import workflows after the core learning loop exists. Do not implement it as the first milestone, and do not build PDF ingestion before Trail generation, graph viewing, tutor chat, mastery, and safe export are working.
 
 **Request:** `multipart/form-data`
 

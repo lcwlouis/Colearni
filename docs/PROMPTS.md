@@ -169,7 +169,8 @@ If validation fails, attempt one repair call with the validation errors appended
 - `concept` — ConceptNode JSON
 - `concept_level` — umbrella/topic/subtopic/granular
 - `prerequisites` — list of prerequisite concept titles
-- `children` — list of contained concept titles
+- `contained_nodes` — list of contained concept titles
+- `containing_nodes` — list of broader concepts that contain the current concept
 - `mastery_status` — current status
 - `bloom_target` — target Bloom level for this concept
 - `learning_goal` — Trail goal statement
