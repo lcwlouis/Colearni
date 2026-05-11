@@ -25,7 +25,7 @@ Front-matter fields:
 |---|---|---|
 | `task` | yes | Machine-readable task identifier (see Task Registry below) |
 | `version` | yes | Integer, incremented on breaking changes |
-| `model_hint` | no | Preferred model class (`gpt-4o`, `gpt-4o-mini`, etc.). LiteLLM routing may override. |
+| `model_hint` | no | Preferred model class (`gpt-4o`, `gpt-4o-mini`, etc.). Must be compatible with the configured `LLM_API_BASE` (see LLM client pattern in `docs/ARCHITECTURE.md`). |
 | `temperature` | no | Default temperature. Services may override per call. |
 
 ## Directory Layout

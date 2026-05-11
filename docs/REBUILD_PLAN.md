@@ -53,7 +53,7 @@ Goal: get the repo into a clean rebuild state that can run locally.
 
 Implementation scope:
 
-- Keep FastAPI, PostgreSQL + pgvector, SQLAlchemy + Alembic, Pydantic, Next.js, LiteLLM, pytest, and local Docker Compose.
+- Keep FastAPI, PostgreSQL + pgvector, SQLAlchemy + Alembic, Pydantic, Next.js, openai SDK, pytest, and local Docker Compose.
 - Preserve the layer rule: routes validate input, call services, and return responses.
 - Make `.env.example` accurate.
 - Provide one command for local infra, backend, and frontend.

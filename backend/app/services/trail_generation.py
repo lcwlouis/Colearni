@@ -9,7 +9,7 @@ import json
 import re
 import uuid
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,9 @@ from backend.app.services.graph_validation import (
     RawGraph,
     RawNode,
 )
+
+if TYPE_CHECKING:
+    from backend.app.agents.llm_client import LLMClient
 
 _PROMPT_PATH = Path(__file__).parent.parent / "agents" / "prompts" / "trail_generation.v1.md"
 
@@ -64,45 +67,25 @@ def _parse_graph(raw: str) -> RawGraph:
 
 
 class LLMGraphGenerator:
-    """OpenAI-SDK-backed generator. Import is lazy so tests never need the package."""
+    """LLMClient-backed graph generator. Provider wiring lives in LLMClient."""
 
-    def __init__(self, model: str, api_key: str, api_base: str = "") -> None:
-        self._model = model
-        self._api_key = api_key
-        self._api_base = api_base
-
-    def _client(self):  # type: ignore[return]
-        from openai import AsyncOpenAI  # lazy import
-
-        kwargs: dict = {"api_key": self._api_key}
-        if self._api_base:
-            kwargs["base_url"] = self._api_base
-        return AsyncOpenAI(**kwargs)
+    def __init__(self, client: LLMClient) -> None:
+        self._client = client
 
     async def generate(self, topic: str, goal: str, target_depth: str) -> str:
         prompt = _load_prompt(topic, goal, target_depth)
-        client = self._client()
-        response = await client.chat.completions.create(
-            model=self._model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
-        )
-        return response.choices[0].message.content or ""
+        return await self._client.chat([{"role": "user", "content": prompt}], temperature=0.4)
 
     async def repair(self, raw_json: str, error: str) -> str:
-        client = self._client()
         repair_prompt = (
             "The following JSON concept graph failed validation with this error:\n"
             f"ERROR: {error}\n\n"
             "Fix the JSON so it passes validation. Return ONLY valid JSON, no explanation.\n\n"
             f"ORIGINAL JSON:\n{raw_json}"
         )
-        response = await client.chat.completions.create(
-            model=self._model,
-            messages=[{"role": "user", "content": repair_prompt}],
-            temperature=0.2,
+        return await self._client.chat(
+            [{"role": "user", "content": repair_prompt}], temperature=0.2
         )
-        return response.choices[0].message.content or ""
 
 
 async def generate_and_store_trail(

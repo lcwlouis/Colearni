@@ -285,6 +285,93 @@ Retrieval should stay scoped and budgeted:
 - Use hybrid vector + full-text search where available.
 - Avoid unbounded loops and whole-workspace searches by default.
 
+## LLM Client Pattern
+
+CoLearni makes direct calls to LLM provider APIs via `backend/app/agents/llm_client.py`. **Do not use LiteLLM.** LiteLLM is not a dependency of this project.
+
+### Why direct calls
+
+- Fewer dependencies = smaller attack surface and simpler auditing.
+- Explicit, reviewable routing logic with no hidden behaviour.
+- The `openai` SDK supports any OpenAI-compatible endpoint via `base_url`, covering OpenAI, OpenRouter, DeepSeek, Gemini, local Ollama, and most hosted alternatives without extra packages.
+- Anthropic is supported natively via their SDK (lazy import, only needed when `LLM_PROVIDER=anthropic`).
+
+### Supported providers
+
+| `LLM_PROVIDER` | Routing | Extra install |
+|---|---|---|
+| `openai` | openai SDK (default endpoint) | — |
+| `openrouter` | openai SDK + `base_url` | — |
+| `deepseek` | openai SDK + `base_url` | — |
+| `gemini` | openai SDK + `base_url` (Google's OAI-compat endpoint) | — |
+| `anthropic` | anthropic SDK (native) | `pip install -e ".[providers]"` |
+| custom | openai SDK + explicit `LLM_API_BASE` | — |
+
+### Standard pattern for new LLM tasks
+
+Every LLM-using service defines an injectable Protocol and a concrete implementation that wraps `LLMClient`:
+
+```python
+# In backend/app/services/my_task.py
+from typing import Protocol
+from backend.app.agents.llm_client import LLMClient
+
+class MyTaskGenerator(Protocol):
+    async def generate(self, **inputs) -> str: ...
+    async def repair(self, raw: str, error: str) -> str: ...
+
+class LLMMyTaskGenerator:
+    def __init__(self, client: LLMClient) -> None:
+        self._client = client
+
+    async def generate(self, **inputs) -> str:
+        prompt = load_and_render_prompt("task_name", version=1, variables=inputs)
+        return await self._client.chat([{"role": "user", "content": prompt}])
+
+    async def repair(self, raw: str, error: str) -> str:
+        repair_prompt = f"Fix this:\nERROR: {error}\nJSON:\n{raw}"
+        return await self._client.chat([{"role": "user", "content": repair_prompt}], temperature=0.2)
+```
+
+### Factory in routes
+
+```python
+# In backend/app/api/my_route.py
+from backend.app.agents.llm_client import LLMClient
+from backend.app.settings import settings
+
+def get_my_generator() -> MyTaskGenerator:
+    return LLMMyTaskGenerator(client=LLMClient.from_settings(settings))
+```
+
+### Testing (no LLM needed)
+
+Inject a `FakeGenerator` through FastAPI `dependency_overrides`. Tests never call a real LLM:
+
+```python
+class FakeGenerator:
+    async def generate(self, **inputs) -> str:
+        return VALID_JSON_FIXTURE
+
+    async def repair(self, raw: str, error: str) -> str:
+        return REPAIRED_JSON_FIXTURE
+
+app.dependency_overrides[get_my_generator] = lambda: FakeGenerator()
+```
+
+### One-repair rule
+
+Generate once. If parsing or validation fails, call `repair()` exactly once. Raise `GenerationError` on the second failure. **No unbounded loops.**
+
+### Configuration
+
+| Variable | Purpose |
+|---|---|
+| `LLM_PROVIDER` | Provider name: `openai`, `openrouter`, `anthropic`, `gemini`, `deepseek` |
+| `LLM_MODEL` | Model name for the provider (e.g. `gpt-4o-mini`, `claude-3-5-haiku-20241022`) |
+| `LLM_API_KEY` | API key for the provider |
+| `LLM_API_BASE` | Optional: override base URL for custom/local endpoints |
+
 ## Local-Ready First, SaaS Later
 
 Local-ready core:

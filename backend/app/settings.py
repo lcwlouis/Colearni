@@ -7,9 +7,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_version: str = "0.1.0"
     database_url: str = "postgresql+asyncpg://colearni:colearni@localhost:5432/colearni"
+    llm_provider: str = "openai"  # openai | openrouter | anthropic | gemini | deepseek
     llm_model: str = "gpt-4o-mini"
     llm_api_key: str = ""
-    llm_api_base: str = ""  # override for local/compatible endpoints e.g. http://localhost:11434/v1
+    llm_api_base: str = ""  # optional: override base URL (e.g. for local/custom endpoints)
 
 
 settings = Settings()

@@ -3,6 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.agents.llm_client import LLMClient
 from backend.app.db import get_session
 from backend.app.schemas.trail import (
     TrailGenerateRequest,
@@ -22,11 +23,7 @@ router = APIRouter(prefix="/api/workspaces/{workspace_id}/trails")
 
 
 def get_graph_generator() -> GraphGenerator:
-    return LLMGraphGenerator(
-        model=settings.llm_model,
-        api_key=settings.llm_api_key,
-        api_base=settings.llm_api_base,
-    )
+    return LLMGraphGenerator(client=LLMClient.from_settings(settings))
 
 
 @router.post("/generate", response_model=TrailGenerateResponse, status_code=201)

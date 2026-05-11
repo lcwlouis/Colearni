@@ -117,7 +117,7 @@ The docs describe the intended rebuild stack:
 | ORM / migrations | SQLAlchemy 2 + Alembic |
 | Frontend | Next.js, TypeScript |
 | Graph UI | React Flow for MVP or Sigma.js if already working |
-| LLM routing | LiteLLM |
+| LLM client | `openai` SDK (direct, provider-configurable) |
 | Tests | pytest, frontend typecheck/test tooling |
 | Tracing | Phoenix/OpenTelemetry later, optional on day one |
 

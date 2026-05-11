@@ -104,10 +104,10 @@ Required variables for the backend (document in `.env.example`):
 | Variable | Description |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string (e.g. `postgresql+asyncpg://...`) |
-| `LLM_PROVIDER` | LiteLLM model string (e.g. `openai/gpt-4o`) |
-| `LLM_API_KEY` | API key for the LLM provider |
-| `OPENAI_API_KEY` | Set if using OpenAI directly |
-| `ANTHROPIC_API_KEY` | Set if using Anthropic |
+| `LLM_PROVIDER` | Provider: `openai` \| `openrouter` \| `anthropic` \| `gemini` \| `deepseek` (default: `openai`) |
+| `LLM_MODEL` | Model name for the chosen provider (e.g. `gpt-4o-mini`, `claude-3-5-haiku-20241022`) |
+| `LLM_API_KEY` | API key for the provider |
+| `LLM_API_BASE` | Optional: override base URL for custom/local endpoints (e.g. Ollama: `http://localhost:11434/v1`) |
 | `APP_ENV` | `development` or `production` |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
 | `OBSERVABILITY_ENABLED` | `true` to enable OpenTelemetry traces (optional) |
