@@ -16,7 +16,7 @@ You are an expert curriculum designer building a concept graph for a learning tr
 Return a JSON object describing a concept graph with `nodes` and `edges`.
 
 The graph must:
-- Have between 3 and 30 nodes.
+- Have between 10 and 30 nodes.
 - Include at least one `umbrella` or `topic` level node that acts as the entry point.
 - Have unique `slug` values (lowercase, hyphen-separated, e.g. `linear-algebra`).
 - Have edges that only reference slugs present in the node list.

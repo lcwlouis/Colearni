@@ -18,56 +18,66 @@ from backend.app.models.trail import Trail  # noqa: F401
 from backend.app.models.workspace import Workspace
 
 
-def _minimal_graph_json() -> str:
-    return json.dumps(
+def _minimal_graph_json(topic: str = "Math") -> str:
+    """Valid 10-node, 9-edge concept graph for use in tests."""
+    subtopics = [
+        ("arithmetic", "Arithmetic"),
+        ("algebra", "Algebra"),
+        ("geometry", "Geometry"),
+        ("statistics", "Statistics"),
+        ("calculus", "Calculus"),
+        ("number-theory", "Number Theory"),
+        ("logic", "Logic"),
+        ("set-theory", "Set Theory"),
+        ("probability", "Probability"),
+    ]
+    nodes = [
         {
-            "nodes": [
-                {
-                    "slug": "math-root",
-                    "title": "Mathematics",
-                    "node_type": "concept",
-                    "concept_level": "umbrella",
-                    "difficulty": "beginner",
-                    "bloom_level": "understand",
-                    "mastery_check_labels": [],
-                    "metadata_json": {},
-                },
-                {
-                    "slug": "addition",
-                    "title": "Addition",
-                    "node_type": "concept",
-                    "concept_level": "topic",
-                    "difficulty": "beginner",
-                    "bloom_level": "remember",
-                    "mastery_check_labels": [],
-                    "metadata_json": {},
-                },
-                {
-                    "slug": "subtraction",
-                    "title": "Subtraction",
-                    "node_type": "concept",
-                    "concept_level": "topic",
-                    "difficulty": "beginner",
-                    "bloom_level": "remember",
-                    "mastery_check_labels": [],
-                    "metadata_json": {},
-                },
-            ],
-            "edges": [
-                {"source_slug": "math-root", "target_slug": "addition", "relation_type": "contains"},  # noqa: E501
-                {"source_slug": "math-root", "target_slug": "subtraction", "relation_type": "contains"},  # noqa: E501
-            ],
+            "slug": "math-root",
+            "title": topic,
+            "node_type": "concept",
+            "concept_level": "umbrella",
+            "difficulty": "beginner",
+            "bloom_level": "understand",
+            "mastery_check_labels": [],
+            "metadata_json": {},
         }
-    )
+    ] + [
+        {
+            "slug": slug,
+            "title": title,
+            "node_type": "concept",
+            "concept_level": "topic",
+            "difficulty": "beginner",
+            "bloom_level": "remember",
+            "mastery_check_labels": [],
+            "metadata_json": {},
+        }
+        for slug, title in subtopics
+    ]
+    edges = [
+        {"source_slug": "math-root", "target_slug": slug, "relation_type": "contains"}
+        for slug, _ in subtopics
+    ]
+    return json.dumps({"nodes": nodes, "edges": edges})
 
 
 class FakeGenerator:
-    def __init__(self, json_str: str, repair_json_str: str | None = None):
+    def __init__(
+        self,
+        json_str: str,
+        repair_json_str: str | None = None,
+        *,
+        raise_on_generate: bool = False,
+    ):
         self._json = json_str
         self._repair = repair_json_str
+        self._raise_on_generate = raise_on_generate
         self.repair_called = False
 
     async def generate(self, topic: str, goal: str, target_depth: str) -> str:
+        if self._raise_on_generate:
+            raise RuntimeError("Provider connection failed")
         return self._json
 
     async def repair(self, raw_json: str, error: str) -> str:
@@ -125,10 +135,10 @@ async def test_create_trail_returns_nodes_and_edges(api_client, workspace_id):
     assert resp.status_code == 201
     data = resp.json()
     assert data["trail"]["topic"] == "Math"
-    assert data["trail"]["node_count"] == 3
-    assert data["trail"]["edge_count"] == 2
-    assert len(data["graph"]["nodes"]) == 3
-    assert len(data["graph"]["edges"]) == 2
+    assert data["trail"]["node_count"] == 10
+    assert data["trail"]["edge_count"] == 9
+    assert len(data["graph"]["nodes"]) == 10
+    assert len(data["graph"]["edges"]) == 9
 
 
 async def test_workspace_id_in_body_rejected(api_client, workspace_id):
@@ -162,6 +172,7 @@ async def test_missing_workspace_returns_404(api_client):
         json={"topic": "Math", "goal": "Learn", "target_depth": "understand"},
     )
     assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "not_found"
 
 
 async def test_llm_error_returns_500(db_engine):
@@ -190,7 +201,7 @@ async def test_llm_error_returns_500(db_engine):
                 json={"topic": "Math", "goal": "Learn", "target_depth": "understand"},
             )
         assert resp.status_code == 500
-        assert resp.json()["detail"]["code"] == "llm_error"
+        assert resp.json()["error"]["code"] == "llm_error"
     finally:
         app.dependency_overrides.clear()
 
@@ -217,3 +228,34 @@ async def test_repair_triggered_on_first_bad_response(api_client, workspace_id):
     )
     assert resp.status_code == 201
     assert repairing_gen.repair_called
+
+
+async def test_generate_raises_returns_500_llm_error(db_engine):
+    """If generator.generate() raises, route returns 500 with error.code == 'llm_error'."""
+    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def override_session():
+        async with async_session() as session:
+            yield session
+
+    async with async_session() as session:
+        ws = Workspace(name="Raising WS")
+        session.add(ws)
+        await session.commit()
+        await session.refresh(ws)
+        ws_id = ws.id
+
+    raising_gen = FakeGenerator(_minimal_graph_json(), raise_on_generate=True)
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_graph_generator] = lambda: raising_gen
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post(
+                f"/api/workspaces/{ws_id}/trails/generate",
+                json={"topic": "Math", "goal": "Learn", "target_depth": "understand"},
+            )
+        assert resp.status_code == 500
+        assert resp.json()["error"]["code"] == "llm_error"
+    finally:
+        app.dependency_overrides.clear()

@@ -27,55 +27,65 @@ async def db_session():
 
 
 def _minimal_graph_json(topic: str = "Math") -> str:
-    return json.dumps(
+    """Valid 10-node, 9-edge concept graph for use in tests."""
+    subtopics = [
+        ("arithmetic", "Arithmetic"),
+        ("algebra", "Algebra"),
+        ("geometry", "Geometry"),
+        ("statistics", "Statistics"),
+        ("calculus", "Calculus"),
+        ("number-theory", "Number Theory"),
+        ("logic", "Logic"),
+        ("set-theory", "Set Theory"),
+        ("probability", "Probability"),
+    ]
+    nodes = [
         {
-            "nodes": [
-                {
-                    "slug": "math-root",
-                    "title": topic,
-                    "node_type": "concept",
-                    "concept_level": "umbrella",
-                    "difficulty": "beginner",
-                    "bloom_level": "understand",
-                    "mastery_check_labels": [],
-                    "metadata_json": {},
-                },
-                {
-                    "slug": "addition",
-                    "title": "Addition",
-                    "node_type": "concept",
-                    "concept_level": "topic",
-                    "difficulty": "beginner",
-                    "bloom_level": "remember",
-                    "mastery_check_labels": [],
-                    "metadata_json": {},
-                },
-                {
-                    "slug": "subtraction",
-                    "title": "Subtraction",
-                    "node_type": "concept",
-                    "concept_level": "topic",
-                    "difficulty": "beginner",
-                    "bloom_level": "remember",
-                    "mastery_check_labels": [],
-                    "metadata_json": {},
-                },
-            ],
-            "edges": [
-                {"source_slug": "math-root", "target_slug": "addition", "relation_type": "contains"},  # noqa: E501
-                {"source_slug": "math-root", "target_slug": "subtraction", "relation_type": "contains"},  # noqa: E501
-            ],
+            "slug": "math-root",
+            "title": topic,
+            "node_type": "concept",
+            "concept_level": "umbrella",
+            "difficulty": "beginner",
+            "bloom_level": "understand",
+            "mastery_check_labels": [],
+            "metadata_json": {},
         }
-    )
+    ] + [
+        {
+            "slug": slug,
+            "title": title,
+            "node_type": "concept",
+            "concept_level": "topic",
+            "difficulty": "beginner",
+            "bloom_level": "remember",
+            "mastery_check_labels": [],
+            "metadata_json": {},
+        }
+        for slug, title in subtopics
+    ]
+    edges = [
+        {"source_slug": "math-root", "target_slug": slug, "relation_type": "contains"}
+        for slug, _ in subtopics
+    ]
+    return json.dumps({"nodes": nodes, "edges": edges})
 
 
 class FakeGenerator:
-    def __init__(self, json_str: str, repair_json_str: str | None = None):
+    def __init__(
+        self,
+        json_str: str,
+        repair_json_str: str | None = None,
+        *,
+        raise_on_generate: bool = False,
+    ):
         self._json = json_str
         self._repair = repair_json_str
+        self._raise_on_generate = raise_on_generate
         self.repair_called = False
 
     async def generate(self, topic: str, goal: str, target_depth: str) -> str:
+        if self._raise_on_generate:
+            raise RuntimeError("Provider connection failed")
         return self._json
 
     async def repair(self, raw_json: str, error: str) -> str:
@@ -104,8 +114,8 @@ async def test_stores_trail_and_graph(db_session: AsyncSession):
     assert trail.id is not None
     assert trail.workspace_id == ws.id
     assert trail.topic == "Math"
-    assert len(nodes) == 3
-    assert len(edges) == 2
+    assert len(nodes) == 10
+    assert len(edges) == 9
     assert not generator.repair_called
 
 
@@ -165,3 +175,21 @@ async def test_generation_error_leaves_no_partial_rows(db_session: AsyncSession)
     from sqlalchemy import func, select
     result = await db_session.execute(select(func.count()).select_from(Trail))
     assert result.scalar() == 0
+
+
+async def test_generate_raises_wraps_generation_error(db_session: AsyncSession):
+    ws = Workspace(name="Test WS")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    generator = FakeGenerator(_minimal_graph_json(), raise_on_generate=True)
+    with pytest.raises(GenerationError, match="LLM call failed"):
+        await generate_and_store_trail(
+            session=db_session,
+            generator=generator,
+            workspace_id=ws.id,
+            topic="Math",
+            goal="Learn basics",
+            target_depth="understand",
+        )

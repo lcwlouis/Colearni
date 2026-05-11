@@ -101,8 +101,7 @@ async def generate_and_store_trail(
 
     Raises:
         LookupError: workspace_id not found.
-        GenerationError: LLM failed after one repair attempt.
-        GraphValidationError: graph still invalid after repair.
+        GenerationError: LLM call failed, repair call failed, or graph invalid after repair.
     """
     # Verify workspace exists
     result = await session.execute(select(Workspace).where(Workspace.id == workspace_id))
@@ -111,11 +110,17 @@ async def generate_and_store_trail(
         raise LookupError(f"Workspace {workspace_id} not found")
 
     # Generate graph — one repair attempt on failure
-    raw = await generator.generate(topic, goal, target_depth)
+    try:
+        raw = await generator.generate(topic, goal, target_depth)
+    except Exception as exc:
+        raise GenerationError(f"LLM call failed: {exc}") from exc
     try:
         graph = _parse_graph(raw)
-    except (GraphValidationError, Exception) as first_err:
-        repaired = await generator.repair(raw, str(first_err))
+    except Exception as first_err:
+        try:
+            repaired = await generator.repair(raw, str(first_err))
+        except Exception as exc:
+            raise GenerationError(f"LLM repair call failed: {exc}") from exc
         try:
             graph = _parse_graph(repaired)
         except Exception as second_err:

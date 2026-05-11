@@ -16,7 +16,7 @@ from backend.app.schemas.types import (
 )
 
 MAX_NODES = 30
-MIN_NODES = 3
+MIN_NODES = 10
 
 
 class GraphValidationError(ValueError):
@@ -78,6 +78,16 @@ def validate_graph(nodes: list[RawNode], edges: list[RawEdge]) -> None:
         if slug in slug_set:
             raise GraphValidationError(f"Duplicate node slug: {slug!r}")
         slug_set.add(slug)
+
+    # 3. Unique titles (normalized: strip whitespace and lowercase)
+    titles_seen: set[str] = set()
+    for node in nodes:
+        normalized = node.title.strip().lower()
+        if normalized in titles_seen:
+            raise GraphValidationError(
+                f"Duplicate node title (normalized): {node.title!r}"
+            )
+        titles_seen.add(normalized)
 
     # 3. At least one umbrella or topic node (entry point)
     entry_levels = {"umbrella", "topic"}

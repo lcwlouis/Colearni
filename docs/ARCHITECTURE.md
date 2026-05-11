@@ -307,6 +307,8 @@ CoLearni makes direct calls to LLM provider APIs via `backend/app/agents/llm_cli
 | `anthropic` | anthropic SDK (native) | `pip install -e ".[providers]"` |
 | custom | openai SDK + explicit `LLM_API_BASE` | — |
 
+> **Anthropic runtime note:** The default install supports all OpenAI-compatible providers (`openai`, `openrouter`, `deepseek`, `gemini`, custom). Anthropic requires the `[providers]` optional extra. If `LLM_PROVIDER=anthropic` but the extra is not installed, the server will raise `ImportError` on the first LLM call. Install with: `pip install -e ".[providers]"`.
+
 ### Standard pattern for new LLM tasks
 
 Every LLM-using service defines an injectable Protocol and a concrete implementation that wraps `LLMClient`:
