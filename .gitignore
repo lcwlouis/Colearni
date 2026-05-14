@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .env
+apps/web/.env.local
 .venv/
 venv/
 *.egg-info/
