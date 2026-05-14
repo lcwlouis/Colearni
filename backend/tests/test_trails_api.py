@@ -62,6 +62,38 @@ def _minimal_graph_json(topic: str = "Math") -> str:
     return json.dumps({"nodes": nodes, "edges": edges})
 
 
+def _graph_json(node_count: int, topic: str = "Math") -> str:
+    nodes = [
+        {
+            "slug": "math-root",
+            "title": topic,
+            "node_type": "concept",
+            "concept_level": "umbrella",
+            "difficulty": "beginner",
+            "bloom_level": "understand",
+            "mastery_check_labels": [],
+            "metadata_json": {},
+        }
+    ] + [
+        {
+            "slug": f"n{i}",
+            "title": f"Node {i}",
+            "node_type": "concept",
+            "concept_level": "subtopic",
+            "difficulty": "beginner",
+            "bloom_level": "understand",
+            "mastery_check_labels": [],
+            "metadata_json": {},
+        }
+        for i in range(node_count - 1)
+    ]
+    edges = [
+        {"source_slug": "math-root", "target_slug": f"n{i}", "relation_type": "contains"}
+        for i in range(node_count - 1)
+    ]
+    return json.dumps({"nodes": nodes, "edges": edges})
+
+
 class FakeGenerator:
     def __init__(
         self,
@@ -74,8 +106,12 @@ class FakeGenerator:
         self._repair = repair_json_str
         self._raise_on_generate = raise_on_generate
         self.repair_called = False
+        self.max_nodes_seen: int | None = None
 
-    async def generate(self, topic: str, goal: str, target_depth: str) -> str:
+    async def generate(
+        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    ) -> str:
+        self.max_nodes_seen = max_nodes
         if self._raise_on_generate:
             raise RuntimeError("Provider connection failed")
         return self._json
@@ -139,6 +175,82 @@ async def test_create_trail_returns_nodes_and_edges(api_client, workspace_id):
     assert data["trail"]["edge_count"] == 9
     assert len(data["graph"]["nodes"]) == 10
     assert len(data["graph"]["edges"]) == 9
+
+
+async def test_generate_accepts_max_nodes(api_client, workspace_id):
+    ac, fake_gen, _ = api_client
+    fake_gen._json = _graph_json(45)
+
+    resp = await ac.post(
+        f"/api/workspaces/{workspace_id}/trails/generate",
+        json={
+            "topic": "Math",
+            "goal": "Learn broadly",
+            "target_depth": "understand",
+            "max_nodes": 60,
+        },
+    )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["trail"]["node_count"] == 45
+    assert fake_gen.max_nodes_seen == 60
+
+
+async def test_generate_stream_emits_progress_and_done(api_client, workspace_id):
+    ac, fake_gen, _ = api_client
+
+    resp = await ac.post(
+        f"/api/workspaces/{workspace_id}/trails/generate/stream",
+        json={
+            "topic": "Math",
+            "goal": "Learn broadly",
+            "target_depth": "understand",
+            "max_nodes": 40,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    body = resp.text
+    assert "event: progress" in body
+    assert "Generating graph for Math" in body
+    assert "event: done" in body
+    assert '"node_count":10' in body
+    assert fake_gen.max_nodes_seen == 40
+
+
+async def test_generate_stream_missing_workspace_emits_error(api_client):
+    ac, _, _ = api_client
+
+    resp = await ac.post(
+        f"/api/workspaces/{uuid.uuid4()}/trails/generate/stream",
+        json={
+            "topic": "Math",
+            "goal": "Learn broadly",
+            "target_depth": "understand",
+            "max_nodes": 40,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "event: error" in resp.text
+    assert '"code":"not_found"' in resp.text
+
+
+async def test_generate_rejects_max_nodes_above_cap(api_client, workspace_id):
+    ac, _, _ = api_client
+    resp = await ac.post(
+        f"/api/workspaces/{workspace_id}/trails/generate",
+        json={
+            "topic": "Math",
+            "goal": "Learn broadly",
+            "target_depth": "understand",
+            "max_nodes": 101,
+        },
+    )
+
+    assert resp.status_code == 422
 
 
 async def test_workspace_id_in_body_rejected(api_client, workspace_id):

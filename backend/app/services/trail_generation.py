@@ -17,11 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
-from backend.app.schemas.trail import TrailInsert
+from backend.app.schemas.trail import TrailGenerateResponse, TrailGraphRead, TrailInsert, TrailRead
 from backend.app.services.graph_validation import (
     GraphValidationError,
     RawGraph,
     RawNode,
+    validate_graph,
 )
 
 if TYPE_CHECKING:
@@ -36,7 +37,9 @@ class GenerationError(Exception):
 
 @runtime_checkable
 class GraphGenerator(Protocol):
-    async def generate(self, topic: str, goal: str, target_depth: str) -> str:
+    async def generate(
+        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    ) -> str:
         """Return raw JSON string for the graph."""
         ...
 
@@ -45,17 +48,18 @@ class GraphGenerator(Protocol):
         ...
 
 
-def _load_prompt(topic: str, goal: str, target_depth: str) -> str:
+def _load_prompt(topic: str, goal: str, target_depth: str, max_nodes: int) -> str:
     template = _PROMPT_PATH.read_text()
     template = template.split("---\n", 2)[-1].strip()  # strip front-matter
     return (
         template.replace("{{topic}}", topic)
         .replace("{{goal}}", goal)
         .replace("{{target_depth}}", target_depth)
+        .replace("{{max_nodes}}", str(max_nodes))
     )
 
 
-def _parse_graph(raw: str) -> RawGraph:
+def _parse_graph(raw: str, *, max_nodes: int = 40) -> RawGraph:
     """Parse and validate a JSON string into a RawGraph. Raises GraphValidationError."""
     # Strip accidental markdown fences
     raw = re.sub(r"```(?:json)?", "", raw).strip()
@@ -63,7 +67,9 @@ def _parse_graph(raw: str) -> RawGraph:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise GraphValidationError(f"LLM returned invalid JSON: {exc}") from exc
-    return RawGraph.model_validate(data)
+    graph = RawGraph.model_validate(data)
+    validate_graph(graph.nodes, graph.edges, max_nodes=max_nodes)
+    return graph
 
 
 class LLMGraphGenerator:
@@ -72,8 +78,10 @@ class LLMGraphGenerator:
     def __init__(self, client: LLMClient) -> None:
         self._client = client
 
-    async def generate(self, topic: str, goal: str, target_depth: str) -> str:
-        prompt = _load_prompt(topic, goal, target_depth)
+    async def generate(
+        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    ) -> str:
+        prompt = _load_prompt(topic, goal, target_depth, max_nodes)
         return await self._client.chat([{"role": "user", "content": prompt}], temperature=0.4)
 
     async def repair(self, raw_json: str, error: str) -> str:
@@ -96,6 +104,7 @@ async def generate_and_store_trail(
     topic: str,
     goal: str,
     target_depth: str,
+    max_nodes: int = 40,
 ) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
     """Generate a trail + concept graph and persist everything in one transaction.
 
@@ -111,18 +120,18 @@ async def generate_and_store_trail(
 
     # Generate graph — one repair attempt on failure
     try:
-        raw = await generator.generate(topic, goal, target_depth)
+        raw = await generator.generate(topic, goal, target_depth, max_nodes)
     except Exception as exc:
         raise GenerationError(f"LLM call failed: {exc}") from exc
     try:
-        graph = _parse_graph(raw)
+        graph = _parse_graph(raw, max_nodes=max_nodes)
     except Exception as first_err:
         try:
             repaired = await generator.repair(raw, str(first_err))
         except Exception as exc:
             raise GenerationError(f"LLM repair call failed: {exc}") from exc
         try:
-            graph = _parse_graph(repaired)
+            graph = _parse_graph(repaired, max_nodes=max_nodes)
         except Exception as second_err:
             raise GenerationError(
                 f"LLM graph invalid after repair: {second_err}"
@@ -184,6 +193,69 @@ async def generate_and_store_trail(
     return trail, nodes, edges
 
 
+async def stream_generate_trail_events(
+    *,
+    session: AsyncSession,
+    generator: GraphGenerator,
+    workspace_id: uuid.UUID,
+    topic: str,
+    goal: str,
+    target_depth: str,
+    max_nodes: int = 40,
+):
+    """Yield SSE events for trail generation progress and final result."""
+    try:
+        yield _sse(
+            "progress",
+            {
+                "message": (
+                    f"Preparing generation request for {topic}; "
+                    f"target depth {target_depth}, up to {max_nodes} concepts."
+                )
+            },
+        )
+        yield _sse(
+            "progress",
+            {"message": f"Generating graph for {topic}, up to {max_nodes} concepts..."},
+        )
+        trail, nodes, edges = await generate_and_store_trail(
+            session=session,
+            generator=generator,
+            workspace_id=workspace_id,
+            topic=topic,
+            goal=goal,
+            target_depth=target_depth,
+            max_nodes=max_nodes,
+        )
+    except LookupError as exc:
+        yield _sse(
+            "error",
+            {"error": {"code": "not_found", "message": str(exc), "details": {}}},
+        )
+        return
+    except GenerationError as exc:
+        yield _sse(
+            "error",
+            {"error": {"code": "llm_error", "message": str(exc), "details": {}}},
+        )
+        return
+
+    trail_read = TrailRead.model_validate(trail)
+    trail_read.node_count = len(nodes)
+    trail_read.edge_count = len(edges)
+    yield _sse(
+        "progress",
+        {"message": f"Stored Trail with {len(nodes)} concepts and {len(edges)} edges."},
+    )
+    yield _sse(
+        "done",
+        TrailGenerateResponse(
+            trail=trail_read,
+            graph=TrailGraphRead(nodes=nodes, edges=edges),
+        ).model_dump(mode="json"),
+    )
+
+
 def _title_from_graph(nodes: list[RawNode], fallback_topic: str) -> str:
     """Derive a trail title from the umbrella/topic node, or fall back to topic."""
     for level in ("umbrella", "topic"):
@@ -191,3 +263,10 @@ def _title_from_graph(nodes: list[RawNode], fallback_topic: str) -> str:
             if node.concept_level == level:
                 return node.title
     return fallback_topic.title()
+
+
+def _sse(event: str, data: dict) -> str:
+    return (
+        f"event: {event}\n"
+        f"data: {json.dumps(data, separators=(',', ':'))}\n\n"
+    )

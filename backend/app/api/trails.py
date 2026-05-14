@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.llm_client import LLMClient
@@ -21,6 +21,7 @@ from backend.app.services.trail_generation import (
     GraphGenerator,
     LLMGraphGenerator,
     generate_and_store_trail,
+    stream_generate_trail_events,
 )
 from backend.app.settings import settings
 
@@ -46,6 +47,7 @@ async def generate_trail(
             topic=body.topic,
             goal=body.goal,
             target_depth=body.target_depth,
+            max_nodes=body.max_nodes,
         )
     except LookupError as exc:
         return JSONResponse(
@@ -69,6 +71,27 @@ async def generate_trail(
     return TrailGenerateResponse(
         trail=trail_read,
         graph=TrailGraphRead(nodes=nodes, edges=edges),
+    )
+
+
+@router.post("/generate/stream", response_model=None)
+async def generate_trail_stream(
+    workspace_id: uuid.UUID,
+    body: TrailGenerateRequest,
+    session: AsyncSession = Depends(get_session),
+    generator: GraphGenerator = Depends(get_graph_generator),
+) -> StreamingResponse:
+    return StreamingResponse(
+        stream_generate_trail_events(
+            session=session,
+            generator=generator,
+            workspace_id=workspace_id,
+            topic=body.topic,
+            goal=body.goal,
+            target_depth=body.target_depth,
+            max_nodes=body.max_nodes,
+        ),
+        media_type="text/event-stream",
     )
 
 

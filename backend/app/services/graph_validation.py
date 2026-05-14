@@ -5,7 +5,7 @@ All validation runs before any DB writes. Raises GraphValidationError on failure
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
 from backend.app.schemas.types import (
     BloomLevel,
@@ -17,6 +17,7 @@ from backend.app.schemas.types import (
 
 MAX_NODES = 30
 MIN_NODES = 10
+ABSOLUTE_MAX_NODES = 100
 
 
 class GraphValidationError(ValueError):
@@ -50,25 +51,33 @@ class RawGraph(BaseModel):
     nodes: list[RawNode]
     edges: list[RawEdge]
 
-    @model_validator(mode="after")
-    def _validate_graph(self) -> RawGraph:
-        validate_graph(self.nodes, self.edges)
-        return self
 
-
-def validate_graph(nodes: list[RawNode], edges: list[RawEdge]) -> None:
+def validate_graph(
+    nodes: list[RawNode],
+    edges: list[RawEdge],
+    *,
+    min_nodes: int = MIN_NODES,
+    max_nodes: int = MAX_NODES,
+) -> None:
     """Validate a raw concept graph.
 
     Raises GraphValidationError describing the first problem found.
     """
+    if max_nodes > ABSOLUTE_MAX_NODES:
+        raise GraphValidationError(f"Graph max_nodes cannot exceed {ABSOLUTE_MAX_NODES}")
+    if min_nodes < 1:
+        raise GraphValidationError("Graph min_nodes must be at least 1")
+    if min_nodes > max_nodes:
+        raise GraphValidationError("Graph min_nodes cannot exceed max_nodes")
+
     # 1. Node count
-    if len(nodes) < MIN_NODES:
+    if len(nodes) < min_nodes:
         raise GraphValidationError(
-            f"Graph must have at least {MIN_NODES} nodes, got {len(nodes)}"
+            f"Graph must have at least {min_nodes} nodes, got {len(nodes)}"
         )
-    if len(nodes) > MAX_NODES:
+    if len(nodes) > max_nodes:
         raise GraphValidationError(
-            f"Graph must have at most {MAX_NODES} nodes, got {len(nodes)}"
+            f"Graph must have at most {max_nodes} nodes, got {len(nodes)}"
         )
 
     # 2. Unique slugs

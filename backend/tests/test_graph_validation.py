@@ -85,6 +85,17 @@ def test_too_large_graph_raises():
         validate_graph(nodes, [])
 
 
+def test_larger_graph_allowed_when_max_nodes_increased():
+    nodes = [_node(f"n{i}", "topic" if i == 0 else "subtopic") for i in range(60)]
+    validate_graph(nodes, [], max_nodes=60)
+
+
+def test_graph_max_nodes_cannot_exceed_absolute_bound():
+    nodes = [_node(f"n{i}", "topic" if i == 0 else "subtopic") for i in range(101)]
+    with pytest.raises(GraphValidationError, match="cannot exceed 100"):
+        validate_graph(nodes, [], max_nodes=101)
+
+
 def test_too_small_graph_raises():
     nodes = _make_nodes(9)  # 9 nodes, below minimum of 10
     with pytest.raises(GraphValidationError, match="at least 10"):

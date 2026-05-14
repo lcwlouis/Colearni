@@ -70,6 +70,38 @@ def _minimal_graph_json(topic: str = "Math") -> str:
     return json.dumps({"nodes": nodes, "edges": edges})
 
 
+def _graph_json(node_count: int, topic: str = "Math") -> str:
+    nodes = [
+        {
+            "slug": "math-root",
+            "title": topic,
+            "node_type": "concept",
+            "concept_level": "umbrella",
+            "difficulty": "beginner",
+            "bloom_level": "understand",
+            "mastery_check_labels": [],
+            "metadata_json": {},
+        }
+    ] + [
+        {
+            "slug": f"n{i}",
+            "title": f"Node {i}",
+            "node_type": "concept",
+            "concept_level": "subtopic",
+            "difficulty": "beginner",
+            "bloom_level": "understand",
+            "mastery_check_labels": [],
+            "metadata_json": {},
+        }
+        for i in range(node_count - 1)
+    ]
+    edges = [
+        {"source_slug": "math-root", "target_slug": f"n{i}", "relation_type": "contains"}
+        for i in range(node_count - 1)
+    ]
+    return json.dumps({"nodes": nodes, "edges": edges})
+
+
 class FakeGenerator:
     def __init__(
         self,
@@ -82,8 +114,12 @@ class FakeGenerator:
         self._repair = repair_json_str
         self._raise_on_generate = raise_on_generate
         self.repair_called = False
+        self.max_nodes_seen: int | None = None
 
-    async def generate(self, topic: str, goal: str, target_depth: str) -> str:
+    async def generate(
+        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    ) -> str:
+        self.max_nodes_seen = max_nodes
         if self._raise_on_generate:
             raise RuntimeError("Provider connection failed")
         return self._json
@@ -117,6 +153,29 @@ async def test_stores_trail_and_graph(db_session: AsyncSession):
     assert len(nodes) == 10
     assert len(edges) == 9
     assert not generator.repair_called
+    assert generator.max_nodes_seen == 40
+
+
+async def test_stores_larger_graph_when_max_nodes_allows_it(db_session: AsyncSession):
+    ws = Workspace(name="Large Graph WS")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    generator = FakeGenerator(_graph_json(45))
+    _, nodes, edges = await generate_and_store_trail(
+        session=db_session,
+        generator=generator,
+        workspace_id=ws.id,
+        topic="Math",
+        goal="Learn broadly",
+        target_depth="understand",
+        max_nodes=60,
+    )
+
+    assert len(nodes) == 45
+    assert len(edges) == 44
+    assert generator.max_nodes_seen == 60
 
 
 async def test_missing_workspace_raises_lookup_error(db_session: AsyncSession):

@@ -10,13 +10,17 @@ You are an expert curriculum designer building a concept graph for a learning tr
 - **Topic**: {{topic}}
 - **Learning goal**: {{goal}}
 - **Target depth** (Bloom's level): {{target_depth}}
+- **Maximum nodes**: {{max_nodes}}
 
 ## Your task
 
 Return a JSON object describing a concept graph with `nodes` and `edges`.
 
 The graph must:
-- Have between 10 and 30 nodes.
+- Have between 10 and {{max_nodes}} nodes.
+- Generate as many concepts as are useful for the topic, up to {{max_nodes}} nodes.
+- Prefer fewer nodes when the topic is narrow; use more nodes when the topic naturally requires breadth.
+- Do not exceed {{max_nodes}} nodes.
 - Include at least one `umbrella` or `topic` level node that acts as the entry point.
 - Have unique `slug` values (lowercase, hyphen-separated, e.g. `linear-algebra`).
 - Have edges that only reference slugs present in the node list.

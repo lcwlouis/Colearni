@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .concept import ConceptEdgeRead, ConceptNodeRead
 from .types import TargetDepth
@@ -18,6 +18,7 @@ class TrailGenerateRequest(BaseModel):
     topic: str
     goal: str
     target_depth: TargetDepth
+    max_nodes: int = Field(default=40, ge=10, le=100)
 
 
 class TrailInsert(BaseModel):
