@@ -52,3 +52,21 @@ class TrailGraphRead(BaseModel):
 class TrailGenerateResponse(BaseModel):
     trail: TrailRead
     graph: TrailGraphRead
+
+
+class TrailListResponse(BaseModel):
+    trails: list[TrailRead]
+
+
+class MasterySummary(BaseModel):
+    total: int
+    not_started: int
+    learning: int
+    needs_review: int
+    mastered: int
+
+
+class TrailDetailResponse(BaseModel):
+    trail: TrailRead
+    graph: TrailGraphRead
+    mastery_summary: MasterySummary

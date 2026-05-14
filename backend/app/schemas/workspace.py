@@ -14,3 +14,7 @@ class WorkspaceRead(BaseModel):
     id: uuid.UUID
     name: str
     created_at: datetime
+
+
+class WorkspaceListResponse(BaseModel):
+    workspaces: list[WorkspaceRead]

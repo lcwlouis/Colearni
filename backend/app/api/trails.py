@@ -1,18 +1,21 @@
 import uuid
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.llm_client import LLMClient
 from backend.app.db import get_session
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
 from backend.app.schemas.trail import (
+    TrailDetailResponse,
     TrailGenerateRequest,
     TrailGenerateResponse,
     TrailGraphRead,
+    TrailListResponse,
     TrailRead,
 )
+from backend.app.services.graph_view import delete_trail, get_trail_detail, list_trails
 from backend.app.services.trail_generation import (
     GenerationError,
     GraphGenerator,
@@ -66,4 +69,55 @@ async def generate_trail(
     return TrailGenerateResponse(
         trail=trail_read,
         graph=TrailGraphRead(nodes=nodes, edges=edges),
+    )
+
+
+@router.get("", response_model=TrailListResponse)
+async def list_trails_route(
+    workspace_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> TrailListResponse | JSONResponse:
+    try:
+        trails = await list_trails(session, workspace_id=workspace_id)
+    except LookupError as exc:
+        return _not_found(str(exc))
+    return TrailListResponse(trails=[TrailRead.model_validate(trail) for trail in trails])
+
+
+@router.get("/{trail_id}", response_model=TrailDetailResponse)
+async def get_trail_detail_route(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> TrailDetailResponse | JSONResponse:
+    try:
+        trail, nodes, edges, mastery_summary = await get_trail_detail(
+            session, workspace_id=workspace_id, trail_id=trail_id
+        )
+    except LookupError as exc:
+        return _not_found(str(exc))
+    return TrailDetailResponse(
+        trail=TrailRead.model_validate(trail),
+        graph=TrailGraphRead(nodes=nodes, edges=edges),
+        mastery_summary=mastery_summary,
+    )
+
+
+@router.delete("/{trail_id}", status_code=204, response_model=None)
+async def delete_trail_route(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> Response | JSONResponse:
+    try:
+        await delete_trail(session, workspace_id=workspace_id, trail_id=trail_id)
+    except LookupError as exc:
+        return _not_found(str(exc))
+    return Response(status_code=204)
+
+
+def _not_found(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content=ErrorEnvelope(error=ErrorBody(code="not_found", message=message)).model_dump(),
     )

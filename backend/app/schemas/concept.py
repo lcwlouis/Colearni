@@ -1,6 +1,6 @@
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .types import BloomLevel, ConceptLevel, Difficulty, NodeType, RelationType
 
@@ -28,3 +28,13 @@ class ConceptEdgeRead(BaseModel):
     source_node_id: uuid.UUID
     target_node_id: uuid.UUID
     relation_type: RelationType
+
+
+class ConceptDetailResponse(BaseModel):
+    concept: ConceptNodeRead
+    prerequisites: list[ConceptNodeRead]
+    contained_nodes: list[ConceptNodeRead]
+    containing_nodes: list[ConceptNodeRead]
+    related: list[ConceptNodeRead]
+    mastery: None = None
+    sources: list[dict] = Field(default_factory=list)
