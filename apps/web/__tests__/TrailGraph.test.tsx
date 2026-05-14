@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
 import { TrailGraph } from "@/app/trails/[id]/components/TrailGraph";
@@ -8,11 +9,22 @@ vi.mock("@xyflow/react", async () => {
   const actual = await vi.importActual<typeof import("@xyflow/react")>("@xyflow/react");
   return {
     ...actual,
-    ReactFlow: ({ nodes }: { nodes: Array<{ data: { label: string } }> }) => (
+    ReactFlow: ({
+      nodes,
+      onNodeClick,
+      children,
+    }: {
+      nodes: Array<{ id: string; data: { label: React.ReactNode } }>;
+      onNodeClick?: (event: unknown, node: { id: string }) => void;
+      children?: React.ReactNode;
+    }) => (
       <div>
         {nodes.map((node) => (
-          <span key={node.data.label}>{node.data.label}</span>
+          <button key={node.id} type="button" onClick={() => onNodeClick?.({}, node)}>
+            {node.data.label}
+          </button>
         ))}
+        {children}
       </div>
     ),
     Background: () => null,
@@ -66,7 +78,42 @@ describe("TrailGraph", () => {
     expect(screen.getByText("Matrices")).toBeInTheDocument();
     expect(screen.getByText("Basis")).toBeInTheDocument();
   });
+
+  test("renders layout controls and neighbor toggle", () => {
+    renderGraph();
+
+    expect(screen.getByRole("button", { name: "Hierarchy" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Radial" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Freeform" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Neighbors only")).toBeInTheDocument();
+  });
+
+  test("search focuses a matching concept", async () => {
+    renderGraph();
+
+    await userEvent.type(screen.getByPlaceholderText("Search concepts"), "basis");
+
+    expect(screen.getByText("Basis")).toBeInTheDocument();
+    expect(screen.getByText("Selected: Basis")).toBeInTheDocument();
+  });
 });
+
+function renderGraph() {
+  render(
+    <TrailGraph
+      workspaceId="workspace-1"
+      trail={trail}
+      graph={{ nodes, edges }}
+      masterySummary={{
+        total: 3,
+        not_started: 3,
+        learning: 0,
+        needs_review: 0,
+        mastered: 0,
+      }}
+    />,
+  );
+}
 
 function node(id: string, title: string, concept_level: ConceptNode["concept_level"]): ConceptNode {
   return {

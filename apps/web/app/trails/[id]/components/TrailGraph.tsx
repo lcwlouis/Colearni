@@ -2,7 +2,6 @@
 
 import "@xyflow/react/dist/style.css";
 
-import dagre from "dagre";
 import { useMemo, useState } from "react";
 import {
   Background,
@@ -19,18 +18,30 @@ import {
 import { getConcept } from "@/lib/api";
 import type {
   ConceptDetail,
-  ConceptEdge,
   ConceptLevel,
   ConceptNode,
-  MasteryStatus,
   Trail,
   TrailGraph as TrailGraphData,
-  RelationType,
 } from "@/lib/types";
 
 import { ConceptPanel } from "./ConceptPanel";
+import { type GraphLayoutMode, type GraphPosition, layoutGraph } from "./graphLayout";
+import {
+  buildFocusSet,
+  edgeColor,
+  edgeStyleFor,
+  isFocusedEdge,
+  isFocusedNode,
+  nodeStyleFor,
+} from "./graphStyles";
 
 const levels: ConceptLevel[] = ["umbrella", "topic", "subtopic", "granular"];
+const layoutModes: Array<{ value: GraphLayoutMode; label: string }> = [
+  { value: "hierarchy", label: "Hierarchy" },
+  { value: "radial", label: "Radial" },
+  { value: "freeform", label: "Freeform" },
+  { value: "compact", label: "Compact" },
+];
 
 interface TrailGraphProps {
   workspaceId: string;
@@ -50,34 +61,89 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
   const [visibleLevels, setVisibleLevels] = useState<Set<ConceptLevel>>(
     () => new Set(levels),
   );
+  const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>(
+    graph.nodes.length > 50 ? "compact" : "hierarchy",
+  );
+  const [neighborsOnly, setNeighborsOnly] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [positions, setPositions] = useState<Map<string, GraphPosition>>(new Map());
   const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [panelError, setPanelError] = useState("");
 
-  const visibleNodeIds = useMemo(
-    () =>
-      new Set(
-        graph.nodes
-          .filter((node) => visibleLevels.has(node.concept_level))
-          .map((node) => node.id),
-      ),
-    [graph.nodes, visibleLevels],
+  const selectedNode = useMemo(
+    () => graph.nodes.find((node) => node.id === selectedNodeId) ?? null,
+    [graph.nodes, selectedNodeId],
   );
+  const focusSet = useMemo(
+    () => buildFocusSet(graph.edges, selectedNodeId),
+    [graph.edges, selectedNodeId],
+  );
+
+  const visibleNodeIds = useMemo(() => {
+    const levelVisible = new Set(
+      graph.nodes
+        .filter((node) => visibleLevels.has(node.concept_level))
+        .map((node) => node.id),
+    );
+    if (!neighborsOnly || !selectedNodeId) {
+      return levelVisible;
+    }
+    return new Set(
+      [...levelVisible].filter((nodeId) => isFocusedNode(nodeId, focusSet)),
+    );
+  }, [focusSet, graph.nodes, neighborsOnly, selectedNodeId, visibleLevels]);
+
+  const computedPositions = useMemo(
+    () =>
+      layoutGraph({
+        mode: layoutMode,
+        nodes: graph.nodes.filter((node) => visibleNodeIds.has(node.id)),
+        edges: graph.edges.filter(
+          (edge) =>
+            visibleNodeIds.has(edge.source_node_id) && visibleNodeIds.has(edge.target_node_id),
+        ),
+        selectedNodeId,
+        existingPositions: positions,
+      }),
+    [graph.edges, graph.nodes, layoutMode, positions, selectedNodeId, visibleNodeIds],
+  );
+
   const flowNodes = useMemo(
-    () => layoutNodes(graph.nodes, visibleNodeIds, query),
-    [graph.nodes, query, visibleNodeIds],
+    () => buildFlowNodes(graph.nodes, visibleNodeIds, computedPositions, query, focusSet),
+    [computedPositions, focusSet, graph.nodes, query, visibleNodeIds],
   );
   const flowEdges = useMemo(
-    () => layoutEdges(graph.edges, visibleNodeIds),
-    [graph.edges, visibleNodeIds],
+    () => buildFlowEdges(graph.edges, visibleNodeIds, focusSet),
+    [focusSet, graph.edges, visibleNodeIds],
   );
 
   async function openConcept(conceptId: string) {
+    setSelectedNodeId(conceptId);
     setPanelError("");
     try {
       setDetail(await getConcept(workspaceId, trail.id, conceptId));
     } catch (exc) {
       setPanelError(exc instanceof Error ? exc.message : "Could not load concept");
+    }
+  }
+
+  function handleSearchChange(value: string) {
+    setQuery(value);
+    const normalizedQuery = value.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return;
+    }
+    const match = graph.nodes.find((node) =>
+      node.title.toLowerCase().includes(normalizedQuery),
+    );
+    if (!match) {
+      return;
+    }
+    setSelectedNodeId(match.id);
+    const point = computedPositions.get(match.id);
+    if (point) {
+      void flow?.setCenter(point.x + 110, point.y + 46, { zoom: 0.95, duration: 220 });
     }
   }
 
@@ -93,37 +159,92 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     });
   }
 
+  function setReadableZoom() {
+    void flow?.setViewport({ x: 80, y: 300, zoom: 0.85 }, { duration: 220 });
+  }
+
+  function centerSelected() {
+    if (!selectedNodeId) {
+      void flow?.fitView({ padding: 0.24, duration: 220 });
+      return;
+    }
+    const point = computedPositions.get(selectedNodeId);
+    if (point) {
+      void flow?.setCenter(point.x + 110, point.y + 46, { zoom: 1, duration: 220 });
+    }
+  }
+
   return (
     <section className="relative flex min-h-0 flex-1">
       <div className="h-full w-full">
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
-          fitView
-          minZoom={0.15}
+          defaultViewport={{ x: 80, y: 300, zoom: 0.85 }}
+          minZoom={0.12}
           onInit={setFlow}
           onNodeClick={(_, node) => openConcept(node.id)}
+          onNodeDragStop={(_, node) => {
+            setLayoutMode("freeform");
+            setPositions((current) => {
+              const next = new Map(current);
+              next.set(node.id, node.position);
+              return next;
+            });
+          }}
           nodesDraggable
         >
-          <Background color="#cbd5e1" gap={28} />
+          <Background color="#dbe3ee" gap={32} />
           <MiniMap pannable zoomable nodeStrokeWidth={3} />
           <Controls />
           <Panel position="top-left">
-            <div className="flex w-[min(92vw,680px)] flex-col gap-3 rounded-md border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex w-[min(72vw,660px)] flex-col gap-3 rounded-md border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
                 <input
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => handleSearchChange(event.target.value)}
                   placeholder="Search concepts"
                   className="h-9 min-w-0 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
                 />
-                <button
-                  type="button"
-                  onClick={() => flow?.fitView({ padding: 0.18 })}
-                  className="h-9 rounded-md border border-slate-300 px-3 text-sm font-medium hover:bg-slate-50"
-                >
-                  Fit view
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={setReadableZoom}
+                    className="h-9 rounded-md border border-slate-300 px-3 text-sm font-medium hover:bg-slate-50"
+                  >
+                    Readable
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => flow?.fitView({ padding: 0.2, duration: 220 })}
+                    className="h-9 rounded-md border border-slate-300 px-3 text-sm font-medium hover:bg-slate-50"
+                  >
+                    Overview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={centerSelected}
+                    className="h-9 rounded-md border border-slate-300 px-3 text-sm font-medium hover:bg-slate-50"
+                  >
+                    Focus selected
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {layoutModes.map((mode) => (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    onClick={() => setLayoutMode(mode.value)}
+                    className={`h-8 rounded-md border px-3 text-xs font-medium ${
+                      layoutMode === mode.value
+                        ? "border-blue-600 bg-blue-50 text-blue-800"
+                        : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
               </div>
               <div className="flex flex-wrap gap-3">
                 {levels.map((level) => (
@@ -136,7 +257,20 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                     {level}
                   </label>
                 ))}
+                <label className="flex items-center gap-2 text-xs font-medium text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={neighborsOnly}
+                    onChange={(event) => setNeighborsOnly(event.target.checked)}
+                  />
+                  Neighbors only
+                </label>
               </div>
+              {selectedNode ? (
+                <p className="text-xs font-medium text-blue-800">Selected: {selectedNode.title}</p>
+              ) : (
+                <p className="text-xs text-slate-500">Select a node to highlight its connections.</p>
+              )}
               <div className="grid grid-cols-5 gap-2 text-xs text-slate-600">
                 <Metric label="total" value={masterySummary.total} />
                 <Metric label="new" value={masterySummary.not_started} />
@@ -164,54 +298,71 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
   );
 }
 
-function layoutNodes(
+function buildFlowNodes(
   concepts: ConceptNode[],
   visibleNodeIds: Set<string>,
+  positions: Map<string, GraphPosition>,
   query: string,
+  focusSet: ReturnType<typeof buildFocusSet>,
 ): Node[] {
-  const graph = new dagre.graphlib.Graph();
-  graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: "TB", nodesep: 70, ranksep: 95 });
   const normalizedQuery = query.trim().toLowerCase();
-  const visibleConcepts = concepts.filter((concept) => visibleNodeIds.has(concept.id));
 
-  visibleConcepts.forEach((concept) => graph.setNode(concept.id, { width: 190, height: 72 }));
-  dagre.layout(graph);
-
-  return visibleConcepts.map((concept, index) => {
-    const point = graph.node(concept.id) ?? { x: 120 + (index % 5) * 220, y: 90 + index * 90 };
-    const matches = normalizedQuery.length === 0 || concept.title.toLowerCase().includes(normalizedQuery);
-    return {
-      id: concept.id,
-      position: { x: point.x - 95, y: point.y - 36 },
-      data: {
-        label: (
-          <NodeLabel
-            title={concept.title}
-            level={concept.concept_level}
-            difficulty={concept.difficulty}
-            status="not_started"
-          />
-        ),
-      },
-      style: nodeStyle("not_started", concept.concept_level, matches),
-    };
-  });
+  return concepts
+    .filter((concept) => visibleNodeIds.has(concept.id))
+    .map((concept, index) => {
+      const point = positions.get(concept.id) ?? {
+        x: 120 + (index % 5) * 260,
+        y: 120 + Math.floor(index / 5) * 140,
+      };
+      const matches =
+        normalizedQuery.length === 0 ||
+        concept.title.toLowerCase().includes(normalizedQuery);
+      const selected = focusSet.selected === concept.id;
+      return {
+        id: concept.id,
+        position: point,
+        data: {
+          label: (
+            <NodeLabel
+              title={concept.title}
+              level={concept.concept_level}
+              difficulty={concept.difficulty}
+            />
+          ),
+        },
+        style: nodeStyleFor({
+          node: concept,
+          status: "not_started",
+          matchesSearch: matches,
+          focused: isFocusedNode(concept.id, focusSet),
+          selected,
+        }),
+      };
+    });
 }
 
-function layoutEdges(edges: ConceptEdge[], visibleNodeIds: Set<string>): Edge[] {
+function buildFlowEdges(
+  edges: TrailGraphData["edges"],
+  visibleNodeIds: Set<string>,
+  focusSet: ReturnType<typeof buildFocusSet>,
+): Edge[] {
   return edges
-    .filter((edge) => visibleNodeIds.has(edge.source_node_id) && visibleNodeIds.has(edge.target_node_id))
-    .map((edge) => ({
-      id: edge.id,
-      source: edge.source_node_id,
-      target: edge.target_node_id,
-      markerEnd:
-        edge.relation_type === "prerequisite"
-          ? { type: MarkerType.ArrowClosed, color: edgeColor(edge.relation_type) }
-          : undefined,
-      style: edgeStyle(edge.relation_type),
-    }));
+    .filter(
+      (edge) => visibleNodeIds.has(edge.source_node_id) && visibleNodeIds.has(edge.target_node_id),
+    )
+    .map((edge) => {
+      const focused = isFocusedEdge(edge, focusSet);
+      return {
+        id: edge.id,
+        source: edge.source_node_id,
+        target: edge.target_node_id,
+        markerEnd:
+          edge.relation_type === "prerequisite"
+            ? { type: MarkerType.ArrowClosed, color: edgeColor(edge.relation_type) }
+            : undefined,
+        style: edgeStyleFor(edge, focused),
+      };
+    });
 }
 
 function NodeLabel({
@@ -222,7 +373,6 @@ function NodeLabel({
   title: string;
   level: ConceptLevel;
   difficulty: string;
-  status: MasteryStatus;
 }) {
   return (
     <div className="flex h-full flex-col justify-between gap-2 p-3 text-left">
@@ -235,57 +385,6 @@ function NodeLabel({
       </div>
     </div>
   );
-}
-
-function nodeStyle(status: MasteryStatus, level: ConceptLevel, matchesSearch: boolean) {
-  const statusColors: Record<MasteryStatus, string> = {
-    not_started: "#f8fafc",
-    learning: "#dbeafe",
-    needs_review: "#ffedd5",
-    mastered: "#dcfce7",
-  };
-  const borderByLevel: Record<ConceptLevel, string> = {
-    umbrella: "3px solid #0f172a",
-    topic: "2px solid #334155",
-    subtopic: "2px dashed #64748b",
-    granular: "1px solid #94a3b8",
-  };
-  return {
-    width: 190,
-    minHeight: 72,
-    borderRadius: 8,
-    border: borderByLevel[level],
-    background: matchesSearch ? statusColors[status] : "#f1f5f9",
-    opacity: matchesSearch ? 1 : 0.32,
-    boxShadow: matchesSearch ? "0 10px 24px rgba(15, 23, 42, 0.10)" : "none",
-  };
-}
-
-function edgeStyle(relationType: RelationType) {
-  const style = { stroke: edgeColor(relationType), strokeWidth: 1.8 };
-  if (relationType === "contains") {
-    return { ...style, strokeDasharray: "7 5" };
-  }
-  if (relationType === "application") {
-    return { ...style, strokeDasharray: "2 4" };
-  }
-  if (relationType === "related") {
-    return { ...style, strokeWidth: 1 };
-  }
-  return style;
-}
-
-function edgeColor(relationType: RelationType) {
-  if (relationType === "prerequisite") {
-    return "#1d4ed8";
-  }
-  if (relationType === "contains") {
-    return "#475569";
-  }
-  if (relationType === "application") {
-    return "#ea580c";
-  }
-  return "#94a3b8";
 }
 
 function difficultyLabel(difficulty: string) {

@@ -45,7 +45,26 @@ export async function listTrails(workspaceId: string): Promise<TrailListResponse
 export async function generateTrail(
   workspaceId: string,
   body: TrailGenerateRequest,
+  onProgress?: (message: string) => void,
 ): Promise<TrailGenerateResponse> {
+  if (onProgress) {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/generate/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      if (response.ok && response.body) {
+        return await readTrailGenerationStream(response, onProgress);
+      }
+      onProgress("Streaming progress unavailable; waiting for final response...");
+    } catch {
+      onProgress("Streaming progress unavailable; waiting for final response...");
+    }
+  }
   return request<TrailGenerateResponse>(`/api/workspaces/${workspaceId}/trails/generate`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -110,4 +129,69 @@ function errorMessage(payload: ErrorEnvelope): string {
       .join(", ");
   }
   return "Request failed";
+}
+
+async function readTrailGenerationStream(
+  response: Response,
+  onProgress: (message: string) => void,
+): Promise<TrailGenerateResponse> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Generation stream is unavailable");
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      const result = handleStreamEvent(chunk, onProgress);
+      if (result) {
+        return result;
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const result = handleStreamEvent(buffer, onProgress);
+    if (result) {
+      return result;
+    }
+  }
+  throw new Error("Generation stream ended before returning a Trail");
+}
+
+function handleStreamEvent(
+  chunk: string,
+  onProgress: (message: string) => void,
+): TrailGenerateResponse | null {
+  const event = /^event:\s*(.+)$/m.exec(chunk)?.[1]?.trim() ?? "message";
+  const dataLines = chunk
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  const rawData = dataLines.join("\n");
+  const payload = rawData ? JSON.parse(rawData) : {};
+
+  if (event === "progress" || event === "delta") {
+    if (typeof payload.message === "string") {
+      onProgress(payload.message);
+    } else if (typeof payload.text === "string") {
+      onProgress(payload.text);
+    }
+    return null;
+  }
+  if (event === "error") {
+    throw new Error(errorMessage(payload as ErrorEnvelope));
+  }
+  if (event === "done") {
+    return payload as TrailGenerateResponse;
+  }
+  return null;
 }

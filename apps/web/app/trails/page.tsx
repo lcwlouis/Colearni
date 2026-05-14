@@ -24,6 +24,8 @@ export default function TrailsPage() {
   const [topic, setTopic] = useState("");
   const [goal, setGoal] = useState("");
   const [targetDepth, setTargetDepth] = useState<BloomLevel>("apply");
+  const [maxNodes, setMaxNodes] = useState(40);
+  const [progressLog, setProgressLog] = useState("");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
@@ -58,11 +60,15 @@ export default function TrailsPage() {
     event.preventDefault();
     setGenerating(true);
     setError("");
+    setProgressLog("Preparing generation request...");
     try {
       const response = await generateTrail(workspaceId, {
         topic,
         goal,
         target_depth: targetDepth,
+        max_nodes: maxNodes,
+      }, (message) => {
+        setProgressLog((current) => `${current}\n${message}`.slice(-300));
       });
       router.push(`/trails/${response.trail.id}`);
     } catch (exc) {
@@ -127,6 +133,23 @@ export default function TrailsPage() {
             ))}
           </select>
         </div>
+        <div className="grid gap-2 sm:max-w-xs">
+          <label htmlFor="max-nodes" className="text-sm font-medium">
+            Graph size
+          </label>
+          <select
+            id="max-nodes"
+            value={maxNodes}
+            onChange={(event) => setMaxNodes(Number(event.target.value))}
+            className="h-10 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
+          >
+            {[20, 40, 75, 100].map((count) => (
+              <option key={count} value={count}>
+                Up to {count} concepts
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
@@ -137,6 +160,14 @@ export default function TrailsPage() {
           </button>
           {error ? <p className="text-sm text-red-700">{error}</p> : null}
         </div>
+        {generating ? (
+          <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+            <div className="text-sm font-medium text-blue-950">Generating Trail</div>
+            <pre className="mt-2 max-h-24 whitespace-pre-wrap text-xs leading-5 text-blue-900">
+              {progressLog.slice(-300)}
+            </pre>
+          </div>
+        ) : null}
       </form>
 
       <section className="grid gap-3">

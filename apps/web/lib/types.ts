@@ -83,6 +83,7 @@ export interface TrailGenerateRequest {
   topic: string;
   goal: string;
   target_depth: BloomLevel;
+  max_nodes: number;
 }
 
 export interface TrailGenerateResponse {
