@@ -31,6 +31,37 @@ describe("graphLayout", () => {
     expect(positions.get("search")?.x).not.toBe(0);
   });
 
+  test("radial layout centers the strongest umbrella node when nothing is selected", () => {
+    const shuffledNodes = [
+      node("basis", "Basis", "topic"),
+      node("linear-algebra", "Linear Algebra", "umbrella"),
+      node("vectors", "Vectors", "topic"),
+      node("matrices", "Matrices", "topic"),
+    ];
+    const shuffledEdges = [
+      edge("e1", "linear-algebra", "vectors", "contains"),
+      edge("e2", "linear-algebra", "matrices", "contains"),
+      edge("e3", "vectors", "basis", "prerequisite"),
+    ];
+
+    const positions = layoutGraph({
+      mode: "radial",
+      nodes: shuffledNodes,
+      edges: shuffledEdges,
+      selectedNodeId: null,
+    });
+
+    expect(positions.get("linear-algebra")).toEqual({ x: 0, y: 0 });
+    expect(positions.get("basis")).not.toEqual({ x: 0, y: 0 });
+  });
+
+  test("compact layout is a distinct horizontal view", () => {
+    const hierarchyPositions = layoutGraph({ mode: "hierarchy", nodes, edges, selectedNodeId: null });
+    const compactPositions = layoutGraph({ mode: "compact", nodes, edges, selectedNodeId: null });
+
+    expect(compactPositions.get("detail")?.x).toBeGreaterThan(hierarchyPositions.get("detail")?.x ?? 0);
+  });
+
   test("freeform preserves existing positions", () => {
     const existingPositions = new Map([["root", { x: 123, y: 456 }]]);
 

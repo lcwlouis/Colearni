@@ -50,7 +50,7 @@ function layoutDagre(
   graph.setDefaultEdgeLabel(() => ({}));
   graph.setGraph(
     mode === "compact"
-      ? { rankdir: "TB", nodesep: 52, ranksep: 72 }
+      ? { rankdir: "LR", nodesep: 44, ranksep: 96 }
       : { rankdir: "TB", nodesep: 120, ranksep: 150 },
   );
 
@@ -74,7 +74,7 @@ function layoutRadial(
   edges: ConceptEdge[],
   selectedNodeId: string | null,
 ): Map<string, GraphPosition> {
-  const centerId = selectedNodeId ?? nodes[0]?.id ?? null;
+  const centerId = selectedNodeId ?? findRadialCenter(nodes, edges);
   if (!centerId) {
     return new Map();
   }
@@ -96,6 +96,32 @@ function layoutRadial(
   const remaining = nodes.filter((node) => !positions.has(node.id));
   placeRing(positions, remaining, 640);
   return positions;
+}
+
+function findRadialCenter(nodes: ConceptNode[], edges: ConceptEdge[]): string | null {
+  if (nodes.length === 0) {
+    return null;
+  }
+
+  const scores = new Map<string, number>();
+  nodes.forEach((node) => {
+    scores.set(node.id, node.concept_level === "umbrella" ? 1000 : 0);
+  });
+
+  edges.forEach((edge) => {
+    const sourceWeight = edge.relation_type === "contains" ? 10 : 4;
+    const targetWeight = edge.relation_type === "contains" ? 3 : 4;
+    scores.set(edge.source_node_id, (scores.get(edge.source_node_id) ?? 0) + sourceWeight);
+    scores.set(edge.target_node_id, (scores.get(edge.target_node_id) ?? 0) + targetWeight);
+  });
+
+  return [...nodes].sort((left, right) => {
+    const scoreDelta = (scores.get(right.id) ?? 0) - (scores.get(left.id) ?? 0);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+    return left.title.localeCompare(right.title);
+  })[0]?.id ?? null;
 }
 
 function placeRing(

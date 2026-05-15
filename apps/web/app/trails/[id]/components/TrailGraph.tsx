@@ -2,7 +2,15 @@
 
 import "@xyflow/react/dist/style.css";
 
-import { type MouseEvent, type ReactNode, useMemo, useState } from "react";
+import {
+  type MouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Background,
   Controls,
@@ -80,6 +88,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
   const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [panelError, setPanelError] = useState("");
+  const lastViewState = useRef({ layoutMode, selectedNodeId, visibleCount: 0 });
 
   const selectedNode = useMemo(
     () => graph.nodes.find((node) => node.id === selectedNodeId) ?? null,
@@ -129,6 +138,56 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     [focusSet, graph.edges, visibleNodeIds],
   );
 
+  const focusConceptInView = useCallback(
+    (conceptId: string, zoom: number) => {
+      const point = computedPositions.get(conceptId);
+      if (point) {
+        void flow?.setCenter(point.x + 110, point.y + 46, { zoom, duration: 220 });
+      }
+    },
+    [computedPositions, flow],
+  );
+
+  const fitVisibleGraph = useCallback(
+    (padding: number) => {
+      window.requestAnimationFrame(() => {
+        void flow?.fitView({ padding, duration: 220 });
+      });
+    },
+    [flow],
+  );
+
+  useEffect(() => {
+    if (!flow || flowNodes.length === 0) {
+      return;
+    }
+
+    const previous = lastViewState.current;
+    const layoutChanged = previous.layoutMode !== layoutMode;
+    const selectionChanged = previous.selectedNodeId !== selectedNodeId;
+    const visibleCountChanged = previous.visibleCount !== flowNodes.length;
+    lastViewState.current = { layoutMode, selectedNodeId, visibleCount: flowNodes.length };
+
+    if (selectedNodeId) {
+      if (selectionChanged || layoutChanged) {
+        focusConceptInView(selectedNodeId, window.innerWidth < 768 ? 0.92 : 1);
+      }
+      return;
+    }
+
+    if (layoutChanged || visibleCountChanged) {
+      fitVisibleGraph(window.innerWidth < 768 ? 0.18 : 0.24);
+    }
+  }, [
+    flow,
+    flowNodes.length,
+    layoutMode,
+    selectedNodeId,
+    computedPositions,
+    fitVisibleGraph,
+    focusConceptInView,
+  ]);
+
   async function openConcept(conceptId: string) {
     setSelectedNodeId(conceptId);
     setPanelError("");
@@ -143,6 +202,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     setSelectedNodeId(null);
     setDetail(null);
     setPanelError("");
+    fitVisibleGraph(window.innerWidth < 768 ? 0.26 : 0.3);
   }
 
   function handleGraphSurfaceClick(event: MouseEvent<HTMLElement>) {
@@ -183,10 +243,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     }
     setSelectedNodeId(match.id);
     setDetail(null);
-    const point = computedPositions.get(match.id);
-    if (point) {
-      void flow?.setCenter(point.x + 110, point.y + 46, { zoom: 0.95, duration: 220 });
-    }
+    focusConceptInView(match.id, 0.95);
   }
 
   function toggleLevel(level: ConceptLevel) {
@@ -202,18 +259,19 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
   }
 
   function setReadableZoom() {
-    void flow?.setViewport({ x: 80, y: 300, zoom: 0.85 }, { duration: 220 });
+    fitVisibleGraph(window.innerWidth < 768 ? 0.18 : 0.24);
   }
 
   function centerSelected() {
     if (!selectedNodeId) {
-      void flow?.fitView({ padding: 0.24, duration: 220 });
+      fitVisibleGraph(0.24);
       return;
     }
-    const point = computedPositions.get(selectedNodeId);
-    if (point) {
-      void flow?.setCenter(point.x + 110, point.y + 46, { zoom: 1, duration: 220 });
-    }
+    focusConceptInView(selectedNodeId, 1);
+  }
+
+  function changeLayoutMode(mode: GraphLayoutMode) {
+    setLayoutMode(mode);
   }
 
   function initializeFlow(instance: ReactFlowInstance) {
@@ -274,8 +332,9 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                 />
                 <ToolbarButton
                   icon={<SlidersHorizontal size={15} />}
-                  label={toolsExpanded ? "Hide" : "Tools"}
+                  label="Tools"
                   onClick={() => setToolsExpanded((current) => !current)}
+                  active={toolsExpanded}
                 />
                 <ToolbarButton
                   icon={<MapIcon size={15} />}
@@ -291,7 +350,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
               )}
               {legendExpanded ? (
                 <div>
-                  <GraphLegendContent compact={false} onToggle={() => setLegendExpanded(false)} />
+                  <GraphLegendContent compact={false} />
                 </div>
               ) : null}
               <div className={`${toolsExpanded ? "grid" : "hidden"} gap-2 md:gap-3`}>
@@ -320,7 +379,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                     <button
                       key={mode.value}
                       type="button"
-                      onClick={() => setLayoutMode(mode.value)}
+                      onClick={() => changeLayoutMode(mode.value)}
                       aria-pressed={layoutMode === mode.value}
                       className={`h-8 rounded px-2 text-xs font-medium transition md:px-3 ${
                         layoutMode === mode.value
@@ -367,7 +426,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
       {detail ? (
         <ConceptPanel
           detail={detail}
-          onClose={() => setDetail(null)}
+          onClose={clearSelection}
           onSelectConcept={openConcept}
         />
       ) : null}
@@ -508,10 +567,8 @@ function statusLabel(status: MasteryStatus) {
 
 function GraphLegendContent({
   compact,
-  onToggle,
 }: {
   compact: boolean;
-  onToggle: () => void;
 }) {
   return (
     <div
@@ -521,13 +578,6 @@ function GraphLegendContent({
     >
       <div className="flex items-center justify-between md:col-span-3">
         <div className="font-semibold text-slate-900">Legend</div>
-        <button
-          type="button"
-          onClick={onToggle}
-          className="rounded border border-slate-200 px-2 py-1 text-xs font-medium hover:bg-slate-50"
-        >
-          Collapse
-        </button>
       </div>
       <div>
         <div className="font-semibold text-slate-900">Learning status</div>

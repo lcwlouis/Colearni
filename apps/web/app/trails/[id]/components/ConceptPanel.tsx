@@ -12,10 +12,11 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
   const concept = detail.concept;
 
   return (
-    <aside className="absolute right-0 top-0 z-20 flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-xl">
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+    <aside className="absolute inset-x-0 bottom-0 z-20 flex max-h-[72vh] w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl md:inset-y-0 md:left-auto md:right-0 md:h-full md:max-h-none md:max-w-md md:rounded-none md:border-l md:border-t-0">
+      <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-300 md:hidden" />
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-4 md:p-5">
         <div>
-          <h2 className="text-xl font-semibold text-slate-950">{concept.title}</h2>
+          <h2 className="text-lg font-semibold text-slate-950 md:text-xl">{concept.title}</h2>
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
             <Badge>{concept.concept_level}</Badge>
             <Badge>{concept.bloom_level}</Badge>
@@ -31,7 +32,7 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
           Close
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-4 md:p-5">
         <Section title="Prerequisites" nodes={detail.prerequisites} onSelect={onSelectConcept} />
         <Section title="Contained by" nodes={detail.containing_nodes} onSelect={onSelectConcept} />
         <Section title="Contains" nodes={detail.contained_nodes} onSelect={onSelectConcept} />
@@ -53,7 +54,7 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
           <p className="mt-2 text-sm text-slate-500">No sources linked yet.</p>
         </section>
       </div>
-      <div className="border-t border-slate-200 p-5">
+      <div className="border-t border-slate-200 p-4 md:p-5">
         <button
           type="button"
           disabled
