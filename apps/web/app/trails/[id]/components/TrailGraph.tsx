@@ -2,7 +2,7 @@
 
 import "@xyflow/react/dist/style.css";
 
-import { type MouseEvent, useMemo, useState } from "react";
+import { type MouseEvent, type ReactNode, useMemo, useState } from "react";
 import {
   Background,
   Controls,
@@ -14,6 +14,13 @@ import {
   ReactFlow,
   type ReactFlowInstance,
 } from "@xyflow/react";
+import {
+  Crosshair,
+  Eye,
+  Map as MapIcon,
+  Maximize2,
+  SlidersHorizontal,
+} from "lucide-react";
 
 import { getConcept } from "@/lib/api";
 import type {
@@ -65,7 +72,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     () => new Set(levels),
   );
   const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("freeform");
-  const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [toolsExpanded, setToolsExpanded] = useState(true);
   const [legendExpanded, setLegendExpanded] = useState(false);
   const [neighborsOnly, setNeighborsOnly] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -257,7 +264,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
             style={{ bottom: 16, left: 12 }}
           />
           <Panel position="top-left">
-            <div className="flex w-[min(94vw,660px)] flex-col gap-2 rounded-md border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur md:w-[min(72vw,660px)] md:gap-3 md:p-3">
+            <div className="flex w-[min(94vw,720px)] flex-col gap-2 rounded-md border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur md:w-[min(70vw,760px)] md:gap-3 md:p-3 lg:w-[min(58vw,780px)]">
               <div className="flex gap-2 md:items-center">
                 <input
                   value={query}
@@ -265,43 +272,17 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                   placeholder="Search concepts"
                   className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 px-2 text-xs outline-none focus:border-blue-500 md:h-9 md:px-3 md:text-sm"
                 />
-                <button
-                  type="button"
+                <ToolbarButton
+                  icon={<SlidersHorizontal size={15} />}
+                  label={toolsExpanded ? "Hide" : "Tools"}
                   onClick={() => setToolsExpanded((current) => !current)}
-                  className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-800 hover:bg-slate-50 md:hidden"
-                >
-                  {toolsExpanded ? "Hide" : "Tools"}
-                </button>
-                <button
-                  type="button"
+                />
+                <ToolbarButton
+                  icon={<MapIcon size={15} />}
+                  label="Legend"
                   onClick={() => setLegendExpanded((current) => !current)}
-                  className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-800 hover:bg-slate-50 md:hidden"
-                >
-                  Legend
-                </button>
-                <div className="hidden flex-wrap gap-2 md:flex">
-                  <button
-                    type="button"
-                    onClick={setReadableZoom}
-                    className="h-9 rounded-md border border-slate-300 px-3 text-sm font-medium hover:bg-slate-50"
-                  >
-                    Readable
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => flow?.fitView({ padding: 0.2, duration: 220 })}
-                    className="h-9 rounded-md border border-slate-300 px-3 text-sm font-medium hover:bg-slate-50"
-                  >
-                    Overview
-                  </button>
-                  <button
-                    type="button"
-                    onClick={centerSelected}
-                    className="h-9 rounded-md border border-slate-300 px-3 text-sm font-medium hover:bg-slate-50"
-                  >
-                    Focus selected
-                  </button>
-                </div>
+                  active={legendExpanded}
+                />
               </div>
               {selectedNode ? (
                 <p className="text-xs font-medium text-blue-800">Selected: {selectedNode.title}</p>
@@ -309,33 +290,30 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                 <p className="text-xs text-slate-500">Select a node to highlight its connections.</p>
               )}
               {legendExpanded ? (
-                <div className="md:hidden">
+                <div>
                   <GraphLegendContent compact={false} onToggle={() => setLegendExpanded(false)} />
                 </div>
               ) : null}
-              <div className={`${toolsExpanded ? "grid" : "hidden"} gap-2 md:grid md:gap-3`}>
-                <div className="flex flex-wrap gap-2 md:hidden">
-                  <button
-                    type="button"
+              <div className={`${toolsExpanded ? "grid" : "hidden"} gap-2 md:gap-3`}>
+                <div className="flex flex-wrap gap-2">
+                  <ToolbarButton
+                    icon={<Eye size={15} />}
+                    label="Readable"
                     onClick={setReadableZoom}
-                    className="h-8 rounded-md border border-slate-300 px-2 text-xs font-medium hover:bg-slate-50"
-                  >
-                    Readable
-                  </button>
-                  <button
-                    type="button"
+                    subtle
+                  />
+                  <ToolbarButton
+                    icon={<Maximize2 size={15} />}
+                    label="Overview"
                     onClick={() => flow?.fitView({ padding: 0.2, duration: 220 })}
-                    className="h-8 rounded-md border border-slate-300 px-2 text-xs font-medium hover:bg-slate-50"
-                  >
-                    Overview
-                  </button>
-                  <button
-                    type="button"
+                    subtle
+                  />
+                  <ToolbarButton
+                    icon={<Crosshair size={15} />}
+                    label="Focus selected"
                     onClick={centerSelected}
-                    className="h-8 rounded-md border border-slate-300 px-2 text-xs font-medium hover:bg-slate-50"
-                  >
-                    Focus selected
-                  </button>
+                    subtle
+                  />
                 </div>
                 <div className="inline-flex w-fit flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-100 p-1">
                   {layoutModes.map((mode) => (
@@ -369,7 +347,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                     onClick={() => setNeighborsOnly((current) => !current)}
                   />
                 </div>
-                <div className="flex gap-2 overflow-x-auto pb-1 text-xs text-slate-600 md:grid md:grid-cols-5 md:overflow-visible md:pb-0">
+                <div className="grid grid-cols-5 gap-1 text-xs text-slate-600 md:gap-2">
                   <Metric label="Total" value={statusCounts.total || masterySummary.total} />
                   <Metric label="New" value={statusCounts.not_started} />
                   <Metric label="Learning" value={statusCounts.learning} />
@@ -378,13 +356,6 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                 </div>
               </div>
             </div>
-          </Panel>
-          <Panel position="top-right">
-            <DesktopGraphLegend
-              compact={detail !== null}
-              expanded={legendExpanded}
-              onToggle={() => setLegendExpanded((current) => !current)}
-            />
           </Panel>
         </ReactFlow>
       </div>
@@ -535,44 +506,18 @@ function statusLabel(status: MasteryStatus) {
   return "Not started";
 }
 
-function DesktopGraphLegend({
-  compact,
-  expanded,
-  onToggle,
-}: {
-  compact: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  if (!expanded) {
-    return (
-      <button
-        type="button"
-        onClick={onToggle}
-        className="hidden rounded-md border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm backdrop-blur hover:bg-slate-50 md:block"
-      >
-        Legend
-      </button>
-    );
-  }
-
-  return <GraphLegendContent compact={compact} onToggle={onToggle} desktop />;
-}
-
 function GraphLegendContent({
   compact,
   onToggle,
-  desktop = false,
 }: {
   compact: boolean;
   onToggle: () => void;
-  desktop?: boolean;
 }) {
   return (
     <div
       className={`grid max-h-[42vh] w-full gap-3 overflow-y-auto rounded-md border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-sm backdrop-blur md:w-[min(88vw,660px)] md:max-h-none ${
         compact ? "md:mr-[28rem]" : "md:grid-cols-3"
-      } ${desktop ? "hidden md:grid" : ""}`}
+      }`}
     >
       <div className="flex items-center justify-between md:col-span-3">
         <div className="font-semibold text-slate-900">Legend</div>
@@ -655,10 +600,44 @@ function EdgeLegend({
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="min-w-20 rounded border border-slate-200 bg-slate-50 px-2 py-1">
+    <div className="min-w-0 rounded border border-slate-200 bg-slate-50 px-2 py-1">
       <div className="font-semibold text-slate-950">{value}</div>
-      <div>{label}</div>
+      <div className="truncate">{label}</div>
     </div>
+  );
+}
+
+function ToolbarButton({
+  active,
+  icon,
+  label,
+  onClick,
+  subtle = false,
+}: {
+  active?: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  subtle?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active ? true : undefined}
+      className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium transition md:h-9 md:text-sm ${
+        active
+          ? "border-blue-200 bg-blue-50 text-blue-800 shadow-sm"
+          : subtle
+            ? "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+            : "border-slate-300 bg-white text-slate-900 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+      }`}
+    >
+      <span className="text-current" aria-hidden="true">
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
   );
 }
 
