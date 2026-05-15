@@ -1,6 +1,32 @@
 import type { CSSProperties } from "react";
 
-import type { ConceptEdge, ConceptLevel, ConceptNode, MasteryStatus, RelationType } from "@/lib/types";
+import type {
+  ConceptEdge,
+  ConceptLevel,
+  ConceptNode,
+  MasteryStatus,
+  RelationType,
+} from "@/lib/types";
+
+export const masteryColors: Record<MasteryStatus, string> = {
+  not_started: "#f8fafc",
+  learning: "#dbeafe",
+  needs_review: "#ffedd5",
+  mastered: "#dcfce7",
+};
+
+export function masteryStatusFor(node: ConceptNode): MasteryStatus {
+  const status = node.metadata_json.mastery_status;
+  if (
+    status === "not_started" ||
+    status === "learning" ||
+    status === "needs_review" ||
+    status === "mastered"
+  ) {
+    return status;
+  }
+  return "not_started";
+}
 
 export interface FocusSet {
   selected: string | null;
@@ -86,12 +112,6 @@ export function nodeStyleFor({
   focused: boolean;
   selected: boolean;
 }): CSSProperties {
-  const backgroundByStatus: Record<MasteryStatus, string> = {
-    not_started: "#f8fafc",
-    learning: "#dbeafe",
-    needs_review: "#ffedd5",
-    mastered: "#dcfce7",
-  };
   const borderByLevel: Record<ConceptLevel, string> = {
     umbrella: "3px solid #0f172a",
     topic: "2px solid #334155",
@@ -103,8 +123,9 @@ export function nodeStyleFor({
     minHeight: 92,
     borderRadius: 8,
     border: selected ? "3px solid #2563eb" : borderByLevel[node.concept_level],
-    background: matchesSearch ? backgroundByStatus[status] : "#f1f5f9",
+    background: matchesSearch ? masteryColors[status] : "#f1f5f9",
     opacity: focused && matchesSearch ? 1 : 0.24,
+    overflow: "visible",
     boxShadow: selected
       ? "0 18px 38px rgba(37, 99, 235, 0.24)"
       : focused

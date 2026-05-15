@@ -2,7 +2,7 @@
 
 import "@xyflow/react/dist/style.css";
 
-import { useMemo, useState } from "react";
+import { type MouseEvent, useMemo, useState } from "react";
 import {
   Background,
   Controls,
@@ -20,6 +20,7 @@ import type {
   ConceptDetail,
   ConceptLevel,
   ConceptNode,
+  MasteryStatus,
   Trail,
   TrailGraph as TrailGraphData,
 } from "@/lib/types";
@@ -32,14 +33,16 @@ import {
   edgeStyleFor,
   isFocusedEdge,
   isFocusedNode,
+  masteryColors,
+  masteryStatusFor,
   nodeStyleFor,
 } from "./graphStyles";
 
 const levels: ConceptLevel[] = ["umbrella", "topic", "subtopic", "granular"];
 const layoutModes: Array<{ value: GraphLayoutMode; label: string }> = [
+  { value: "freeform", label: "Freeform" },
   { value: "hierarchy", label: "Hierarchy" },
   { value: "radial", label: "Radial" },
-  { value: "freeform", label: "Freeform" },
   { value: "compact", label: "Compact" },
 ];
 
@@ -61,9 +64,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
   const [visibleLevels, setVisibleLevels] = useState<Set<ConceptLevel>>(
     () => new Set(levels),
   );
-  const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>(
-    graph.nodes.length > 50 ? "compact" : "hierarchy",
-  );
+  const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("freeform");
   const [neighborsOnly, setNeighborsOnly] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Map<string, GraphPosition>>(new Map());
@@ -128,6 +129,42 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     }
   }
 
+  function selectConcept(conceptId: string) {
+    setSelectedNodeId(conceptId);
+    setDetail(null);
+    setPanelError("");
+  }
+
+  function clearSelection() {
+    setSelectedNodeId(null);
+    setDetail(null);
+    setPanelError("");
+  }
+
+  function handleGraphSurfaceClick(event: MouseEvent<HTMLElement>) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    if (
+      target.closest(
+        [
+          ".react-flow__node",
+          ".react-flow__edge",
+          ".react-flow__panel",
+          ".react-flow__controls",
+          ".react-flow__minimap",
+          ".react-flow__attribution",
+        ].join(","),
+      )
+    ) {
+      return;
+    }
+    if (target.closest(".react-flow")) {
+      clearSelection();
+    }
+  }
+
   function handleSearchChange(value: string) {
     setQuery(value);
     const normalizedQuery = value.trim().toLowerCase();
@@ -141,6 +178,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
       return;
     }
     setSelectedNodeId(match.id);
+    setDetail(null);
     const point = computedPositions.get(match.id);
     if (point) {
       void flow?.setCenter(point.x + 110, point.y + 46, { zoom: 0.95, duration: 220 });
@@ -176,14 +214,19 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
 
   return (
     <section className="relative flex min-h-0 flex-1">
-      <div className="h-full w-full">
+      <style>
+        {".react-flow__node:hover [data-node-hover-card] { display: block; }"}
+      </style>
+      <div className="h-full w-full" onClickCapture={handleGraphSurfaceClick}>
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
           defaultViewport={{ x: 80, y: 300, zoom: 0.85 }}
           minZoom={0.12}
           onInit={setFlow}
-          onNodeClick={(_, node) => openConcept(node.id)}
+          onNodeClick={(_, node) => selectConcept(node.id)}
+          onNodeDoubleClick={(_, node) => openConcept(node.id)}
+          onPaneClick={clearSelection}
           onNodeDragStop={(_, node) => {
             setLayoutMode("freeform");
             setPositions((current) => {
@@ -195,7 +238,13 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
           nodesDraggable
         >
           <Background color="#dbe3ee" gap={32} />
-          <MiniMap pannable zoomable nodeStrokeWidth={3} />
+          <MiniMap
+            pannable
+            zoomable
+            nodeStrokeWidth={3}
+            position="bottom-left"
+            style={{ bottom: 96, left: 12, height: 124, width: 190 }}
+          />
           <Controls />
           <Panel position="top-left">
             <div className="flex w-[min(72vw,660px)] flex-col gap-3 rounded-md border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
@@ -280,6 +329,9 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
               </div>
             </div>
           </Panel>
+          <Panel position="bottom-right">
+            <GraphLegend compact={detail !== null} />
+          </Panel>
         </ReactFlow>
       </div>
       {panelError ? (
@@ -322,17 +374,11 @@ function buildFlowNodes(
         id: concept.id,
         position: point,
         data: {
-          label: (
-            <NodeLabel
-              title={concept.title}
-              level={concept.concept_level}
-              difficulty={concept.difficulty}
-            />
-          ),
+          label: <NodeLabel node={concept} />,
         },
         style: nodeStyleFor({
           node: concept,
-          status: "not_started",
+          status: masteryStatusFor(concept),
           matchesSearch: matches,
           focused: isFocusedNode(concept.id, focusSet),
           selected,
@@ -366,22 +412,43 @@ function buildFlowEdges(
 }
 
 function NodeLabel({
-  title,
-  level,
-  difficulty,
+  node,
 }: {
-  title: string;
-  level: ConceptLevel;
-  difficulty: string;
+  node: ConceptNode;
 }) {
   return (
-    <div className="flex h-full flex-col justify-between gap-2 p-3 text-left">
-      <div className="line-clamp-2 text-sm font-semibold leading-5 text-slate-950">{title}</div>
+    <div className="relative flex h-full flex-col justify-between gap-2 p-3 text-left">
+      <div className="line-clamp-2 text-sm font-semibold leading-5 text-slate-950">
+        {node.title}
+      </div>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase text-slate-500">{level}</span>
-        <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
-          {difficultyLabel(difficulty)}
+        <span className="text-[10px] uppercase text-slate-500">{node.concept_level}</span>
+        <span
+          title={`Difficulty: ${difficultyName(node.difficulty)}`}
+          aria-label={`Difficulty: ${difficultyName(node.difficulty)}`}
+          className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700"
+        >
+          {difficultyLabel(node.difficulty)}
         </span>
+      </div>
+      <NodeHoverPanel node={node} />
+    </div>
+  );
+}
+
+function NodeHoverPanel({ node }: { node: ConceptNode }) {
+  return (
+    <div
+      data-node-hover-card
+      className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-72 rounded-md border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-lg backdrop-blur"
+    >
+      <div className="text-sm font-semibold text-slate-950">Title: {node.title}</div>
+      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
+        <div>Level: {node.concept_level}</div>
+        <div>Type: {node.node_type}</div>
+        <div>Bloom: {node.bloom_level}</div>
+        <div>Difficulty: {difficultyName(node.difficulty)}</div>
+        <div className="col-span-2">Status: {statusLabel(masteryStatusFor(node))}</div>
       </div>
     </div>
   );
@@ -389,6 +456,105 @@ function NodeLabel({
 
 function difficultyLabel(difficulty: string) {
   return difficulty === "advanced" ? "A" : difficulty === "intermediate" ? "I" : "B";
+}
+
+function difficultyName(difficulty: string) {
+  if (difficulty === "advanced") {
+    return "Advanced";
+  }
+  if (difficulty === "intermediate") {
+    return "Intermediate";
+  }
+  return "Beginner";
+}
+
+function statusLabel(status: MasteryStatus) {
+  if (status === "learning") {
+    return "Learning";
+  }
+  if (status === "needs_review") {
+    return "Needs review";
+  }
+  if (status === "mastered") {
+    return "Mastered";
+  }
+  return "Not started";
+}
+
+function GraphLegend({ compact }: { compact: boolean }) {
+  return (
+    <div
+      className={`grid max-w-[min(76vw,660px)] gap-3 rounded-md border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-sm backdrop-blur ${
+        compact ? "mr-[28rem]" : "md:grid-cols-3"
+      }`}
+    >
+      <div>
+        <div className="font-semibold text-slate-900">Learning status</div>
+        <div className="mt-2 grid gap-1">
+          <LegendSwatch color={masteryColors.not_started} label="New" />
+          <LegendSwatch color={masteryColors.learning} label="Learning" />
+          <LegendSwatch color={masteryColors.needs_review} label="Review" />
+          <LegendSwatch color={masteryColors.mastered} label="Mastered" />
+        </div>
+      </div>
+      <div>
+        <div className="font-semibold text-slate-900">Edges</div>
+        <div className="mt-2 grid gap-1">
+          <EdgeLegend relation="prerequisite" label="A -> B: A before B" />
+          <EdgeLegend relation="contains" label="A -> B: A contains B" />
+          <EdgeLegend relation="application" label="A -> B: A applies to B" />
+          <EdgeLegend relation="related" label="Related connection" />
+        </div>
+      </div>
+      <div>
+        <div className="font-semibold text-slate-900">Difficulty</div>
+        <div className="mt-2 grid gap-1">
+          <div>B = Beginner</div>
+          <div>I = Intermediate</div>
+          <div>A = Advanced</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-3 w-3 rounded border border-slate-300" style={{ background: color }} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function EdgeLegend({
+  relation,
+  label,
+}: {
+  relation: TrailGraphData["edges"][number]["relation_type"];
+  label: string;
+}) {
+  const dashed =
+    relation === "contains" ? "7 5" : relation === "application" ? "2 4" : undefined;
+  return (
+    <div className="flex items-center gap-2">
+      <svg aria-hidden="true" width="42" height="10" viewBox="0 0 42 10">
+        <line
+          x1="1"
+          y1="5"
+          x2="36"
+          y2="5"
+          stroke={edgeColor(relation)}
+          strokeWidth={relation === "related" ? 1.3 : 2}
+          strokeDasharray={dashed}
+        />
+        {relation !== "related" ? (
+          <path d="M36 1 L41 5 L36 9 Z" fill={edgeColor(relation)} />
+        ) : null}
+      </svg>
+      <span>{label}</span>
+    </div>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: number }) {

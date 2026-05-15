@@ -12,18 +12,30 @@ vi.mock("@xyflow/react", async () => {
     ReactFlow: ({
       nodes,
       onNodeClick,
+      onNodeDoubleClick,
+      onPaneClick,
       children,
     }: {
       nodes: Array<{ id: string; data: { label: React.ReactNode } }>;
       onNodeClick?: (event: unknown, node: { id: string }) => void;
+      onNodeDoubleClick?: (event: unknown, node: { id: string }) => void;
+      onPaneClick?: () => void;
       children?: React.ReactNode;
     }) => (
       <div>
         {nodes.map((node) => (
-          <button key={node.id} type="button" onClick={() => onNodeClick?.({}, node)}>
+          <button
+            key={node.id}
+            type="button"
+            onClick={() => onNodeClick?.({}, node)}
+            onDoubleClick={() => onNodeDoubleClick?.({}, node)}
+          >
             {node.data.label}
           </button>
         ))}
+        <button type="button" onClick={() => onPaneClick?.()}>
+          Pane
+        </button>
         {children}
       </div>
     ),
@@ -82,9 +94,9 @@ describe("TrailGraph", () => {
   test("renders layout controls and neighbor toggle", () => {
     renderGraph();
 
+    expect(screen.getByRole("button", { name: "Freeform" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hierarchy" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Radial" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Freeform" })).toBeInTheDocument();
     expect(screen.getByLabelText("Neighbors only")).toBeInTheDocument();
   });
 
@@ -95,6 +107,24 @@ describe("TrailGraph", () => {
 
     expect(screen.getByText("Basis")).toBeInTheDocument();
     expect(screen.getByText("Selected: Basis")).toBeInTheDocument();
+  });
+
+  test("renders graph legends", () => {
+    renderGraph();
+
+    expect(screen.getByText("Learning status")).toBeInTheDocument();
+    expect(screen.getByText("A -> B: A before B")).toBeInTheDocument();
+    expect(screen.getByText("B = Beginner")).toBeInTheDocument();
+  });
+
+  test("single click selects and pane click clears selection", async () => {
+    renderGraph();
+
+    await userEvent.click(screen.getByRole("button", { name: /Vectors/ }));
+    expect(screen.getByText("Selected: Vectors")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Pane" }));
+    expect(screen.getByText("Select a node to highlight its connections.")).toBeInTheDocument();
   });
 });
 
