@@ -5,6 +5,29 @@ import { describe, expect, test, vi } from "vitest";
 import { TrailGraph } from "@/app/trails/[id]/components/TrailGraph";
 import type { ConceptEdge, ConceptNode, Trail } from "@/lib/types";
 
+vi.mock("@/lib/api", () => ({
+  getConcept: vi.fn(async (_workspaceId: string, _trailId: string, conceptId: string) => ({
+    concept: {
+      id: conceptId,
+      trail_id: "trail-1",
+      slug: conceptId,
+      title: conceptId,
+      node_type: "concept",
+      concept_level: "topic",
+      difficulty: "beginner",
+      bloom_level: "understand",
+      mastery_check_labels: [],
+      metadata_json: {},
+    },
+    prerequisites: [],
+    contained_nodes: [],
+    containing_nodes: [],
+    related: [],
+    mastery: null,
+    sources: [],
+  })),
+}));
+
 vi.mock("@xyflow/react", async () => {
   const actual = await vi.importActual<typeof import("@xyflow/react")>("@xyflow/react");
   return {
@@ -109,8 +132,11 @@ describe("TrailGraph", () => {
     expect(screen.getByText("Selected: Basis")).toBeInTheDocument();
   });
 
-  test("renders graph legends", () => {
+  test("renders graph legends", async () => {
     renderGraph();
+
+    expect(screen.getByRole("button", { name: "Legend" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Legend" }));
 
     expect(screen.getByText("Learning status")).toBeInTheDocument();
     expect(screen.getByText("A -> B: A before B")).toBeInTheDocument();

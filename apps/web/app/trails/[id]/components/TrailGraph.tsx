@@ -65,6 +65,8 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     () => new Set(levels),
   );
   const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("freeform");
+  const [toolsExpanded, setToolsExpanded] = useState(false);
+  const [legendExpanded, setLegendExpanded] = useState(false);
   const [neighborsOnly, setNeighborsOnly] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Map<string, GraphPosition>>(new Map());
@@ -127,12 +129,6 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     } catch (exc) {
       setPanelError(exc instanceof Error ? exc.message : "Could not load concept");
     }
-  }
-
-  function selectConcept(conceptId: string) {
-    setSelectedNodeId(conceptId);
-    setDetail(null);
-    setPanelError("");
   }
 
   function clearSelection() {
@@ -224,7 +220,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
           defaultViewport={{ x: 80, y: 300, zoom: 0.85 }}
           minZoom={0.12}
           onInit={setFlow}
-          onNodeClick={(_, node) => selectConcept(node.id)}
+          onNodeClick={(_, node) => openConcept(node.id)}
           onNodeDoubleClick={(_, node) => openConcept(node.id)}
           onPaneClick={clearSelection}
           onNodeDragStop={(_, node) => {
@@ -239,23 +235,34 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
         >
           <Background color="#dbe3ee" gap={32} />
           <MiniMap
+            className="hidden md:block"
             pannable
             zoomable
             nodeStrokeWidth={3}
             position="bottom-left"
-            style={{ bottom: 96, left: 12, height: 124, width: 190 }}
+            style={{ bottom: 16, left: 76, height: 118, width: 180 }}
           />
-          <Controls />
+          <Controls
+            position="bottom-left"
+            style={{ bottom: 16, left: 12 }}
+          />
           <Panel position="top-left">
-            <div className="flex w-[min(72vw,660px)] flex-col gap-3 rounded-md border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <div className="flex w-[min(94vw,660px)] flex-col gap-2 rounded-md border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur md:w-[min(72vw,660px)] md:gap-3 md:p-3">
+              <div className="flex gap-2 md:items-center">
                 <input
                   value={query}
                   onChange={(event) => handleSearchChange(event.target.value)}
                   placeholder="Search concepts"
-                  className="h-9 min-w-0 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 px-2 text-xs outline-none focus:border-blue-500 md:h-9 md:px-3 md:text-sm"
                 />
-                <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setToolsExpanded((current) => !current)}
+                  className="h-8 rounded-md border border-slate-300 px-3 text-xs font-medium hover:bg-slate-50 md:hidden"
+                >
+                  {toolsExpanded ? "Hide" : "Tools"}
+                </button>
+                <div className="hidden flex-wrap gap-2 md:flex">
                   <button
                     type="button"
                     onClick={setReadableZoom}
@@ -279,58 +286,87 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
                   </button>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {layoutModes.map((mode) => (
-                  <button
-                    key={mode.value}
-                    type="button"
-                    onClick={() => setLayoutMode(mode.value)}
-                    className={`h-8 rounded-md border px-3 text-xs font-medium ${
-                      layoutMode === mode.value
-                        ? "border-blue-600 bg-blue-50 text-blue-800"
-                        : "border-slate-300 text-slate-700 hover:bg-slate-50"
-                    }`}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-3">
-                {levels.map((level) => (
-                  <label key={level} className="flex items-center gap-2 text-xs text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={visibleLevels.has(level)}
-                      onChange={() => toggleLevel(level)}
-                    />
-                    {level}
-                  </label>
-                ))}
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={neighborsOnly}
-                    onChange={(event) => setNeighborsOnly(event.target.checked)}
-                  />
-                  Neighbors only
-                </label>
-              </div>
               {selectedNode ? (
                 <p className="text-xs font-medium text-blue-800">Selected: {selectedNode.title}</p>
               ) : (
                 <p className="text-xs text-slate-500">Select a node to highlight its connections.</p>
               )}
-              <div className="grid grid-cols-5 gap-2 text-xs text-slate-600">
-                <Metric label="total" value={masterySummary.total} />
-                <Metric label="new" value={masterySummary.not_started} />
-                <Metric label="learning" value={masterySummary.learning} />
-                <Metric label="review" value={masterySummary.needs_review} />
-                <Metric label="mastered" value={masterySummary.mastered} />
+              <div className={`${toolsExpanded ? "grid" : "hidden"} gap-2 md:grid md:gap-3`}>
+                <div className="flex flex-wrap gap-2 md:hidden">
+                  <button
+                    type="button"
+                    onClick={setReadableZoom}
+                    className="h-8 rounded-md border border-slate-300 px-2 text-xs font-medium hover:bg-slate-50"
+                  >
+                    Readable
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => flow?.fitView({ padding: 0.2, duration: 220 })}
+                    className="h-8 rounded-md border border-slate-300 px-2 text-xs font-medium hover:bg-slate-50"
+                  >
+                    Overview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={centerSelected}
+                    className="h-8 rounded-md border border-slate-300 px-2 text-xs font-medium hover:bg-slate-50"
+                  >
+                    Focus selected
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {layoutModes.map((mode) => (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => setLayoutMode(mode.value)}
+                      className={`h-8 rounded-md border px-2 text-xs font-medium md:px-3 ${
+                        layoutMode === mode.value
+                          ? "border-blue-600 bg-blue-50 text-blue-800"
+                          : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {levels.map((level) => (
+                    <label key={level} className="flex items-center gap-2 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={visibleLevels.has(level)}
+                        onChange={() => toggleLevel(level)}
+                      />
+                      {level}
+                    </label>
+                  ))}
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={neighborsOnly}
+                      onChange={(event) => setNeighborsOnly(event.target.checked)}
+                    />
+                    Neighbors only
+                  </label>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-1 text-xs text-slate-600 md:grid md:grid-cols-5 md:overflow-visible md:pb-0">
+                  <Metric label="total" value={masterySummary.total} />
+                  <Metric label="new" value={masterySummary.not_started} />
+                  <Metric label="learning" value={masterySummary.learning} />
+                  <Metric label="review" value={masterySummary.needs_review} />
+                  <Metric label="mastered" value={masterySummary.mastered} />
+                </div>
               </div>
             </div>
           </Panel>
-          <Panel position="bottom-right">
-            <GraphLegend compact={detail !== null} />
+          <Panel position="top-right">
+            <GraphLegend
+              compact={detail !== null}
+              expanded={legendExpanded}
+              onToggle={() => setLegendExpanded((current) => !current)}
+            />
           </Panel>
         </ReactFlow>
       </div>
@@ -481,13 +517,43 @@ function statusLabel(status: MasteryStatus) {
   return "Not started";
 }
 
-function GraphLegend({ compact }: { compact: boolean }) {
+function GraphLegend({
+  compact,
+  expanded,
+  onToggle,
+}: {
+  compact: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="rounded-md border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm backdrop-blur hover:bg-slate-50"
+      >
+        Legend
+      </button>
+    );
+  }
+
   return (
     <div
-      className={`grid max-w-[min(76vw,660px)] gap-3 rounded-md border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-sm backdrop-blur ${
-        compact ? "mr-[28rem]" : "md:grid-cols-3"
+      className={`grid max-h-[42vh] w-[min(88vw,660px)] gap-3 overflow-y-auto rounded-md border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-sm backdrop-blur md:max-h-none ${
+        compact ? "md:mr-[28rem]" : "md:grid-cols-3"
       }`}
     >
+      <div className="flex items-center justify-between md:col-span-3">
+        <div className="font-semibold text-slate-900">Legend</div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="rounded border border-slate-200 px-2 py-1 text-xs font-medium hover:bg-slate-50"
+        >
+          Collapse
+        </button>
+      </div>
       <div>
         <div className="font-semibold text-slate-900">Learning status</div>
         <div className="mt-2 grid gap-1">

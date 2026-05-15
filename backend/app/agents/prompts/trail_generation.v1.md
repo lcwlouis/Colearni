@@ -58,5 +58,10 @@ Return ONLY valid JSON, no markdown fences, no explanation.
 
 - `bloom_level` on each node should reflect the cognitive depth required to master that node.
 - Nodes with `concept_level: granular` should be the most detailed, leaf-level ideas.
+- Use `contains` for parent-to-child structure.
+- Use `prerequisite` when the source concept should be learned before the target concept.
+- Use `application` when the source concept is applied by, or practiced through, the target concept.
+- Use `related` for meaningful cross-links between sibling or distant concepts that are connected but are not prerequisites, containment, or applications.
+- Include a few `related` edges when the topic has useful non-linear connections; do not force them when no meaningful relationship exists.
 - `mastery_check_labels` are short quiz-topic hints, e.g. `["definition", "example"]`.
 - Do NOT include any text outside the JSON object.
