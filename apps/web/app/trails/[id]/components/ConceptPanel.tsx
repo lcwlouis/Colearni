@@ -87,7 +87,12 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
         </div>
         <button
           type="button"
-          onClick={onClose}
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
           className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50"
         >
           Close

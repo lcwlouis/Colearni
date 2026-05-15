@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { ConceptPanel } from "@/app/trails/[id]/components/ConceptPanel";
 import type { ConceptDetail } from "@/lib/types";
@@ -43,5 +43,15 @@ describe("ConceptPanel", () => {
 
     expect(screen.getByTestId("concept-sheet-body")).toHaveClass("block");
     expect(screen.getByRole("button", { name: "Collapse concept details" })).toBeInTheDocument();
+  });
+
+  test("close button calls onClose from inside draggable header", async () => {
+    const onClose = vi.fn();
+
+    render(<ConceptPanel detail={detail} onClose={onClose} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
