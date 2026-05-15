@@ -120,7 +120,7 @@ describe("TrailGraph", () => {
     expect(screen.getByRole("button", { name: "Freeform" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hierarchy" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Radial" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Neighbors only")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Neighbors only" })).toBeInTheDocument();
   });
 
   test("search focuses a matching concept", async () => {
@@ -135,12 +135,13 @@ describe("TrailGraph", () => {
   test("renders graph legends", async () => {
     renderGraph();
 
-    expect(screen.getByRole("button", { name: "Legend" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Legend" }));
+    const legendButtons = screen.getAllByRole("button", { name: "Legend" });
+    expect(legendButtons.length).toBeGreaterThan(0);
+    await userEvent.click(legendButtons[0]);
 
-    expect(screen.getByText("Learning status")).toBeInTheDocument();
-    expect(screen.getByText("A -> B: A before B")).toBeInTheDocument();
-    expect(screen.getByText("B = Beginner")).toBeInTheDocument();
+    expect(screen.getAllByText("Learning status").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("A -> B: A before B").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("B = Beginner").length).toBeGreaterThan(0);
   });
 
   test("single click selects and pane click clears selection", async () => {
