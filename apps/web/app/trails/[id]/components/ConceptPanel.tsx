@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, type PointerEvent } from "react";
+
 import type { ConceptDetail, ConceptNode } from "@/lib/types";
 
 interface ConceptPanelProps {
@@ -10,11 +12,70 @@ interface ConceptPanelProps {
 
 export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelProps) {
   const concept = detail.concept;
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  const [dragStartY, setDragStartY] = useState<number | null>(null);
+  const [dragOffset, setDragOffset] = useState(0);
+
+  function startDrag(event: PointerEvent<HTMLElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) {
+      return;
+    }
+    setDragStartY(event.clientY);
+    setDragOffset(0);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function moveDrag(event: PointerEvent<HTMLElement>) {
+    if (dragStartY === null) {
+      return;
+    }
+    setDragOffset(event.clientY - dragStartY);
+  }
+
+  function endDrag(event: PointerEvent<HTMLElement>) {
+    if (dragStartY === null) {
+      return;
+    }
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (dragOffset < -40) {
+      setMobileExpanded(true);
+    } else if (dragOffset > 40) {
+      setMobileExpanded(false);
+    }
+    setDragStartY(null);
+    setDragOffset(0);
+  }
 
   return (
-    <aside className="absolute inset-x-0 bottom-0 z-20 flex max-h-[72vh] w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl md:inset-y-0 md:left-auto md:right-0 md:h-full md:max-h-none md:max-w-md md:rounded-none md:border-l md:border-t-0">
-      <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-300 md:hidden" />
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-4 md:p-5">
+    <aside
+      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl transition-[max-height,transform] duration-200 ease-out md:inset-y-0 md:left-auto md:right-0 md:h-full md:max-h-none md:max-w-md md:translate-y-0 md:rounded-none md:border-l md:border-t-0 ${
+        mobileExpanded ? "max-h-[78vh]" : "max-h-48"
+      }`}
+      style={
+        dragStartY === null
+          ? undefined
+          : { transform: `translateY(${Math.max(-40, Math.min(72, dragOffset))}px)` }
+      }
+    >
+      <button
+        type="button"
+        aria-label={mobileExpanded ? "Collapse concept details" : "Expand concept details"}
+        onClick={() => setMobileExpanded((current) => !current)}
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        className="touch-none px-4 pt-2 md:hidden"
+      >
+        <span className="mx-auto block h-1 w-10 rounded-full bg-slate-300" />
+      </button>
+      <div
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        className="flex touch-none items-start justify-between gap-4 border-b border-slate-200 p-4 md:p-5"
+      >
         <div>
           <h2 className="text-lg font-semibold text-slate-950 md:text-xl">{concept.title}</h2>
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -32,7 +93,12 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
           Close
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 md:p-5">
+      <div
+        data-testid="concept-sheet-body"
+        className={`flex-1 overflow-y-auto p-4 md:block md:p-5 ${
+          mobileExpanded ? "block" : "hidden"
+        }`}
+      >
         <Section title="Prerequisites" nodes={detail.prerequisites} onSelect={onSelectConcept} />
         <Section title="Contained by" nodes={detail.containing_nodes} onSelect={onSelectConcept} />
         <Section title="Contains" nodes={detail.contained_nodes} onSelect={onSelectConcept} />
@@ -54,7 +120,11 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
           <p className="mt-2 text-sm text-slate-500">No sources linked yet.</p>
         </section>
       </div>
-      <div className="border-t border-slate-200 p-4 md:p-5">
+      <div
+        className={`border-t border-slate-200 p-4 md:block md:p-5 ${
+          mobileExpanded ? "block" : "hidden"
+        }`}
+      >
         <button
           type="button"
           disabled
