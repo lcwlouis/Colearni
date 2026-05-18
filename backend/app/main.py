@@ -7,12 +7,26 @@ from .api.concepts import router as concepts_router
 from .api.health import router as health_router
 from .api.trails import router as trails_router
 from .api.workspaces import router as workspaces_router
+from .db import AsyncSessionLocal, engine
+from .services.workspaces import ensure_default_workspace
 from .settings import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── Startup ───────────────────────────────────────────────────────────────
+    # Ensure a default workspace exists for local-ready single-user mode.
+    # Replace with user-scoped workspace provisioning when auth is added.
+    async with AsyncSessionLocal() as session:
+        await ensure_default_workspace(session)
+
     yield
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    # Close all pooled DB connections cleanly so PostgreSQL doesn't see them
+    # as abruptly dropped. Add teardown for any new resources (HTTP clients,
+    # caches, background workers) directly below this line.
+    await engine.dispose()
 
 
 app = FastAPI(

@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -11,6 +12,8 @@ from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode  # noqa: F401
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail  # noqa: F401
+from backend.app.models.workspace import Workspace
+from backend.app.services.workspaces import DEFAULT_WORKSPACE_NAME, ensure_default_workspace
 
 
 @pytest.fixture
@@ -34,6 +37,41 @@ async def api_client(db_engine):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def db_session(db_engine):
+    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with async_session() as session:
+        yield session
+
+
+# ── ensure_default_workspace service tests ────────────────────────────────────
+
+
+async def test_ensure_default_workspace_creates_workspace_when_none_exists(db_session):
+    workspace = await ensure_default_workspace(db_session)
+
+    assert workspace.id is not None
+    assert workspace.name == DEFAULT_WORKSPACE_NAME
+
+
+async def test_ensure_default_workspace_is_idempotent(db_session):
+    first = await ensure_default_workspace(db_session)
+    second = await ensure_default_workspace(db_session)
+
+    assert first.id == second.id
+
+
+async def test_ensure_default_workspace_does_not_create_duplicate(db_session):
+    await ensure_default_workspace(db_session)
+    await ensure_default_workspace(db_session)
+
+    count = await db_session.scalar(select(func.count()).select_from(Workspace))
+    assert count == 1
+
+
+# ── HTTP API tests ────────────────────────────────────────────────────────────
 
 
 async def test_create_workspace_returns_201(api_client):
