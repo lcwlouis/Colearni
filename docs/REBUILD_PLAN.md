@@ -255,6 +255,9 @@ Implementation scope:
 - Add `POST /api/tutor/chat`.
 - Build tutor context from current concept, nearby graph context, mastery state, learning goal, safe source links, and conversation summary.
 - Support tutor modes: `socratic`, `direct`, `repair`, `quiz_prompt`, and `explore`.
+- Build the chat panel UI using `@assistant-ui/react` with a custom `LocalRuntime` adapter (see `docs/FRONTEND.md` — Tutor Chat UI section). The adapter calls `POST /api/tutor/chat`; the library handles all streaming, rendering, and state.
+- Return a **streaming response** from `POST /api/tutor/chat` (SSE or chunked transfer) so tokens render incrementally. A non-streaming response is acceptable for the first iteration but should be upgraded before demo polish.
+- Customise the installed `Thread` component to show the tutor mode badge, concept context header, source citation chips, and mastery level-up prompt.
 
 Requirements:
 
@@ -265,6 +268,8 @@ Requirements:
 - The tutor can reference public source links if present.
 - The tutor can say it lacks source material.
 - User-visible sourced claims include citations or refuse in strict grounded mode.
+- The chat UI is built with `@assistant-ui/react`; no bespoke chat shell is written from scratch.
+- The custom runtime adapter is the only glue between the UI and the FastAPI backend.
 
 Tests:
 
@@ -272,11 +277,13 @@ Tests:
 - Prompt builder includes mastery state.
 - Prompt builder excludes private sources from public context.
 - Mode classifier returns valid mode.
+- Runtime adapter sends correct `concept_id` and `workspace_id` to the backend.
 - Manual tests cover direct answers, incorrect answers, examples, ML links, and unrelated questions.
 
 Acceptance criteria:
 
 - The tutor feels like a coach, not a search engine.
+- Streaming tokens appear incrementally in the chat UI.
 
 ## Phase 5: Mastery + Level-Up Quiz
 
@@ -414,7 +421,7 @@ Acceptance criteria:
 
 ## Phase 9: Demo Polish/User Testing
 
-Goal: make the rebuild good enough to show people.
+Goal: make the rebuild good enough to show people and let them try it themselves.
 
 Demo path:
 
@@ -442,14 +449,55 @@ Local product metrics:
 - Hydration used or skipped.
 - Exports and imports.
 
+Requirements:
+
+- All demo path steps work end-to-end without errors.
+- Trail generation is resilient to page refresh: if the user refreshes or navigates away mid-stream, the generation continues in a backend job and the result is retrievable on return. Implement as a simple async background task with a polling endpoint (`GET /api/jobs/{job_id}`); no heavy queue required.
+- Dark mode: system-respecting, implemented with `next-themes` and Tailwind `dark:` variants. All pages, graph canvas, and chat panel must be themed. See `docs/FRONTEND.md` for the full scope.
+- The backend logs actionable errors — not raw stack traces — for generation failures, LLM errors, and import/export problems.
+- All user-facing error messages are readable and suggest a next action.
+
 Acceptance criteria:
 
 - A new user can create a Trail in under one minute.
 - They can click a concept and start learning immediately.
 - The graph updates after mastery.
 - Export/import works without private leakage.
+- Refreshing the browser during Trail generation does not permanently lose the Trail.
 
-## Phase 10: SaaS Prep
+## Phase 10: Deployment
+
+Goal: make the product deployable to a VPS or cloud instance so real users can try it.
+
+Implementation scope:
+
+- Production Docker Compose profile (separate from dev): Postgres with volume, backend, frontend behind a reverse proxy (Caddy or nginx).
+- Environment variable documentation: every required and optional env var documented in `.env.example` with a comment.
+- CORS locked to the deployed domain, not hardcoded to `localhost:3000`.
+- Health check endpoint used by Docker to gate service readiness.
+- LLM API key supplied via env, never baked into the image.
+- Basic rate limiting on generation endpoints to prevent runaway LLM spend (simple in-process token bucket is fine for single-instance).
+- One-command deploy: `docker compose -f docker-compose.prod.yml up -d` brings up the full stack.
+- HTTPS via Caddy automatic TLS or equivalent.
+
+Requirements:
+
+- A fresh clone with a filled `.env` can be deployed to a VPS with a single command.
+- No secrets are in the image or the repo.
+- The frontend correctly points to the deployed backend URL via `NEXT_PUBLIC_API_BASE_URL`.
+- The app is usable by someone who is not running it locally.
+
+Tests:
+
+- `docker compose -f docker-compose.prod.yml config` validates without errors.
+- Health endpoint is reachable after container startup.
+- CORS rejects requests from unlisted origins.
+
+Acceptance criteria:
+
+- A non-developer can open a URL and use the product end-to-end.
+
+## Phase 11: SaaS Prep
 
 Goal: add hosted product concerns only after the local version proves useful.
 
