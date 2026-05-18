@@ -15,8 +15,8 @@ The product is not a generic RAG chatbot. The graph and mastery model are first-
 ```text
 Frontend
   - Trail creation UI
-  - Graph viewer
-  - Tutor chat
+  - Graph viewer — React Flow per-Trail view (≤100 nodes); Sigma.js if combined/workspace view is ever built
+  - Tutor chat (assistant-ui + custom LocalRuntime adapter)
   - Level-up quiz cards
   - Import/export UI
 
@@ -373,6 +373,55 @@ Generate once. If parsing or validation fails, call `repair()` exactly once. Rai
 | `LLM_MODEL` | Model name for the provider (e.g. `gpt-4o-mini`, `claude-3-5-haiku-20241022`) |
 | `LLM_API_KEY` | API key for the provider |
 | `LLM_API_BASE` | Optional: override base URL for custom/local endpoints |
+| `LLM_THINKING_ENABLED` | Enable extended thinking/reasoning (default: `false`). Gracefully skipped if model doesn't support it. |
+| `LLM_THINKING_BUDGET` | Anthropic: `budget_tokens` for extended thinking, min 1024 (default: `8000`) |
+| `LLM_THINKING_LEVEL` | OpenAI o-series: `reasoning_effort` — `low`, `medium`, `high` (default: `medium`) |
+
+## Frontend Graph Library: React Flow
+
+The per-Trail concept graph uses [`@xyflow/react`](https://github.com/xyflow/xyflow) with [`dagre`](https://github.com/dagrejs/dagre) for layout. This is already implemented and is the correct tool for the current use case.
+
+### Why React Flow for per-Trail graphs
+
+- Nodes render as React components, making rich per-node content (title, level badge, difficulty, mastery colour) straightforward.
+- `dagre`'s hierarchical layout suits the `umbrella → topic → subtopic → granular` structure better than force-directed physics.
+- At 10–100 nodes (the per-Trail cap in `docs/GRAPH.md`) DOM-based rendering is comfortable.
+
+### Known ceiling
+
+React Flow is DOM-based. Pan/zoom triggers style recalculations across all rendered nodes. Interactions become sluggish around **300–500 nodes** and degrade further beyond that. This does not affect per-Trail graphs but matters if a combined or workspace-level view is ever introduced.
+
+### Sigma.js trigger
+
+If any view ever shows nodes from **more than one Trail simultaneously** — a workspace overview, merged Trail, or community graph — React Flow is the wrong tool. Sigma.js should be adopted for that surface (WebGL-based, handles thousands of nodes with smooth pan/zoom). See `docs/CONSIDERED.md` for the full decision record.
+
+Do not pre-emptively migrate the per-Trail graph to Sigma.js.
+
+## Frontend Chat Library: assistant-ui
+
+The tutor chat panel uses [`@assistant-ui/react`](https://github.com/assistant-ui/assistant-ui), an open-source MIT-licensed React/TypeScript library. It is **not** the Vercel AI SDK and introduces no server-side route changes.
+
+### Integration pattern
+
+assistant-ui connects to the FastAPI backend through a `LocalRuntime` model adapter — a single async generator function that calls `POST /api/tutor/chat` and yields token chunks. The library owns all UI state (messages, streaming, auto-scroll, retries). The installed shadcn/ui components live in `apps/web/components/assistant-ui/` and are fully owned by this repo.
+
+### What the library provides
+
+- `Thread`, `Message`, `Composer`, and `ActionBar` primitives.
+- Streaming token rendering, auto-scroll, markdown, code highlighting.
+- A `Sources` component for inline citation chips.
+- Optional KaTeX add-on for math in tutor responses.
+
+### What CoLearni adds on top
+
+- Tutor mode badge (`socratic`, `direct`, `repair`, `quiz_prompt`, `explore`) on assistant messages.
+- Concept context header above the thread (title, concept level).
+- Mastery level-up prompt surfaced when the tutor shifts to `quiz_prompt` mode.
+- `concept_id` and `workspace_id` injected into every request by the adapter.
+
+### Streaming
+
+`POST /api/tutor/chat` should return a streaming response (SSE or chunked transfer encoding) for token-by-token rendering. A non-streaming response is acceptable early on; the adapter yields the full response in one shot and no UI code changes are required when streaming is later added to the backend.
 
 ## Local-Ready First, SaaS Later
 
