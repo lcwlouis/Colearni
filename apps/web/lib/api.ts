@@ -46,8 +46,10 @@ export async function generateTrail(
   workspaceId: string,
   body: TrailGenerateRequest,
   onProgress?: (message: string) => void,
+  onDelta?: (chunk: string) => void,
+  onThinking?: (chunk: string) => void,
 ): Promise<TrailGenerateResponse> {
-  if (onProgress) {
+  if (onProgress || onDelta || onThinking) {
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/generate/stream`,
@@ -58,11 +60,11 @@ export async function generateTrail(
         },
       );
       if (response.ok && response.body) {
-        return await readTrailGenerationStream(response, onProgress);
+        return await readTrailGenerationStream(response, onProgress, onDelta, onThinking);
       }
-      onProgress("Streaming progress unavailable; waiting for final response...");
+      onProgress?.("Streaming progress unavailable; waiting for final response...");
     } catch {
-      onProgress("Streaming progress unavailable; waiting for final response...");
+      onProgress?.("Streaming progress unavailable; waiting for final response...");
     }
   }
   return request<TrailGenerateResponse>(`/api/workspaces/${workspaceId}/trails/generate`, {
@@ -133,7 +135,9 @@ function errorMessage(payload: ErrorEnvelope): string {
 
 async function readTrailGenerationStream(
   response: Response,
-  onProgress: (message: string) => void,
+  onProgress: ((message: string) => void) | undefined,
+  onDelta: ((chunk: string) => void) | undefined,
+  onThinking: ((chunk: string) => void) | undefined,
 ): Promise<TrailGenerateResponse> {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -151,7 +155,7 @@ async function readTrailGenerationStream(
     const chunks = buffer.split("\n\n");
     buffer = chunks.pop() ?? "";
     for (const chunk of chunks) {
-      const result = handleStreamEvent(chunk, onProgress);
+      const result = handleStreamEvent(chunk, onProgress, onDelta, onThinking);
       if (result) {
         return result;
       }
@@ -159,7 +163,7 @@ async function readTrailGenerationStream(
   }
 
   if (buffer.trim()) {
-    const result = handleStreamEvent(buffer, onProgress);
+    const result = handleStreamEvent(buffer, onProgress, onDelta, onThinking);
     if (result) {
       return result;
     }
@@ -169,7 +173,9 @@ async function readTrailGenerationStream(
 
 function handleStreamEvent(
   chunk: string,
-  onProgress: (message: string) => void,
+  onProgress: ((message: string) => void) | undefined,
+  onDelta: ((chunk: string) => void) | undefined,
+  onThinking: ((chunk: string) => void) | undefined,
 ): TrailGenerateResponse | null {
   const event = /^event:\s*(.+)$/m.exec(chunk)?.[1]?.trim() ?? "message";
   const dataLines = chunk
@@ -179,11 +185,21 @@ function handleStreamEvent(
   const rawData = dataLines.join("\n");
   const payload = rawData ? JSON.parse(rawData) : {};
 
-  if (event === "progress" || event === "delta") {
+  if (event === "progress") {
     if (typeof payload.message === "string") {
-      onProgress(payload.message);
-    } else if (typeof payload.text === "string") {
-      onProgress(payload.text);
+      onProgress?.(payload.message);
+    }
+    return null;
+  }
+  if (event === "delta") {
+    if (typeof payload.text === "string") {
+      onDelta?.(payload.text);
+    }
+    return null;
+  }
+  if (event === "thinking") {
+    if (typeof payload.text === "string") {
+      onThinking?.(payload.text);
     }
     return null;
   }

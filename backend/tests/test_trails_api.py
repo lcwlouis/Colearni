@@ -116,6 +116,16 @@ class FakeGenerator:
             raise RuntimeError("Provider connection failed")
         return self._json
 
+    async def generate_stream(
+        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    ):
+        self.max_nodes_seen = max_nodes
+        if self._raise_on_generate:
+            raise RuntimeError("Provider connection failed")
+        chunk_size = max(1, len(self._json) // 4)
+        for i in range(0, len(self._json), chunk_size):
+            yield ("text", self._json[i : i + chunk_size])
+
     async def repair(self, raw_json: str, error: str) -> str:
         self.repair_called = True
         return self._repair if self._repair is not None else self._json
@@ -214,7 +224,8 @@ async def test_generate_stream_emits_progress_and_done(api_client, workspace_id)
     assert resp.headers["content-type"].startswith("text/event-stream")
     body = resp.text
     assert "event: progress" in body
-    assert "Generating graph for Math" in body
+    assert "Generating concept graph for" in body
+    assert "event: delta" in body
     assert "event: done" in body
     assert '"node_count":10' in body
     assert fake_gen.max_nodes_seen == 40

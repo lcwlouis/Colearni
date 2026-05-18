@@ -108,6 +108,9 @@ Required variables for the backend (document in `.env.example`):
 | `LLM_MODEL` | Model name for the chosen provider (e.g. `gpt-4o-mini`, `claude-3-5-haiku-20241022`) |
 | `LLM_API_KEY` | API key for the provider |
 | `LLM_API_BASE` | Optional: override base URL for custom/local endpoints (e.g. Ollama: `http://localhost:11434/v1`) |
+| `LLM_THINKING_ENABLED` | Enable extended thinking/reasoning (default: `false`). Gracefully skipped if model doesn't support it. |
+| `LLM_THINKING_BUDGET` | Anthropic: `budget_tokens` for extended thinking, min 1024 (default: `8000`) |
+| `LLM_THINKING_LEVEL` | OpenAI o-series: `reasoning_effort` — `low` \| `medium` \| `high` (default: `medium`) |
 | `APP_ENV` | `development` or `production` |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
 | `OBSERVABILITY_ENABLED` | `true` to enable OpenTelemetry traces (optional) |

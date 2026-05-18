@@ -1,16 +1,26 @@
 .PHONY: install dev test lint infra-up infra-down db-upgrade db-revision
 
-install:
-	pip install -e ".[dev]"
+# Use uv if available; otherwise fall back to a plain .venv + pip.
+UV := $(shell which uv 2>/dev/null)
+
+ifdef UV
+  RUN     := uv run
+  install:
+	uv sync --extra dev
+else
+  RUN     := .venv/bin/python -m
+  install:
+	python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+endif
 
 dev:
-	uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+	$(RUN) uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
 test:
-	pytest -q
+	$(RUN) pytest -q
 
 lint:
-	ruff check .
+	$(RUN) ruff check .
 
 infra-up:
 	docker compose up -d
@@ -19,7 +29,7 @@ infra-down:
 	docker compose down
 
 db-upgrade:
-	alembic upgrade head
+	$(RUN) alembic upgrade head
 
 db-revision:
-	alembic revision --autogenerate -m "$(m)"
+	$(RUN) alembic revision --autogenerate -m "$(m)"

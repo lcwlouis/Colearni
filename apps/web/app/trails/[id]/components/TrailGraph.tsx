@@ -572,7 +572,7 @@ function GraphLegendContent({
 }) {
   return (
     <div
-      className={`grid max-h-[42vh] w-full gap-3 overflow-y-auto rounded-md border border-slate-200 bg-white/95 p-3 text-xs text-slate-700 shadow-sm backdrop-blur md:w-[min(88vw,660px)] md:max-h-none ${
+      className={`grid max-h-[42vh] w-full gap-4 overflow-y-auto rounded-md border border-slate-200 bg-white/95 p-4 text-xs text-slate-700 shadow-sm backdrop-blur md:max-h-none ${
         compact ? "md:mr-[28rem]" : "md:grid-cols-3"
       }`}
     >

@@ -9,7 +9,7 @@ import json
 import re
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, AsyncIterator, Protocol, runtime_checkable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,12 @@ class GraphGenerator(Protocol):
         self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
     ) -> str:
         """Return raw JSON string for the graph."""
+        ...
+
+    async def generate_stream(
+        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    ) -> AsyncIterator[tuple[str, str]]:
+        """Yield (kind, chunk) tuples where kind is 'text' or 'thinking'."""
         ...
 
     async def repair(self, raw_json: str, error: str) -> str:
@@ -84,6 +90,15 @@ class LLMGraphGenerator:
         prompt = _load_prompt(topic, goal, target_depth, max_nodes)
         return await self._client.chat([{"role": "user", "content": prompt}], temperature=0.4)
 
+    async def generate_stream(
+        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    ) -> AsyncIterator[tuple[str, str]]:
+        prompt = _load_prompt(topic, goal, target_depth, max_nodes)
+        async for kind, chunk in self._client.chat_stream_tagged(
+            [{"role": "user", "content": prompt}], temperature=0.4
+        ):
+            yield kind, chunk
+
     async def repair(self, raw_json: str, error: str) -> str:
         repair_prompt = (
             "The following JSON concept graph failed validation with this error:\n"
@@ -96,48 +111,48 @@ class LLMGraphGenerator:
         )
 
 
-async def generate_and_store_trail(
-    *,
-    session: AsyncSession,
-    generator: GraphGenerator,
-    workspace_id: uuid.UUID,
-    topic: str,
-    goal: str,
-    target_depth: str,
-    max_nodes: int = 40,
-) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
-    """Generate a trail + concept graph and persist everything in one transaction.
+# ------------------------------------------------------------------
+# Private helpers shared by the blocking and streaming paths
+# ------------------------------------------------------------------
 
-    Raises:
-        LookupError: workspace_id not found.
-        GenerationError: LLM call failed, repair call failed, or graph invalid after repair.
-    """
-    # Verify workspace exists
+async def _lookup_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> None:
+    """Raises LookupError if the workspace does not exist."""
     result = await session.execute(select(Workspace).where(Workspace.id == workspace_id))
-    workspace = result.scalar_one_or_none()
-    if workspace is None:
+    if result.scalar_one_or_none() is None:
         raise LookupError(f"Workspace {workspace_id} not found")
 
-    # Generate graph — one repair attempt on failure
+
+async def _validate_with_repair(
+    raw: str, *, max_nodes: int, generator: GraphGenerator
+) -> RawGraph:
+    """Parse and validate raw JSON with one repair attempt on failure.
+
+    Raises GenerationError if repair fails or graph is still invalid after repair.
+    """
     try:
-        raw = await generator.generate(topic, goal, target_depth, max_nodes)
-    except Exception as exc:
-        raise GenerationError(f"LLM call failed: {exc}") from exc
-    try:
-        graph = _parse_graph(raw, max_nodes=max_nodes)
+        return _parse_graph(raw, max_nodes=max_nodes)
     except Exception as first_err:
         try:
             repaired = await generator.repair(raw, str(first_err))
         except Exception as exc:
             raise GenerationError(f"LLM repair call failed: {exc}") from exc
         try:
-            graph = _parse_graph(repaired, max_nodes=max_nodes)
+            return _parse_graph(repaired, max_nodes=max_nodes)
         except Exception as second_err:
             raise GenerationError(
                 f"LLM graph invalid after repair: {second_err}"
             ) from second_err
 
-    # Build slug → ConceptNode map for edge resolution
+
+async def _persist_trail(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    topic: str,
+    goal: str,
+    target_depth: str,
+    graph: RawGraph,
+) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
+    """Persist the Trail, ConceptNodes and ConceptEdges in a single transaction."""
     title = _title_from_graph(graph.nodes, topic)
     insert = TrailInsert(
         workspace_id=workspace_id,
@@ -193,6 +208,37 @@ async def generate_and_store_trail(
     return trail, nodes, edges
 
 
+# ------------------------------------------------------------------
+# Public API
+# ------------------------------------------------------------------
+
+async def generate_and_store_trail(
+    *,
+    session: AsyncSession,
+    generator: GraphGenerator,
+    workspace_id: uuid.UUID,
+    topic: str,
+    goal: str,
+    target_depth: str,
+    max_nodes: int = 40,
+) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
+    """Generate a trail + concept graph and persist everything in one transaction.
+
+    Raises:
+        LookupError: workspace_id not found.
+        GenerationError: LLM call failed, repair call failed, or graph invalid after repair.
+    """
+    await _lookup_workspace(session, workspace_id)
+
+    try:
+        raw = await generator.generate(topic, goal, target_depth, max_nodes)
+    except Exception as exc:
+        raise GenerationError(f"LLM call failed: {exc}") from exc
+
+    graph = await _validate_with_repair(raw, max_nodes=max_nodes, generator=generator)
+    return await _persist_trail(session, workspace_id, topic, goal, target_depth, graph)
+
+
 async def stream_generate_trail_events(
     *,
     session: AsyncSession,
@@ -203,50 +249,75 @@ async def stream_generate_trail_events(
     target_depth: str,
     max_nodes: int = 40,
 ):
-    """Yield SSE events for trail generation progress and final result."""
+    """Yield SSE events for trail generation, streaming LLM tokens as delta events."""
+
+    # 1. Verify workspace before doing any LLM work.
     try:
-        yield _sse(
-            "progress",
-            {
-                "message": (
-                    f"Preparing generation request for {topic}; "
-                    f"target depth {target_depth}, up to {max_nodes} concepts."
-                )
-            },
-        )
-        yield _sse(
-            "progress",
-            {"message": f"Generating graph for {topic}, up to {max_nodes} concepts..."},
-        )
-        trail, nodes, edges = await generate_and_store_trail(
-            session=session,
-            generator=generator,
-            workspace_id=workspace_id,
-            topic=topic,
-            goal=goal,
-            target_depth=target_depth,
-            max_nodes=max_nodes,
-        )
+        await _lookup_workspace(session, workspace_id)
     except LookupError as exc:
-        yield _sse(
-            "error",
-            {"error": {"code": "not_found", "message": str(exc), "details": {}}},
-        )
+        yield _sse("error", {"error": {"code": "not_found", "message": str(exc), "details": {}}})
         return
-    except GenerationError as exc:
+
+    yield _sse("progress", {"message": f'Generating concept graph for "{topic}"...'})
+
+    # 2. Stream LLM tokens, accumulating the full text response.
+    raw_chunks: list[str] = []
+    try:
+        async for kind, chunk in generator.generate_stream(topic, goal, target_depth, max_nodes):
+            if kind == "thinking":
+                yield _sse("thinking", {"text": chunk})
+            else:
+                raw_chunks.append(chunk)
+                yield _sse("delta", {"text": chunk})
+    except Exception as exc:
         yield _sse(
             "error",
-            {"error": {"code": "llm_error", "message": str(exc), "details": {}}},
+            {"error": {"code": "llm_error", "message": f"LLM call failed: {exc}", "details": {}}},
         )
         return
 
+    raw = "".join(raw_chunks)
+
+    # 3. Validate — one repair attempt on failure.
+    yield _sse("progress", {"message": "Validating graph structure..."})
+    try:
+        graph = _parse_graph(raw, max_nodes=max_nodes)
+    except Exception as first_err:
+        yield _sse("progress", {"message": "Graph needs repair — asking LLM to fix it..."})
+        try:
+            repaired = await generator.repair(raw, str(first_err))
+        except Exception as exc:
+            yield _sse(
+                "error",
+                {"error": {"code": "llm_error", "message": f"LLM repair call failed: {exc}", "details": {}}},
+            )
+            return
+        try:
+            graph = _parse_graph(repaired, max_nodes=max_nodes)
+        except Exception as second_err:
+            yield _sse(
+                "error",
+                {"error": {"code": "llm_error", "message": f"LLM graph invalid after repair: {second_err}", "details": {}}},
+            )
+            return
+
+    # 4. Persist.
+    yield _sse("progress", {"message": f"Saving Trail with {len(graph.nodes)} concepts..."})
+    try:
+        trail, nodes, edges = await _persist_trail(
+            session, workspace_id, topic, goal, target_depth, graph
+        )
+    except Exception as exc:
+        yield _sse(
+            "error",
+            {"error": {"code": "db_error", "message": str(exc), "details": {}}},
+        )
+        return
+
+    # 5. Done.
     trail_read = TrailRead.model_validate(trail)
     trail_read.node_count = len(nodes)
     trail_read.edge_count = len(edges)
-    yield _sse(
-        "progress",
-        {"message": f"Stored Trail with {len(nodes)} concepts and {len(edges)} edges."},
-    )
     yield _sse(
         "done",
         TrailGenerateResponse(
