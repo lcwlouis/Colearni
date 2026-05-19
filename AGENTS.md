@@ -19,6 +19,12 @@ CoLearni was reset to start fresh for the actual MVP. Treat the docs in `docs/` 
 - `docs/TEST_PLAN.md`
 - `docs/FRONTEND.md` when touching `apps/web/`
 
+## Git Policy
+
+**Do not commit, amend, or push any changes without explicit user approval.**
+
+Agents must stop after completing implementation and verification. The user reviews the diff and output before any `git add` / `git commit` / `git push` is run. Only commit when the user explicitly says to commit or approve.
+
 ## Repo Expectations
 
 - Small PR-sized changes, target 400 net LOC or less. Split larger work into phases.

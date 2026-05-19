@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from .concept import ConceptEdgeRead, ConceptNodeRead
+from .mastery import MasteryRecordRead
 from .types import TargetDepth
 
 
@@ -48,6 +49,7 @@ class TrailRead(BaseModel):
 class TrailGraphRead(BaseModel):
     nodes: list[ConceptNodeRead]
     edges: list[ConceptEdgeRead]
+    mastery: dict[uuid.UUID, MasteryRecordRead] = Field(default_factory=dict)
 
 
 class TrailGenerateResponse(BaseModel):

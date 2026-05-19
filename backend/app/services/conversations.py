@@ -3,9 +3,7 @@
 Handles get-or-create conversation, scope validation, context assembly, and
 conversation history retrieval.
 
-Known limitations (Phase 4A):
-- Mastery side-effect (set concept to "learning" on first chat) is deferred to
-  Phase 5 once mastery_records table is in place.
+Known limitations:
 - Automatic conversation summarisation is deferred; the conversation_summaries
   table is created and the model is wired, but no summary is generated yet.
   Context always falls back to the last N raw turns.
@@ -33,6 +31,7 @@ from backend.app.models.conversation import (
 from backend.app.models.source import ConceptSourceLink, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
+from backend.app.services.mastery import get_mastery_state
 
 # Maximum number of recent turns included in the prompt context window.
 _RECENT_TURNS_LIMIT = 10
@@ -74,7 +73,6 @@ class TutorContext:
     related: list[ConceptNode] = field(default_factory=list)
     application_nodes: list[ConceptNode] = field(default_factory=list)
 
-    # Phase 5 placeholder – mastery_records not yet implemented.
     mastery_status: str = "not_started"
 
     recent_turns: list[ConversationTurn] = field(default_factory=list)
@@ -272,6 +270,12 @@ async def build_tutor_context(
         .limit(1)
     )
 
+    mastery_state = await get_mastery_state(
+        session,
+        workspace_id=trail.workspace_id,
+        concept=concept,
+    )
+
     return TutorContext(
         conversation_id=conversation.id,
         concept=concept,
@@ -283,7 +287,7 @@ async def build_tutor_context(
         containing_nodes=containing_nodes,
         related=related,
         application_nodes=application_nodes,
-        mastery_status="not_started",  # TODO: Phase 5 — read from mastery_records
+        mastery_status=mastery_state.status,
         recent_turns=recent_turns,
         conversation_summary=summary,
         sources=await _load_safe_sources(

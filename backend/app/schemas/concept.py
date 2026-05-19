@@ -2,6 +2,8 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .mastery import MasteryRecordRead
+from .source import SourceRecordRead
 from .types import BloomLevel, ConceptLevel, Difficulty, NodeType, RelationType
 
 
@@ -36,5 +38,5 @@ class ConceptDetailResponse(BaseModel):
     contained_nodes: list[ConceptNodeRead]
     containing_nodes: list[ConceptNodeRead]
     related: list[ConceptNodeRead]
-    mastery: None = None
-    sources: list[dict] = Field(default_factory=list)
+    mastery: MasteryRecordRead
+    sources: list[SourceRecordRead] = Field(default_factory=list)

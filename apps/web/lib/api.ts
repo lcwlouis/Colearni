@@ -2,6 +2,10 @@ import type {
   ConceptDetail,
   ConversationHistoryResponse,
   ConversationMessage,
+  GradeResult,
+  LevelUpCard,
+  QuizAnswer,
+  QuizQuestion,
   TrailDetail,
   TrailGenerateRequest,
   TrailGenerateResponse,
@@ -105,6 +109,60 @@ export async function getTrail(workspaceId: string, trailId: string): Promise<Tr
   return request<TrailDetail>(`/api/workspaces/${workspaceId}/trails/${trailId}`, {
     method: "GET",
   });
+}
+
+export async function generateLevelUpQuiz(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+): Promise<LevelUpCard> {
+  return request<LevelUpCard>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/level-up`,
+    { method: "POST" },
+  );
+}
+
+export async function generatePracticeQuiz(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+): Promise<LevelUpCard> {
+  return request<LevelUpCard>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/practice`,
+    { method: "POST" },
+  );
+}
+
+export async function gradeLevelUpQuiz(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  questions: QuizQuestion[],
+  answers: QuizAnswer[],
+): Promise<GradeResult> {
+  return request<GradeResult>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/grade`,
+    {
+      method: "POST",
+      body: JSON.stringify({ questions, answers }),
+    },
+  );
+}
+
+export async function gradePracticeQuiz(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  questions: QuizQuestion[],
+  answers: QuizAnswer[],
+): Promise<GradeResult> {
+  return request<GradeResult>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/practice/grade`,
+    {
+      method: "POST",
+      body: JSON.stringify({ questions, answers }),
+    },
+  );
 }
 
 export async function deleteTrail(workspaceId: string, trailId: string): Promise<void> {

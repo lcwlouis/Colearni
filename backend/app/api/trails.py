@@ -9,6 +9,7 @@ from backend.app.db import get_session
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.schemas.concept import ConceptEdgeRead, ConceptNodeRead
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
+from backend.app.schemas.mastery import MasteryRecordRead
 from backend.app.schemas.trail import (
     TrailDetailResponse,
     TrailGenerateRequest,
@@ -119,7 +120,7 @@ async def get_trail_detail_route(
         return _not_found(str(exc))
     return TrailDetailResponse(
         trail=TrailRead.model_validate(trail),
-        graph=_graph_read(nodes, edges),
+        graph=_graph_read(nodes, edges, getattr(trail, "mastery_by_concept", {})),
         mastery_summary=mastery_summary,
     )
 
@@ -137,10 +138,18 @@ async def delete_trail_route(
     return Response(status_code=204)
 
 
-def _graph_read(nodes: list[ConceptNode], edges: list[ConceptEdge]) -> TrailGraphRead:
+def _graph_read(
+    nodes: list[ConceptNode],
+    edges: list[ConceptEdge],
+    mastery_by_concept: dict | None = None,
+) -> TrailGraphRead:
     return TrailGraphRead(
         nodes=[ConceptNodeRead.model_validate(node) for node in nodes],
         edges=[ConceptEdgeRead.model_validate(edge) for edge in edges],
+        mastery={
+            concept_id: MasteryRecordRead.model_validate(state)
+            for concept_id, state in (mastery_by_concept or {}).items()
+        },
     )
 
 

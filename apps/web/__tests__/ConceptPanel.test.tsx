@@ -28,7 +28,15 @@ const detail: ConceptDetail = {
   contained_nodes: [],
   containing_nodes: [],
   related: [],
-  mastery: null,
+  mastery: {
+    id: null,
+    workspace_id: "workspace-1",
+    concept_id: "concept-1",
+    status: "not_started",
+    bloom_level: "understand",
+    score: 0,
+    updated_at: null,
+  },
   sources: [],
 };
 
@@ -45,6 +53,7 @@ describe("ConceptPanel", () => {
 
     expect(screen.getByRole("heading", { name: "Vectors" })).toBeInTheDocument();
     expect(screen.getByText("topic")).toBeInTheDocument();
+    expect(screen.getByText("not_started")).toBeInTheDocument();
   });
 
   test("mobile sheet starts collapsed and expands from the handle", async () => {

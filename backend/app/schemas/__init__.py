@@ -1,6 +1,8 @@
 from .concept import ConceptEdgeRead, ConceptNodeRead
+from .mastery import GradeResult, LevelUpCard, MasteryRecordRead, QuizAnswer, QuizQuestion
 from .source import SourceRecordRead
 from .trail import (
+    MasterySummary,
     TrailGenerateRequest,
     TrailGenerateResponse,
     TrailGraphRead,
@@ -11,7 +13,9 @@ from .types import (
     BloomLevel,
     ConceptLevel,
     Difficulty,
+    MasteryStatus,
     NodeType,
+    QuizType,
     RelationType,
     SourceAccess,
     SourceOrigin,
@@ -25,7 +29,15 @@ __all__ = [
     "ConceptEdgeRead",
     "ConceptNodeRead",
     "Difficulty",
+    "GradeResult",
+    "LevelUpCard",
+    "MasteryRecordRead",
+    "MasteryStatus",
+    "MasterySummary",
     "NodeType",
+    "QuizAnswer",
+    "QuizQuestion",
+    "QuizType",
     "RelationType",
     "SourceAccess",
     "SourceOrigin",

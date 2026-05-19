@@ -23,7 +23,15 @@ vi.mock("@/lib/api", () => ({
     contained_nodes: [],
     containing_nodes: [],
     related: [],
-    mastery: null,
+    mastery: {
+      id: null,
+      workspace_id: "workspace-1",
+      concept_id: conceptId,
+      status: "not_started",
+      bloom_level: "understand",
+      score: 0,
+      updated_at: null,
+    },
     sources: [],
   })),
 }));
@@ -92,13 +100,43 @@ const edges: ConceptEdge[] = [
   edge("edge-2", "matrices", "basis", "contains"),
 ];
 
+const mastery = {
+  vectors: {
+    id: null,
+    workspace_id: "workspace-1",
+    concept_id: "vectors",
+    status: "learning" as const,
+    bloom_level: "understand" as const,
+    score: 0.4,
+    updated_at: null,
+  },
+  matrices: {
+    id: null,
+    workspace_id: "workspace-1",
+    concept_id: "matrices",
+    status: "mastered" as const,
+    bloom_level: "understand" as const,
+    score: 0.9,
+    updated_at: null,
+  },
+  basis: {
+    id: null,
+    workspace_id: "workspace-1",
+    concept_id: "basis",
+    status: "not_started" as const,
+    bloom_level: "understand" as const,
+    score: 0,
+    updated_at: null,
+  },
+};
+
 describe("TrailGraph", () => {
   test("renders graph node labels", () => {
     render(
       <TrailGraph
         workspaceId="workspace-1"
         trail={trail}
-        graph={{ nodes, edges }}
+        graph={{ nodes, edges, mastery }}
         masterySummary={{
           total: 3,
           not_started: 3,
@@ -153,6 +191,14 @@ describe("TrailGraph", () => {
     await userEvent.click(screen.getByRole("button", { name: "Pane" }));
     expect(screen.getByText("Select a node to highlight its connections.")).toBeInTheDocument();
   });
+
+  test("uses graph mastery records for summary metrics", () => {
+    renderGraph();
+
+    expect(screen.getByText("Learning")).toBeInTheDocument();
+    expect(screen.getByText("Mastered")).toBeInTheDocument();
+    expect(screen.getAllByText("1").length).toBeGreaterThan(0);
+  });
 });
 
 function renderGraph() {
@@ -160,7 +206,7 @@ function renderGraph() {
     <TrailGraph
       workspaceId="workspace-1"
       trail={trail}
-      graph={{ nodes, edges }}
+      graph={{ nodes, edges, mastery }}
       masterySummary={{
         total: 3,
         not_started: 3,

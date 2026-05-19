@@ -100,6 +100,7 @@ export function ConceptPanel({
             <Badge>{concept.bloom_level}</Badge>
             <Badge>{concept.difficulty}</Badge>
             <Badge>{concept.node_type}</Badge>
+            <Badge>{detail.mastery.status}</Badge>
           </div>
         </div>
         <button

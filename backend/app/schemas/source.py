@@ -17,3 +17,4 @@ class SourceRecordRead(BaseModel):
     license: str | None
     include_on_public_export: bool
     metadata_json: dict
+    relation: str | None = None

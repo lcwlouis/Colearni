@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
+from backend.app.models.mastery import MasteryRecord, QuizAttempt
 from backend.app.models.source import ConceptSourceLink, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
@@ -223,3 +224,42 @@ async def test_concept_source_link(session):
     row = await session.scalar(select(ConceptSourceLink).where(ConceptSourceLink.id == link.id))
     assert row.source_id == source.id
     assert row.relation == "reference"
+
+
+@pytest.mark.asyncio
+async def test_create_mastery_record(session):
+    owner = await workspace(session)
+    concept = await node(session, await trail(session, owner))
+    record = await save(
+        session,
+        MasteryRecord(
+            workspace_id=owner.id,
+            concept_id=concept.id,
+            status="learning",
+            bloom_level="understand",
+            score=0.4,
+        ),
+    )
+    row = await session.get(MasteryRecord, record.id)
+    assert row.status == "learning"
+    assert row.score == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
+async def test_create_quiz_attempt(session):
+    concept = await node(session, await trail(session, await workspace(session)))
+    attempt = await save(
+        session,
+        QuizAttempt(
+            concept_id=concept.id,
+            quiz_type="practice",
+            questions_json=[{"id": "q1"}],
+            answers_json=[{"question_id": "q1", "answer": "answer"}],
+            evaluator_feedback="Helpful feedback",
+            passed=True,
+            score=0.8,
+        ),
+    )
+    row = await session.get(QuizAttempt, attempt.id)
+    assert row.quiz_type == "practice"
+    assert row.score == pytest.approx(0.8)

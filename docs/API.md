@@ -130,15 +130,17 @@ QuizType = Literal["level_up", "practice"]
 
 ```json
 {
-  "id": "uuid",
+  "id": "uuid | null",
   "workspace_id": "uuid",
   "concept_id": "uuid",
   "status": "MasteryStatus",
   "bloom_level": "BloomLevel",
   "score": "float (0.0–1.0)",
-  "updated_at": "ISO 8601 datetime"
+  "updated_at": "ISO 8601 datetime | null"
 }
 ```
+
+When no DB row exists yet, the API synthesizes a default `MasteryRecord` with `status: "not_started"`, `score: 0.0`, and `id`/`updated_at` as `null`.
 
 ### QuizQuestion
 
@@ -491,6 +493,14 @@ Grade a level-up quiz attempt. If passed, updates mastery to `mastered`. If fail
 
 ```json
 {
+  "questions": [
+    {
+      "id": "string",
+      "type": "explain | apply | compare",
+      "prompt": "string",
+      "mastery_label": "string"
+    }
+  ],
   "answers": [
     {"question_id": "string", "answer": "string"}
   ]
@@ -500,6 +510,7 @@ Grade a level-up quiz attempt. If passed, updates mastery to `mastered`. If fail
 **Response 200:** `GradeResult`
 
 Note: This endpoint only updates mastery for `level_up` attempts. See `/practice/grade` for practice attempts.
+The client must send back the `questions` snapshot from the generated card so grading is deterministic and the graded attempt stores the exact card that was answered.
 
 ---
 
@@ -519,6 +530,14 @@ Grade a practice quiz attempt. Stores the attempt and returns feedback but **nev
 
 ```json
 {
+  "questions": [
+    {
+      "id": "string",
+      "type": "explain | apply | compare",
+      "prompt": "string",
+      "mastery_label": "string"
+    }
+  ],
   "answers": [
     {"question_id": "string", "answer": "string"}
   ]
@@ -581,7 +600,7 @@ Emitted once at the end. Includes the full assembled message for storage.
 ```
 Emitted if the LLM call fails. The stream then closes.
 
-**Mastery side-effect:** Deferred. Phase 4A persists conversation history but does not yet update mastery on first chat turn.
+**Mastery side-effect:** The first successful tutor turn auto-transitions concept mastery from `not_started` to `learning`. If the concept was already `needs_review`, a new tutor retry also resets it to `learning`.
 
 ---
 

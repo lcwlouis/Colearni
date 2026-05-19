@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.app.api.tutor import get_classifier, get_responder
@@ -18,6 +19,7 @@ from backend.app.main import app
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptNode  # noqa: F401
 from backend.app.models.conversation import Conversation, ConversationTurn  # noqa: F401
+from backend.app.models.mastery import MasteryRecord
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
@@ -191,6 +193,57 @@ async def test_chat_done_event_includes_conversation_id_and_message(api_client, 
     assert msg["mode"] == "socratic"  # FakeClassifier default mode
     assert "id" in msg
     assert "created_at" in msg
+
+
+async def test_first_chat_turn_sets_mastery_to_learning(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Let's start."},
+    )
+
+    assert resp.status_code == 200
+
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        record = await session.scalar(
+            select(MasteryRecord).where(MasteryRecord.concept_id == concept_id)
+        )
+
+    assert record is not None
+    assert record.status == "learning"
+
+
+async def test_chat_from_needs_review_resets_mastery_to_learning(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        session.add(
+            MasteryRecord(
+                workspace_id=ws_id,
+                concept_id=concept_id,
+                status="needs_review",
+                bloom_level="understand",
+                score=0.5,
+            )
+        )
+        await session.commit()
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "I want to try again."},
+    )
+
+    assert resp.status_code == 200
+
+    async with async_session() as session:
+        record = await session.scalar(
+            select(MasteryRecord).where(MasteryRecord.concept_id == concept_id)
+        )
+
+    assert record is not None
+    assert record.status == "learning"
 
 
 async def test_chat_mode_event_carries_mode_field(api_client, db_engine):

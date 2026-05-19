@@ -13,7 +13,6 @@ from .logging_config import configure_logging
 from .services.workspaces import ensure_default_workspace
 from .settings import settings
 
-
 # Uvicorn configures its own loggers, so backend package logs need explicit wiring.
 configure_logging(settings.log_level)
 

@@ -37,3 +37,15 @@ def test_prompt_registry_rejects_missing_variables(tmp_path):
 
     with pytest.raises(KeyError, match="name"):
         registry.render("example_task", {}, version=1)
+
+
+def test_prompt_registry_loads_quiz_prompts_from_repo():
+    registry = PromptRegistry()
+
+    generation = registry.load("quiz_generation", version=1)
+    grader = registry.load("quiz_grader", version=1)
+
+    assert generation.task == "quiz_generation"
+    assert grader.task == "quiz_grader"
+    assert "mastery check labels" in generation.body.lower()
+    assert "grade each answer" in grader.body.lower()

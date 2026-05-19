@@ -9,3 +9,4 @@ SourceAccess = Literal["public", "private", "restricted", "unknown"]
 SourceOrigin = Literal["research_agent", "user_upload", "manual", "system"]
 TargetDepth = BloomLevel
 MasteryStatus = Literal["not_started", "learning", "needs_review", "mastered"]
+QuizType = Literal["level_up", "practice"]

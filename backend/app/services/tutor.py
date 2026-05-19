@@ -25,12 +25,9 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.prompts import prompt_registry
-from backend.app.models.concept import ConceptNode
-from backend.app.models.trail import Trail
 from backend.app.schemas.tutor import ConversationMessage, TutorMode
 from backend.app.services.conversations import (
     TutorContext,
@@ -40,7 +37,9 @@ from backend.app.services.conversations import (
     get_or_create_conversation,
     persist_assistant_turn,
     persist_user_turn,
+    validate_concept_scope,
 )
+from backend.app.services.mastery import mark_learning_from_tutor_turn
 
 if TYPE_CHECKING:
     from backend.app.agents.llm_client import LLMClient
@@ -205,7 +204,11 @@ class LLMTutorResponder:
         task = _MODE_TO_TASK[mode]
         variables = _context_to_prompt_vars(mode, context)
         system_prompt = self._registry.render(task, variables)
-        messages = _build_chat_messages(system_prompt, context.recent_turns, context.learner_message)
+        messages = _build_chat_messages(
+            system_prompt,
+            context.recent_turns,
+            context.learner_message,
+        )
         async for kind, chunk in self._client.chat_stream_tagged(
             messages, temperature=0.7, max_tokens=1024
         ):
@@ -281,6 +284,19 @@ async def stream_chat_response(
         yield _sse("error", {"type": "error", "code": "not_found", "message": str(exc)})
         return
 
+    trail, concept = await validate_concept_scope(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+
+    await mark_learning_from_tutor_turn(
+        session,
+        workspace_id=workspace_id,
+        concept=concept,
+    )
+
     # 2. Reserve turn indexes.
     user_turn_index = await get_next_turn_index(session, conversation.id)
     assistant_turn_index = user_turn_index + 1
@@ -288,18 +304,7 @@ async def stream_chat_response(
     # 3. Persist user turn (flushed, not yet committed).
     await persist_user_turn(session, conversation.id, message.strip(), user_turn_index)
 
-    # 4. Load trail + concept (already validated, reload from session cache).
-    trail = await session.scalar(select(Trail).where(Trail.id == trail_id))
-    concept = await session.scalar(select(ConceptNode).where(ConceptNode.id == concept_id))
-    if trail is None or concept is None:
-        await session.rollback()
-        yield _sse(
-            "error",
-            {"type": "error", "code": "not_found", "message": "Concept context not found"},
-        )
-        return
-
-    # 5. Assemble tutor context.
+    # 4. Assemble tutor context.
     context = await build_tutor_context(
         session,
         conversation=conversation,
@@ -309,17 +314,17 @@ async def stream_chat_response(
         user_turn_index=user_turn_index,
     )
 
-    # 6. Classify mode.
+    # 5. Classify mode.
     try:
         mode: TutorMode = await classifier.classify(context)
     except Exception as exc:
         logger.warning("Tutor mode classifier failed; defaulting to socratic. Error: %s", exc)
         mode = "socratic"
 
-    # 7. Emit mode event BEFORE tokens.
+    # 6. Emit mode event BEFORE tokens.
     yield _sse("mode", {"type": "mode", "mode": mode})
 
-    # 8. Stream response chunks, collecting visible text plus provider-exposed reasoning.
+    # 7. Stream response chunks, collecting visible text plus provider-exposed reasoning.
     full_text = ""
     full_reasoning = ""
     try:
@@ -336,7 +341,7 @@ async def stream_chat_response(
         yield _sse("error", {"type": "error", "code": "llm_error", "message": "Generation failed"})
         return
 
-    # 9. Persist assistant turn and commit transaction.
+    # 8. Persist assistant turn and commit transaction.
     assistant_turn = await persist_assistant_turn(
         session,
         conversation.id,
@@ -346,7 +351,7 @@ async def stream_chat_response(
         reasoning=full_reasoning or None,
     )
 
-    # 10. Emit done event with assembled message.
+    # 9. Emit done event with assembled message.
     msg_schema = ConversationMessage.model_validate(assistant_turn)
     yield _sse(
         "done",

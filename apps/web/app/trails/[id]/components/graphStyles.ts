@@ -4,6 +4,7 @@ import type {
   ConceptEdge,
   ConceptLevel,
   ConceptNode,
+  MasteryRecord,
   MasteryStatus,
   RelationType,
 } from "@/lib/types";
@@ -15,8 +16,11 @@ export const masteryColors: Record<MasteryStatus, string> = {
   mastered: "#dcfce7",
 };
 
-export function masteryStatusFor(node: ConceptNode): MasteryStatus {
-  const status = node.metadata_json.mastery_status;
+export function masteryStatusFor(
+  node: ConceptNode,
+  masteryByConcept?: Record<string, MasteryRecord>,
+): MasteryStatus {
+  const status = masteryByConcept?.[node.id]?.status ?? node.metadata_json.mastery_status;
   if (
     status === "not_started" ||
     status === "learning" ||

@@ -40,7 +40,7 @@ describe("api client", () => {
               encoder.encode(
                 `event: done\ndata: ${JSON.stringify({
                   trail: fixtureTrail,
-                  graph: { nodes: [], edges: [] },
+                  graph: { nodes: [], edges: [], mastery: {} },
                 })}\n\n`,
               ),
             );

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.conversation import Conversation, ConversationTurn  # noqa: F401
+from backend.app.models.mastery import MasteryRecord
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
@@ -446,6 +447,24 @@ def test_context_to_prompt_vars_socratic_mode():
     assert vars_["learner_message"] == "Hello"
     assert vars_["mastery_status"] == "not_started"
     assert "application_nodes" not in vars_, "socratic mode must not include application_nodes"
+
+
+async def test_context_reads_real_mastery_status(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    db_session.add(
+        MasteryRecord(
+            workspace_id=ws_id,
+            concept_id=concept_id,
+            status="needs_review",
+            bloom_level="understand",
+            score=0.6,
+        )
+    )
+    await db_session.commit()
+
+    ctx, _ = await _make_db_context(db_session, ws_id, trail_id, concept_id)
+
+    assert ctx.mastery_status == "needs_review"
 
 
 def test_context_to_prompt_vars_explore_mode_includes_application_nodes():

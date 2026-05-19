@@ -76,11 +76,11 @@ Implemented:
 - Concept detail API with graph context and safe source metadata.
 - Tutor backend for one concept with conversation persistence, thin FastAPI routes, prompt registry, mode classifier, SSE streaming, provider thinking events, and optional persisted assistant reasoning traces.
 - Tutor frontend using assistant-ui `LocalRuntime`, SSE adapter, persisted history hydration, reasoning trace rendering, Markdown/GFM, KaTeX math, fenced `mermaid` diagrams, copyable code blocks, and concept-level source chips.
+- Mastery records and quiz attempts persisted in the DB, with real concept/trail mastery reads, first tutor turn `not_started -> learning`, level-up/practice quiz generation from `mastery_check_labels`, grading, and mastery updates on level-up pass/fail only.
 - LLM client support for OpenAI Responses API, OpenAI-compatible providers including OpenRouter/DeepSeek/Gemini/custom, and optional Anthropic SDK.
 
 Not implemented yet:
 
-- Mastery records, quiz attempts, level-up grading, and graph mastery status updates.
 - True per-message citation/source parts and quote support.
 - Guided agentic graph progression across multiple concepts/topics.
 - Containerized file-search/source-inspection tooling for agentic source understanding.

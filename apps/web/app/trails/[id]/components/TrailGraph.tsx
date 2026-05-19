@@ -98,7 +98,10 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     () => buildFocusSet(graph.edges, selectedNodeId),
     [graph.edges, selectedNodeId],
   );
-  const statusCounts = useMemo(() => countMasteryStatuses(graph.nodes), [graph.nodes]);
+  const statusCounts = useMemo(
+    () => countMasteryStatuses(graph.nodes, graph.mastery),
+    [graph.mastery, graph.nodes],
+  );
 
   const visibleNodeIds = useMemo(() => {
     const levelVisible = new Set(
@@ -130,8 +133,16 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
   );
 
   const flowNodes = useMemo(
-    () => buildFlowNodes(graph.nodes, visibleNodeIds, computedPositions, query, focusSet),
-    [computedPositions, focusSet, graph.nodes, query, visibleNodeIds],
+    () =>
+      buildFlowNodes(
+        graph.nodes,
+        visibleNodeIds,
+        computedPositions,
+        query,
+        focusSet,
+        graph.mastery,
+      ),
+    [computedPositions, focusSet, graph.mastery, graph.nodes, query, visibleNodeIds],
   );
   const flowEdges = useMemo(
     () => buildFlowEdges(graph.edges, visibleNodeIds, focusSet),
@@ -442,6 +453,7 @@ function buildFlowNodes(
   positions: Map<string, GraphPosition>,
   query: string,
   focusSet: ReturnType<typeof buildFocusSet>,
+  masteryByConcept: TrailGraphData["mastery"],
 ): Node[] {
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -460,11 +472,11 @@ function buildFlowNodes(
         id: concept.id,
         position: point,
         data: {
-          label: <NodeLabel node={concept} />,
+          label: <NodeLabel node={concept} masteryByConcept={masteryByConcept} />,
         },
         style: nodeStyleFor({
           node: concept,
-          status: masteryStatusFor(concept),
+          status: masteryStatusFor(concept, masteryByConcept),
           matchesSearch: matches,
           focused: isFocusedNode(concept.id, focusSet),
           selected,
@@ -499,8 +511,10 @@ function buildFlowEdges(
 
 function NodeLabel({
   node,
+  masteryByConcept,
 }: {
   node: ConceptNode;
+  masteryByConcept: TrailGraphData["mastery"];
 }) {
   return (
     <div className="relative flex h-full flex-col justify-between gap-2 p-3 text-left">
@@ -517,12 +531,18 @@ function NodeLabel({
           {difficultyLabel(node.difficulty)}
         </span>
       </div>
-      <NodeHoverPanel node={node} />
+      <NodeHoverPanel node={node} masteryByConcept={masteryByConcept} />
     </div>
   );
 }
 
-function NodeHoverPanel({ node }: { node: ConceptNode }) {
+function NodeHoverPanel({
+  node,
+  masteryByConcept,
+}: {
+  node: ConceptNode;
+  masteryByConcept: TrailGraphData["mastery"];
+}) {
   return (
     <div
       data-node-hover-card
@@ -534,7 +554,7 @@ function NodeHoverPanel({ node }: { node: ConceptNode }) {
         <div>Type: {node.node_type}</div>
         <div>Bloom: {node.bloom_level}</div>
         <div>Difficulty: {difficultyName(node.difficulty)}</div>
-        <div className="col-span-2">Status: {statusLabel(masteryStatusFor(node))}</div>
+        <div className="col-span-2">Status: {statusLabel(masteryStatusFor(node, masteryByConcept))}</div>
       </div>
     </div>
   );
@@ -722,11 +742,14 @@ function FilterPill({
   );
 }
 
-function countMasteryStatuses(nodes: ConceptNode[]) {
+function countMasteryStatuses(
+  nodes: ConceptNode[],
+  masteryByConcept: TrailGraphData["mastery"],
+) {
   return nodes.reduce(
     (summary, node) => {
       summary.total += 1;
-      summary[masteryStatusFor(node)] += 1;
+      summary[masteryStatusFor(node, masteryByConcept)] += 1;
       return summary;
     },
     {

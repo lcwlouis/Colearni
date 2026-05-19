@@ -120,8 +120,10 @@ Manual tests:
 - Weak answer sets needs_review.
 - Wrong answer gives specific feedback.
 - Quiz attempt is stored.
+- Practice grading stores an attempt but does not update mastery.
 - User can retry.
 - Graph UI reflects mastery status.
+- First tutor turn sets concept status to learning.
 - Tutor cannot mark mastery without quiz/evaluation.
 
 ## Source Safety Tests

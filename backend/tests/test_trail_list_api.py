@@ -9,6 +9,7 @@ from backend.app.db import get_session
 from backend.app.main import app
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
+from backend.app.models.mastery import MasteryRecord
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
@@ -120,12 +121,52 @@ async def test_get_trail_detail_returns_graph_and_mastery_summary(api_client, db
     assert data["trail"]["id"] == str(trail_id)
     assert len(data["graph"]["nodes"]) == 2
     assert len(data["graph"]["edges"]) == 1
+    assert set(data["graph"]["mastery"].keys()) == {
+        data["graph"]["nodes"][0]["id"],
+        data["graph"]["nodes"][1]["id"],
+    }
     assert data["mastery_summary"] == {
         "total": 2,
         "not_started": 2,
         "learning": 0,
         "needs_review": 0,
         "mastered": 0,
+    }
+
+
+async def test_get_trail_detail_counts_real_mastery_states(api_client, db_engine):
+    workspace_id, trail_id, nodes = await _seed_trail(db_engine)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        session.add_all(
+            [
+                MasteryRecord(
+                    workspace_id=workspace_id,
+                    concept_id=nodes[0].id,
+                    status="learning",
+                    bloom_level=nodes[0].bloom_level,
+                    score=0.3,
+                ),
+                MasteryRecord(
+                    workspace_id=workspace_id,
+                    concept_id=nodes[1].id,
+                    status="mastered",
+                    bloom_level=nodes[1].bloom_level,
+                    score=0.9,
+                ),
+            ]
+        )
+        await session.commit()
+
+    resp = await api_client.get(f"/api/workspaces/{workspace_id}/trails/{trail_id}")
+
+    assert resp.status_code == 200
+    assert resp.json()["mastery_summary"] == {
+        "total": 2,
+        "not_started": 0,
+        "learning": 1,
+        "needs_review": 0,
+        "mastered": 1,
     }
 
 
