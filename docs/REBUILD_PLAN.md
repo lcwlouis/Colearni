@@ -44,9 +44,10 @@ The MVP is not a generic RAG chatbot. The graph, mastery model, and source prove
 11. Research trace
 12. Hydration
 13. Trail Pack import
-14. Demo polish
-15. Deployment
-16. SaaS prep
+14. Guided graph navigation + source sandbox
+15. Demo polish
+16. Deployment
+17. SaaS prep
 
 Do not start with PDF ingestion, SaaS billing/auth, or a public marketplace.
 
@@ -81,6 +82,8 @@ Not implemented yet:
 
 - Mastery records, quiz attempts, level-up grading, and graph mastery status updates.
 - True per-message citation/source parts and quote support.
+- Guided agentic graph progression across multiple concepts/topics.
+- Containerized file-search/source-inspection tooling for agentic source understanding.
 - Trail Pack export/import, research trace APIs, hydration, durable generation jobs, dark mode, deployment, auth, and SaaS features.
 
 ## Phase 0: Foundation Cleanup
@@ -533,7 +536,40 @@ Acceptance criteria:
 
 - A learner can import a safe content-light Trail Pack and start learning.
 
-## Phase 9: Demo Polish/User Testing
+## Phase 9: Guided Graph Navigation + Source Sandbox
+
+Goal: move from isolated concept chat to a guided learning flow that can navigate a bounded part of the graph, decide what to tackle next, and use source-aware file search safely.
+
+Implementation scope:
+
+- Add a graph-progress guide that can work across multiple concepts in the current Trail rather than only inside one concept conversation.
+- Let the system guide the learner through a subgraph or topic cluster until the learner finishes the relevant concepts, then suggest the next topic or entry point.
+- Use mastery state, graph structure, recent chat history, and Trail goal to decide what to suggest next.
+- Add agentic source/file-search capability only through a containerized sandbox scoped to the current workspace or imported pack.
+- The sandbox may be Docker-based or equivalent, but it must not expose arbitrary host filesystem access.
+
+Requirements:
+
+- The learner can stay inside a guided flow that spans several connected concepts without losing graph context.
+- The guide stays bounded to the current Trail or selected subgraph unless the learner explicitly asks to go broader.
+- The guide suggests the next concept or topic based on mastery state and graph structure, not arbitrary LLM preference.
+- Any file or source inspection used for deeper grounded explanations runs inside a containerized sandbox with scoped mounts, bounded budgets, and no host-wide filesystem access.
+- Source/file search remains evidence-first and provenance-aware; it must not weaken export/privacy rules.
+
+Tests:
+
+- Completing a concept or topic can cause the guide to suggest the next appropriate graph target.
+- Guided progression respects prerequisites and does not skip required concepts without justification.
+- Guided progression behaves sensibly for mixed mastery states (`not_started`, `learning`, `needs_review`, `mastered`).
+- Sandbox file search cannot read outside the mounted workspace scope.
+- Sandbox/file-search failures degrade cleanly without crashing the tutor flow.
+
+Acceptance criteria:
+
+- CoLearni can guide a learner through a bounded portion of a Trail, then recommend where to go next.
+- Agentic source understanding is possible without giving the model unrestricted filesystem access.
+
+## Phase 10: Demo Polish/User Testing
 
 Goal: make the rebuild good enough to show people and let them try it themselves.
 
@@ -579,7 +615,7 @@ Acceptance criteria:
 - Export/import works without private leakage.
 - Refreshing the browser during Trail generation does not permanently lose the Trail.
 
-## Phase 10: Deployment
+## Phase 11: Deployment
 
 Goal: make the product deployable to a VPS or cloud instance so real users can try it.
 
@@ -611,7 +647,7 @@ Acceptance criteria:
 
 - A non-developer can open a URL and use the product end-to-end.
 
-## Phase 11: SaaS Prep
+## Phase 12: SaaS Prep
 
 Goal: add hosted product concerns only after the local version proves useful.
 
