@@ -5,8 +5,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.app.api.trails import get_graph_generator
 from backend.app.db import get_session
@@ -16,6 +15,8 @@ from backend.app.models.concept import ConceptEdge, ConceptNode  # noqa: F401
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail  # noqa: F401
 from backend.app.models.workspace import Workspace
+from backend.app.services.trail_generation import LLMGraphGenerator
+from backend.app.settings import settings
 
 
 def _minimal_graph_json(topic: str = "Math") -> str:
@@ -108,17 +109,13 @@ class FakeGenerator:
         self.repair_called = False
         self.max_nodes_seen: int | None = None
 
-    async def generate(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
-    ) -> str:
+    async def generate(self, topic: str, goal: str, target_depth: str, max_nodes: int = 40) -> str:
         self.max_nodes_seen = max_nodes
         if self._raise_on_generate:
             raise RuntimeError("Provider connection failed")
         return self._json
 
-    async def generate_stream(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
-    ):
+    async def generate_stream(self, topic: str, goal: str, target_depth: str, max_nodes: int = 40):
         self.max_nodes_seen = max_nodes
         if self._raise_on_generate:
             raise RuntimeError("Provider connection failed")
@@ -144,7 +141,7 @@ async def db_engine():
 async def api_client(db_engine):
     """ASGI client with in-memory SQLite DB and a fake graph generator."""
     engine = db_engine
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
 
     async def override_session():
         async with async_session() as session:
@@ -163,13 +160,28 @@ async def api_client(db_engine):
 
 @pytest.fixture
 async def workspace_id(db_engine):
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
     async with async_session() as session:
         ws = Workspace(name="Test Workspace")
         session.add(ws)
         await session.commit()
         await session.refresh(ws)
         return ws.id
+
+
+def test_graph_generator_factory_preserves_reasoning_settings(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "openrouter")
+    monkeypatch.setattr(settings, "llm_model", "deepseek/deepseek-v4-flash:free")
+    monkeypatch.setattr(settings, "llm_api_key", "test-key")
+    monkeypatch.setattr(settings, "llm_api_base", "")
+    monkeypatch.setattr(settings, "llm_thinking_enabled", True)
+    monkeypatch.setattr(settings, "llm_thinking_budget", 8000)
+    monkeypatch.setattr(settings, "llm_thinking_level", "medium")
+
+    generator = get_graph_generator()
+
+    assert isinstance(generator, LLMGraphGenerator)
+    assert generator._client._thinking_enabled is True
 
 
 async def test_create_trail_returns_nodes_and_edges(api_client, workspace_id):
@@ -299,7 +311,7 @@ async def test_missing_workspace_returns_404(api_client):
 
 
 async def test_llm_error_returns_500(db_engine):
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async def override_session():
         async with async_session() as session:
@@ -333,7 +345,7 @@ async def test_repair_triggered_on_first_bad_response(api_client, workspace_id):
     """When generate() returns bad JSON, repair() is called and used."""
     ac, fake_gen, engine = api_client
     # Override the generator with one that fails first, then repairs
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
 
     async def override_session():
         async with async_session() as session:
@@ -355,7 +367,7 @@ async def test_repair_triggered_on_first_bad_response(api_client, workspace_id):
 
 async def test_generate_raises_returns_500_llm_error(db_engine):
     """If generator.generate() raises, route returns 500 with error.code == 'llm_error'."""
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async def override_session():
         async with async_session() as session:

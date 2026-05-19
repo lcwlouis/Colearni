@@ -8,16 +8,19 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from pathlib import Path
-from typing import TYPE_CHECKING, AsyncIterator, Protocol, runtime_checkable
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.agents.prompts import prompt_registry
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
+from backend.app.schemas.concept import ConceptEdgeRead, ConceptNodeRead
 from backend.app.schemas.trail import TrailGenerateResponse, TrailGraphRead, TrailInsert, TrailRead
+from backend.app.schemas.types import TargetDepth
 from backend.app.services.graph_validation import (
     GraphValidationError,
     RawGraph,
@@ -28,7 +31,10 @@ from backend.app.services.graph_validation import (
 if TYPE_CHECKING:
     from backend.app.agents.llm_client import LLMClient
 
-_PROMPT_PATH = Path(__file__).parent.parent / "agents" / "prompts" / "trail_generation.v1.md"
+_MIN_GENERATION_MAX_TOKENS = 4096
+_MAX_GENERATION_MAX_TOKENS = 16000
+_GENERATION_TOKENS_PER_NODE = 300
+_REPAIR_MAX_TOKENS = 12000
 
 
 class GenerationError(Exception):
@@ -38,13 +44,13 @@ class GenerationError(Exception):
 @runtime_checkable
 class GraphGenerator(Protocol):
     async def generate(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+        self, topic: str, goal: str, target_depth: TargetDepth, max_nodes: int = 40
     ) -> str:
         """Return raw JSON string for the graph."""
         ...
 
-    async def generate_stream(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+    def generate_stream(
+        self, topic: str, goal: str, target_depth: TargetDepth, max_nodes: int = 40
     ) -> AsyncIterator[tuple[str, str]]:
         """Yield (kind, chunk) tuples where kind is 'text' or 'thinking'."""
         ...
@@ -54,14 +60,16 @@ class GraphGenerator(Protocol):
         ...
 
 
-def _load_prompt(topic: str, goal: str, target_depth: str, max_nodes: int) -> str:
-    template = _PROMPT_PATH.read_text()
-    template = template.split("---\n", 2)[-1].strip()  # strip front-matter
-    return (
-        template.replace("{{topic}}", topic)
-        .replace("{{goal}}", goal)
-        .replace("{{target_depth}}", target_depth)
-        .replace("{{max_nodes}}", str(max_nodes))
+def _load_prompt(topic: str, goal: str, target_depth: TargetDepth, max_nodes: int) -> str:
+    return prompt_registry.render(
+        "trail_generation",
+        {
+            "topic": topic,
+            "goal": goal,
+            "target_depth": target_depth,
+            "max_nodes": max_nodes,
+        },
+        version=1,
     )
 
 
@@ -85,17 +93,23 @@ class LLMGraphGenerator:
         self._client = client
 
     async def generate(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+        self, topic: str, goal: str, target_depth: TargetDepth, max_nodes: int = 40
     ) -> str:
         prompt = _load_prompt(topic, goal, target_depth, max_nodes)
-        return await self._client.chat([{"role": "user", "content": prompt}], temperature=0.4)
+        return await self._client.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.4,
+            max_tokens=_generation_max_tokens(max_nodes),
+        )
 
     async def generate_stream(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
+        self, topic: str, goal: str, target_depth: TargetDepth, max_nodes: int = 40
     ) -> AsyncIterator[tuple[str, str]]:
         prompt = _load_prompt(topic, goal, target_depth, max_nodes)
         async for kind, chunk in self._client.chat_stream_tagged(
-            [{"role": "user", "content": prompt}], temperature=0.4
+            [{"role": "user", "content": prompt}],
+            temperature=0.4,
+            max_tokens=_generation_max_tokens(max_nodes),
         ):
             yield kind, chunk
 
@@ -107,13 +121,16 @@ class LLMGraphGenerator:
             f"ORIGINAL JSON:\n{raw_json}"
         )
         return await self._client.chat(
-            [{"role": "user", "content": repair_prompt}], temperature=0.2
+            [{"role": "user", "content": repair_prompt}],
+            temperature=0.2,
+            max_tokens=_REPAIR_MAX_TOKENS,
         )
 
 
 # ------------------------------------------------------------------
 # Private helpers shared by the blocking and streaming paths
 # ------------------------------------------------------------------
+
 
 async def _lookup_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> None:
     """Raises LookupError if the workspace does not exist."""
@@ -122,9 +139,7 @@ async def _lookup_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> N
         raise LookupError(f"Workspace {workspace_id} not found")
 
 
-async def _validate_with_repair(
-    raw: str, *, max_nodes: int, generator: GraphGenerator
-) -> RawGraph:
+async def _validate_with_repair(raw: str, *, max_nodes: int, generator: GraphGenerator) -> RawGraph:
     """Parse and validate raw JSON with one repair attempt on failure.
 
     Raises GenerationError if repair fails or graph is still invalid after repair.
@@ -139,9 +154,7 @@ async def _validate_with_repair(
         try:
             return _parse_graph(repaired, max_nodes=max_nodes)
         except Exception as second_err:
-            raise GenerationError(
-                f"LLM graph invalid after repair: {second_err}"
-            ) from second_err
+            raise GenerationError(f"LLM graph invalid after repair: {second_err}") from second_err
 
 
 async def _persist_trail(
@@ -149,68 +162,73 @@ async def _persist_trail(
     workspace_id: uuid.UUID,
     topic: str,
     goal: str,
-    target_depth: str,
+    target_depth: TargetDepth,
     graph: RawGraph,
 ) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
     """Persist the Trail, ConceptNodes and ConceptEdges in a single transaction."""
-    title = _title_from_graph(graph.nodes, topic)
-    insert = TrailInsert(
-        workspace_id=workspace_id,
-        title=title,
-        topic=topic,
-        goal=goal,
-        target_depth=target_depth,
-    )
-
-    trail = Trail(
-        workspace_id=insert.workspace_id,
-        title=insert.title,
-        topic=insert.topic,
-        goal=insert.goal,
-        target_depth=insert.target_depth,
-    )
-    session.add(trail)
-    await session.flush()  # get trail.id without committing
-
-    slug_to_node: dict[str, ConceptNode] = {}
-    nodes: list[ConceptNode] = []
-    for raw_node in graph.nodes:
-        node = ConceptNode(
-            trail_id=trail.id,
-            slug=raw_node.slug,
-            title=raw_node.title,
-            node_type=raw_node.node_type,
-            concept_level=raw_node.concept_level,
-            difficulty=raw_node.difficulty,
-            bloom_level=raw_node.bloom_level,
-            mastery_check_labels=raw_node.mastery_check_labels,
-            metadata_json=raw_node.metadata_json,
+    try:
+        title = _title_from_graph(graph.nodes, topic)
+        insert = TrailInsert(
+            workspace_id=workspace_id,
+            title=title,
+            topic=topic,
+            goal=goal,
+            target_depth=target_depth,
         )
-        session.add(node)
-        nodes.append(node)
-        slug_to_node[raw_node.slug] = node
 
-    await session.flush()  # get node IDs
-
-    edges: list[ConceptEdge] = []
-    for raw_edge in graph.edges:
-        edge = ConceptEdge(
-            trail_id=trail.id,
-            source_node_id=slug_to_node[raw_edge.source_slug].id,
-            target_node_id=slug_to_node[raw_edge.target_slug].id,
-            relation_type=raw_edge.relation_type,
+        trail = Trail(
+            workspace_id=insert.workspace_id,
+            title=insert.title,
+            topic=insert.topic,
+            goal=insert.goal,
+            target_depth=insert.target_depth,
         )
-        session.add(edge)
-        edges.append(edge)
+        session.add(trail)
+        await session.flush()  # get trail.id without committing
 
-    await session.commit()
-    await session.refresh(trail)
-    return trail, nodes, edges
+        slug_to_node: dict[str, ConceptNode] = {}
+        nodes: list[ConceptNode] = []
+        for raw_node in graph.nodes:
+            node = ConceptNode(
+                trail_id=trail.id,
+                slug=raw_node.slug,
+                title=raw_node.title,
+                node_type=raw_node.node_type,
+                concept_level=raw_node.concept_level,
+                difficulty=raw_node.difficulty,
+                bloom_level=raw_node.bloom_level,
+                mastery_check_labels=raw_node.mastery_check_labels,
+                metadata_json=raw_node.metadata_json,
+            )
+            session.add(node)
+            nodes.append(node)
+            slug_to_node[raw_node.slug] = node
+
+        await session.flush()  # get node IDs
+
+        edges: list[ConceptEdge] = []
+        for raw_edge in graph.edges:
+            edge = ConceptEdge(
+                trail_id=trail.id,
+                source_node_id=slug_to_node[raw_edge.source_slug].id,
+                target_node_id=slug_to_node[raw_edge.target_slug].id,
+                relation_type=raw_edge.relation_type,
+            )
+            session.add(edge)
+            edges.append(edge)
+
+        await session.commit()
+        await session.refresh(trail)
+        return trail, nodes, edges
+    except Exception:
+        await session.rollback()
+        raise
 
 
 # ------------------------------------------------------------------
 # Public API
 # ------------------------------------------------------------------
+
 
 async def generate_and_store_trail(
     *,
@@ -219,7 +237,7 @@ async def generate_and_store_trail(
     workspace_id: uuid.UUID,
     topic: str,
     goal: str,
-    target_depth: str,
+    target_depth: TargetDepth,
     max_nodes: int = 40,
 ) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
     """Generate a trail + concept graph and persist everything in one transaction.
@@ -246,9 +264,9 @@ async def stream_generate_trail_events(
     workspace_id: uuid.UUID,
     topic: str,
     goal: str,
-    target_depth: str,
+    target_depth: TargetDepth,
     max_nodes: int = 40,
-):
+) -> AsyncIterator[str]:
     """Yield SSE events for trail generation, streaming LLM tokens as delta events."""
 
     # 1. Verify workspace before doing any LLM work.
@@ -260,11 +278,15 @@ async def stream_generate_trail_events(
 
     yield _sse("progress", {"message": f'Generating concept graph for "{topic}"...'})
 
-    # 2. Stream LLM tokens, accumulating the full text response.
+    # 2. Stream LLM tokens, accumulating completion text for validation. Some
+    # reasoning-capable providers can emit useful JSON in reasoning with little
+    # or no final completion, so keep reasoning as a fallback instead of losing it.
     raw_chunks: list[str] = []
+    reasoning_chunks: list[str] = []
     try:
         async for kind, chunk in generator.generate_stream(topic, goal, target_depth, max_nodes):
             if kind == "thinking":
+                reasoning_chunks.append(chunk)
                 yield _sse("thinking", {"text": chunk})
             else:
                 raw_chunks.append(chunk)
@@ -276,7 +298,13 @@ async def stream_generate_trail_events(
         )
         return
 
-    raw = "".join(raw_chunks)
+    raw = "".join(raw_chunks).strip()
+    if not raw:
+        raw = "".join(reasoning_chunks).strip()
+        yield _sse(
+            "progress",
+            {"message": "No completion text received; validating reasoning output..."},
+        )
 
     # 3. Validate — one repair attempt on failure.
     yield _sse("progress", {"message": "Validating graph structure..."})
@@ -289,7 +317,13 @@ async def stream_generate_trail_events(
         except Exception as exc:
             yield _sse(
                 "error",
-                {"error": {"code": "llm_error", "message": f"LLM repair call failed: {exc}", "details": {}}},
+                {
+                    "error": {
+                        "code": "llm_error",
+                        "message": f"LLM repair call failed: {exc}",
+                        "details": {},
+                    }
+                },
             )
             return
         try:
@@ -297,7 +331,13 @@ async def stream_generate_trail_events(
         except Exception as second_err:
             yield _sse(
                 "error",
-                {"error": {"code": "llm_error", "message": f"LLM graph invalid after repair: {second_err}", "details": {}}},
+                {
+                    "error": {
+                        "code": "llm_error",
+                        "message": f"LLM graph invalid after repair: {second_err}",
+                        "details": {},
+                    }
+                },
             )
             return
 
@@ -322,8 +362,22 @@ async def stream_generate_trail_events(
         "done",
         TrailGenerateResponse(
             trail=trail_read,
-            graph=TrailGraphRead(nodes=nodes, edges=edges),
+            graph=_graph_read(nodes, edges),
         ).model_dump(mode="json"),
+    )
+
+
+def _generation_max_tokens(max_nodes: int) -> int:
+    return min(
+        _MAX_GENERATION_MAX_TOKENS,
+        max(_MIN_GENERATION_MAX_TOKENS, max_nodes * _GENERATION_TOKENS_PER_NODE),
+    )
+
+
+def _graph_read(nodes: list[ConceptNode], edges: list[ConceptEdge]) -> TrailGraphRead:
+    return TrailGraphRead(
+        nodes=[ConceptNodeRead.model_validate(node) for node in nodes],
+        edges=[ConceptEdgeRead.model_validate(edge) for edge in edges],
     )
 
 
@@ -337,7 +391,4 @@ def _title_from_graph(nodes: list[RawNode], fallback_topic: str) -> str:
 
 
 def _sse(event: str, data: dict) -> str:
-    return (
-        f"event: {event}\n"
-        f"data: {json.dumps(data, separators=(',', ':'))}\n\n"
-    )
+    return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"

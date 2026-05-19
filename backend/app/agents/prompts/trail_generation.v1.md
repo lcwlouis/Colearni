@@ -28,7 +28,7 @@ The graph must:
 
 ## Output schema
 
-Return ONLY valid JSON, no markdown fences, no explanation.
+Return ONLY valid JSON in the final assistant answer/completion, no markdown fences, no explanation. If you use hidden reasoning, do not stop after reasoning; always emit the complete JSON object as the final answer.
 
 ```json
 {

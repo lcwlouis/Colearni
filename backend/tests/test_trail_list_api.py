@@ -3,8 +3,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.app.db import get_session
 from backend.app.main import app
@@ -26,7 +25,7 @@ async def db_engine():
 
 @pytest.fixture
 async def api_client(db_engine):
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async def override_session():
         async with async_session() as session:
@@ -39,7 +38,7 @@ async def api_client(db_engine):
 
 
 async def _seed_trail(db_engine) -> tuple[uuid.UUID, uuid.UUID, list[ConceptNode]]:
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
     async with async_session() as session:
         workspace = Workspace(name="Graph Workspace")
         session.add(workspace)
@@ -145,7 +144,7 @@ async def test_delete_trail_removes_graph_rows(api_client, db_engine):
     resp = await api_client.delete(f"/api/workspaces/{workspace_id}/trails/{trail_id}")
 
     assert resp.status_code == 204
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
     async with async_session() as session:
         assert await session.get(Trail, trail_id) is None
         assert list(await session.scalars(select(ConceptNode))) == []

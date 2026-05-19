@@ -4,8 +4,7 @@ import json
 import uuid
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode  # noqa: F401
@@ -24,7 +23,7 @@ async def db_session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(engine, expire_on_commit=False)
     async with async_session() as session:
         yield session
     await engine.dispose()
@@ -106,6 +105,22 @@ def _graph_json(node_count: int, topic: str = "Math") -> str:
     return json.dumps({"nodes": nodes, "edges": edges})
 
 
+class ReasoningOnlyGenerator:
+    def __init__(self, reasoning_json: str):
+        self._reasoning_json = reasoning_json
+
+    async def generate(self, topic: str, goal: str, target_depth: str, max_nodes: int = 40) -> str:
+        return ""
+
+    async def generate_stream(self, topic: str, goal: str, target_depth: str, max_nodes: int = 40):
+        midpoint = len(self._reasoning_json) // 2
+        yield ("thinking", self._reasoning_json[:midpoint])
+        yield ("thinking", self._reasoning_json[midpoint:])
+
+    async def repair(self, raw_json: str, error: str) -> str:
+        return raw_json
+
+
 class FakeGenerator:
     def __init__(
         self,
@@ -120,17 +135,13 @@ class FakeGenerator:
         self.repair_called = False
         self.max_nodes_seen: int | None = None
 
-    async def generate(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
-    ) -> str:
+    async def generate(self, topic: str, goal: str, target_depth: str, max_nodes: int = 40) -> str:
         self.max_nodes_seen = max_nodes
         if self._raise_on_generate:
             raise RuntimeError("Provider connection failed")
         return self._json
 
-    async def generate_stream(
-        self, topic: str, goal: str, target_depth: str, max_nodes: int = 40
-    ):
+    async def generate_stream(self, topic: str, goal: str, target_depth: str, max_nodes: int = 40):
         self.max_nodes_seen = max_nodes
         if self._raise_on_generate:
             raise RuntimeError("Provider connection failed")
@@ -246,6 +257,7 @@ async def test_generation_error_leaves_no_partial_rows(db_session: AsyncSession)
 
     # No trail rows written (session was rolled back / never committed)
     from sqlalchemy import func, select
+
     result = await db_session.execute(select(func.count()).select_from(Trail))
     assert result.scalar() == 0
 
@@ -292,6 +304,31 @@ async def test_stream_emits_progress_delta_and_done(db_session: AsyncSession):
     assert "event: done" in body
     assert '"node_count":10' in body
     assert generator.max_nodes_seen == 40
+
+
+async def test_stream_uses_reasoning_output_when_completion_is_empty(db_session: AsyncSession):
+    ws = Workspace(name="Reasoning Stream WS")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    generator = ReasoningOnlyGenerator(_minimal_graph_json())
+    events: list[str] = []
+    async for event in stream_generate_trail_events(
+        session=db_session,
+        generator=generator,
+        workspace_id=ws.id,
+        topic="Math",
+        goal="Learn basics",
+        target_depth="understand",
+    ):
+        events.append(event)
+
+    body = "".join(events)
+    assert "event: thinking" in body
+    assert "No completion text received" in body
+    assert "event: done" in body
+    assert '"node_count":10' in body
 
 
 async def test_stream_llm_error_emits_error_event(db_session: AsyncSession):

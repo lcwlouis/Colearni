@@ -10,6 +10,8 @@ These tests never call a real LLM — they verify that:
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from backend.app.agents.llm_client import LLMClient, _is_thinking_error
@@ -20,14 +22,16 @@ from backend.app.settings import Settings
 # ---------------------------------------------------------------------------
 
 
-def make_client(**kwargs) -> LLMClient:
-    defaults = dict(
-        provider="openai",
-        model="gpt-4o-mini",
-        api_key="test-key",
+def make_client(**kwargs: Any) -> LLMClient:
+    return LLMClient(
+        provider=kwargs.get("provider", "openai"),
+        model=kwargs.get("model", "gpt-4o-mini"),
+        api_key=kwargs.get("api_key", "test-key"),
+        api_base=kwargs.get("api_base", ""),
+        thinking_enabled=kwargs.get("thinking_enabled", False),
+        thinking_budget=kwargs.get("thinking_budget", 8000),
+        thinking_level=kwargs.get("thinking_level", "medium"),
     )
-    defaults.update(kwargs)
-    return LLMClient(**defaults)
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +63,9 @@ def test_from_settings_thinking_defaults():
         llm_provider="openai",
         llm_model="gpt-4o-mini",
         llm_api_key="k",
+        llm_thinking_enabled=False,
+        llm_thinking_budget=8000,
+        llm_thinking_level="medium",
     )
     client = LLMClient.from_settings(s)
     assert client._thinking_enabled is False
@@ -170,6 +177,17 @@ def test_openrouter_headers_included():
     assert kwargs["extra_headers"]["X-Title"] == "CoLearni"
 
 
+def test_openai_compatible_kwargs_include_max_tokens():
+    client = make_client(provider="openrouter", thinking_enabled=True)
+    kwargs = client._build_openai_kwargs(
+        [{"role": "user", "content": "hi"}],
+        temperature=0.4,
+        thinking=True,
+        max_tokens=12000,
+    )
+    assert kwargs["max_tokens"] == 12000
+
+
 def test_openrouter_disables_reasoning_when_thinking_off():
     """When thinking_enabled=False, OpenRouter kwargs must include effort=none."""
     client = make_client(provider="openrouter", thinking_enabled=False)
@@ -209,15 +227,14 @@ async def test_openai_chat_falls_back_on_thinking_error(monkeypatch):
     """When the API rejects reasoning_effort the client retries without it."""
     calls: list[dict] = []
 
+    class FakeMessage:
+        content = "ok"
+
+    class FakeChoice:
+        message = FakeMessage()
+
     class FakeResponse:
-        class choices:
-            class _0:
-                class message:
-                    content = "ok"
-
-            __class_getitem__ = lambda cls, i: cls._0
-
-        choices = [type("c", (), {"message": type("m", (), {"content": "ok"})()})()]
+        choices = [FakeChoice()]
 
     async def fake_create(**kwargs):
         calls.append(dict(kwargs))

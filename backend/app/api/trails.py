@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.llm_client import LLMClient
 from backend.app.db import get_session
+from backend.app.models.concept import ConceptEdge, ConceptNode
+from backend.app.schemas.concept import ConceptEdgeRead, ConceptNodeRead
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
 from backend.app.schemas.trail import (
     TrailDetailResponse,
@@ -52,16 +54,12 @@ async def generate_trail(
     except LookupError as exc:
         return JSONResponse(
             status_code=404,
-            content=ErrorEnvelope(
-                error=ErrorBody(code="not_found", message=str(exc))
-            ).model_dump(),
+            content=ErrorEnvelope(error=ErrorBody(code="not_found", message=str(exc))).model_dump(),
         )
     except GenerationError as exc:
         return JSONResponse(
             status_code=500,
-            content=ErrorEnvelope(
-                error=ErrorBody(code="llm_error", message=str(exc))
-            ).model_dump(),
+            content=ErrorEnvelope(error=ErrorBody(code="llm_error", message=str(exc))).model_dump(),
         )
 
     trail_read = TrailRead.model_validate(trail)
@@ -70,7 +68,7 @@ async def generate_trail(
 
     return TrailGenerateResponse(
         trail=trail_read,
-        graph=TrailGraphRead(nodes=nodes, edges=edges),
+        graph=_graph_read(nodes, edges),
     )
 
 
@@ -121,7 +119,7 @@ async def get_trail_detail_route(
         return _not_found(str(exc))
     return TrailDetailResponse(
         trail=TrailRead.model_validate(trail),
-        graph=TrailGraphRead(nodes=nodes, edges=edges),
+        graph=_graph_read(nodes, edges),
         mastery_summary=mastery_summary,
     )
 
@@ -137,6 +135,13 @@ async def delete_trail_route(
     except LookupError as exc:
         return _not_found(str(exc))
     return Response(status_code=204)
+
+
+def _graph_read(nodes: list[ConceptNode], edges: list[ConceptEdge]) -> TrailGraphRead:
+    return TrailGraphRead(
+        nodes=[ConceptNodeRead.model_validate(node) for node in nodes],
+        edges=[ConceptEdgeRead.model_validate(edge) for edge in edges],
+    )
 
 
 def _not_found(message: str) -> JSONResponse:

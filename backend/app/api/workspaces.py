@@ -30,7 +30,9 @@ async def list_workspaces_route(
     session: AsyncSession = Depends(get_session),
 ) -> WorkspaceListResponse:
     workspaces = await list_workspaces(session)
-    return WorkspaceListResponse(workspaces=workspaces)
+    return WorkspaceListResponse(
+        workspaces=[WorkspaceRead.model_validate(workspace) for workspace in workspaces]
+    )
 
 
 @router.get("/{workspace_id}", response_model=WorkspaceRead)

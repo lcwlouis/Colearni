@@ -1,7 +1,10 @@
 """Tests for graph_validation.py."""
 
+from typing import cast
+
 import pytest
 
+from backend.app.schemas.types import ConceptLevel, RelationType
 from backend.app.services.graph_validation import (
     GraphValidationError,
     RawEdge,
@@ -10,7 +13,7 @@ from backend.app.services.graph_validation import (
 )
 
 
-def _node(slug: str, level: str = "topic", **kw) -> RawNode:
+def _node(slug: str, level: ConceptLevel = "topic", **kw) -> RawNode:
     return RawNode(
         slug=slug,
         title=slug.replace("-", " ").title(),
@@ -21,7 +24,7 @@ def _node(slug: str, level: str = "topic", **kw) -> RawNode:
     )
 
 
-def _edge(src: str, tgt: str, rel: str = "contains") -> RawEdge:
+def _edge(src: str, tgt: str, rel: RelationType = "contains") -> RawEdge:
     return RawEdge(source_slug=src, target_slug=tgt, relation_type=rel)
 
 
@@ -61,7 +64,7 @@ def test_duplicate_title_raises():
 
 def test_bad_concept_level_raises():
     with pytest.raises(Exception):
-        _node("bad", level="not-a-level")  # Pydantic rejects it
+        _node("bad", level=cast(ConceptLevel, "not-a-level"))  # Pydantic rejects it
 
 
 def test_missing_slug_in_edge_raises():

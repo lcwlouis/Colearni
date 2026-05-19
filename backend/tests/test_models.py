@@ -1,7 +1,9 @@
+from typing import Any, overload
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
@@ -20,17 +22,28 @@ async def session():
     await engine.dispose()
 
 
-async def save(session, *rows):
-    session.add_all(rows)
+@overload
+async def save[T](session: AsyncSession, row: T) -> T: ...
+
+
+@overload
+async def save(session: AsyncSession, row: object, *rows: Any) -> tuple[Any, ...]: ...
+
+
+async def save(session: AsyncSession, row: Any, *rows: Any) -> Any:
+    all_rows = (row, *rows)
+    session.add_all(all_rows)
     await session.commit()
-    return rows[0] if len(rows) == 1 else rows
+    return row if len(all_rows) == 1 else all_rows
 
 
-async def workspace(session, name="Default Workspace"):
+async def workspace(session: AsyncSession, name: str = "Default Workspace") -> Workspace:
     return await save(session, Workspace(name=name))
 
 
-async def trail(session, workspace, title="Linear Algebra"):
+async def trail(
+    session: AsyncSession, workspace: Workspace, title: str = "Linear Algebra"
+) -> Trail:
     return await save(
         session,
         Trail(
@@ -43,7 +56,7 @@ async def trail(session, workspace, title="Linear Algebra"):
     )
 
 
-async def node(session, trail, slug="matrix-product"):
+async def node(session: AsyncSession, trail: Trail, slug: str = "matrix-product") -> ConceptNode:
     return await save(
         session,
         ConceptNode(

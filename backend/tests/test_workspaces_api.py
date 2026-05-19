@@ -3,8 +3,7 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.app.db import get_session
 from backend.app.main import app
@@ -27,7 +26,7 @@ async def db_engine():
 
 @pytest.fixture
 async def api_client(db_engine):
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
 
     async def override_session():
         async with async_session() as session:
@@ -41,7 +40,7 @@ async def api_client(db_engine):
 
 @pytest.fixture
 async def db_session(db_engine):
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
     async with async_session() as session:
         yield session
 

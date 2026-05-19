@@ -43,7 +43,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from backend.app.settings import Settings
 
@@ -112,10 +112,8 @@ def _extract_delta_reasoning_details(delta) -> str | None:
     parts: list[str] = []
     for item in details:
         if isinstance(item, dict):
-            item_type: str = item.get("type", "")
             text: str = item.get("text", "") or item.get("summary", "") or ""
         else:
-            item_type = getattr(item, "type", "") or ""
             text = getattr(item, "text", "") or getattr(item, "summary", "") or ""
         if text:
             parts.append(text)
@@ -216,7 +214,7 @@ class LLMClient:
             return await self._anthropic_chat(messages, temperature, max_tokens)
         if self._provider in _RESPONSES_API_PROVIDERS:
             return await self._openai_responses_chat(messages, temperature, max_tokens)
-        return await self._openai_compatible_chat(messages, temperature)
+        return await self._openai_compatible_chat(messages, temperature, max_tokens)
 
     async def chat_stream(
         self,
@@ -263,7 +261,9 @@ class LLMClient:
             ):
                 yield item
         else:
-            async for item in self._openai_compatible_chat_stream_tagged(messages, temperature):
+            async for item in self._openai_compatible_chat_stream_tagged(
+                messages, temperature, max_tokens
+            ):
                 yield item
 
     # ------------------------------------------------------------------
@@ -388,7 +388,12 @@ class LLMClient:
         return {}
 
     def _build_openai_kwargs(
-        self, messages: list[dict], temperature: float, *, thinking: bool
+        self,
+        messages: list[dict],
+        temperature: float,
+        *,
+        thinking: bool,
+        max_tokens: int = 4096,
     ) -> dict:
         """Build the kwargs dict for an OpenAI-compatible completions call.
 
@@ -404,7 +409,7 @@ class LLMClient:
         For other Chat Completions providers the ``reasoning_effort`` top-level
         parameter is used when thinking is on (legacy OpenAI o-series behaviour).
         """
-        kwargs: dict = {"model": self._model, "messages": messages}
+        kwargs: dict = {"model": self._model, "messages": messages, "max_tokens": max_tokens}
         extra_headers = self._openrouter_headers()
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
@@ -426,9 +431,13 @@ class LLMClient:
             kwargs["temperature"] = temperature
         return kwargs
 
-    async def _openai_compatible_chat(self, messages: list[dict], temperature: float) -> str:
+    async def _openai_compatible_chat(
+        self, messages: list[dict], temperature: float, max_tokens: int = 4096
+    ) -> str:
         client = self._openai_client()
-        kwargs = self._build_openai_kwargs(messages, temperature, thinking=self._thinking_enabled)
+        kwargs = self._build_openai_kwargs(
+            messages, temperature, thinking=self._thinking_enabled, max_tokens=max_tokens
+        )
         try:
             response = await client.chat.completions.create(**kwargs)
             return response.choices[0].message.content or ""
@@ -439,21 +448,25 @@ class LLMClient:
                     self._model,
                     exc,
                 )
-                kwargs = self._build_openai_kwargs(messages, temperature, thinking=False)
+                kwargs = self._build_openai_kwargs(
+                    messages, temperature, thinking=False, max_tokens=max_tokens
+                )
                 response = await client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content or ""
             raise
 
     async def _openai_compatible_chat_stream(
-        self, messages: list[dict], temperature: float
+        self, messages: list[dict], temperature: float, max_tokens: int = 4096
     ) -> AsyncIterator[str]:
         """Text-only OpenAI-compatible stream. Reasoning tokens are dropped."""
-        async for kind, chunk in self._openai_compatible_chat_stream_tagged(messages, temperature):
+        async for kind, chunk in self._openai_compatible_chat_stream_tagged(
+            messages, temperature, max_tokens
+        ):
             if kind == "text":
                 yield chunk
 
     async def _openai_compatible_chat_stream_tagged(
-        self, messages: list[dict], temperature: float
+        self, messages: list[dict], temperature: float, max_tokens: int = 4096
     ) -> AsyncIterator[TaggedChunk]:
         """Tagged OpenAI-compatible stream.
 
@@ -466,7 +479,9 @@ class LLMClient:
         model; it does not suppress tokens the model chooses to emit.
         """
         client = self._openai_client()
-        kwargs = self._build_openai_kwargs(messages, temperature, thinking=self._thinking_enabled)
+        kwargs = self._build_openai_kwargs(
+            messages, temperature, thinking=self._thinking_enabled, max_tokens=max_tokens
+        )
         kwargs["stream"] = True
         try:
             stream = await client.chat.completions.create(**kwargs)
@@ -487,7 +502,9 @@ class LLMClient:
                     self._model,
                     exc,
                 )
-                kwargs = self._build_openai_kwargs(messages, temperature, thinking=False)
+                kwargs = self._build_openai_kwargs(
+                    messages, temperature, thinking=False, max_tokens=max_tokens
+                )
                 kwargs["stream"] = True
                 stream = await client.chat.completions.create(**kwargs)
                 async for chunk in stream:

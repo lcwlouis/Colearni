@@ -34,8 +34,8 @@ async def list_trails(session: AsyncSession, *, workspace_id: uuid.UUID) -> list
     )
     trails: list[Trail] = []
     for trail, node_count, edge_count in rows.all():
-        trail.node_count = node_count
-        trail.edge_count = edge_count
+        setattr(trail, "node_count", node_count)
+        setattr(trail, "edge_count", edge_count)
         trails.append(trail)
     return trails
 
@@ -54,8 +54,8 @@ async def get_trail_detail(
             select(ConceptEdge).where(ConceptEdge.trail_id == trail_id).order_by(ConceptEdge.id)
         )
     )
-    trail.node_count = len(nodes)
-    trail.edge_count = len(edges)
+    setattr(trail, "node_count", len(nodes))
+    setattr(trail, "edge_count", len(edges))
     mastery_summary = MasterySummary(
         total=len(nodes),
         not_started=len(nodes),
@@ -94,9 +94,7 @@ async def get_concept_detail(
     if concept is None:
         raise LookupError(f"Concept {concept_id} not found")
 
-    edges = list(
-        await session.scalars(select(ConceptEdge).where(ConceptEdge.trail_id == trail_id))
-    )
+    edges = list(await session.scalars(select(ConceptEdge).where(ConceptEdge.trail_id == trail_id)))
 
     prerequisites: list[ConceptNode] = []
     contained_nodes: list[ConceptNode] = []
