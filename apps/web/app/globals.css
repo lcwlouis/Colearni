@@ -17,6 +17,18 @@ body {
   color: var(--foreground);
 }
 
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+.tutor-mermaid svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+}
+
 button,
 input,
 select,

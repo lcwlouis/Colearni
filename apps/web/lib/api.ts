@@ -1,8 +1,12 @@
 import type {
   ConceptDetail,
+  ConversationHistoryResponse,
+  ConversationMessage,
   TrailDetail,
   TrailGenerateRequest,
   TrailGenerateResponse,
+  TutorChatRequest,
+  TutorMode,
   Workspace,
 } from "@/lib/types";
 
@@ -19,6 +23,30 @@ interface TrailListResponse {
 interface ErrorEnvelope {
   error?: { message?: string };
   detail?: unknown;
+}
+
+interface TutorStreamEvent {
+  type?: "mode" | "thinking" | "token" | "done" | "error";
+  mode?: TutorMode;
+  content?: string;
+  conversation_id?: string;
+  message?: ConversationMessage | string;
+  code?: string;
+  error?: { message?: string };
+  detail?: unknown;
+}
+
+export interface StreamTutorChatOptions {
+  workspaceId: string;
+  trailId: string;
+  conceptId: string;
+  message: string;
+  conversationId: string | null;
+  signal?: AbortSignal;
+  onMode: (mode: TutorMode) => void;
+  onThinking?: (content: string) => void;
+  onToken: (content: string) => void;
+  onDone: (conversationId: string, message: ConversationMessage) => void;
 }
 
 export async function createWorkspace(name: string): Promise<Workspace> {
@@ -96,6 +124,58 @@ export async function getConcept(
   );
 }
 
+export async function getConversation(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  limit?: number,
+): Promise<ConversationHistoryResponse> {
+  const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  return request<ConversationHistoryResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/conversation${query}`,
+    { method: "GET" },
+  );
+}
+
+export async function streamTutorChat({
+  workspaceId,
+  trailId,
+  conceptId,
+  message,
+  conversationId,
+  signal,
+  onMode,
+  onThinking,
+  onToken,
+  onDone,
+}: StreamTutorChatOptions): Promise<void> {
+  const body: TutorChatRequest = {
+    message,
+    conversation_id: conversationId,
+  };
+  const response = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/chat`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  if (!response.body) {
+    throw new Error("Tutor stream is unavailable");
+  }
+
+  const sawDone = await readTutorStream(response.body, { onMode, onThinking, onToken, onDone });
+  if (!sawDone) {
+    throw new Error("Tutor stream ended before completion");
+  }
+}
+
 async function request<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
@@ -131,6 +211,114 @@ function errorMessage(payload: ErrorEnvelope): string {
       .join(", ");
   }
   return "Request failed";
+}
+
+async function responseErrorMessage(response: Response): Promise<string> {
+  const text = await response.text().catch(() => "");
+  if (!text) {
+    return response.statusText || "Request failed";
+  }
+  try {
+    return errorMessage(JSON.parse(text) as ErrorEnvelope);
+  } catch {
+    return text;
+  }
+}
+
+async function readTutorStream(
+  body: ReadableStream<Uint8Array>,
+  callbacks: Pick<StreamTutorChatOptions, "onMode" | "onThinking" | "onToken" | "onDone">,
+): Promise<boolean> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let sawDone = false;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      sawDone = handleTutorStreamEvent(chunk, callbacks) || sawDone;
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    sawDone = handleTutorStreamEvent(buffer, callbacks) || sawDone;
+  }
+  return sawDone;
+}
+
+function handleTutorStreamEvent(
+  chunk: string,
+  callbacks: Pick<StreamTutorChatOptions, "onMode" | "onThinking" | "onToken" | "onDone">,
+): boolean {
+  const dataLines = chunk
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  const rawData = dataLines.join("\n");
+  if (!rawData) {
+    return false;
+  }
+
+  const payload = JSON.parse(rawData) as TutorStreamEvent;
+  if (payload.type === "mode") {
+    if (payload.mode) {
+      callbacks.onMode(payload.mode);
+    }
+    return false;
+  }
+  if (payload.type === "token") {
+    if (typeof payload.content === "string") {
+      callbacks.onToken(payload.content);
+    }
+    return false;
+  }
+  if (payload.type === "thinking") {
+    if (typeof payload.content === "string") {
+      callbacks.onThinking?.(payload.content);
+    }
+    return false;
+  }
+  if (payload.type === "done") {
+    if (typeof payload.conversation_id === "string" && isConversationMessage(payload.message)) {
+      callbacks.onDone(payload.conversation_id, payload.message);
+      return true;
+    }
+    throw new Error("Tutor stream returned a malformed completion event");
+  }
+  if (payload.type === "error") {
+    throw new Error(streamErrorMessage(payload));
+  }
+  return false;
+}
+
+function isConversationMessage(value: TutorStreamEvent["message"]): value is ConversationMessage {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    "role" in value &&
+    "content" in value &&
+    "reasoning" in value &&
+    "created_at" in value
+  );
+}
+
+function streamErrorMessage(payload: TutorStreamEvent): string {
+  if (typeof payload.message === "string") {
+    return payload.message;
+  }
+  if (payload.error?.message) {
+    return payload.error.message;
+  }
+  return errorMessage(payload as ErrorEnvelope);
 }
 
 async function readTrailGenerationStream(

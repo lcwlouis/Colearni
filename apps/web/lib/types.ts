@@ -10,6 +10,9 @@ export type Difficulty = "beginner" | "intermediate" | "advanced";
 export type NodeType = "concept" | "skill" | "misconception" | "example";
 export type RelationType = "prerequisite" | "contains" | "application" | "related";
 export type MasteryStatus = "not_started" | "learning" | "needs_review" | "mastered";
+export type TutorMode = "socratic" | "direct" | "repair" | "quiz_prompt" | "explore";
+export type SourceOrigin = "research_agent" | "user_upload" | "manual" | "system";
+export type SourceAccess = "public" | "private" | "restricted" | "unknown";
 
 export interface Workspace {
   id: string;
@@ -76,7 +79,39 @@ export interface ConceptDetail {
   containing_nodes: ConceptNode[];
   related: ConceptNode[];
   mastery: null;
-  sources: unknown[];
+  sources: SourceRecord[];
+}
+
+export interface SourceRecord {
+  id: string;
+  workspace_id: string;
+  title: string;
+  url: string | null;
+  origin: SourceOrigin;
+  access: SourceAccess;
+  license: string | null;
+  include_on_public_export: boolean;
+  metadata_json: Record<string, unknown>;
+  relation?: string;
+}
+
+export interface TutorChatRequest {
+  message: string;
+  conversation_id: string | null;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  reasoning: string | null;
+  mode: TutorMode | null;
+  created_at: string;
+}
+
+export interface ConversationHistoryResponse {
+  conversation_id: string | null;
+  messages: ConversationMessage[];
 }
 
 export interface TrailGenerateRequest {

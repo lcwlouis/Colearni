@@ -1,20 +1,35 @@
 "use client";
 
-import { useState, type PointerEvent } from "react";
+import { useEffect, useState, type PointerEvent } from "react";
 
 import type { ConceptDetail, ConceptNode } from "@/lib/types";
 
+import { TutorPanel } from "./TutorPanel";
+
 interface ConceptPanelProps {
+  workspaceId: string;
+  trailId: string;
   detail: ConceptDetail;
   onClose: () => void;
   onSelectConcept?: (conceptId: string) => void;
 }
 
-export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelProps) {
+export function ConceptPanel({
+  workspaceId,
+  trailId,
+  detail,
+  onClose,
+  onSelectConcept,
+}: ConceptPanelProps) {
   const concept = detail.concept;
+  const [tutorOpen, setTutorOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [dragStartY, setDragStartY] = useState<number | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
+
+  useEffect(() => {
+    setTutorOpen(false);
+  }, [concept.id]);
 
   function startDrag(event: PointerEvent<HTMLElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) {
@@ -48,7 +63,9 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
 
   return (
     <aside
-      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl transition-[max-height,transform] duration-200 ease-out md:inset-y-0 md:left-auto md:right-0 md:h-full md:max-h-none md:max-w-md md:translate-y-0 md:rounded-none md:border-l md:border-t-0 ${
+      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl transition-[max-height,transform] duration-200 ease-out md:inset-y-0 md:left-auto md:right-0 md:h-full md:max-h-none md:translate-y-0 md:rounded-none md:border-l md:border-t-0 ${
+        tutorOpen ? "md:max-w-xl" : "md:max-w-md"
+      } ${
         mobileExpanded ? "max-h-[78vh]" : "max-h-48"
       }`}
       style={
@@ -104,40 +121,77 @@ export function ConceptPanel({ detail, onClose, onSelectConcept }: ConceptPanelP
           mobileExpanded ? "block" : "hidden"
         }`}
       >
-        <Section title="Prerequisites" nodes={detail.prerequisites} onSelect={onSelectConcept} />
-        <Section title="Contained by" nodes={detail.containing_nodes} onSelect={onSelectConcept} />
-        <Section title="Contains" nodes={detail.contained_nodes} onSelect={onSelectConcept} />
-        <Section title="Related" nodes={detail.related} onSelect={onSelectConcept} />
+        {tutorOpen ? (
+          <TutorPanel
+            workspaceId={workspaceId}
+            trailId={trailId}
+            concept={concept}
+            sources={detail.sources}
+            onBack={() => setTutorOpen(false)}
+          />
+        ) : (
+          <>
+            <Section title="Prerequisites" nodes={detail.prerequisites} onSelect={onSelectConcept} />
+            <Section title="Contained by" nodes={detail.containing_nodes} onSelect={onSelectConcept} />
+            <Section title="Contains" nodes={detail.contained_nodes} onSelect={onSelectConcept} />
+            <Section title="Related" nodes={detail.related} onSelect={onSelectConcept} />
 
-        <section className="mt-6">
-          <h3 className="text-sm font-semibold text-slate-900">Mastery checks</h3>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {concept.mastery_check_labels.length === 0 ? (
-              <p className="text-sm text-slate-500">No checks yet.</p>
-            ) : (
-              concept.mastery_check_labels.map((label) => <Badge key={label}>{label}</Badge>)
-            )}
-          </div>
-        </section>
+            <section className="mt-6">
+              <h3 className="text-sm font-semibold text-slate-900">Mastery checks</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {concept.mastery_check_labels.length === 0 ? (
+                  <p className="text-sm text-slate-500">No checks yet.</p>
+                ) : (
+                  concept.mastery_check_labels.map((label) => <Badge key={label}>{label}</Badge>)
+                )}
+              </div>
+            </section>
 
-        <section className="mt-6">
-          <h3 className="text-sm font-semibold text-slate-900">Sources</h3>
-          <p className="mt-2 text-sm text-slate-500">No sources linked yet.</p>
-        </section>
+            <section className="mt-6">
+              <h3 className="text-sm font-semibold text-slate-900">Sources</h3>
+              {detail.sources.length === 0 ? (
+                <p className="mt-2 text-sm text-slate-500">No sources linked yet.</p>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {detail.sources.map((source) =>
+                    source.url ? (
+                      <a
+                        key={source.id}
+                        href={source.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700"
+                      >
+                        {source.title}
+                      </a>
+                    ) : (
+                      <Badge key={source.id}>{source.title}</Badge>
+                    ),
+                  )}
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </div>
-      <div
-        className={`border-t border-slate-200 p-4 md:block md:p-5 ${
-          mobileExpanded ? "block" : "hidden"
-        }`}
-      >
-        <button
-          type="button"
-          disabled
-          className="h-10 w-full rounded-md bg-slate-200 text-sm font-medium text-slate-500"
+      {!tutorOpen ? (
+        <div
+          className={`border-t border-slate-200 p-4 md:block md:p-5 ${
+            mobileExpanded ? "block" : "hidden"
+          }`}
         >
-          Start Learning: Coming in Phase 4
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => {
+              setTutorOpen(true);
+              setMobileExpanded(true);
+            }}
+            className="h-10 w-full rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Start Learning
+          </button>
+        </div>
+      ) : null}
     </aside>
   );
 }

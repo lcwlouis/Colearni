@@ -425,6 +425,8 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
       ) : null}
       {detail ? (
         <ConceptPanel
+          workspaceId={workspaceId}
+          trailId={trail.id}
           detail={detail}
           onClose={clearSelection}
           onSelectConcept={openConcept}
