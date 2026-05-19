@@ -115,8 +115,11 @@ The tutor chat endpoint streams via **Server-Sent Events (SSE)**. See `docs/API.
 
 Event sequence per turn:
 1. `mode` — emitted first with the selected TutorMode.
-2. `token` — one event per streamed token from the LLM.
-3. `done` — final event with the assembled `ConversationMessage` and `conversation_id`.
+2. `thinking` — optional reasoning chunks when the provider exposes them.
+3. `token` — one event per streamed visible token from the LLM.
+4. `done` — final event with the assembled `ConversationMessage` and `conversation_id`.
+
+If provider-exposed reasoning is available, it may also be stored on the assistant turn so the frontend can rehydrate the reasoning trace after refresh.
 
 If the LLM call fails, emit `error` and close the stream. The service must not emit partial tokens after an error.
 
@@ -135,3 +138,15 @@ This keeps token costs bounded and the prompt focused on recent reasoning.
 ## Tone
 
 The tutor should be calm, precise, and coach-like. It can encourage the learner, but feedback should be specific rather than generic praise.
+
+## Response Formatting
+
+Tutor responses should default to clean, readable Markdown rather than dense text blocks.
+
+- Prefer short paragraphs.
+- Use short bullet lists or bold lead-ins only when they make the response easier to scan.
+- Avoid wide tables in chat unless they are clearly the best format.
+- Use LaTeX for notation-heavy content when it improves readability. Prefer `$...$` for inline math and `$$...$$` for display math; the current frontend also normalizes TeX `\(...\)` and `\[...\]` delimiters.
+- Use fenced code blocks with a language label for code examples, for example ```` ```python ````.
+- Use small fenced `mermaid` diagrams only when a relationship, flow, or hierarchy is genuinely easier to see than describe.
+- Do not force formatting into every turn; plain prose is still correct when it is the clearest option.

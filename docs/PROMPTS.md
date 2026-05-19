@@ -33,11 +33,11 @@ Front-matter fields:
 ```text
 backend/app/agents/prompts/
   trail_generation.v1.md
-  tutor_socratic.v1.md
-  tutor_direct.v1.md
-  tutor_repair.v1.md
-  tutor_explore.v1.md
-  tutor_mode_classifier.v1.md
+  tutor_socratic.v2.md
+  tutor_direct.v2.md
+  tutor_repair.v2.md
+  tutor_explore.v2.md
+  tutor_mode_classifier.v2.md
   quiz_generation.v1.md
   quiz_grader.v1.md
   research_query.v1.md
@@ -49,11 +49,11 @@ backend/app/agents/prompts/
 | Task | File | Description |
 |---|---|---|
 | `trail_generation` | `trail_generation.v1.md` | Generate a 10–30 node concept graph from a topic/goal/depth |
-| `tutor_socratic` | `tutor_socratic.v1.md` | Socratic mode: ask one focused guiding question |
-| `tutor_direct` | `tutor_direct.v1.md` | Direct mode: explain clearly, then check understanding |
-| `tutor_repair` | `tutor_repair.v1.md` | Repair mode: address misconception, give hint, invite retry |
-| `tutor_explore` | `tutor_explore.v1.md` | Explore mode: discuss adjacent topics and applications |
-| `tutor_mode_classifier` | `tutor_mode_classifier.v1.md` | Classify which tutor mode to use for a learner message |
+| `tutor_socratic` | `tutor_socratic.v2.md` | Socratic mode: ask one focused guiding question |
+| `tutor_direct` | `tutor_direct.v2.md` | Direct mode: explain clearly, then check understanding |
+| `tutor_repair` | `tutor_repair.v2.md` | Repair mode: address misconception, give hint, invite retry |
+| `tutor_explore` | `tutor_explore.v2.md` | Explore mode: discuss adjacent topics and applications |
+| `tutor_mode_classifier` | `tutor_mode_classifier.v2.md` | Classify which tutor mode to use for a learner message |
 | `quiz_generation` | `quiz_generation.v1.md` | Generate a level-up or practice quiz from mastery_check_labels |
 | `quiz_grader` | `quiz_grader.v1.md` | Grade a short-answer quiz response; return score and feedback |
 | `research_query` | `research_query.v1.md` | Generate search queries for a topic/concept |
@@ -137,7 +137,7 @@ If validation fails, attempt one repair call with the validation errors appended
 
 ---
 
-### `tutor_mode_classifier.v1.md`
+### `tutor_mode_classifier.v2.md`
 
 **Template variables:**
 - `learner_message` — the raw learner input
@@ -156,14 +156,14 @@ If validation fails, attempt one repair call with the validation errors appended
 
 **Mode selection logic (guide for the LLM):**
 - `socratic` — default; learner is engaging normally
-- `direct` — learner explicitly asks "explain", "just tell me", "what is", "give me the answer"
+- `direct` — learner explicitly asks "explain", "just tell me", "give me the answer", "summarize", or to be shown an example directly; generic first-turn content questions should usually remain Socratic
 - `repair` — learner answer contains a clear misconception or is incorrect
 - `quiz_prompt` — learner says they feel ready or asks to be tested
 - `explore` — learner asks about applications, real-world use, why it matters, or adjacent topics
 
 ---
 
-### `tutor_socratic.v1.md`
+### `tutor_socratic.v2.md`
 
 **Template variables:**
 - `concept` — ConceptNode JSON
@@ -179,27 +179,29 @@ If validation fails, attempt one repair call with the validation errors appended
 - `recent_turns` — last N conversation messages
 - `learner_message` — current message
 
-**Output:** Plain text Socratic question or response (streamed). One focused question.
+**Output:** Markdown-friendly plain text Socratic question or response (streamed). One focused question. Inline LaTeX is allowed when it makes notation clearer.
 
 ---
 
-### `tutor_direct.v1.md`
+### `tutor_direct.v2.md`
 
-Same variables as `tutor_socratic`. Output is a direct explanation followed by a short check-in question.
+Same variables as `tutor_socratic`. Output is a direct explanation followed by a short check-in question. Short Markdown structure is allowed. LaTeX and small Mermaid blocks are allowed when they materially improve clarity.
 
----
-
-### `tutor_repair.v1.md`
-
-Same variables as `tutor_socratic`. Output names the likely misconception, gives a hint, and invites the learner to try again.
+Prompted LaTeX should prefer `$...$` and `$$...$$`; the frontend renderer also accepts TeX `\(...\)` and `\[...\]` delimiters for robustness.
 
 ---
 
-### `tutor_explore.v1.md`
+### `tutor_repair.v2.md`
+
+Same variables as `tutor_socratic`. Output names the likely misconception, gives a hint, and invites the learner to try again. Short Markdown structure is allowed. LaTeX and small Mermaid blocks are allowed when they materially improve clarity.
+
+---
+
+### `tutor_explore.v2.md`
 
 **Additional variable:** `application_nodes` — list of application-edge concepts.
 
-Output explores adjacent topics and applications, anchored to the current Trail. Stays bounded unless the learner explicitly asks to go broader.
+Output explores adjacent topics and applications, anchored to the current Trail. Stays bounded unless the learner explicitly asks to go broader. Short Markdown structure is allowed. LaTeX and small Mermaid blocks are allowed when they materially improve clarity.
 
 ---
 

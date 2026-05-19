@@ -35,17 +35,53 @@ The MVP is not a generic RAG chatbot. The graph, mastery model, and source prove
 2. Workspace + Trail database models
 3. Trail generation endpoint
 4. Graph viewer
-5. Tutor chat for one concept
-6. Mastery + level-up quiz
-7. Source provenance + export sanitizer
-8. Trail Pack export
-9. Research trace
-10. Hydration
-11. Trail Pack import
-12. Demo polish
-13. SaaS prep
+5. Phase 3.5 hardening + docs alignment
+6. Tutor chat backend for one concept
+7. Tutor chat frontend with assistant-ui
+8. Mastery + level-up quiz
+9. Source provenance + export sanitizer
+10. Trail Pack export
+11. Research trace
+12. Hydration
+13. Trail Pack import
+14. Demo polish
+15. Deployment
+16. SaaS prep
 
 Do not start with PDF ingestion, SaaS billing/auth, or a public marketplace.
+
+## Plan Maintenance
+
+This file is a living build plan, not a historical snapshot. Agents and humans should update it in the same PR/turn whenever implementation changes the current build state, phase status, API contracts, or deferred work.
+
+Update rules:
+
+- Keep the **Current Build Snapshot** below accurate.
+- Add short current implementation notes under the affected phase when scope changes.
+- Mark deferred work explicitly instead of leaving stale requirements that imply it is done.
+- Keep detailed contracts in `docs/API.md`, `docs/FRONTEND.md`, and domain docs; use this file for status, sequence, and phase-level scope.
+
+## Current Build Snapshot
+
+Last updated: 2026-05-19.
+
+Implemented:
+
+- Local workspace bootstrap with workspace-scoped API paths.
+- Workspace CRUD/list basics.
+- Trail generation via normal response and temporary progress SSE stream.
+- Trail list/detail/delete.
+- Per-Trail graph viewer using `@xyflow/react` plus `dagre`, search/filter controls, side-panel concept details, and Start Learning flow.
+- Concept detail API with graph context and safe source metadata.
+- Tutor backend for one concept with conversation persistence, thin FastAPI routes, prompt registry, mode classifier, SSE streaming, provider thinking events, and optional persisted assistant reasoning traces.
+- Tutor frontend using assistant-ui `LocalRuntime`, SSE adapter, persisted history hydration, reasoning trace rendering, Markdown/GFM, KaTeX math, fenced `mermaid` diagrams, copyable code blocks, and concept-level source chips.
+- LLM client support for OpenAI Responses API, OpenAI-compatible providers including OpenRouter/DeepSeek/Gemini/custom, and optional Anthropic SDK.
+
+Not implemented yet:
+
+- Mastery records, quiz attempts, level-up grading, and graph mastery status updates.
+- True per-message citation/source parts and quote support.
+- Trail Pack export/import, research trace APIs, hydration, durable generation jobs, dark mode, deployment, auth, and SaaS features.
 
 ## Phase 0: Foundation Cleanup
 
@@ -173,8 +209,9 @@ Goal: a user enters a topic and gets a usable concept graph.
 
 Implementation scope:
 
-- Add `POST /api/trails/generate`.
-- Generate 10-30 concept nodes with prerequisites, hierarchy level, difficulty, Bloom target, and mastery check labels.
+- Add `POST /api/workspaces/{workspace_id}/trails/generate`.
+- Generate concept nodes with prerequisites, hierarchy level, difficulty, Bloom target, and mastery check labels.
+- Normal generation should target 10-30 nodes; the implemented local-ready API also accepts `max_nodes` for larger graphs up to the per-Trail viewer cap of 100.
 - Validate and store graph JSON.
 - Repair malformed LLM output once, then fail clearly or fall back to a smaller graph.
 
@@ -184,9 +221,12 @@ Input example:
 {
   "topic": "Linear Algebra",
   "goal": "Understand enough for machine learning",
-  "target_depth": "apply"
+  "target_depth": "apply",
+  "max_nodes": 40
 }
 ```
+
+`max_nodes` is optional, defaults to the backend's configured generation size, and must stay within the graph budgets in `docs/GRAPH.md`.
 
 Requirements:
 
@@ -213,14 +253,19 @@ Acceptance criteria:
 
 - Manual topics such as Linear Algebra, Computer Networks, FastAPI, Operating Systems, and Photography Exposure Triangle produce usable graphs.
 
+Current implementation note:
+
+- `POST /api/workspaces/{workspace_id}/trails/generate/stream` exists as a progress-streaming helper for the frontend. It is intentionally refresh-fragile for now and should be superseded by the durable job-based generation flow in demo polish.
+
 ## Phase 3: Graph Viewer
 
 Goal: learners can see, search, and click the Trail.
 
 Implementation scope:
 
-- Add `/trails`, `/trails/[id]`, and `/trails/[id]/concepts/[conceptId]`.
+- Add `/trails` and `/trails/[id]`.
 - Render nodes, edges, status colors, selected-node side panel, and a start-learning action.
+- Concept details are currently side-panel based inside `/trails/[id]`; a deep-link route such as `/trails/[id]/concepts/[conceptId]` can be added later if shareable concept URLs become necessary.
 - Use React Flow for speed unless the existing Sigma.js graph is already working and cheaper to preserve.
 
 Requirements:
@@ -246,18 +291,51 @@ Acceptance criteria:
 
 - A learner can understand what to learn next from the graph.
 
-## Phase 4: Tutor Chat For One Concept
+## Phase 3.5: Hardening + Docs Alignment
 
-Goal: make the first compelling learning loop.
+Goal: stabilise the implemented Phase 1-3 surfaces before adding tutor and mastery behavior.
 
 Implementation scope:
 
-- Add `POST /api/tutor/chat`.
+- Resolve backend diagnostics/type issues introduced by Phase 1-3 work.
+- Keep the intentional local-ready decisions already implemented: workspace-scoped routes, `max_nodes`, streaming Trail generation progress, and side-panel concept details.
+- Standardise prompt loading through `PromptRegistry` before adding tutor/quiz/research prompts.
+- Ensure Trail generation persistence rolls back cleanly on database/storage failure.
+- Remove unused frontend graph packages when safe; the per-Trail viewer uses `@xyflow/react`, not the legacy `reactflow` package.
+- Align `docs/REBUILD_PLAN.md` and `docs/API.md` with the implemented Phase 1-3 API.
+
+Requirements:
+
+- The prompt registry loads versioned Markdown prompt files from `backend/app/agents/prompts/` and renders Jinja-style variables without inlining long prompts in services/routes.
+- Trail graph persistence commits only after validation and rolls back explicitly if persistence fails.
+- `/generate/stream` remains documented as a temporary progress-stream endpoint until Phase 9 durable jobs are implemented.
+- Frontend dependency cleanup must not change graph behavior.
+
+Tests:
+
+- Backend tests pass.
+- Frontend typecheck/test pass when frontend dependencies are changed.
+- `ruff check .` and `git diff --check` pass.
+
+Acceptance criteria:
+
+- Phase 1-3 implementation, docs, and type diagnostics are aligned enough that Phase 4 can build on stable contracts.
+
+## Phase 4A: Tutor Chat Backend For One Concept
+
+Status: implemented for the local-ready slice; mastery side effects and automatic summarisation remain deferred.
+
+Goal: make the first compelling learning loop available through the API.
+
+Implementation scope:
+
+- Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat`.
+- Add `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversation`.
+- Add conversation persistence tables for conversations, turns, and summaries.
 - Build tutor context from current concept, nearby graph context, mastery state, learning goal, safe source links, and conversation summary.
 - Support tutor modes: `socratic`, `direct`, `repair`, `quiz_prompt`, and `explore`.
-- Build the chat panel UI using `@assistant-ui/react` with a custom `LocalRuntime` adapter (see `docs/FRONTEND.md` — Tutor Chat UI section). The adapter calls `POST /api/tutor/chat`; the library handles all streaming, rendering, and state.
-- Return a **streaming response** from `POST /api/tutor/chat` (SSE or chunked transfer) so tokens render incrementally. A non-streaming response is acceptable for the first iteration but should be upgraded before demo polish.
-- Customise the installed `Thread` component to show the tutor mode badge, concept context header, source citation chips, and mastery level-up prompt.
+- Return a **streaming SSE response** from the chat endpoint so tokens render incrementally.
+- Keep route code thin; prompt assembly, mode selection, streaming, and persistence belong in services.
 
 Requirements:
 
@@ -268,8 +346,9 @@ Requirements:
 - The tutor can reference public source links if present.
 - The tutor can say it lacks source material.
 - User-visible sourced claims include citations or refuse in strict grounded mode.
-- The chat UI is built with `@assistant-ui/react`; no bespoke chat shell is written from scratch.
-- The custom runtime adapter is the only glue between the UI and the FastAPI backend.
+- Conversation history is persisted and retrievable for the selected concept.
+- Provider-exposed `thinking` chunks stream to the client and are persisted as optional assistant `reasoning` for history rehydration.
+- The first backend slice may defer mastery side effects until Phase 5 if `mastery_records` do not exist yet.
 
 Tests:
 
@@ -277,13 +356,48 @@ Tests:
 - Prompt builder includes mastery state.
 - Prompt builder excludes private sources from public context.
 - Mode classifier returns valid mode.
-- Runtime adapter sends correct `concept_id` and `workspace_id` to the backend.
+- Chat endpoint streams events in the documented order: `mode`, `token`, `done`.
+- Conversation turns are stored and retrieved in chronological order.
+- Optional assistant reasoning traces are stored and returned in conversation history.
 - Manual tests cover direct answers, incorrect answers, examples, ML links, and unrelated questions.
 
 Acceptance criteria:
 
-- The tutor feels like a coach, not a search engine.
+- The backend can support a concept-scoped tutor conversation without frontend-specific glue.
+
+## Phase 4B: Tutor Chat Frontend
+
+Status: implemented for the local-ready tutor panel; true per-message sources, quotes, artifacts, and broader assistant-ui add-ons remain deferred.
+
+Goal: make the tutor usable from the graph/concept UI.
+
+Implementation scope:
+
+- Build the chat panel UI using `@assistant-ui/react` with a custom `LocalRuntime` adapter (see `docs/FRONTEND.md` — Tutor Chat UI section).
+- The adapter calls `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat`; the library handles streaming, rendering, and local chat state.
+- Customise the installed `Thread` component to show the tutor mode badge, concept context header, source citation chips, and mastery level-up prompt.
+- Wire the existing concept side panel's Start Learning action to open the tutor UI.
+
+Requirements:
+
+- The chat UI is built with `@assistant-ui/react`; no bespoke chat shell is written from scratch.
+- The custom runtime adapter is the only glue between the UI and the FastAPI backend.
+- Runtime requests include workspace id, Trail id, concept id, current message, and conversation id when present.
 - Streaming tokens appear incrementally in the chat UI.
+- Persisted conversation history hydrates into assistant-ui messages when a concept is reopened.
+- Tutor Markdown supports GFM, KaTeX math, fenced code blocks, and fenced `mermaid` diagrams.
+
+Tests:
+
+- Runtime adapter sends the correct workspace, Trail, concept, message, and conversation id data to the backend.
+- Empty/loading/error states render clearly.
+- Markdown/math/Mermaid/code rendering has focused test coverage.
+- Manual checks cover Socratic, direct, repair, quiz prompt, and explore interactions.
+
+Acceptance criteria:
+
+- The tutor feels like a coach, not a search engine.
+- A learner can start a concept-scoped tutor conversation from the graph.
 
 ## Phase 5: Mastery + Level-Up Quiz
 
@@ -292,8 +406,8 @@ Goal: make mastery a motivating product loop.
 Implementation scope:
 
 - Add `mastery_records` and `quiz_attempts`.
-- Add `POST /api/concepts/{id}/level-up`.
-- Add `POST /api/concepts/{id}/grade`.
+- Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/level-up`.
+- Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/grade`.
 - Generate a short level-up card from mastery check labels.
 
 Requirements:
@@ -365,9 +479,9 @@ Goal: make Trail Packs useful without sharing copyrighted or private content.
 
 Implementation scope:
 
-- Add `POST /api/trails/{id}/research`.
+- Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/research`.
 - Store search queries, selected public links, source types, license/access status, selection reasons, and excluded source notes.
-- Add `POST /api/trails/{id}/hydrate`.
+- Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/hydrate`.
 
 Requirements:
 
@@ -394,7 +508,7 @@ Goal: learners can start from community/shared Trails.
 
 Implementation scope:
 
-- Add `POST /api/trail-packs/import`.
+- Add `POST /api/workspaces/{workspace_id}/trail-packs/import`.
 - For V1, import by forking into the current workspace.
 - Validate manifest, graph, concepts, sources, and research trace.
 

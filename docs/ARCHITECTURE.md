@@ -193,6 +193,7 @@ conversation_turns
 - conversation_id
 - role               (user | assistant)
 - content
+- reasoning          (optional provider-exposed thinking text for UI rehydration)
 - mode               (socratic | direct | repair | quiz_prompt | explore)
 - turn_index         (sequential, used for context window management)
 - created_at
@@ -403,14 +404,14 @@ The tutor chat panel uses [`@assistant-ui/react`](https://github.com/assistant-u
 
 ### Integration pattern
 
-assistant-ui connects to the FastAPI backend through a `LocalRuntime` model adapter — a single async generator function that calls `POST /api/tutor/chat` and yields token chunks. The library owns all UI state (messages, streaming, auto-scroll, retries). The installed shadcn/ui components live in `apps/web/components/assistant-ui/` and are fully owned by this repo.
+assistant-ui connects to the FastAPI backend through a `LocalRuntime` model adapter — a single async generator function that calls `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat` and yields token chunks. The library owns all UI state (messages, streaming, auto-scroll, retries). The installed shadcn/ui components live in `apps/web/components/assistant-ui/` and are fully owned by this repo.
 
 ### What the library provides
 
 - `Thread`, `Message`, `Composer`, and `ActionBar` primitives.
 - Streaming token rendering, auto-scroll, markdown, code highlighting.
 - A `Sources` component for inline citation chips.
-- Optional KaTeX add-on for math in tutor responses.
+- Markdown extension points we can use for KaTeX math rendering.
 
 ### What CoLearni adds on top
 
@@ -418,10 +419,11 @@ assistant-ui connects to the FastAPI backend through a `LocalRuntime` model adap
 - Concept context header above the thread (title, concept level).
 - Mastery level-up prompt surfaced when the tutor shifts to `quiz_prompt` mode.
 - `concept_id` and `workspace_id` injected into every request by the adapter.
+- A custom message markdown renderer for LaTeX and fenced `mermaid` diagram blocks.
 
 ### Streaming
 
-`POST /api/tutor/chat` should return a streaming response (SSE or chunked transfer encoding) for token-by-token rendering. A non-streaming response is acceptable early on; the adapter yields the full response in one shot and no UI code changes are required when streaming is later added to the backend.
+`POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat` should return a streaming SSE response for token-by-token rendering.
 
 ## Local-Ready First, SaaS Later
 

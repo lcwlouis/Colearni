@@ -49,6 +49,10 @@ Difficulty = Literal["beginner", "intermediate", "advanced"]
 # Target depth (same values as BloomLevel, used on Trail creation)
 TargetDepth = Literal["remember", "understand", "apply", "analyze", "evaluate", "create"]
 
+# Optional Trail generation cap. Defaults to 40 in the local-ready UI.
+# Normal generation should usually stay around 10-30 concepts; 100 is the per-Trail viewer cap.
+MaxNodes = int  # 10 <= max_nodes <= 100
+
 # Quiz type
 QuizType = Literal["level_up", "practice"]
 ```
@@ -192,6 +196,7 @@ QuizType = Literal["level_up", "practice"]
   "id": "uuid",
   "role": "user | assistant",
   "content": "string",
+  "reasoning": "string | null",
   "mode": "TutorMode",
   "created_at": "ISO 8601 datetime"
 }
@@ -346,9 +351,12 @@ Generate a new Trail from a topic description. Calls the graph generator LLM, va
 {
   "topic": "string",
   "goal": "string",
-  "target_depth": "TargetDepth"
+  "target_depth": "TargetDepth",
+  "max_nodes": "int | optional, default 40, min 10, max 100"
 }
 ```
+
+`max_nodes` is intentionally supported for local graph-size exploration. Normal generation should usually stay around 10-30 nodes; 100 is the current per-Trail viewer cap.
 
 **Response 201:**
 
@@ -362,6 +370,42 @@ Generate a new Trail from a topic description. Calls the graph generator LLM, va
 **Errors:**
 - `500 llm_error` — LLM returned malformed output after one repair attempt
 - `503 budget_exceeded` — resolver budget hit during generation
+
+---
+
+#### `POST /api/workspaces/{workspace_id}/trails/generate/stream`
+
+Generate a new Trail while streaming progress events to the frontend. This endpoint is a local-ready progress helper for the current UI. It is **not durable across page refreshes**; Phase 9 replaces this with backend jobs and polling.
+
+**Request body:** same as `POST /api/workspaces/{workspace_id}/trails/generate`.
+
+**Response headers:**
+
+```text
+Content-Type: text/event-stream
+```
+
+**SSE event types:**
+
+```json
+{ "message": "Generating concept graph..." }
+```
+Emitted as `event: progress`.
+
+```json
+{ "text": "partial model output" }
+```
+Emitted as `event: delta` for visible model output and `event: thinking` when a provider exposes reasoning/thinking text.
+
+```json
+{ "trail": "Trail", "graph": "TrailGraph" }
+```
+Emitted as `event: done` after validation and persistence.
+
+```json
+{ "error": { "code": "string", "message": "string", "details": {} } }
+```
+Emitted as `event: error`; the stream then closes.
 
 ---
 
@@ -516,9 +560,16 @@ X-Accel-Buffering: no
 Emitted first, before tokens, so the client knows which mode was selected.
 
 ```json
+{ "type": "thinking", "content": "string" }
+```
+Optional reasoning/thinking chunks when the provider exposes them. When available, assistant turns also persist the assembled reasoning text in `ConversationMessage.reasoning` so the client can rehydrate traces after refresh.
+
+```json
 { "type": "token", "content": "string" }
 ```
 Streamed tokens as they arrive from the LLM.
+
+Tutor message content is Markdown. The current frontend supports GFM, KaTeX math, fenced code blocks, and fenced `mermaid` diagrams.
 
 ```json
 { "type": "done", "conversation_id": "uuid", "message": "ConversationMessage" }
@@ -530,7 +581,7 @@ Emitted once at the end. Includes the full assembled message for storage.
 ```
 Emitted if the LLM call fails. The stream then closes.
 
-**Mastery side-effect:** The first message in a conversation sets concept mastery to `learning` if it is currently `not_started`.
+**Mastery side-effect:** Deferred. Phase 4A persists conversation history but does not yet update mastery on first chat turn.
 
 ---
 
@@ -755,8 +806,9 @@ The tutor chat endpoint uses SSE. Clients should:
 1. Open the connection with a `POST` request (body is the chat payload).
 2. Read events line by line (`data: ...`).
 3. Handle `mode` event to update UI indicator.
-4. Accumulate `token` events to display streamed text.
-5. On `done`, persist the `conversation_id` for future turns.
-6. On `error`, display the message and close the connection.
+4. Optionally render `thinking` events as collapsible reasoning traces.
+5. Accumulate `token` events to display streamed text.
+6. On `done`, persist the `conversation_id` for future turns.
+7. On `error`, display the message and close the connection.
 
 FastAPI implementation should use `StreamingResponse` with `media_type="text/event-stream"` and an async generator.

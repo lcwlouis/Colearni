@@ -26,8 +26,8 @@ Do not build a marketing landing page as the main experience. The first screen s
 - Tailwind and a small component system.
 - **React Flow (`@xyflow/react`)** for the per-Trail graph viewer (see Graph Library section below).
 - **`@assistant-ui/react`** for the tutor chat UI (see section below).
-- KaTeX for math rendering when needed (available as an assistant-ui add-on).
-- Vitest or the repo-standard frontend test runner once scaffolded.
+- KaTeX, `remark-math`, `rehype-katex`, and `remark-gfm` for tutor message rendering.
+- Vitest for frontend tests.
 
 ## Graph Library: React Flow
 
@@ -54,63 +54,67 @@ Do not pre-emptively switch the per-Trail graph to Sigma.js. The React Flow impl
 The tutor chat panel is built on [`@assistant-ui/react`](https://github.com/assistant-ui/assistant-ui), an open-source MIT-licensed React/TypeScript library for production chat UIs. It provides:
 
 - Composable `Thread`, `Message`, and `Composer` primitives (Radix-style, unstyled).
-- A polished shadcn/ui themed starter installed directly into `apps/web/components/assistant-ui/` via the CLI — we own those files entirely.
-- Streaming tokens, auto-scroll, markdown rendering, code highlighting, and accessibility out of the box.
-- A `Sources` component designed to display URL-sourced citations, which maps directly to our source provenance model.
-- Optional KaTeX add-on for math rendering in tutor messages.
+- Streaming state, auto-scroll, message grouping, and accessibility primitives.
+- Markdown rendering extension points used by our owned renderer.
+- A `Sources` component designed to display URL-sourced citations. We use concept-level source chips today; true per-message source parts are next.
+- KaTeX-friendly markdown support for math rendering in tutor messages.
+- Mermaid diagrams through our owned renderer for fenced `mermaid` code blocks.
 
 ### Why not the Vercel AI SDK
 
-CoLearni calls its own FastAPI backend (`POST /api/tutor/chat`), not a Next.js route backed by the Vercel AI SDK. `assistant-ui` supports this via its **Custom Backend / `LocalRuntime`** pattern: we write a thin model adapter that handles the HTTP call, and the library manages all UI state.
+CoLearni calls its own FastAPI backend (`POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat`), not a Next.js route backed by the Vercel AI SDK. `assistant-ui` supports this via its **Custom Backend / `LocalRuntime`** pattern: we write a thin model adapter that handles the HTTP call, and the library manages all UI state.
 
 ### Custom Runtime Adapter
 
-The adapter lives in `apps/web/lib/tutor-runtime.ts` and is the only integration glue we write:
+The adapter lives in `apps/web/lib/tutor-runtime.ts` and is the only integration glue between assistant-ui and FastAPI.
 
-```ts
-import { useLocalRuntime, type ChatModelAdapter } from "@assistant-ui/react";
+Current behavior:
 
-const CoLearniTutorAdapter: ChatModelAdapter = {
-  async *run({ messages, abortSignal }) {
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/tutor/chat`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages,
-          concept_id: "...",   // injected from page context
-          workspace_id: "...", // injected from localStorage
-        }),
-        signal: abortSignal,
-      }
-    );
-    // For streaming: yield chunks as they arrive via SSE or chunked transfer.
-    // For non-streaming: yield the full response in one shot.
-    const text = await res.text();
-    yield { content: [{ type: "text", text }] };
-  },
-};
+- Hydrates persisted turns from `GET .../conversation` into assistant-ui `initialMessages`.
+- Sends only the latest user message to `POST .../chat` with the current `conversation_id`.
+- Reads SSE events from `apps/web/lib/api.ts` and maps `thinking` chunks to assistant-ui `reasoning` parts.
+- Maps streamed visible tokens to assistant-ui text parts.
+- Stores the returned `conversation_id` for later turns.
 
-export function useTutorRuntime() {
-  return useLocalRuntime(CoLearniTutorAdapter);
-}
-```
-
-The page wraps the chat panel in `<AssistantRuntimeProvider runtime={runtime}>` and renders the installed `<Thread />` component.
+The page wraps the chat panel in `<AssistantRuntimeProvider runtime={runtime}>` and renders owned thread/message/composer UI using assistant-ui primitives.
 
 ### Streaming Requirement
 
-For a responsive Socratic experience, `POST /api/tutor/chat` should return a **streaming response** (SSE or chunked transfer). The adapter above can be upgraded to yield tokens incrementally by reading the response body as a `ReadableStream`. The UI will start rendering as soon as the first token arrives. If the endpoint is non-streaming initially, the adapter works without changes — the whole reply just appears at once.
+For a responsive Socratic experience, `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat` should return a **streaming response** using SSE. The adapter above should yield tokens incrementally by reading the response body as a `ReadableStream`. The UI will start rendering as soon as the first token arrives.
 
 ### Customisation Points
 
-The components copied into `apps/web/components/assistant-ui/` by the CLI are plain React/Tailwind files we fully own. CoLearni-specific customisations include:
+The components in `apps/web/components/assistant-ui/` and `apps/web/app/trails/[id]/components/TutorPanel.tsx` are plain React/Tailwind files we fully own. CoLearni-specific customisations include:
 
 - **Tutor mode badge**: display the active mode (`socratic`, `direct`, `repair`, `quiz_prompt`, `explore`) on assistant messages.
 - **Concept context header**: show the concept title and level above the thread.
-- **Citation chips**: render source links inline in assistant messages using the `Sources` add-on component.
+- **Markdown/math/code renderer**: `MarkdownText` uses assistant-ui markdown primitives with `remark-gfm`, `remark-math`, `rehype-katex`, fenced `mermaid` rendering, copyable code blocks, and preprocessing for both `$...$` and TeX `\(...\)`/`\[...\]` math delimiters.
+- **Concept-level source chips**: render available source links in the tutor header. True per-message `Sources` parts are deferred until the backend emits answer-level citation parts.
 - **Mastery signal**: surface a "Ready to level up?" prompt inside the thread when the tutor mode shifts to `quiz_prompt`.
+
+### Tutor UI Roadmap
+
+Near-term next:
+
+- Adopt true assistant-ui `Sources` message parts once the backend emits per-message citation/source parts rather than only concept-level source metadata.
+- Add `Quote` support alongside those sourced message parts.
+
+Later, but important:
+
+- Evaluate `Streamdown` when we want a broader markdown/rendering migration beyond the current owned renderer.
+
+Later, once tutor/tool flows are more agentic:
+
+- `Syntax Highlighting`
+- `Context Display`
+- `Directive Text`
+- `ToolGroup`
+
+Artifact roadmap:
+
+- Start with structured artifact payloads such as JSON or CSV rendered by a frontend component registry.
+- Flashcard sets and mini quizzes should arrive through that artifact path when mastery gating lands.
+- Raw React or JavaScript artifacts are a much-later option, not part of the current MVP phases.
 
 ### Installation
 
@@ -119,7 +123,7 @@ cd apps/web
 npx assistant-ui@latest init
 ```
 
-The CLI will scaffold the shadcn/ui styled components into `components/assistant-ui/`. Install any add-ons (markdown, LaTeX, sources) as separate packages when the relevant phase is reached.
+The CLI will scaffold the shadcn/ui styled components into `components/assistant-ui/`. Install any add-ons needed for markdown, LaTeX, or sources as separate packages when the relevant phase is reached. Mermaid is not a built-in assistant-ui feature here; handle it in our owned markdown renderer.
 
 ## Graph UI Requirements
 
