@@ -1,0 +1,139 @@
+"""Tutor chat routes.
+
+Thin routes; all logic lives in backend.app.services.tutor and
+backend.app.services.conversations.
+
+Factory functions (get_classifier, get_responder) are defined here so tests can
+override them via app.dependency_overrides without touching service internals.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.app.db import get_session
+from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
+from backend.app.schemas.tutor import ChatRequest, ConversationHistoryResponse, ConversationMessage
+from backend.app.services.conversations import get_conversation_history, validate_concept_scope
+from backend.app.services.tutor import (
+    LLMTutorModeClassifier,
+    LLMTutorResponder,
+    TutorModeClassifier,
+    TutorResponder,
+    stream_chat_response,
+)
+from backend.app.settings import settings
+
+router = APIRouter(prefix="/api/workspaces/{workspace_id}/trails/{trail_id}/concepts")
+
+
+# ---------------------------------------------------------------------------
+# Dependency factories — override in tests via app.dependency_overrides
+# ---------------------------------------------------------------------------
+
+
+def get_classifier() -> TutorModeClassifier:
+    """Return the LLM-backed mode classifier."""
+    from backend.app.agents.llm_client import LLMClient
+
+    return LLMTutorModeClassifier(client=LLMClient.from_settings(settings))
+
+
+def get_responder() -> TutorResponder:
+    """Return the LLM-backed streaming responder."""
+    from backend.app.agents.llm_client import LLMClient
+
+    return LLMTutorResponder(client=LLMClient.from_settings(settings))
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{concept_id}/chat", response_model=None)
+async def chat_endpoint(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    body: ChatRequest,
+    session: AsyncSession = Depends(get_session),
+    classifier: TutorModeClassifier = Depends(get_classifier),
+    responder: TutorResponder = Depends(get_responder),
+) -> StreamingResponse | JSONResponse:
+    """Stream a Socratic tutor response via Server-Sent Events.
+
+    Pre-validates workspace → trail → concept scope and returns 404 before
+    starting the stream.  SSE error events are used for in-stream failures.
+    """
+    try:
+        await validate_concept_scope(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+        )
+    except LookupError as exc:
+        return _not_found(str(exc))
+
+    async def generate():
+        async for event in stream_chat_response(
+            session,
+            classifier,
+            responder,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message=body.message,
+            conversation_id=body.conversation_id,
+        ):
+            yield event
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/{concept_id}/conversation", response_model=ConversationHistoryResponse)
+async def get_conversation_endpoint(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    limit: int = Query(default=20, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
+) -> ConversationHistoryResponse | JSONResponse:
+    """Return conversation history for a concept in chronological order.
+
+    Returns conversation_id=null and messages=[] if no conversation has started.
+    """
+    try:
+        conv_id, turns = await get_conversation_history(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            limit=limit,
+        )
+    except LookupError as exc:
+        return _not_found(str(exc))
+
+    messages = [ConversationMessage.model_validate(t) for t in turns]
+    return ConversationHistoryResponse(conversation_id=conv_id, messages=messages)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _not_found(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content=ErrorEnvelope(error=ErrorBody(code="not_found", message=message)).model_dump(),
+    )
