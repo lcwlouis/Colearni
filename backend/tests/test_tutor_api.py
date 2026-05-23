@@ -1,6 +1,6 @@
 """Route-level tests for tutor chat and conversation history endpoints.
 
-Uses fake classifiers and responders; no live LLM calls are made.
+Uses fake tutor agents; no live LLM calls are made.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.app.api.tutor import get_classifier, get_responder
+from backend.app.api.tutor import get_tutor_agent
 from backend.app.db import get_session
 from backend.app.main import app
 from backend.app.models.base import Base
@@ -31,33 +31,56 @@ from backend.app.services.conversations import TutorContext
 # ---------------------------------------------------------------------------
 
 
-class _FakeClassifier:
-    def __init__(self, mode: TutorMode = "socratic") -> None:
+class _FakeAgent:
+    def __init__(self, mode: TutorMode = "socratic", tokens: list[str] | None = None) -> None:
         self.mode: TutorMode = mode
-
-    async def classify(self, context: TutorContext) -> TutorMode:
-        return self.mode
-
-
-class _FakeResponder:
-    def __init__(self, tokens: list[str] | None = None) -> None:
         self.tokens = tokens or ["Hello", " learner"]
 
-    async def respond_stream(self, mode: TutorMode, context: TutorContext):
+    async def respond_stream(self, context: TutorContext):
+        yield ("mode", self.mode)
         for token in self.tokens:
             yield ("text", token)
 
 
-class _ThinkingResponder:
-    async def respond_stream(self, mode: TutorMode, context: TutorContext):
+class _ThinkingAgent:
+    async def respond_stream(self, context: TutorContext):
+        yield ("mode", "socratic")
+        yield ("status", "thinking")
         yield ("thinking", "Reasoning trace")
         yield ("text", "Visible answer")
 
 
-class _FailingResponder:
-    """Responder that raises immediately (no tokens before the error)."""
+class _ToolAgent:
+    async def respond_stream(self, context: TutorContext):
+        yield ("status", "calling_tool")
+        yield ("tool_call", '<tool name="get_tutor_instructions" mode="direct" />')
+        yield ("status", "tool_called")
+        yield (
+            "tool_result",
+            '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+        )
+        yield ("status", "tool_complete")
+        yield ("mode", "direct")
+        yield ("text", "Direct answer")
 
-    async def respond_stream(self, mode: TutorMode, context: TutorContext):
+
+class _ReasoningToolAgent:
+    async def respond_stream(self, context: TutorContext):
+        yield ("mode", "direct")
+        yield ("thinking", "Plan first.\n")
+        yield ("tool_call", '<tool name="get_tutor_instructions" mode="direct" />')
+        yield (
+            "tool_result",
+            '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+        )
+        yield ("thinking", "Now answer.\n")
+        yield ("text", "Direct answer")
+
+
+class _FailingAgent:
+    """Agent that raises immediately (no tokens before the error)."""
+
+    async def respond_stream(self, context: TutorContext):
         raise RuntimeError("LLM generation failed")
         yield  # marks this as an async generator
 
@@ -85,8 +108,7 @@ async def api_client(db_engine):
             yield session
 
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_classifier] = lambda: _FakeClassifier()
-    app.dependency_overrides[get_responder] = lambda: _FakeResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _FakeAgent()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
@@ -188,9 +210,9 @@ async def test_chat_done_event_includes_conversation_id_and_message(api_client, 
     assert "message" in data
     msg = data["message"]
     assert msg["role"] == "assistant"
-    assert msg["content"] == "Hello learner"  # FakeResponder tokens joined
+    assert msg["content"] == "Hello learner"  # FakeAgent tokens joined
     assert msg["reasoning"] is None
-    assert msg["mode"] == "socratic"  # FakeClassifier default mode
+    assert msg["mode"] == "socratic"  # FakeAgent default mode
     assert "id" in msg
     assert "created_at" in msg
 
@@ -261,7 +283,7 @@ async def test_chat_mode_event_carries_mode_field(api_client, db_engine):
 
 async def test_chat_can_emit_thinking_event_before_tokens(api_client, db_engine):
     ws_id, trail_id, concept_id = await _seed(db_engine)
-    app.dependency_overrides[get_responder] = lambda: _ThinkingResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _ThinkingAgent()
 
     resp = await api_client.post(
         f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
@@ -275,9 +297,47 @@ async def test_chat_can_emit_thinking_event_before_tokens(api_client, db_engine)
     assert event_types.index("thinking") < event_types.index("token")
 
 
+async def test_chat_can_emit_status_events(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _ToolAgent()
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Explain directly."},
+    )
+
+    events = _parse_sse(resp.text)
+    status_values = [event["data"]["status"] for event in events if event["data"]["type"] == "status"]
+    assert status_values == ["calling_tool", "tool_called", "tool_complete", "responding"]
+
+
+async def test_chat_emits_tool_events_for_reasoning_ui(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _ToolAgent()
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Explain directly."},
+    )
+
+    events = _parse_sse(resp.text)
+    tool_call = next(event for event in events if event["data"]["type"] == "tool_call")
+    tool_result = next(event for event in events if event["data"]["type"] == "tool_result")
+
+    assert tool_call["data"] == {
+        "type": "tool_call",
+        "name": "get_tutor_instructions",
+        "mode": "direct",
+    }
+    assert tool_result["data"]["type"] == "tool_result"
+    assert tool_result["data"]["name"] == "get_tutor_instructions"
+    assert tool_result["data"]["mode"] == "direct"
+    assert json.loads(tool_result["data"]["result"]) == {"status": "received", "mode": "direct"}
+
+
 async def test_chat_done_event_includes_persisted_reasoning_when_available(api_client, db_engine):
     ws_id, trail_id, concept_id = await _seed(db_engine)
-    app.dependency_overrides[get_responder] = lambda: _ThinkingResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _ThinkingAgent()
 
     resp = await api_client.post(
         f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
@@ -287,6 +347,31 @@ async def test_chat_done_event_includes_persisted_reasoning_when_available(api_c
     events = _parse_sse(resp.text)
     done_event = next(e for e in events if e["data"]["type"] == "done")
     assert done_event["data"]["message"]["reasoning"] == "Reasoning trace"
+
+
+async def test_chat_done_event_includes_structured_reasoning_parts(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _ReasoningToolAgent()
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Explain directly."},
+    )
+
+    events = _parse_sse(resp.text)
+    done_event = next(e for e in events if e["data"]["type"] == "done")
+    reasoning_parts = done_event["data"]["message"]["reasoning_parts"]
+
+    assert [part["kind"] for part in reasoning_parts] == [
+        "thinking",
+        "tool_call",
+        "tool_result",
+        "thinking",
+    ]
+    assert reasoning_parts[0]["text"] == "Plan first.\n"
+    assert reasoning_parts[1]["name"] == "get_tutor_instructions"
+    assert reasoning_parts[2]["result"] == '{"status": "received", "mode": "direct"}'
+    assert reasoning_parts[3]["text"] == "Now answer.\n"
 
 
 # ---------------------------------------------------------------------------
@@ -403,8 +488,7 @@ async def test_chat_generator_failure_emits_sse_error_event(db_engine):
             yield session
 
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_classifier] = lambda: _FakeClassifier()
-    app.dependency_overrides[get_responder] = lambda: _FailingResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _FailingAgent()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         ws_id, trail_id, concept_id = await _seed(db_engine)
@@ -435,8 +519,7 @@ async def test_chat_generator_failure_does_not_persist_partial_assistant_turn(db
             yield session
 
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_classifier] = lambda: _FakeClassifier()
-    app.dependency_overrides[get_responder] = lambda: _FailingResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _FailingAgent()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         ws_id, trail_id, concept_id = await _seed(db_engine)
@@ -454,3 +537,47 @@ async def test_chat_generator_failure_does_not_persist_partial_assistant_turn(db
 
         turns = list(await session.scalars(select(ConversationTurn)))
         assert turns == [], "no turns should be persisted after generator failure"
+
+
+async def test_tool_turns_do_not_leak_into_public_history(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _ToolAgent()
+
+    await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Explain directly."},
+    )
+
+    history = await api_client.get(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversation"
+    )
+
+    assert history.status_code == 200
+    payload = history.json()
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant"]
+    assert payload["messages"][1]["content"] == "Direct answer"
+
+
+async def test_history_includes_structured_reasoning_parts(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _ReasoningToolAgent()
+
+    await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Explain directly."},
+    )
+
+    history = await api_client.get(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversation"
+    )
+
+    assert history.status_code == 200
+    assistant_message = next(
+        message for message in history.json()["messages"] if message["role"] == "assistant"
+    )
+    assert [part["kind"] for part in assistant_message["reasoning_parts"]] == [
+        "thinking",
+        "tool_call",
+        "tool_result",
+        "thinking",
+    ]

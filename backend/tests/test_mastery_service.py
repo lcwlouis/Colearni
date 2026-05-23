@@ -130,7 +130,7 @@ async def test_store_quiz_attempt_persists_snapshot_and_answers(session):
     questions = [
         QuizQuestion(
             id="q1",
-            type="explain",
+            type="short_answer",
             prompt="Explain it",
             mastery_label="explain_derivative",
         )

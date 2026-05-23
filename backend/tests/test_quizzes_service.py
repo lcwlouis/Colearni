@@ -1,10 +1,11 @@
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptNode
-from backend.app.models.mastery import MasteryRecord, QuizAttempt
+from backend.app.models.mastery import MasteryRecord, QuizAttempt, QuizDraft
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.schemas.mastery import QuizAnswer, QuizEvaluation, QuizQuestion
@@ -32,15 +33,17 @@ class FakeQuizGenerator:
         self.questions = questions or [
             QuizQuestion(
                 id="q1",
-                type="explain",
+                type="short_answer",
                 prompt="Explain derivatives in your own words.",
                 mastery_label="explain_derivative",
+                difficulty="standard",
             ),
             QuizQuestion(
                 id="q2",
-                type="apply",
+                type="long_answer",
                 prompt="Apply a derivative to a small example.",
                 mastery_label="apply_derivative",
+                difficulty="challenge",
             ),
         ]
         self.calls: list[tuple[str, str]] = []
@@ -138,9 +141,193 @@ async def test_generate_quiz_card_uses_mastery_labels(session):
     assert generator.calls == [("Derivatives", "level_up")]
 
 
+async def test_generate_quiz_card_reuses_existing_draft(session):
+    workspace, trail, concept = await _seed_concept(session)
+    generator = FakeQuizGenerator()
+
+    first = await generate_quiz_card(
+        session,
+        generator,
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+    )
+    second = await generate_quiz_card(
+        session,
+        generator,
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+    )
+
+    assert second.questions == first.questions
+    assert generator.calls == [("Derivatives", "level_up")]
+
+
+async def test_duplicate_draft_recovery_does_not_access_expired_concept(monkeypatch):
+    concept_id = __import__("uuid").uuid4()
+    question = QuizQuestion(
+        id="q1",
+        type="short_answer",
+        prompt="Explain derivatives.",
+        mastery_label="explain_derivative",
+        difficulty="standard",
+    )
+    second_question = QuizQuestion(
+        id="q2",
+        type="long_answer",
+        prompt="Apply derivatives.",
+        mastery_label="apply_derivative",
+        difficulty="challenge",
+    )
+
+    class ExpiringConcept:
+        title = "Derivatives"
+        concept_level = "topic"
+        difficulty = "beginner"
+        bloom_level = "apply"
+        mastery_check_labels = ["explain_derivative"]
+        metadata_json = {}
+        _id_reads = 0
+
+        @property
+        def id(self):
+            self._id_reads += 1
+            if self._id_reads > 1:
+                raise AssertionError("concept.id was accessed after rollback")
+            return concept_id
+
+    class FakeConnection:
+        class dialect:
+            name = "sqlite"
+
+    class FakeSession:
+        def __init__(self):
+            self.scalar_calls = 0
+            self.rolled_back = False
+
+        async def connection(self):
+            return FakeConnection()
+
+        async def scalar(self, _statement):
+            self.scalar_calls += 1
+            if self.scalar_calls == 1:
+                return None
+            return type(
+                "Draft",
+                (),
+                {
+                    "questions_json": [
+                        question.model_dump(mode="json"),
+                        second_question.model_dump(mode="json"),
+                    ]
+                },
+            )()
+
+        def add(self, _value):
+            return None
+
+        async def commit(self):
+            raise IntegrityError("insert", {}, Exception("duplicate"))
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    async def fake_validate_concept_scope(*_args, **_kwargs):
+        return None, ExpiringConcept()
+
+    monkeypatch.setattr(
+        "backend.app.services.quizzes.validate_concept_scope",
+        fake_validate_concept_scope,
+    )
+    fake_session = FakeSession()
+
+    card = await generate_quiz_card(
+        fake_session,
+        FakeQuizGenerator([question, second_question]),
+        workspace_id=__import__("uuid").uuid4(),
+        trail_id=__import__("uuid").uuid4(),
+        concept_id=concept_id,
+        quiz_type="level_up",
+    )
+
+    assert fake_session.rolled_back is True
+    assert card.concept_id == concept_id
+    assert card.questions == [question, second_question]
+
+
+async def test_force_new_quiz_card_replaces_draft(session):
+    workspace, trail, concept = await _seed_concept(session)
+    first_generator = FakeQuizGenerator()
+    second_generator = FakeQuizGenerator(
+        [
+            QuizQuestion(
+                id="q3",
+                type="multiple_choice",
+                prompt="Compare derivatives and finite differences.",
+                mastery_label="compare_derivative",
+                difficulty="light",
+                options=["Both describe change", "Both are always constant", "Neither uses rates"],
+            ),
+            QuizQuestion(
+                id="q4",
+                type="short_answer",
+                prompt="Explain derivative notation.",
+                mastery_label="explain_notation",
+                difficulty="standard",
+            ),
+        ]
+    )
+
+    await generate_quiz_card(
+        session,
+        first_generator,
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+    )
+    fresh = await generate_quiz_card(
+        session,
+        second_generator,
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+        force_new=True,
+    )
+
+    assert [question.id for question in fresh.questions] == ["q3", "q4"]
+    assert first_generator.calls == [("Derivatives", "level_up")]
+    assert second_generator.calls == [("Derivatives", "level_up")]
+
+
+async def test_legacy_question_types_are_normalized():
+    question = QuizQuestion.model_validate(
+        {
+            "id": "q1",
+            "type": "explain",
+            "prompt": "Explain it.",
+            "mastery_label": "explain_derivative",
+        }
+    )
+
+    assert question.type == "long_answer"
+
+
 async def test_level_up_pass_updates_mastered_and_stores_attempt(session):
     workspace, trail, concept = await _seed_concept(session)
     questions = FakeQuizGenerator().questions
+    await generate_quiz_card(
+        session,
+        FakeQuizGenerator(questions),
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+    )
     result = await grade_quiz_submission(
         session,
         FakeQuizGrader(0.85),
@@ -165,6 +352,8 @@ async def test_level_up_pass_updates_mastered_and_stores_attempt(session):
     attempt = await session.scalar(select(QuizAttempt).where(QuizAttempt.id == result.attempt_id))
     assert attempt is not None
     assert attempt.quiz_type == "level_up"
+    draft = await session.scalar(select(QuizDraft).where(QuizDraft.concept_id == concept.id))
+    assert draft is None
 
 
 async def test_level_up_fail_updates_needs_review(session):
@@ -263,15 +452,18 @@ async def test_llm_quiz_generator_renders_prompt_and_parses_questions(session):
               "questions": [
                 {
                   "id": "q1",
-                  "type": "explain",
+                  "type": "multiple_choice",
                   "prompt": "Explain derivatives.",
-                  "mastery_label": "explain_derivative"
+                  "mastery_label": "explain_derivative",
+                  "difficulty": "light",
+                  "options": ["A rate of change", "A total amount", "A shape"]
                 },
                 {
                   "id": "q2",
-                  "type": "apply",
+                  "type": "short_answer",
                   "prompt": "Apply derivatives.",
-                  "mastery_label": "apply_derivative"
+                  "mastery_label": "apply_derivative",
+                  "difficulty": "standard"
                 }
               ]
             }
@@ -300,15 +492,18 @@ async def test_llm_quiz_generator_repairs_invalid_json_once(session):
               "questions": [
                 {
                   "id": "q1",
-                  "type": "explain",
+                  "type": "multiple_choice",
                   "prompt": "Explain derivatives.",
-                  "mastery_label": "explain_derivative"
+                  "mastery_label": "explain_derivative",
+                  "difficulty": "light",
+                  "options": ["A rate of change", "A total amount", "A shape"]
                 },
                 {
                   "id": "q2",
-                  "type": "apply",
+                  "type": "short_answer",
                   "prompt": "Apply derivatives.",
-                  "mastery_label": "apply_derivative"
+                  "mastery_label": "apply_derivative",
+                  "difficulty": "standard"
                 }
               ]
             }

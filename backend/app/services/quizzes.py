@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from hashlib import blake2b
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from sqlalchemy import delete, select, text
+from sqlalchemy.exc import IntegrityError
 
 from backend.app.agents.prompts import prompt_registry
 from backend.app.models.concept import ConceptNode
+from backend.app.models.mastery import QuizDraft
 from backend.app.schemas.mastery import (
     GradeResult,
     LevelUpCard,
@@ -208,6 +213,7 @@ async def generate_quiz_card(
     trail_id: uuid.UUID,
     concept_id: uuid.UUID,
     quiz_type: QuizType,
+    force_new: bool = False,
 ) -> LevelUpCard:
     _, concept = await validate_concept_scope(
         session,
@@ -215,8 +221,50 @@ async def generate_quiz_card(
         trail_id=trail_id,
         concept_id=concept_id,
     )
+    concept_uuid = concept.id
+    await _lock_quiz_draft_generation(session, concept_id=concept_uuid, quiz_type=quiz_type)
+
+    if force_new:
+        await session.execute(
+            delete(QuizDraft).where(
+                QuizDraft.concept_id == concept_uuid,
+                QuizDraft.quiz_type == quiz_type,
+            )
+        )
+        await session.flush()
+
+    draft = await session.scalar(
+        select(QuizDraft).where(
+            QuizDraft.concept_id == concept_uuid,
+            QuizDraft.quiz_type == quiz_type,
+        )
+    )
+    if draft is not None:
+        questions = [QuizQuestion.model_validate(question) for question in draft.questions_json]
+        return LevelUpCard(concept_id=concept_uuid, quiz_type=quiz_type, questions=questions)
+
     questions = await generator.generate(concept=concept, quiz_type=quiz_type)
-    return LevelUpCard(concept_id=concept.id, quiz_type=quiz_type, questions=questions)
+    try:
+        session.add(
+            QuizDraft(
+                concept_id=concept_uuid,
+                quiz_type=quiz_type,
+                questions_json=[question.model_dump(mode="json") for question in questions],
+            )
+        )
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        draft = await session.scalar(
+            select(QuizDraft).where(
+                QuizDraft.concept_id == concept_uuid,
+                QuizDraft.quiz_type == quiz_type,
+            )
+        )
+        if draft is None:
+            raise
+        questions = [QuizQuestion.model_validate(question) for question in draft.questions_json]
+    return LevelUpCard(concept_id=concept_uuid, quiz_type=quiz_type, questions=questions)
 
 
 async def grade_quiz_submission(
@@ -251,6 +299,12 @@ async def grade_quiz_submission(
         passed=passed,
         score=evaluation.score,
     )
+    await session.execute(
+        delete(QuizDraft).where(
+            QuizDraft.concept_id == concept.id,
+            QuizDraft.quiz_type == quiz_type,
+        )
+    )
 
     if quiz_type == "level_up":
         mastery_state = await apply_level_up_result(
@@ -272,9 +326,31 @@ async def grade_quiz_submission(
         passed=passed,
         score=evaluation.score,
         feedback=feedback,
+        per_question=evaluation.per_question,
         mastery_status=mastery_state.status,
         attempt_id=attempt.id,
     )
+
+
+async def _lock_quiz_draft_generation(
+    session: AsyncSession,
+    *,
+    concept_id: uuid.UUID,
+    quiz_type: QuizType,
+) -> None:
+    """Serialize PostgreSQL draft generation so duplicate requests reuse one LLM call."""
+    connection = await session.connection()
+    if connection.dialect.name != "postgresql":
+        return
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": _quiz_draft_lock_key(concept_id, quiz_type)},
+    )
+
+
+def _quiz_draft_lock_key(concept_id: uuid.UUID, quiz_type: QuizType) -> int:
+    digest = blake2b(f"{concept_id}:{quiz_type}".encode("ascii"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") & 0x7FFFFFFFFFFFFFFF
 
 
 def _parse_generation_output(raw: str) -> list[QuizQuestion]:

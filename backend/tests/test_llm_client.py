@@ -185,7 +185,7 @@ def test_openai_compatible_kwargs_include_max_tokens():
         thinking=True,
         max_tokens=12000,
     )
-    assert kwargs["max_tokens"] == 12000
+    assert kwargs["max_tokens"] == 20000
 
 
 def test_openrouter_disables_reasoning_when_thinking_off():
@@ -389,6 +389,13 @@ def test_extract_delta_reasoning_falls_through_to_details():
         # No reasoning_content or reasoning string fields
 
     assert _extract_delta_reasoning(FakeDelta()) == "via details"
+
+
+def test_delta_suffix_returns_only_new_reasoning_content():
+    from backend.app.agents.llm_client import _delta_suffix
+
+    assert _delta_suffix("We need to decide.", "We need to decide. Then call the tool.") == " Then call the tool."
+    assert _delta_suffix("", "Fresh reasoning") == "Fresh reasoning"
 
 
 # ---------------------------------------------------------------------------

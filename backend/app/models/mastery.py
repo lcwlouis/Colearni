@@ -93,3 +93,33 @@ class QuizAttempt(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class QuizDraft(Base):
+    __tablename__ = "quiz_drafts"
+    __table_args__ = (
+        UniqueConstraint("concept_id", "quiz_type", name="uq_quiz_drafts_concept_type"),
+        CheckConstraint(
+            "quiz_type in ('level_up', 'practice')",
+            name="ck_quiz_drafts_quiz_type",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("concept_nodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    quiz_type: Mapped[str] = mapped_column(String, nullable=False)
+    questions_json: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )

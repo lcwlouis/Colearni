@@ -33,8 +33,8 @@ from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.services.mastery import get_mastery_state
 
-# Maximum number of recent turns included in the prompt context window.
-_RECENT_TURNS_LIMIT = 10
+# Maximum number of recent visible turns included in the prompt context window.
+_RECENT_VISIBLE_TURNS_LIMIT = 10
 
 
 @dataclass
@@ -59,7 +59,7 @@ class TutorSourceMetadata:
 
 @dataclass
 class TutorContext:
-    """All data needed by mode classifier and response generator."""
+    """All data needed by the tutor agent and instruction tool."""
 
     conversation_id: uuid.UUID
     concept: ConceptNode
@@ -248,19 +248,42 @@ async def build_tutor_context(
                 related.append(neighbor)
 
     # --- Conversation history ---
-    # Fetch the last RECENT_TURNS_LIMIT turns BEFORE the current user turn.
-    recent_rows = list(
+    # Keep the visible history window bounded, but preserve internal tool turns
+    # that occurred within that retained visible window so gated-mode context
+    # remains replayable on later turns.
+    visible_rows = list(
         await session.scalars(
             select(ConversationTurn)
             .where(
                 ConversationTurn.conversation_id == conversation.id,
                 ConversationTurn.turn_index < user_turn_index,
+                ConversationTurn.kind == "visible",
             )
             .order_by(ConversationTurn.turn_index.desc())
-            .limit(_RECENT_TURNS_LIMIT)
+            .limit(_RECENT_VISIBLE_TURNS_LIMIT)
         )
     )
-    recent_turns = list(reversed(recent_rows))
+    recent_turns = list(reversed(visible_rows))
+
+    if recent_turns:
+        earliest_visible_turn_index = recent_turns[0].turn_index
+        tool_rows = list(
+            await session.scalars(
+                select(ConversationTurn)
+                .where(
+                    ConversationTurn.conversation_id == conversation.id,
+                    ConversationTurn.turn_index >= earliest_visible_turn_index,
+                    ConversationTurn.turn_index < user_turn_index,
+                    ConversationTurn.kind != "visible",
+                )
+                .order_by(ConversationTurn.turn_index.asc())
+            )
+        )
+        if tool_rows:
+            merged_turns = {turn.turn_index: turn for turn in recent_turns}
+            for turn in tool_rows:
+                merged_turns[turn.turn_index] = turn
+            recent_turns = [merged_turns[index] for index in sorted(merged_turns)]
 
     # --- Conversation summary (most recent) ---
     summary = await session.scalar(
@@ -334,7 +357,10 @@ async def get_conversation_history(
     recent_turns = list(
         await session.scalars(
             select(ConversationTurn)
-            .where(ConversationTurn.conversation_id == conv.id)
+            .where(
+                ConversationTurn.conversation_id == conv.id,
+                ConversationTurn.kind == "visible",
+            )
             .order_by(ConversationTurn.turn_index.desc())
             .limit(limit)
         )
@@ -364,6 +390,7 @@ async def persist_user_turn(
     turn = ConversationTurn(
         conversation_id=conversation_id,
         role="user",
+        kind="visible",
         content=content,
         mode=None,
         turn_index=turn_index,
@@ -380,13 +407,16 @@ async def persist_assistant_turn(
     mode: str,
     turn_index: int,
     reasoning: str | None = None,
+    reasoning_parts: list[dict] | None = None,
 ) -> ConversationTurn:
     """Add the assistant turn, optional reasoning trace, and commit."""
     turn = ConversationTurn(
         conversation_id=conversation_id,
         role="assistant",
+        kind="visible",
         content=content,
         reasoning=reasoning,
+        reasoning_parts=reasoning_parts,
         mode=mode,
         turn_index=turn_index,
     )
@@ -398,6 +428,36 @@ async def persist_assistant_turn(
         conv.updated_at = datetime.now(UTC)
 
     await session.commit()
+    return turn
+
+
+async def persist_tool_turn(
+    session: AsyncSession,
+    conversation_id: uuid.UUID,
+    *,
+    role: str,
+    kind: str,
+    content: str,
+    turn_index: int,
+    mode: str | None = None,
+) -> ConversationTurn:
+    """Persist an internal tool call/result turn for prompt replay.
+
+    Tool turns are excluded from the public history API but remain part of the
+    prompt history so prior tool uses stay cacheable on later turns.
+    """
+    turn = ConversationTurn(
+        conversation_id=conversation_id,
+        role=role,
+        kind=kind,
+        content=content,
+        reasoning=None,
+        reasoning_parts=None,
+        mode=mode,
+        turn_index=turn_index,
+    )
+    session.add(turn)
+    await session.flush()
     return turn
 
 

@@ -22,15 +22,18 @@ class _FakeQuizGenerator:
         return [
             QuizQuestion(
                 id="q1",
-                type="explain",
+                type="multiple_choice",
                 prompt=f"Explain {concept.title}.",
                 mastery_label=concept.mastery_check_labels[0],
+                difficulty="light",
+                options=["Correct option", "Distractor", "Another distractor"],
             ),
             QuizQuestion(
                 id="q2",
-                type="apply",
+                type="short_answer",
                 prompt=f"Apply {concept.title}.",
                 mastery_label=concept.mastery_check_labels[0],
+                difficulty="standard",
             ),
         ]
 
@@ -209,6 +212,31 @@ async def test_level_up_route_returns_generated_quiz(api_client, db_engine):
     assert [question["id"] for question in data["questions"]] == ["q1", "q2"]
 
 
+async def test_level_up_route_reuses_draft_unless_force_new(api_client, db_engine):
+    workspace_id, trail_id, ids = await _seed_concept_graph(db_engine)
+    generator = _FakeQuizGenerator()
+    app.dependency_overrides[get_quiz_generator] = lambda: generator
+
+    try:
+        first = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/level-up"
+        )
+        second = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/level-up"
+        )
+        fresh = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/level-up",
+            json={"force_new": True},
+        )
+    finally:
+        app.dependency_overrides.pop(get_quiz_generator, None)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert fresh.status_code == 200
+    assert second.json()["questions"] == first.json()["questions"]
+
+
 async def test_practice_route_returns_generated_quiz(api_client, db_engine):
     workspace_id, trail_id, ids = await _seed_concept_graph(db_engine)
     app.dependency_overrides[get_quiz_generator] = lambda: _FakeQuizGenerator()
@@ -237,13 +265,13 @@ async def test_level_up_grade_pass_updates_mastered_and_stores_attempt(api_clien
                 "questions": [
                     {
                         "id": "q1",
-                        "type": "explain",
+                        "type": "short_answer",
                         "prompt": "Explain routing.",
                         "mastery_label": "check_routing",
                     },
                     {
                         "id": "q2",
-                        "type": "apply",
+                        "type": "long_answer",
                         "prompt": "Apply routing.",
                         "mastery_label": "check_routing",
                     },
@@ -285,7 +313,7 @@ async def test_level_up_grade_fail_updates_needs_review(api_client, db_engine):
                 "questions": [
                     {
                         "id": "q1",
-                        "type": "explain",
+                        "type": "short_answer",
                         "prompt": "Explain routing.",
                         "mastery_label": "check_routing",
                     }
@@ -311,7 +339,7 @@ async def test_practice_grade_does_not_update_mastery(api_client, db_engine):
                 "questions": [
                     {
                         "id": "q1",
-                        "type": "explain",
+                        "type": "short_answer",
                         "prompt": "Explain routing.",
                         "mastery_label": "check_routing",
                     }

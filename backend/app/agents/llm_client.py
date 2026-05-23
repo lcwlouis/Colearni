@@ -149,6 +149,15 @@ def _extract_delta_reasoning(delta) -> str | None:  # type: ignore[no-untyped-de
     return _extract_delta_reasoning_details(delta)
 
 
+def _delta_suffix(previous: str, current: str) -> str:
+    """Return only the newly appended suffix when a provider repeats prior text."""
+    if not current:
+        return ""
+    if previous and current.startswith(previous):
+        return current[len(previous) :]
+    return current
+
+
 class LLMClient:
     """Async LLM client. All provider-specific wiring is encapsulated here.
 
@@ -240,6 +249,7 @@ class LLMClient:
         *,
         temperature: float = 0.4,
         max_tokens: int = 4096,
+        thinking: bool | None = None,
     ) -> AsyncIterator[TaggedChunk]:
         """Streaming chat that yields (kind, chunk) tuples.
 
@@ -252,17 +262,29 @@ class LLMClient:
                         reasoning delta field.
           anthropic   — Native SDK; thinking blocks stream as ("thinking", chunk).
         """
+        requested_thinking = self._thinking_enabled if thinking is None else thinking
         if self._provider in _NATIVE_SDK_PROVIDERS:
-            async for item in self._anthropic_chat_stream_tagged(messages, temperature, max_tokens):
+            async for item in self._anthropic_chat_stream_tagged(
+                messages,
+                temperature,
+                max_tokens,
+                thinking=requested_thinking,
+            ):
                 yield item
         elif self._provider in _RESPONSES_API_PROVIDERS:
             async for item in self._openai_responses_chat_stream_tagged(
-                messages, temperature, max_tokens
+                messages,
+                temperature,
+                max_tokens,
+                thinking=requested_thinking,
             ):
                 yield item
         else:
             async for item in self._openai_compatible_chat_stream_tagged(
-                messages, temperature, max_tokens
+                messages,
+                temperature,
+                max_tokens,
+                thinking=requested_thinking,
             ):
                 yield item
 
@@ -275,6 +297,7 @@ class LLMClient:
         messages: list[dict],
         temperature: float,
         max_tokens: int,
+        thinking: bool | None = None,
     ) -> dict:
         """Convert a messages list to kwargs for client.responses.create.
 
@@ -295,10 +318,13 @@ class LLMClient:
             else:
                 input_items.append(msg)
 
+        requested_thinking = self._thinking_enabled if thinking is None else thinking
+        effective_max_tokens = max_tokens + self._thinking_budget if requested_thinking else max_tokens
+
         kwargs: dict = {
             "model": self._model,
             "input": input_items if input_items else messages,
-            "max_output_tokens": max_tokens,
+            "max_output_tokens": effective_max_tokens,
             # Stateless: CoLearni manages its own context window.
             "store": False,
         }
@@ -306,7 +332,7 @@ class LLMClient:
         if instructions:
             kwargs["instructions"] = instructions
 
-        if self._thinking_enabled:
+        if requested_thinking:
             # Reasoning models use effort instead of temperature.
             kwargs["reasoning"] = {
                 "effort": self._thinking_level,  # low | medium | high
@@ -335,6 +361,8 @@ class LLMClient:
         messages: list[dict],
         temperature: float,
         max_tokens: int,
+        *,
+        thinking: bool | None = None,
     ) -> AsyncIterator[TaggedChunk]:
         """Tagged streaming via the OpenAI Responses API.
 
@@ -349,7 +377,7 @@ class LLMClient:
           response.output_text.delta             — text
         """
         client = self._openai_client()
-        kwargs = self._build_responses_api_kwargs(messages, temperature, max_tokens)
+        kwargs = self._build_responses_api_kwargs(messages, temperature, max_tokens, thinking=thinking)
         kwargs["stream"] = True
         stream = await client.responses.create(**kwargs)
         async for event in stream:
@@ -409,7 +437,12 @@ class LLMClient:
         For other Chat Completions providers the ``reasoning_effort`` top-level
         parameter is used when thinking is on (legacy OpenAI o-series behaviour).
         """
-        kwargs: dict = {"model": self._model, "messages": messages, "max_tokens": max_tokens}
+        effective_max_tokens = max_tokens + self._thinking_budget if thinking else max_tokens
+        kwargs: dict = {
+            "model": self._model,
+            "messages": messages,
+            "max_tokens": effective_max_tokens,
+        }
         extra_headers = self._openrouter_headers()
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
@@ -466,7 +499,12 @@ class LLMClient:
                 yield chunk
 
     async def _openai_compatible_chat_stream_tagged(
-        self, messages: list[dict], temperature: float, max_tokens: int = 4096
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int = 4096,
+        *,
+        thinking: bool | None = None,
     ) -> AsyncIterator[TaggedChunk]:
         """Tagged OpenAI-compatible stream.
 
@@ -479,10 +517,12 @@ class LLMClient:
         model; it does not suppress tokens the model chooses to emit.
         """
         client = self._openai_client()
+        requested_thinking = self._thinking_enabled if thinking is None else thinking
         kwargs = self._build_openai_kwargs(
-            messages, temperature, thinking=self._thinking_enabled, max_tokens=max_tokens
+            messages, temperature, thinking=requested_thinking, max_tokens=max_tokens
         )
         kwargs["stream"] = True
+        reasoning_so_far = ""
         try:
             stream = await client.chat.completions.create(**kwargs)
             async for chunk in stream:
@@ -491,12 +531,17 @@ class LLMClient:
                 delta = chunk.choices[0].delta
                 reasoning = _extract_delta_reasoning(delta)
                 if reasoning:
-                    logger.debug("Reasoning chunk received (len=%d)", len(reasoning))
-                    yield ("thinking", reasoning)
+                    next_reasoning = _delta_suffix(reasoning_so_far, reasoning)
+                    if next_reasoning:
+                        logger.debug("Reasoning chunk received (len=%d)", len(next_reasoning))
+                        yield ("thinking", next_reasoning)
+                    reasoning_so_far = (
+                        reasoning if len(reasoning) >= len(reasoning_so_far) else reasoning_so_far + reasoning
+                    )
                 if delta.content:
                     yield ("text", delta.content)
         except Exception as exc:
-            if self._thinking_enabled and _is_thinking_error(exc):
+            if requested_thinking and _is_thinking_error(exc):
                 logger.warning(
                     "Thinking not supported by model %r; retrying without. Error: %s",
                     self._model,
@@ -513,8 +558,13 @@ class LLMClient:
                     delta = chunk.choices[0].delta
                     reasoning = _extract_delta_reasoning(delta)
                     if reasoning:
-                        logger.debug("Reasoning chunk received (len=%d)", len(reasoning))
-                        yield ("thinking", reasoning)
+                        next_reasoning = _delta_suffix(reasoning_so_far, reasoning)
+                        if next_reasoning:
+                            logger.debug("Reasoning chunk received (len=%d)", len(next_reasoning))
+                            yield ("thinking", next_reasoning)
+                        reasoning_so_far = (
+                            reasoning if len(reasoning) >= len(reasoning_so_far) else reasoning_so_far + reasoning
+                        )
                     if delta.content:
                         yield ("text", delta.content)
             else:
@@ -612,7 +662,12 @@ class LLMClient:
                 yield chunk
 
     async def _anthropic_chat_stream_tagged(
-        self, messages: list[dict], temperature: float, max_tokens: int
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        *,
+        thinking: bool | None = None,
     ) -> AsyncIterator[TaggedChunk]:
         """Anthropic stream that yields (kind, chunk) tuples.
 
@@ -621,8 +676,9 @@ class LLMClient:
         Falls back to text-only streaming when thinking is not supported.
         """
         client = self._anthropic_client()
+        requested_thinking = self._thinking_enabled if thinking is None else thinking
         kwargs, _ = self._build_anthropic_kwargs(
-            messages, temperature, max_tokens, thinking=self._thinking_enabled
+            messages, temperature, max_tokens, thinking=requested_thinking
         )
         try:
             async with client.messages.stream(**kwargs) as stream:
@@ -634,7 +690,7 @@ class LLMClient:
                         elif delta.type == "text_delta":
                             yield ("text", delta.text)
         except Exception as exc:
-            if self._thinking_enabled and _is_thinking_error(exc):
+            if requested_thinking and _is_thinking_error(exc):
                 logger.warning(
                     "Thinking not supported by model %r; retrying without. Error: %s",
                     self._model,

@@ -8,7 +8,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-TutorMode = Literal["socratic", "direct", "repair", "quiz_prompt", "explore"]
+TutorMode = Literal["socratic", "direct", "repair", "quiz_prompt", "explore", "free_explore"]
+TutorStreamStatus = Literal[
+    "thinking",
+    "calling_tool",
+    "tool_called",
+    "tool_complete",
+    "responding",
+    "retrying_without_thinking",
+]
 
 
 class ChatRequest(BaseModel):
@@ -25,6 +33,17 @@ class ChatRequest(BaseModel):
         return v
 
 
+class ConversationReasoningPart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["status", "thinking", "tool_call", "tool_result"]
+    status: TutorStreamStatus | None = None
+    text: str | None = None
+    name: str | None = None
+    mode: TutorMode | None = None
+    result: str | None = None
+
+
 class ConversationMessage(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -32,8 +51,14 @@ class ConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     reasoning: str | None = None
+    reasoning_parts: list[ConversationReasoningPart] = Field(default_factory=list)
     mode: TutorMode | None = None
     created_at: datetime
+
+    @field_validator("reasoning_parts", mode="before")
+    @classmethod
+    def reasoning_parts_default_empty(cls, v: object) -> object:
+        return [] if v is None else v
 
 
 class ConversationHistoryResponse(BaseModel):

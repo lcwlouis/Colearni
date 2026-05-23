@@ -184,6 +184,25 @@ def test_graph_generator_factory_preserves_reasoning_settings(monkeypatch):
     assert generator._client._thinking_enabled is True
 
 
+def test_tutor_agent_factory_preserves_tutor_max_tokens(monkeypatch):
+    from backend.app.api.tutor import get_tutor_agent
+    from backend.app.services.tutor import LLMTutorAgent
+
+    monkeypatch.setattr(settings, "llm_provider", "openrouter")
+    monkeypatch.setattr(settings, "llm_model", "deepseek/deepseek-v4-flash:free")
+    monkeypatch.setattr(settings, "llm_api_key", "test-key")
+    monkeypatch.setattr(settings, "llm_api_base", "")
+    monkeypatch.setattr(settings, "llm_thinking_enabled", True)
+    monkeypatch.setattr(settings, "llm_thinking_budget", 8000)
+    monkeypatch.setattr(settings, "llm_thinking_level", "medium")
+    monkeypatch.setattr(settings, "llm_tutor_max_tokens", 5000)
+
+    agent = get_tutor_agent()
+
+    assert isinstance(agent, LLMTutorAgent)
+    assert agent._max_tokens == 5000
+
+
 async def test_create_trail_returns_nodes_and_edges(api_client, workspace_id):
     ac, _, _ = api_client
     resp = await ac.post(

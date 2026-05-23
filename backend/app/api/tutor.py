@@ -3,8 +3,8 @@
 Thin routes; all logic lives in backend.app.services.tutor and
 backend.app.services.conversations.
 
-Factory functions (get_classifier, get_responder) are defined here so tests can
-override them via app.dependency_overrides without touching service internals.
+Factory function ``get_tutor_agent`` is defined here so tests can override it
+via ``app.dependency_overrides`` without touching service internals.
 """
 
 from __future__ import annotations
@@ -20,10 +20,8 @@ from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
 from backend.app.schemas.tutor import ChatRequest, ConversationHistoryResponse, ConversationMessage
 from backend.app.services.conversations import get_conversation_history, validate_concept_scope
 from backend.app.services.tutor import (
-    LLMTutorModeClassifier,
-    LLMTutorResponder,
-    TutorModeClassifier,
-    TutorResponder,
+    LLMTutorAgent,
+    TutorAgent,
     stream_chat_response,
 )
 from backend.app.settings import settings
@@ -36,18 +34,14 @@ router = APIRouter(prefix="/api/workspaces/{workspace_id}/trails/{trail_id}/conc
 # ---------------------------------------------------------------------------
 
 
-def get_classifier() -> TutorModeClassifier:
-    """Return the LLM-backed mode classifier."""
+def get_tutor_agent() -> TutorAgent:
+    """Return the LLM-backed tutor agent."""
     from backend.app.agents.llm_client import LLMClient
 
-    return LLMTutorModeClassifier(client=LLMClient.from_settings(settings))
-
-
-def get_responder() -> TutorResponder:
-    """Return the LLM-backed streaming responder."""
-    from backend.app.agents.llm_client import LLMClient
-
-    return LLMTutorResponder(client=LLMClient.from_settings(settings))
+    return LLMTutorAgent(
+        client=LLMClient.from_settings(settings),
+        max_tokens=settings.llm_tutor_max_tokens,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -62,8 +56,7 @@ async def chat_endpoint(
     concept_id: uuid.UUID,
     body: ChatRequest,
     session: AsyncSession = Depends(get_session),
-    classifier: TutorModeClassifier = Depends(get_classifier),
-    responder: TutorResponder = Depends(get_responder),
+    agent: TutorAgent = Depends(get_tutor_agent),
 ) -> StreamingResponse | JSONResponse:
     """Stream a Socratic tutor response via Server-Sent Events.
 
@@ -83,8 +76,7 @@ async def chat_endpoint(
     async def generate():
         async for event in stream_chat_response(
             session,
-            classifier,
-            responder,
+            agent,
             workspace_id=workspace_id,
             trail_id=trail_id,
             concept_id=concept_id,

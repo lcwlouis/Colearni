@@ -14,7 +14,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.app.api.tutor import get_classifier, get_responder
+from backend.app.api.tutor import get_tutor_agent
 from backend.app.db import get_session
 from backend.app.main import app
 from backend.app.models.base import Base
@@ -23,7 +23,6 @@ from backend.app.models.conversation import Conversation, ConversationTurn  # no
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
-from backend.app.schemas.tutor import TutorMode
 from backend.app.services.conversations import (
     TutorContext,
     get_conversation_history,
@@ -35,13 +34,9 @@ from backend.app.services.conversations import (
 # ---------------------------------------------------------------------------
 
 
-class _FakeClassifier:
-    async def classify(self, context: TutorContext) -> TutorMode:
-        return "socratic"
-
-
-class _FakeResponder:
-    async def respond_stream(self, mode: TutorMode, context: TutorContext):
+class _FakeAgent:
+    async def respond_stream(self, context: TutorContext):
+        yield ("mode", "socratic")
         yield ("text", "Response text")
 
 
@@ -75,8 +70,7 @@ async def api_client(db_engine):
             yield session
 
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_classifier] = lambda: _FakeClassifier()
-    app.dependency_overrides[get_responder] = lambda: _FakeResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _FakeAgent()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
@@ -215,9 +209,9 @@ async def test_assistant_turn_is_stored_after_successful_chat(api_client, db_eng
 
     assistant_turns = [t for t in turns if t.role == "assistant"]
     assert len(assistant_turns) == 1
-    assert assistant_turns[0].content == "Response text"  # _FakeResponder
+    assert assistant_turns[0].content == "Response text"  # _FakeAgent
     assert assistant_turns[0].reasoning is None
-    assert assistant_turns[0].mode == "socratic"  # _FakeClassifier
+    assert assistant_turns[0].mode == "socratic"  # _FakeAgent
 
 
 async def test_assistant_reasoning_is_stored_when_provider_exposes_it(db_engine):
@@ -227,14 +221,14 @@ async def test_assistant_reasoning_is_stored_when_provider_exposes_it(db_engine)
         async with async_session() as session:
             yield session
 
-    class _ThinkingResponder:
-        async def respond_stream(self, mode: TutorMode, context: TutorContext):
+    class _ThinkingAgent:
+        async def respond_stream(self, context: TutorContext):
+            yield ("mode", "socratic")
             yield ("thinking", "Reasoning trace")
             yield ("text", "Visible answer")
 
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_classifier] = lambda: _FakeClassifier()
-    app.dependency_overrides[get_responder] = lambda: _ThinkingResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _ThinkingAgent()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         ws_id, trail_id, concept_id = await _seed(db_engine)
@@ -257,6 +251,9 @@ async def test_assistant_reasoning_is_stored_when_provider_exposes_it(db_engine)
     assert len(assistant_turns) == 1
     assert assistant_turns[0].content == "Visible answer"
     assert assistant_turns[0].reasoning == "Reasoning trace"
+    assert assistant_turns[0].reasoning_parts == [
+        {"kind": "thinking", "text": "Reasoning trace"}
+    ]
 
 
 async def test_turn_indexes_increment_correctly(api_client, db_engine):
@@ -356,14 +353,14 @@ async def test_history_endpoint_returns_reasoning_for_assistant_turns(db_engine)
         async with async_session() as session:
             yield session
 
-    class _ThinkingResponder:
-        async def respond_stream(self, mode: TutorMode, context: TutorContext):
+    class _ThinkingAgent:
+        async def respond_stream(self, context: TutorContext):
+            yield ("mode", "socratic")
             yield ("thinking", "Stored reasoning")
             yield ("text", "Stored answer")
 
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_classifier] = lambda: _FakeClassifier()
-    app.dependency_overrides[get_responder] = lambda: _ThinkingResponder()
+    app.dependency_overrides[get_tutor_agent] = lambda: _ThinkingAgent()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         ws_id, trail_id, concept_id = await _seed(db_engine)

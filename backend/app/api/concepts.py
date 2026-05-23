@@ -8,7 +8,12 @@ from backend.app.agents.llm_client import LLMClient
 from backend.app.db import get_session
 from backend.app.schemas.concept import ConceptDetailResponse
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
-from backend.app.schemas.mastery import GradeResult, LevelUpCard, QuizGradeRequest
+from backend.app.schemas.mastery import (
+    GradeResult,
+    LevelUpCard,
+    QuizGenerateRequest,
+    QuizGradeRequest,
+)
 from backend.app.services.graph_view import get_concept_detail
 from backend.app.services.quizzes import (
     LLMQuizGenerator,
@@ -58,6 +63,7 @@ async def generate_level_up_route(
     workspace_id: uuid.UUID,
     trail_id: uuid.UUID,
     concept_id: uuid.UUID,
+    body: QuizGenerateRequest | None = None,
     session: AsyncSession = Depends(get_session),
     generator: QuizGenerator = Depends(get_quiz_generator),
 ) -> LevelUpCard | JSONResponse:
@@ -69,6 +75,7 @@ async def generate_level_up_route(
             trail_id=trail_id,
             concept_id=concept_id,
             quiz_type="level_up",
+            force_new=body.force_new if body else False,
         )
     except LookupError as exc:
         await session.rollback()
@@ -83,6 +90,7 @@ async def generate_practice_route(
     workspace_id: uuid.UUID,
     trail_id: uuid.UUID,
     concept_id: uuid.UUID,
+    body: QuizGenerateRequest | None = None,
     session: AsyncSession = Depends(get_session),
     generator: QuizGenerator = Depends(get_quiz_generator),
 ) -> LevelUpCard | JSONResponse:
@@ -94,6 +102,7 @@ async def generate_practice_route(
             trail_id=trail_id,
             concept_id=concept_id,
             quiz_type="practice",
+            force_new=body.force_new if body else False,
         )
     except LookupError as exc:
         await session.rollback()

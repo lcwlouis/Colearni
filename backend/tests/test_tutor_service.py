@@ -4,7 +4,8 @@ Tests for:
   - TutorContext assembly (build_tutor_context)
   - FallbackTutorModeClassifier keyword rules
   - _parse_mode_json safe fallbacks
-  - _context_to_prompt_vars coverage
+  - _context_to_prompt_vars compatibility coverage
+  - _build_chat_messages tool-history replay
 
 No live LLM calls are made.
 """
@@ -28,9 +29,11 @@ from backend.app.models.workspace import Workspace
 from backend.app.services.conversations import TutorContext, build_tutor_context
 from backend.app.services.tutor import (
     FallbackTutorModeClassifier,
+    LLMTutorAgent,
     _build_chat_messages,
     _context_to_prompt_vars,
     _parse_mode_json,
+    _strip_control_prefix,
 )
 
 # ---------------------------------------------------------------------------
@@ -240,6 +243,7 @@ async def test_context_includes_recent_turns(db_engine, db_session):
     prior_turn = ConversationTurn(
         conversation_id=conv.id,
         role="user",
+        kind="visible",
         content="Earlier question",
         mode=None,
         turn_index=0,
@@ -262,6 +266,78 @@ async def test_context_includes_recent_turns(db_engine, db_session):
 
     assert len(ctx.recent_turns) == 1
     assert ctx.recent_turns[0].content == "Earlier question"
+
+
+async def test_context_keeps_tool_turns_with_retained_visible_window(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+
+    conv = Conversation(workspace_id=ws_id, trail_id=trail_id, concept_id=concept_id)
+    db_session.add(conv)
+    await db_session.flush()
+
+    for index in range(12):
+        db_session.add(
+            ConversationTurn(
+                conversation_id=conv.id,
+                role="user" if index % 2 == 0 else "assistant",
+                kind="visible",
+                content=f"visible-{index}",
+                mode=None if index % 2 == 0 else "socratic",
+                turn_index=index,
+            )
+        )
+
+    db_session.add(
+        ConversationTurn(
+            conversation_id=conv.id,
+            role="assistant",
+            kind="tool_call",
+            content='<tool name="get_tutor_instructions" mode="direct" />',
+            mode="direct",
+            turn_index=12,
+        )
+    )
+    db_session.add(
+        ConversationTurn(
+            conversation_id=conv.id,
+            role="tool",
+            kind="tool_result",
+            content='<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+            mode="direct",
+            turn_index=13,
+        )
+    )
+    db_session.add(
+        ConversationTurn(
+            conversation_id=conv.id,
+            role="assistant",
+            kind="visible",
+            content="visible-12",
+            mode="direct",
+            turn_index=14,
+        )
+    )
+    await db_session.flush()
+
+    trail = await db_session.scalar(select(Trail).where(Trail.id == trail_id))
+    concept = await db_session.scalar(select(ConceptNode).where(ConceptNode.id == concept_id))
+
+    ctx = await build_tutor_context(
+        db_session,
+        conversation=conv,
+        concept=concept,
+        trail=trail,
+        learner_message="New question",
+        user_turn_index=15,
+    )
+
+    kept_contents = [turn.content for turn in ctx.recent_turns]
+    assert '<tool name="get_tutor_instructions" mode="direct" />' in kept_contents
+    assert (
+        '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>'
+        in kept_contents
+    )
+    assert "visible-0" not in kept_contents
 
 
 async def test_context_does_not_include_unrelated_nodes(db_engine, db_session):
@@ -318,6 +394,19 @@ def _make_context(message: str) -> TutorContext:
     )
 
 
+class _StubTaggedLLMClient:
+    def __init__(self, *streams: list[tuple[str, str]]) -> None:
+        self._streams = [list(stream) for stream in streams]
+        self.calls: list[list[dict]] = []
+
+    async def chat_stream_tagged(self, messages: list[dict], **_: object):
+        if not self._streams:
+            raise AssertionError("Unexpected extra chat_stream_tagged call")
+        self.calls.append(messages)
+        for kind, chunk in self._streams.pop(0):
+            yield (kind, chunk)
+
+
 async def test_fallback_classifier_default_is_socratic():
     clf = FallbackTutorModeClassifier()
     ctx = _make_context("How does this work?")
@@ -339,6 +428,12 @@ async def test_fallback_classifier_default_on_what_is():
 async def test_fallback_classifier_direct_on_just_tell_me():
     clf = FallbackTutorModeClassifier()
     ctx = _make_context("Just tell me what a limit is.")
+    assert await clf.classify(ctx) == "direct"
+
+
+async def test_fallback_classifier_direct_on_summarise():
+    clf = FallbackTutorModeClassifier()
+    ctx = _make_context("Summarise this concept for me.")
     assert await clf.classify(ctx) == "direct"
 
 
@@ -517,6 +612,37 @@ def test_build_chat_messages_with_history():
     assert len(msgs) == 4
 
 
+def test_build_chat_messages_replays_tool_turns_as_assistant_messages():
+    from types import SimpleNamespace
+
+    turns = [
+        SimpleNamespace(
+            role="assistant",
+            kind="tool_call",
+            content='<tool name="get_tutor_instructions" mode="direct" />',
+            mode="direct",
+        ),
+        SimpleNamespace(
+            role="tool",
+            kind="tool_result",
+            content='<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+            mode="direct",
+        ),
+    ]
+
+    msgs = _build_chat_messages("Be a tutor.", turns, "Latest")
+
+    assert msgs == [
+        {"role": "system", "content": "Be a tutor."},
+        {"role": "assistant", "content": '<tool name="get_tutor_instructions" mode="direct" />'},
+        {
+            "role": "assistant",
+            "content": '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+        },
+        {"role": "user", "content": "Latest"},
+    ]
+
+
 def test_build_chat_messages_system_is_always_first():
     """System message must always be the first element regardless of history."""
     from types import SimpleNamespace
@@ -524,6 +650,16 @@ def test_build_chat_messages_system_is_always_first():
     turns = [SimpleNamespace(role="user", content="Prior question")]
     msgs = _build_chat_messages("Instructions.", turns, "New question")
     assert msgs[0]["role"] == "system"
+
+
+def test_strip_control_prefix_removes_leaked_mode_line():
+    raw = '<mode name="socratic" />\nVisible answer.'
+    assert _strip_control_prefix(raw) == "Visible answer."
+
+
+def test_strip_control_prefix_removes_leaked_tool_line():
+    raw = '<tool name="get_tutor_instructions" mode="direct" />\nVisible answer.'
+    assert _strip_control_prefix(raw) == "Visible answer."
 
 
 def test_build_chat_messages_learner_message_is_always_last():
@@ -536,3 +672,66 @@ def test_build_chat_messages_learner_message_is_always_last():
     ]
     msgs = _build_chat_messages("System.", turns, "Latest")
     assert msgs[-1] == {"role": "user", "content": "Latest"}
+
+
+async def test_locked_direct_summary_request_only_emits_socratic_question():
+    from types import SimpleNamespace
+
+    client = _StubTaggedLLMClient(
+        [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
+        [
+            ("text", '<mode name="socratic" />\nMylo Xyloto explores hope and escape. '),
+            ("text", "What theme do you think ties the album together?"),
+        ],
+    )
+    agent = LLMTutorAgent(client, max_tokens=512)
+    ctx = _make_context("Summarise the topics within Mylo Xyloto")
+    ctx.mastery_status = "learning"
+    ctx.concept = cast(
+        ConceptNode,
+        SimpleNamespace(
+            title="Mylo Xyloto",
+            concept_level="topic",
+            bloom_level="understand",
+            id=uuid.uuid4(),
+        ),
+    )
+
+    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(ctx)]
+
+    assert [chunk for kind, chunk in events if kind == "mode"] == ["socratic"]
+    assert [chunk for kind, chunk in events if kind == "status"] == [
+        "calling_tool",
+        "tool_called",
+        "tool_complete",
+    ]
+    assert [chunk for kind, chunk in events if kind == "text"] == [
+        "What theme do you think ties the album together?"
+    ]
+
+
+async def test_locked_direct_summary_without_question_uses_default_socratic_question():
+    from types import SimpleNamespace
+
+    client = _StubTaggedLLMClient(
+        [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
+        [("text", "Mylo Xyloto explores hope, color, and resistance.")],
+    )
+    agent = LLMTutorAgent(client, max_tokens=512)
+    ctx = _make_context("Summarise the topics within Mylo Xyloto")
+    ctx.mastery_status = "learning"
+    ctx.concept = cast(
+        ConceptNode,
+        SimpleNamespace(
+            title="Mylo Xyloto",
+            concept_level="topic",
+            bloom_level="understand",
+            id=uuid.uuid4(),
+        ),
+    )
+
+    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(ctx)]
+
+    assert [chunk for kind, chunk in events if kind == "text"] == [
+        "What do you think are the main topics or themes within Mylo Xyloto?"
+    ]

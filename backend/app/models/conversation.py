@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -69,11 +70,15 @@ class ConversationTurn(Base):
             name="uq_conversation_turns_index",
         ),
         CheckConstraint(
-            "role in ('user', 'assistant')",
+            "role in ('user', 'assistant', 'tool')",
             name="ck_conversation_turns_role",
         ),
         CheckConstraint(
-            "mode IS NULL OR mode in ('socratic', 'direct', 'repair', 'quiz_prompt', 'explore')",
+            "kind in ('visible', 'tool_call', 'tool_result')",
+            name="ck_conversation_turns_kind",
+        ),
+        CheckConstraint(
+            "mode IS NULL OR mode in ('socratic', 'direct', 'repair', 'quiz_prompt', 'explore', 'free_explore')",
             name="ck_conversation_turns_mode",
         ),
     )
@@ -85,9 +90,12 @@ class ConversationTurn(Base):
         nullable=False,
     )
     role: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="visible", server_default="visible")
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # Optional provider-exposed thinking text used to rehydrate reasoning traces.
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Ordered public trace parts used to rehydrate thinking/tool boundaries.
+    reasoning_parts: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     mode: Mapped[str | None] = mapped_column(String, nullable=True)
     turn_index: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

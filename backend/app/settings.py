@@ -16,10 +16,13 @@ class Settings(BaseSettings):
     # Extended thinking / reasoning — off by default; silently skipped when
     # the selected model does not support it.
     llm_thinking_enabled: bool = False
-    # Anthropic budget_tokens (min 1024); ignored for OpenAI-compatible providers.
+    # Anthropic budget_tokens (min 1024). Also used as extra request headroom
+    # when provider reasoning consumes completion/output tokens.
     llm_thinking_budget: int = 8000
     # OpenAI o-series reasoning_effort: low | medium | high.
     llm_thinking_level: str = "medium"
+    # Requested tutor answer budget per LLM call.
+    llm_tutor_max_tokens: int = 4096
 
     # Reasoning token visibility by provider:
     #   anthropic   — visible via native SDK thinking blocks (requires llm_thinking_enabled=true)
