@@ -72,9 +72,11 @@ Current behavior:
 
 - Hydrates persisted turns from `GET .../conversation` into assistant-ui `initialMessages`.
 - Sends only the latest user message to `POST .../chat` with the current `conversation_id`.
-- Reads SSE events from `apps/web/lib/api.ts` and maps `thinking` chunks to assistant-ui `reasoning` parts.
+- Reads SSE events from `apps/web/lib/api.ts` and maps `status`, `thinking`, `tool_call`, and `tool_result` into ordered assistant-ui data parts.
+- Rehydrates persisted `reasoning_parts` as ordered assistant-ui data parts so reopened chats keep thinking/tool/result boundaries instead of flattening into one reasoning block.
 - Maps streamed visible tokens to assistant-ui text parts.
 - Stores the returned `conversation_id` for later turns.
+- Applies `mastery_update` from the final SSE event so the graph/concept UI can update immediately after tutor turns that change state.
 
 The page wraps the chat panel in `<AssistantRuntimeProvider runtime={runtime}>` and renders owned thread/message/composer UI using assistant-ui primitives.
 
@@ -87,10 +89,14 @@ For a responsive Socratic experience, `POST /api/workspaces/{workspace_id}/trail
 The components in `apps/web/components/assistant-ui/` and `apps/web/app/trails/[id]/components/TutorPanel.tsx` are plain React/Tailwind files we fully own. CoLearni-specific customisations include:
 
 - **Tutor mode badge**: display the active mode (`socratic`, `direct`, `repair`, `quiz_prompt`, `explore`) on assistant messages.
+- `free_explore` is also a valid tutor mode, but it is mastery-gated and may be rare in the current MVP.
 - **Concept context header**: show the concept title and level above the thread.
 - **Markdown/math/code renderer**: `MarkdownText` uses assistant-ui markdown primitives with `remark-gfm`, `remark-math`, `rehype-katex`, fenced `mermaid` rendering, copyable code blocks, and preprocessing for both `$...$` and TeX `\(...\)`/`\[...\]` math delimiters.
 - **Concept-level source chips**: render available source links in the tutor header. True per-message `Sources` parts are deferred until the backend emits answer-level citation parts.
 - **Mastery signal**: surface a "Ready to level up?" prompt inside the thread when the tutor mode shifts to `quiz_prompt`.
+- **Reasoning view toggle**: default to a learner-safe summary and allow an explicit full-trace toggle, persisted in `localStorage` as `colearni.reasoningView`.
+
+Hidden internal tool turns used by the backend's gated tutor flow are not rendered in the frontend. The public conversation history endpoint only returns visible user/assistant messages.
 
 ### Tutor UI Roadmap
 
@@ -109,6 +115,10 @@ Later, once tutor/tool flows are more agentic:
 - `Context Display`
 - `Directive Text`
 - `ToolGroup`
+
+AssistantModal evaluation:
+
+- Keep the current concept side panel for the MVP. `AssistantModal` is a floating global popover pattern, while CoLearni's tutor is concept-scoped, shares state with the concept sheet, and needs the graph-side context header. Revisit `AssistantModal` only if a global cross-Trail assistant is added later.
 
 Artifact roadmap:
 

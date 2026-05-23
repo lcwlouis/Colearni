@@ -33,11 +33,10 @@ Front-matter fields:
 ```text
 backend/app/agents/prompts/
   trail_generation.v1.md
-  tutor_socratic.v2.md
-  tutor_direct.v2.md
-  tutor_repair.v2.md
-  tutor_explore.v2.md
-  tutor_mode_classifier.v2.md
+  tutor_base.v1.md
+  tutor_direct_instructions.v1.md
+  tutor_free_explore_instructions.v1.md
+  tutor_locked_mode.v1.md
   quiz_generation.v1.md
   quiz_grader.v1.md
   research_query.v1.md
@@ -49,13 +48,12 @@ backend/app/agents/prompts/
 | Task | File | Description |
 |---|---|---|
 | `trail_generation` | `trail_generation.v1.md` | Generate a 10–30 node concept graph from a topic/goal/depth |
-| `tutor_socratic` | `tutor_socratic.v2.md` | Socratic mode: ask one focused guiding question |
-| `tutor_direct` | `tutor_direct.v2.md` | Direct mode: explain clearly, then check understanding |
-| `tutor_repair` | `tutor_repair.v2.md` | Repair mode: address misconception, give hint, invite retry |
-| `tutor_explore` | `tutor_explore.v2.md` | Explore mode: discuss adjacent topics and applications |
-| `tutor_mode_classifier` | `tutor_mode_classifier.v2.md` | Classify which tutor mode to use for a learner message |
+| `tutor_base` | `tutor_base.v1.md` | Single base tutor prompt for Socratic, repair, quiz_prompt, and bounded explore turns |
+| `tutor_direct_instructions` | `tutor_direct_instructions.v1.md` | Mastery-gated direct explanation instructions |
+| `tutor_free_explore_instructions` | `tutor_free_explore_instructions.v1.md` | Mastery-gated broader exploration instructions |
+| `tutor_locked_mode` | `tutor_locked_mode.v1.md` | Fallback instructions when a gated tutor mode is still locked |
 | `quiz_generation` | `quiz_generation.v1.md` | Generate a level-up or practice quiz from mastery_check_labels |
-| `quiz_grader` | `quiz_grader.v1.md` | Grade a short-answer quiz response; return score and feedback |
+| `quiz_grader` | `quiz_grader.v1.md` | Grade a mixed-format quiz response and return score plus feedback |
 | `research_query` | `research_query.v1.md` | Generate search queries for a topic/concept |
 | `research_select` | `research_select.v1.md` | Evaluate and rank candidate sources for inclusion in research trace |
 
@@ -137,71 +135,60 @@ If validation fails, attempt one repair call with the validation errors appended
 
 ---
 
-### `tutor_mode_classifier.v2.md`
+### `tutor_base.v1.md`
 
 **Template variables:**
 - `learner_message` — the raw learner input
-- `concept_title` — current concept
+- `concept` — current concept plus level
+- `concept_level` — umbrella/topic/subtopic/granular
+- `prerequisites` — prerequisite titles
+- `contained_nodes` — contained concept titles
+- `containing_nodes` — broader containing concept titles
+- `application_nodes` — application-node titles
+- `related_nodes` — related concept titles
 - `mastery_status` — current mastery status
+- `bloom_target` — current concept Bloom target
+- `learning_goal` — Trail goal
+- `sources` — safe source titles/URLs/licenses
 - `conversation_summary` — brief summary of recent turns
+- `recent_turns` — last N conversation messages
 
-**Expected output:**
+**Expected output:** first line is a control tag, followed by visible text when applicable.
 
-```json
-{
-  "mode": "socratic | direct | repair | quiz_prompt | explore",
-  "reason": "one sentence explanation"
-}
+```text
+<mode name="socratic" />
+<mode name="repair" />
+<mode name="quiz_prompt" />
+<mode name="explore" />
+<tool name="get_tutor_instructions" mode="direct" />
+<tool name="get_tutor_instructions" mode="free_explore" />
 ```
 
-**Mode selection logic (guide for the LLM):**
+**Mode selection logic:**
 - `socratic` — default; learner is engaging normally
-- `direct` — learner explicitly asks "explain", "just tell me", "give me the answer", "summarize", or to be shown an example directly; generic first-turn content questions should usually remain Socratic
+- `direct` — learner explicitly asks "explain", "just tell me", "give me the answer", "summarize", "summarise", or to be shown an example directly; requested through the internal tool when mastery allows it
 - `repair` — learner answer contains a clear misconception or is incorrect
 - `quiz_prompt` — learner says they feel ready or asks to be tested
-- `explore` — learner asks about applications, real-world use, why it matters, or adjacent topics
+- `explore` — learner asks about applications, real-world use, why it matters, or adjacent topics while staying bounded to the current Trail
+- `free_explore` — learner explicitly wants to go broader than the normal bounded explore response; requested through the internal tool when mastery allows it
 
 ---
 
-### `tutor_socratic.v2.md`
+### `tutor_direct_instructions.v1.md`
 
-**Template variables:**
-- `concept` — ConceptNode JSON
-- `concept_level` — umbrella/topic/subtopic/granular
-- `prerequisites` — list of prerequisite concept titles
-- `contained_nodes` — list of contained concept titles
-- `containing_nodes` — list of broader concepts that contain the current concept
-- `mastery_status` — current status
-- `bloom_target` — target Bloom level for this concept
-- `learning_goal` — Trail goal statement
-- `sources` — list of available source titles (no content, just titles and URLs)
-- `conversation_summary` — summary of recent turns (see context management)
-- `recent_turns` — last N conversation messages
-- `learner_message` — current message
-
-**Output:** Markdown-friendly plain text Socratic question or response (streamed). One focused question. Inline LaTeX is allowed when it makes notation clearer.
+Uses the same concept/context variables as `tutor_base`. Output is instruction text returned by the internal `get_tutor_instructions(mode)` tool, telling the continuation call how to answer in direct mode.
 
 ---
 
-### `tutor_direct.v2.md`
+### `tutor_free_explore_instructions.v1.md`
 
-Same variables as `tutor_socratic`. Output is a direct explanation followed by a short check-in question. Short Markdown structure is allowed. LaTeX and small Mermaid blocks are allowed when they materially improve clarity.
+Uses the same concept/context variables as `tutor_base`. Output is instruction text returned by the internal tool for broader, mastery-gated exploration.
 
-Prompted LaTeX should prefer `$...$` and `$$...$$`; the frontend renderer also accepts TeX `\(...\)` and `\[...\]` delimiters for robustness.
+### `tutor_locked_mode.v1.md`
 
----
-
-### `tutor_repair.v2.md`
-
-Same variables as `tutor_socratic`. Output names the likely misconception, gives a hint, and invites the learner to try again. Short Markdown structure is allowed. LaTeX and small Mermaid blocks are allowed when they materially improve clarity.
+Uses the same concept/context variables plus `requested_mode` and `fallback_mode`. Output is instruction text for the continuation call when the learner requests a gated mode that is still locked.
 
 ---
-
-### `tutor_explore.v2.md`
-
-**Additional variable:** `application_nodes` — list of application-edge concepts.
-
-Output explores adjacent topics and applications, anchored to the current Trail. Stays bounded unless the learner explicitly asks to go broader. Short Markdown structure is allowed. LaTeX and small Mermaid blocks are allowed when they materially improve clarity.
 
 ---
 
@@ -220,15 +207,19 @@ Output explores adjacent topics and applications, anchored to the current Trail.
   "questions": [
     {
       "id": "q1",
-      "type": "explain | apply | compare",
+      "type": "multiple_choice | short_answer | long_answer",
       "prompt": "string",
-      "mastery_label": "explain_in_own_words"
+      "mastery_label": "explain_in_own_words",
+      "difficulty": "light | standard | challenge",
+      "options": ["string", "string", "string"]
     }
   ]
 }
 ```
 
-A standard level-up card has 2–4 questions covering explain, apply, and compare types. Questions are generated from abstract labels only — never from private source-derived content.
+Practice cards should have 2-3 questions. Level-up cards should have 2-4 questions.
+
+Questions are generated from abstract labels only — never from private source-derived content. The generator should choose the lowest-friction question type that still checks the required mastery label, and only include `options` for `multiple_choice` questions.
 
 ---
 
@@ -237,7 +228,7 @@ A standard level-up card has 2–4 questions covering explain, apply, and compar
 **Template variables:**
 - `concept_title` — concept being checked
 - `bloom_target` — target Bloom level
-- `questions` — list of QuizQuestion objects
+- `questions` — list of mixed-format QuizQuestion objects
 - `answers` — list of `{question_id, answer}` objects
 
 **Expected output:**

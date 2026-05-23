@@ -39,6 +39,7 @@ Database
   - concept_source_links
   - mastery_records
   - quiz_attempts
+  - quiz_drafts
   - conversation/session tables
 
 Private Storage
@@ -180,6 +181,14 @@ quiz_attempts
 - score              (0.0–1.0)
 - created_at
 
+quiz_drafts
+- id
+- concept_id
+- quiz_type          (level_up | practice)
+- questions_json     (server-owned ungraded card snapshot)
+- created_at
+- updated_at
+
 conversations
 - id
 - workspace_id
@@ -191,10 +200,12 @@ conversations
 conversation_turns
 - id
 - conversation_id
-- role               (user | assistant)
+- role               (user | assistant | tool)
+- kind               (visible | tool_call | tool_result)
 - content
 - reasoning          (optional provider-exposed thinking text for UI rehydration)
-- mode               (socratic | direct | repair | quiz_prompt | explore)
+- reasoning_parts    (optional ordered status/thinking/tool trace for UI rehydration)
+- mode               (socratic | direct | repair | quiz_prompt | explore | free_explore)
 - turn_index         (sequential, used for context window management)
 - created_at
 
@@ -205,6 +216,8 @@ conversation_summaries
 - turns_covered_to   (turn_index of last turn included in this summary)
 - created_at
 ```
+
+`conversation_summaries` is currently schema-only plumbing. Automatic summary generation is deferred, so prompt context still falls back to recent raw turns unless an older summary row already exists.
 
 `concept_level` is required and must be one of:
 
@@ -234,8 +247,10 @@ Validation must enforce node schema, concept level values, edge schema, duplicat
 ```text
 User selects concept
 -> backend loads concept, nearby graph context, mastery state, safe sources
--> tutor chooses mode
--> tutor responds Socratically
+-> tutor runs one base prompt for Socratic / repair / bounded explore behaviour
+-> tutor may request a mastery-gated instruction tool for direct or free_explore mode
+-> tutor may emit public `status` / `thinking` / `tool_call` / `tool_result` trace events and persist ordered `reasoning_parts`
+-> tutor streams the final response
 -> mastery service may update progress after explicit checks
 ```
 
@@ -377,6 +392,7 @@ Generate once. If parsing or validation fails, call `repair()` exactly once. Rai
 | `LLM_THINKING_ENABLED` | Enable extended thinking/reasoning (default: `false`). Gracefully skipped if model doesn't support it. |
 | `LLM_THINKING_BUDGET` | Anthropic: `budget_tokens` for extended thinking, min 1024 (default: `8000`) |
 | `LLM_THINKING_LEVEL` | OpenAI o-series: `reasoning_effort` — `low`, `medium`, `high` (default: `medium`) |
+| `LLM_TUTOR_MAX_TOKENS` | Requested tutor answer budget per call (default: `4096`). Tune this independently from provider reasoning settings. |
 
 ## Frontend Graph Library: React Flow
 

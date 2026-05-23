@@ -99,8 +99,12 @@ Photography Exposure Triangle
 - Tutor can enter direct mode.
 - Tutor can enter repair mode.
 - Tutor can enter explore mode.
+- Tutor can unlock free_explore after mastery and falls back cleanly before mastery.
+- Tutor stream emits `status`, `tool_call`, and `tool_result` events when gated tool continuation is used.
+- Reopened assistant history preserves ordered `reasoning_parts` instead of flattening tool/thinking traces.
 - Tutor does not reference missing/private sources.
 - Prompt builder excludes public-export-stripped content from public contexts.
+- Hidden tool-call history does not leak into the public conversation history API.
 - User-visible sourced claims cite allowed evidence or refuse in strict grounded mode.
 
 Manual tests:
@@ -116,10 +120,13 @@ Manual tests:
 ## Mastery Tests
 
 - Quiz generated from mastery labels.
+- Quiz supports `multiple_choice`, `short_answer`, and `long_answer` questions.
 - Correct answer updates concept to mastered.
 - Weak answer sets needs_review.
 - Wrong answer gives specific feedback.
+- Grade responses include per-question feedback.
 - Quiz attempt is stored.
+- Unsubmitted quiz drafts are reused unless `force_new` is requested.
 - Practice grading stores an attempt but does not update mastery.
 - User can retry.
 - Graph UI reflects mastery status.

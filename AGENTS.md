@@ -4,10 +4,13 @@
 
 CoLearni was reset to start fresh for the actual MVP. Treat the docs in `docs/` as the current source of truth. Historical README/architecture assumptions should not be carried forward unless they match the rebuild docs.
 
+When the current tutor/quiz implementation has moved ahead of older phase wording, `docs/CURRENT_VARIANT.md` is the implementation overlay and should be treated as authoritative until the stale phase/domain doc is updated.
+
 ## Read These First
 
 - `docs/CODEX.md`
 - `docs/REBUILD_PLAN.md`
+- `docs/CURRENT_VARIANT.md`
 - `docs/ARCHITECTURE.md`
 - `docs/API.md`
 - `docs/PROMPTS.md`

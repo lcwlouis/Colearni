@@ -62,9 +62,14 @@ Update rules:
 - Mark deferred work explicitly instead of leaving stale requirements that imply it is done.
 - Keep detailed contracts in `docs/API.md`, `docs/FRONTEND.md`, and domain docs; use this file for status, sequence, and phase-level scope.
 
+Implementation overlay:
+
+- `docs/CURRENT_VARIANT.md` records the current tutor/quiz implementation details and deferred items that landed after the original phase wording.
+- If a phase description here drifts from shipped behavior, follow `docs/CURRENT_VARIANT.md` first and update the stale phase text in the same change.
+
 ## Current Build Snapshot
 
-Last updated: 2026-05-19.
+Last updated: 2026-05-23.
 
 Implemented:
 
@@ -74,14 +79,15 @@ Implemented:
 - Trail list/detail/delete.
 - Per-Trail graph viewer using `@xyflow/react` plus `dagre`, search/filter controls, side-panel concept details, and Start Learning flow.
 - Concept detail API with graph context and safe source metadata.
-- Tutor backend for one concept with conversation persistence, thin FastAPI routes, prompt registry, mode classifier, SSE streaming, provider thinking events, and optional persisted assistant reasoning traces.
-- Tutor frontend using assistant-ui `LocalRuntime`, SSE adapter, persisted history hydration, reasoning trace rendering, Markdown/GFM, KaTeX math, fenced `mermaid` diagrams, copyable code blocks, and concept-level source chips.
-- Mastery records and quiz attempts persisted in the DB, with real concept/trail mastery reads, first tutor turn `not_started -> learning`, level-up/practice quiz generation from `mastery_check_labels`, grading, and mastery updates on level-up pass/fail only.
+- Tutor backend for one concept with conversation persistence, thin FastAPI routes, prompt registry, single-agent mode selection, mastery-gated direct/free_explore tool continuation, SSE streaming, provider thinking events, public `status` / `tool_call` / `tool_result` trace events, hidden persisted tool turns for prompt replay, ordered `reasoning_parts`, and one retry without provider thinking when reasoning produces no visible answer.
+- Tutor frontend using assistant-ui `LocalRuntime`, concept-side-panel chat, persisted history hydration, ordered reasoning/tool trace rehydration, learner-safe reasoning-summary default with full-trace toggle, Markdown/GFM, KaTeX math, fenced `mermaid` diagrams, copyable code blocks, and concept-level source chips.
+- Mastery records, quiz attempts, and quiz drafts persisted in the DB, with real concept/trail mastery reads, first tutor turn `not_started -> learning`, tutor-stream mastery updates, mixed-format level-up/practice quiz generation from `mastery_check_labels`, per-question grading feedback, backend draft reuse with `force_new` refresh, duplicate-request protection (frontend dedupe plus backend advisory lock), practice retry-in-place, and mastery updates on level-up pass/fail only.
 - LLM client support for OpenAI Responses API, OpenAI-compatible providers including OpenRouter/DeepSeek/Gemini/custom, and optional Anthropic SDK.
 
 Not implemented yet:
 
 - True per-message citation/source parts and quote support.
+- Automatic conversation summarisation and provider-native tool calling.
 - Guided agentic graph progression across multiple concepts/topics.
 - Containerized file-search/source-inspection tooling for agentic source understanding.
 - Trail Pack export/import, research trace APIs, hydration, durable generation jobs, dark mode, deployment, auth, and SaaS features.
@@ -326,7 +332,7 @@ Acceptance criteria:
 
 ## Phase 4A: Tutor Chat Backend For One Concept
 
-Status: implemented for the local-ready slice; mastery side effects and automatic summarisation remain deferred.
+Status: implemented for the local-ready slice; the tutor now uses a single base prompt plus mastery-gated tool continuation, ordered public reasoning/tool traces, and empty-completion retry, while automatic summarisation remains deferred.
 
 Goal: make the first compelling learning loop available through the API.
 
@@ -336,7 +342,7 @@ Implementation scope:
 - Add `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversation`.
 - Add conversation persistence tables for conversations, turns, and summaries.
 - Build tutor context from current concept, nearby graph context, mastery state, learning goal, safe source links, and conversation summary.
-- Support tutor modes: `socratic`, `direct`, `repair`, `quiz_prompt`, and `explore`.
+- Support tutor modes: `socratic`, `direct`, `repair`, `quiz_prompt`, `explore`, and mastery-gated `free_explore`.
 - Return a **streaming SSE response** from the chat endpoint so tokens render incrementally.
 - Keep route code thin; prompt assembly, mode selection, streaming, and persistence belong in services.
 
@@ -350,18 +356,21 @@ Requirements:
 - The tutor can say it lacks source material.
 - User-visible sourced claims include citations or refuse in strict grounded mode.
 - Conversation history is persisted and retrievable for the selected concept.
-- Provider-exposed `thinking` chunks stream to the client and are persisted as optional assistant `reasoning` for history rehydration.
-- The first backend slice may defer mastery side effects until Phase 5 if `mastery_records` do not exist yet.
+- Provider-exposed `thinking` chunks, tutor `status` milestones, and public `tool_call` / `tool_result` events stream to the client. Assistant turns persist optional full `reasoning` plus ordered `reasoning_parts` for history rehydration, while raw tool turns stay internal.
+- `mode` is emitted before visible `token` events, but gated-mode `status` and `tool_*` activity may appear earlier.
+- If reasoning consumes the completion without visible text, retry once without provider thinking before failing.
+- Tutor-side mastery effects are implemented in the current slice: first tutor turn sets `learning`, and a tutor retry from `needs_review` resets the concept to `learning`.
 
 Tests:
 
 - Prompt builder includes current concept.
 - Prompt builder includes mastery state.
 - Prompt builder excludes private sources from public context.
-- Mode classifier returns valid mode.
-- Chat endpoint streams events in the documented order: `mode`, `token`, `done`.
+- Tutor stream emits a valid mode before visible tokens.
+- Chat endpoint emits documented `status`, `thinking`, `tool_call`, `tool_result`, `mode`, `token`, and `done` events with the documented relative ordering guarantees.
 - Conversation turns are stored and retrieved in chronological order.
-- Optional assistant reasoning traces are stored and returned in conversation history.
+- Optional assistant reasoning traces and ordered `reasoning_parts` are stored and returned in conversation history.
+- Hidden tutor tool-call history is stored for prompt replay but excluded from the public conversation history API.
 - Manual tests cover direct answers, incorrect answers, examples, ML links, and unrelated questions.
 
 Acceptance criteria:
@@ -370,7 +379,7 @@ Acceptance criteria:
 
 ## Phase 4B: Tutor Chat Frontend
 
-Status: implemented for the local-ready tutor panel; true per-message sources, quotes, artifacts, and broader assistant-ui add-ons remain deferred.
+Status: implemented for the local-ready tutor panel; the tutor stays in the concept side panel with learner-safe reasoning summaries by default, while true per-message sources, quotes, artifacts, and broader assistant-ui add-ons remain deferred.
 
 Goal: make the tutor usable from the graph/concept UI.
 
@@ -388,14 +397,17 @@ Requirements:
 - Runtime requests include workspace id, Trail id, concept id, current message, and conversation id when present.
 - Streaming tokens appear incrementally in the chat UI.
 - Persisted conversation history hydrates into assistant-ui messages when a concept is reopened.
+- Rehydrated assistant traces use `reasoning_parts` first so ordered `status` / `thinking` / `tool_call` / `tool_result` boundaries survive refresh.
+- The learner-facing reasoning UI defaults to a compact summary with an explicit full-trace toggle.
 - Tutor Markdown supports GFM, KaTeX math, fenced code blocks, and fenced `mermaid` diagrams.
 
 Tests:
 
 - Runtime adapter sends the correct workspace, Trail, concept, message, and conversation id data to the backend.
+- Runtime rehydration preserves ordered `reasoning_parts` instead of flattening them into one reasoning block.
 - Empty/loading/error states render clearly.
 - Markdown/math/Mermaid/code rendering has focused test coverage.
-- Manual checks cover Socratic, direct, repair, quiz prompt, and explore interactions.
+- Manual checks cover Socratic, direct, repair, quiz prompt, explore, and ordered reasoning/tool trace interactions.
 
 Acceptance criteria:
 
@@ -404,11 +416,14 @@ Acceptance criteria:
 
 ## Phase 5: Mastery + Level-Up Quiz
 
+Status: implemented for the current MVP slice, including tutor-side mastery updates, mixed-format quizzes, backend quiz drafts with `force_new`, duplicate-request hardening, per-question grading feedback, practice retry behavior, and mastery-gated tutor direct/free-explore modes.
+
 Goal: make mastery a motivating product loop.
 
 Implementation scope:
 
 - Add `mastery_records` and `quiz_attempts`.
+- Add server-side `quiz_drafts` so ungraded quiz cards can be reopened and reused.
 - Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/level-up`.
 - Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/grade`.
 - Generate a short level-up card from mastery check labels.
@@ -418,16 +433,25 @@ Requirements:
 - Passing updates concept status to `mastered`.
 - Failing sets status to `needs_review`.
 - Quiz attempts are stored.
+- Unsubmitted quiz cards are backend-owned and portable across devices until grading or explicit `force_new` refresh.
+- Quiz cards can mix `multiple_choice`, `short_answer`, and `long_answer` questions with adaptive `light` / `standard` / `challenge` difficulty.
 - Feedback is specific and useful.
 - The learner can retry.
 - The tutor cannot mark mastery without a quiz or explicit mastery policy.
+- Tutor direct explanation and broader free exploration are mastery-gated to `mastered`, while normal Socratic / repair / bounded explore behaviour remains available earlier.
+- Tutor-side internal tool history may be persisted for prompt replay but must not leak through the public conversation API.
+- Duplicate quiz-generation requests must safely reuse one draft rather than producing competing cards.
 
 Tests:
 
 - Passing answer updates mastery.
 - Failing answer does not mark mastered.
 - Quiz attempt is stored.
+- Quiz draft is reused unless `force_new` is requested.
+- Mixed question types render and grade correctly.
 - Graph status changes after mastery update.
+- Per-question quiz feedback is returned.
+- Hidden tutor tool-call history is excluded from public conversation history.
 - Manual tests include good, vague, wrong, and gaming attempts.
 
 Acceptance criteria:

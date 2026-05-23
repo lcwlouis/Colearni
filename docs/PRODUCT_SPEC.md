@@ -89,10 +89,12 @@ Expected behavior:
 
 - The tutor defaults to Socratic mode.
 - The tutor asks one useful question at a time.
-- The tutor can switch to direct explanation when the learner explicitly asks.
+- The tutor can switch to direct explanation when the learner explicitly asks, but direct explanation is mastery-gated until the concept is `mastered` in the current MVP.
 - The tutor repairs confusion when the learner is stuck or incorrect.
+- The tutor can explore applications in a bounded way before mastery and can unlock broader free exploration after mastery.
 - The tutor uses only safe scoped context: current concept, nearby graph nodes, mastery state, learning goal, and allowed sources.
 - In strict grounded mode, user-visible sourced claims include citations or the tutor refuses.
+- If reasoning traces are shown, the learner UI defaults to a compact summary and only shows the full trace when explicitly requested.
 
 ## User Story: Level Up
 
@@ -101,10 +103,11 @@ As a learner, I can complete a short mastery check to mark a concept as mastered
 Expected behavior:
 
 - The level-up card is generated from mastery check labels.
-- A typical check includes explaining in the learner's own words, applying a small example, and checking a misconception or comparison.
+- A typical check uses 2-4 mixed-format questions (`multiple_choice`, `short_answer`, `long_answer`) chosen from mastery labels, usually keeping only one or two longer explanation/application prompts.
 - Passing updates the concept to `mastered`.
 - Failing sets the concept to `needs_review` and gives specific feedback.
 - The learner can retry.
+- An unfinished quiz card reopens from a backend-owned draft until it is graded or explicitly refreshed.
 
 ## User Story: Export a Trail Pack
 

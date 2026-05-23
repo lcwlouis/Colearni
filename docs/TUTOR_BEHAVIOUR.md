@@ -27,6 +27,7 @@ direct
 repair
 quiz_prompt
 explore
+free_explore
 ```
 
 ## Socratic
@@ -40,6 +41,8 @@ Use when the learner is starting or working through a concept. Ask focused quest
 Used when the learner explicitly asks for a direct explanation, summary, or example.
 
 Even in direct mode, the tutor should check understanding afterward with a short question or prompt.
+
+For the current MVP, `direct` is mastery-gated. The tutor should try to preserve the learner's intent when the gate is not met, but it must fall back to normal Socratic coaching rather than exposing the direct-mode instructions.
 
 ## Repair
 
@@ -62,6 +65,12 @@ Quiz prompts should be generated from mastery check labels and scoped to the cur
 Used when the learner asks about adjacent topics, applications, or why the concept matters.
 
 Explore mode may reference containing/contained nodes and application nodes, but should stay anchored to the current Trail unless the learner explicitly asks to go broader.
+
+## Free Explore
+
+Used for broader curiosity after the learner has already demonstrated mastery. This mode can range further than the bounded `explore` mode, but it should still stay educational and coherent rather than drifting into arbitrary trivia.
+
+For the current MVP, `free_explore` is mastery-gated to `mastered`.
 
 ## Prompt Context
 
@@ -113,13 +122,20 @@ It must not invent private source access or imply it has read sources that are n
 
 The tutor chat endpoint streams via **Server-Sent Events (SSE)**. See `docs/API.md` for the full streaming spec.
 
-Event sequence per turn:
-1. `mode` — emitted first with the selected TutorMode.
-2. `thinking` — optional reasoning chunks when the provider exposes them.
-3. `token` — one event per streamed visible token from the LLM.
-4. `done` — final event with the assembled `ConversationMessage` and `conversation_id`.
+Relative ordering guarantees per turn:
 
-If provider-exposed reasoning is available, it may also be stored on the assistant turn so the frontend can rehydrate the reasoning trace after refresh.
+- `status`, `thinking`, `tool_call`, and `tool_result` are optional and may appear before or between other events.
+- `mode` is emitted before the first visible `token`.
+- `done` ends a successful turn with the assembled `ConversationMessage` and `conversation_id`.
+- `error` ends a failed turn.
+
+The service may also persist hidden internal tool-call/tool-result turns between the user and assistant turns so prior gated-mode decisions can be replayed in later prompts. Those internal turns must not appear in the public conversation history API.
+
+If provider-exposed reasoning is available, it may also be stored on the assistant turn. The full text is kept in `reasoning`; ordered learner-visible trace parts are kept in `reasoning_parts` so the frontend can rehydrate thinking/tool boundaries after refresh.
+
+Public `tool_result` previews must stay sanitized. They are for learner-safe trace/debug UI and must not expose raw internal tutor instructions.
+
+If a reasoning-enabled attempt ends with no visible tutor text, the service should retry once without provider thinking and emit `retrying_without_thinking` as a status milestone.
 
 If the LLM call fails, emit `error` and close the stream. The service must not emit partial tokens after an error.
 
@@ -128,12 +144,13 @@ If the LLM call fails, emit `error` and close the stream. The service must not e
 Each concept has one conversation per workspace. The conversation is persisted in the `conversations` and `conversation_turns` tables.
 
 Context window rules:
-- Include the last **10 turns** (user + assistant pairs) in the prompt.
-- After **20 total turns** in a conversation, generate a summary of the earliest turns and store it in `conversation_summaries`. Remove those turns from the active prompt context.
+- Include the last **10 visible turns** (user + assistant only) in the prompt.
+- If internal tool-call/tool-result turns occurred within that retained visible window, include those tool turns too so prior gated-mode context remains replayable.
+- Automatic conversation summarisation remains deferred in the current implementation. The service still reads the most recent `conversation_summaries` row if one already exists, but it does not generate new summaries yet.
 - Always include the summary (if present) at the start of the context block.
 - Context included in prompt: summary (if any) → recent turns → current message.
 
-This keeps token costs bounded and the prompt focused on recent reasoning.
+This keeps token costs bounded and the prompt focused on recent reasoning while summary generation remains future work.
 
 ## Tone
 

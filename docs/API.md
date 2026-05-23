@@ -35,7 +35,7 @@ NodeType = Literal["concept", "skill", "misconception", "example"]
 RelationType = Literal["prerequisite", "contains", "application", "related"]
 
 # Tutor modes
-TutorMode = Literal["socratic", "direct", "repair", "quiz_prompt", "explore"]
+TutorMode = Literal["socratic", "direct", "repair", "quiz_prompt", "explore", "free_explore"]
 
 # Source origins
 SourceOrigin = Literal["research_agent", "user_upload", "manual", "system"]
@@ -55,6 +55,22 @@ MaxNodes = int  # 10 <= max_nodes <= 100
 
 # Quiz type
 QuizType = Literal["level_up", "practice"]
+
+# Quiz question type
+QuizQuestionType = Literal["multiple_choice", "short_answer", "long_answer"]
+
+# Quiz question difficulty
+QuizQuestionDifficulty = Literal["light", "standard", "challenge"]
+
+# Tutor stream status
+TutorStreamStatus = Literal[
+    "thinking",
+    "calling_tool",
+    "tool_called",
+    "tool_complete",
+    "responding",
+    "retrying_without_thinking",
+]
 ```
 
 ## Schemas
@@ -147,11 +163,15 @@ When no DB row exists yet, the API synthesizes a default `MasteryRecord` with `s
 ```json
 {
   "id": "string (stable within a card)",
-  "type": "explain | apply | compare",
+  "type": "multiple_choice | short_answer | long_answer",
   "prompt": "string",
-  "mastery_label": "string"
+  "mastery_label": "string",
+  "difficulty": "QuizQuestionDifficulty",
+  "options": ["string"]
 }
 ```
+
+`options` is only present for `multiple_choice` questions. New API responses emit only the current question types above; older persisted `explain` / `apply` / `compare` snapshots are normalized to `long_answer` when read back through the API.
 
 ### LevelUpCard
 
@@ -163,6 +183,16 @@ When no DB row exists yet, the API synthesizes a default `MasteryRecord` with `s
 }
 ```
 
+### QuizGenerateRequest
+
+```json
+{
+  "force_new": "bool (default false)"
+}
+```
+
+Quiz generation reuses the existing backend draft for the same `(concept_id, quiz_type)` unless `force_new` is `true`. Drafts are cleared after grading.
+
 ### GradeResult
 
 ```json
@@ -170,6 +200,13 @@ When no DB row exists yet, the API synthesizes a default `MasteryRecord` with `s
   "passed": "bool",
   "score": "float (0.0–1.0)",
   "feedback": "string",
+  "per_question": [
+    {
+      "question_id": "string",
+      "score": "float (0.0–1.0)",
+      "feedback": "string"
+    }
+  ],
   "mastery_status": "MasteryStatus",
   "attempt_id": "uuid"
 }
@@ -199,7 +236,17 @@ When no DB row exists yet, the API synthesizes a default `MasteryRecord` with `s
   "role": "user | assistant",
   "content": "string",
   "reasoning": "string | null",
-  "mode": "TutorMode",
+  "reasoning_parts": [
+    {
+      "kind": "status | thinking | tool_call | tool_result",
+      "status": "TutorStreamStatus | null",
+      "text": "string | null",
+      "name": "string | null",
+      "mode": "TutorMode | null",
+      "result": "string | null"
+    }
+  ],
+  "mode": "TutorMode | null",
   "created_at": "ISO 8601 datetime"
 }
 ```
@@ -481,7 +528,11 @@ Get a concept with its graph context and mastery state.
 
 Generate a level-up quiz card for a concept. Cards are generated from `mastery_check_labels` and never include private/source-derived content.
 
+**Request body (optional):** `QuizGenerateRequest`
+
 **Response 200:** `LevelUpCard` (with `quiz_type: "level_up"`)
+
+If an ungraded level-up draft already exists for the concept, the backend returns that stored card unless `force_new` is `true`.
 
 ---
 
@@ -493,14 +544,7 @@ Grade a level-up quiz attempt. If passed, updates mastery to `mastered`. If fail
 
 ```json
 {
-  "questions": [
-    {
-      "id": "string",
-      "type": "explain | apply | compare",
-      "prompt": "string",
-      "mastery_label": "string"
-    }
-  ],
+  "questions": ["QuizQuestion"],
   "answers": [
     {"question_id": "string", "answer": "string"}
   ]
@@ -511,6 +555,7 @@ Grade a level-up quiz attempt. If passed, updates mastery to `mastered`. If fail
 
 Note: This endpoint only updates mastery for `level_up` attempts. See `/practice/grade` for practice attempts.
 The client must send back the `questions` snapshot from the generated card so grading is deterministic and the graded attempt stores the exact card that was answered.
+The matching backend draft is deleted after successful grading.
 
 ---
 
@@ -518,7 +563,11 @@ The client must send back the `questions` snapshot from the generated card so gr
 
 Generate a practice quiz card. Identical to level-up card generation but marks the card as `quiz_type: "practice"`.
 
+**Request body (optional):** `QuizGenerateRequest`
+
 **Response 200:** `LevelUpCard` (with `quiz_type: "practice"`)
+
+If an ungraded practice draft already exists for the concept, the backend returns that stored card unless `force_new` is `true`.
 
 ---
 
@@ -530,14 +579,7 @@ Grade a practice quiz attempt. Stores the attempt and returns feedback but **nev
 
 ```json
 {
-  "questions": [
-    {
-      "id": "string",
-      "type": "explain | apply | compare",
-      "prompt": "string",
-      "mastery_label": "string"
-    }
-  ],
+  "questions": ["QuizQuestion"],
   "answers": [
     {"question_id": "string", "answer": "string"}
   ]
@@ -553,6 +595,10 @@ Grade a practice quiz attempt. Stores the attempt and returns feedback but **nev
 #### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat`
 
 Send a message to the Socratic tutor for a concept. Returns a **Server-Sent Events (SSE)** stream.
+
+Internally the tutor may persist hidden tool-call/tool-result turns to support
+prompt replay for mastery-gated modes. Those internal turns are never returned
+by the public conversation history endpoint.
 
 **Request body:**
 
@@ -576,12 +622,32 @@ X-Accel-Buffering: no
 ```json
 { "type": "mode", "mode": "TutorMode" }
 ```
-Emitted first, before tokens, so the client knows which mode was selected.
+Emitted before visible `token` events so the client knows which mode produced the visible answer. In mastery-gated flows, `status` and `tool_*` events may appear earlier.
+
+```json
+{ "type": "status", "status": "thinking | calling_tool | tool_called | tool_complete | responding | retrying_without_thinking" }
+```
+Optional activity milestones for chain-of-thought style UI. These can appear before or between `thinking`, `mode`, and `token` events as the tutor moves through reasoning, retries, and internal tool resolution.
+
+Mode notes:
+- `socratic` is the default.
+- `repair`, `quiz_prompt`, and bounded `explore` are handled directly by the base tutor prompt.
+- `direct` and `free_explore` are mastery-gated and are only used after the tutor resolves an internal instruction tool.
+
+```json
+{ "type": "tool_call", "name": "get_tutor_instructions", "mode": "TutorMode" }
+```
+Optional public trace event showing that the tutor requested the internal instruction tool for a gated mode. `mode` here is the requested instruction mode, not necessarily the final visible tutor mode.
+
+```json
+{ "type": "tool_result", "name": "get_tutor_instructions", "mode": "TutorMode", "result": "string" }
+```
+Optional public trace event showing the sanitized result preview for that internal tool call. The `result` field is a learner-safe preview, not the raw internal instructions.
 
 ```json
 { "type": "thinking", "content": "string" }
 ```
-Optional reasoning/thinking chunks when the provider exposes them. When available, assistant turns also persist the assembled reasoning text in `ConversationMessage.reasoning` so the client can rehydrate traces after refresh.
+Optional reasoning/thinking chunks when the provider exposes them. When available, assistant turns persist the assembled full text in `ConversationMessage.reasoning` and an ordered public UI trace in `ConversationMessage.reasoning_parts` so clients can rehydrate thinking/tool boundaries after refresh.
 
 ```json
 { "type": "token", "content": "string" }
@@ -591,9 +657,18 @@ Streamed tokens as they arrive from the LLM.
 Tutor message content is Markdown. The current frontend supports GFM, KaTeX math, fenced code blocks, and fenced `mermaid` diagrams.
 
 ```json
-{ "type": "done", "conversation_id": "uuid", "message": "ConversationMessage" }
+{
+  "type": "done",
+  "conversation_id": "uuid",
+  "message": "ConversationMessage",
+  "mastery_update": {
+    "concept_id": "uuid",
+    "status": "MasteryStatus",
+    "score": "float"
+  }
+}
 ```
-Emitted once at the end. Includes the full assembled message for storage.
+Emitted once at the end. Includes the full assembled message for storage and the latest mastery state for optimistic graph updates.
 
 ```json
 { "type": "error", "code": "string", "message": "string" }
@@ -824,10 +899,10 @@ The tutor chat endpoint uses SSE. Clients should:
 
 1. Open the connection with a `POST` request (body is the chat payload).
 2. Read events line by line (`data: ...`).
-3. Handle `mode` event to update UI indicator.
-4. Optionally render `thinking` events as collapsible reasoning traces.
+3. Handle optional `status`, `thinking`, `tool_call`, and `tool_result` events as reasoning/activity UI.
+4. Handle `mode` to update the tutor-mode indicator. It arrives before visible tokens, but not necessarily before reasoning/tool activity.
 5. Accumulate `token` events to display streamed text.
-6. On `done`, persist the `conversation_id` for future turns.
+6. On `done`, persist the `conversation_id` for future turns and rehydrate from `reasoning_parts` when available.
 7. On `error`, display the message and close the connection.
 
 FastAPI implementation should use `StreamingResponse` with `media_type="text/event-stream"` and an async generator.
