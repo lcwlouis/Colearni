@@ -111,6 +111,7 @@ Required variables for the backend (document in `.env.example`):
 | `LLM_THINKING_ENABLED` | Enable extended thinking/reasoning (default: `false`). Gracefully skipped if model doesn't support it. |
 | `LLM_THINKING_BUDGET` | Anthropic: `budget_tokens` for extended thinking, min 1024 (default: `8000`) |
 | `LLM_THINKING_LEVEL` | OpenAI o-series: `reasoning_effort` — `low` \| `medium` \| `high` (default: `medium`) |
+| `LLM_TUTOR_MAX_TOKENS` | Requested tutor answer budget per call (default: `4096`) |
 | `APP_ENV` | `development` or `production` |
 | `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
 | `OBSERVABILITY_ENABLED` | `true` to enable OpenTelemetry traces (optional) |
