@@ -7,7 +7,8 @@ import { TutorPanel } from "@/app/trails/[id]/components/TutorPanel";
 import type { ConceptNode, ConversationHistoryResponse, SourceRecord } from "@/lib/types";
 
 let runtimeOptions: {
-  onMode: (mode: "socratic" | "direct" | "repair" | "quiz_prompt" | "explore") => void;
+  onMode: (mode: "socratic" | "direct" | "repair" | "quiz_prompt" | "explore" | "free_explore") => void;
+  onStatus?: (status: string | null) => void;
   onError?: (message: string) => void;
 } | null = null;
 const sendMock = vi.fn();
@@ -85,6 +86,19 @@ vi.mock("@assistant-ui/react", () => ({
         ))}
       </div>
     ),
+    ScrollToBottom: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <button type="button" className={className}>
+        {children}
+      </button>
+    ),
+    ViewportFooter: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <div className={className}>{children}</div>
+    ),
+    Suggestion: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <button type="button" className={className}>
+        {children}
+      </button>
+    ),
   },
   MessagePrimitive: {
     Root: ({ children, className }: { children: ReactNode; className?: string }) => (
@@ -107,10 +121,37 @@ vi.mock("@assistant-ui/react", () => ({
     Input: ({ submitMode: _submitMode, ...props }: Record<string, unknown>) => (
       <textarea {...props} />
     ),
-    Send: ({ children, className }: { children: ReactNode; className?: string }) => (
-      <button type="button" className={className} onClick={sendMock}>
+    Send: ({
+      children,
+      className,
+      ...props
+    }: {
+      children: ReactNode;
+      className?: string;
+      [key: string]: unknown;
+    }) => (
+      <button type="button" className={className} onClick={sendMock} {...props}>
         {children}
       </button>
+    ),
+    Cancel: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <button type="button" className={className}>
+        {children}
+      </button>
+    ),
+  },
+  ActionBarPrimitive: {
+    Root: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <div className={className}>{children}</div>
+    ),
+    Copy: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <button type="button" className={className}>{children}</button>
+    ),
+    Reload: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <button type="button" className={className}>{children}</button>
+    ),
+    Edit: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <button type="button" className={className}>{children}</button>
     ),
   },
   useThread: vi.fn((selector) =>
@@ -124,17 +165,25 @@ const getConversationMock = vi.mocked(await import("@/lib/api")).getConversation
 interface MockMessage {
   id: string;
   role: "user" | "assistant";
-  content: Array<{ type: "text" | "reasoning"; text: string }>;
+  content: Array<
+    | { type: "text" | "reasoning"; text: string }
+    | { type: "data"; name: string; data: Record<string, unknown> }
+  >;
   status?: { type: "running" | "complete" };
 }
 
-type MockPart = { type: "group-reasoning"; indices: number[]; status: { type: "running" | "complete" } } | MockMessage["content"][number];
+type MockPart =
+  | { type: "group-chain-of-thought"; status: { type: "running" | "complete" } }
+  | { type: "group-steps"; status: { type: "running" | "complete" } }
+  | { type: "group-reasoning"; status: { type: "running" | "complete" } }
+  | MockMessage["content"][number];
 
 let mockMessages: MockMessage[] = [];
 let mockRunning = false;
 
 describe("TutorPanel", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     runtimeOptions = null;
     mockMessages = [];
     mockRunning = false;
@@ -162,6 +211,17 @@ describe("TutorPanel", () => {
     expect(await screen.findByText("Mode: direct")).toBeInTheDocument();
   });
 
+  test("header status updates when runtime reports status", async () => {
+    renderPanel();
+    await screen.findByText("Mode: waiting");
+
+    act(() => {
+      runtimeOptions?.onStatus?.("calling_tool");
+    });
+
+    expect(await screen.findByText("Status: Calling tool")).toBeInTheDocument();
+  });
+
   test("token chunks appear in chat UI", async () => {
     mockMessages = [assistantMessage("Think about vectors.")];
 
@@ -175,10 +235,73 @@ describe("TutorPanel", () => {
 
     renderPanel();
 
+    await userEvent.click(await screen.findByRole("button", { name: "Show full reasoning trace" }));
     await userEvent.click(await screen.findByRole("button", { name: "Show reasoning" }));
 
     expect(await screen.findByText("Private reasoning trace.")).toBeInTheDocument();
     expect(screen.getByText("Final answer.")).toBeInTheDocument();
+  });
+
+  test("renders tutor stream status inside the reasoning group", async () => {
+    mockMessages = [assistantMessage("Final answer.", "Private reasoning trace.", "calling_tool")];
+
+    renderPanel();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show full reasoning trace" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Show reasoning" }));
+
+    expect(await screen.findByText("Calling tool")).toBeInTheDocument();
+  });
+
+  test("renders ordered thinking and tool events inside the reasoning group", async () => {
+    mockMessages = [
+      {
+        id: "assistant-tool-flow",
+        role: "assistant",
+        content: [
+          { type: "data", name: "tutor-thinking", data: { text: "I should call the tool first." } },
+          {
+            type: "data",
+            name: "tutor-tool-call",
+            data: { name: "get_tutor_instructions", mode: "direct" },
+          },
+          {
+            type: "data",
+            name: "tutor-tool-result",
+            data: {
+              name: "get_tutor_instructions",
+              mode: "direct",
+              result: "Use direct mode.",
+            },
+          },
+          { type: "data", name: "tutor-thinking", data: { text: "Now I can answer." } },
+          { type: "text", text: "Final answer." },
+        ],
+        status: { type: "complete" },
+      },
+    ];
+
+    renderPanel();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show full reasoning trace" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Show reasoning" }));
+
+    expect(await screen.findByText("I should call the tool first.")).toBeInTheDocument();
+    expect(screen.getByText("get_tutor_instructions")).toBeInTheDocument();
+    expect(screen.getByText("Use direct mode.")).toBeInTheDocument();
+    expect(screen.getByText("Now I can answer.")).toBeInTheDocument();
+  });
+
+  test("defaults to learner-safe reasoning summary", async () => {
+    mockMessages = [assistantMessage("Final answer.", "This is the first safe sentence. Hidden details follow.")];
+
+    renderPanel();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Show reasoning summary" }));
+
+    expect(await screen.findByText("Thinking through the next step")).toBeInTheDocument();
+    expect(screen.getByText("This is the first safe sentence.")).toBeInTheDocument();
+    expect(screen.queryByText("Hidden details follow.")).not.toBeInTheDocument();
   });
 
   test("renders LaTeX math in assistant messages", async () => {
@@ -219,7 +342,7 @@ describe("TutorPanel", () => {
     });
 
     expect(
-      await screen.findByText("Ready to level up? Quiz cards arrive in Phase 5."),
+      await screen.findByText("Ready to level up? Go back to the concept details and use the Level Up button."),
     ).toBeInTheDocument();
   });
 
@@ -289,11 +412,12 @@ function renderPanel(sources: SourceRecord[] = []) {
   );
 }
 
-function assistantMessage(text: string, reasoning?: string): MockMessage {
+function assistantMessage(text: string, reasoning?: string, status?: string): MockMessage {
   return {
     id: `assistant-${text}`,
     role: "assistant",
     content: [
+      ...(status ? [{ type: "data" as const, name: "tutor-status", data: { status } }] : []),
       ...(reasoning ? [{ type: "reasoning" as const, text: reasoning }] : []),
       { type: "text", text },
     ],
@@ -306,19 +430,27 @@ function mockGroupedParts() {
   if (!message) {
     return [];
   }
-  const reasoningParts = message.content.filter((part) => part.type === "reasoning");
+  const reasoningParts = message.content.filter(
+    (part) =>
+      part.type === "reasoning" ||
+      (part.type === "data" &&
+        ["tutor-status", "tutor-thinking", "tutor-tool-call", "tutor-tool-result"].includes(part.name)),
+  );
   const textParts = message.content.filter((part) => part.type === "text");
   const entries: Array<{ part: MockPart; children: ReactNode }> = [];
 
   if (reasoningParts.length > 0) {
     entries.push({
       part: {
-        type: "group-reasoning",
-        indices: reasoningParts.map((_, index) => index),
+        type: "group-chain-of-thought",
         status: message.status ?? { type: "complete" },
       },
-      children: <>{reasoningParts.map((part, index) => <div key={index}>{part.text}</div>)}</>,
+      children: null,
     });
+
+    for (const part of reasoningParts) {
+      entries.push({ part, children: null });
+    }
   }
 
   for (const part of textParts) {
@@ -346,6 +478,23 @@ function readNodeText(node: ReactNode): string {
   }
 
   return "";
+}
+
+function formatMockStatus(status: string): string {
+  switch (status) {
+    case "thinking":
+      return "Thinking";
+    case "calling_tool":
+      return "Calling tool";
+    case "tool_called":
+      return "Tool requested";
+    case "tool_complete":
+      return "Tool result ready";
+    case "responding":
+      return "Responding";
+    default:
+      return status;
+  }
 }
 
 const emptyHistory: ConversationHistoryResponse = {

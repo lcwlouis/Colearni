@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ActionBarPrimitive,
   AssistantRuntimeProvider,
   ComposerPrimitive,
   MessagePrimitive,
@@ -13,6 +14,7 @@ import {
   useThread,
   type MessageState,
 } from "@assistant-ui/react";
+import { ArrowDownIcon, ArrowUpIcon } from "lucide-react";
 
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import {
@@ -27,9 +29,14 @@ import { useTutorRuntime } from "@/lib/tutor-runtime";
 import type {
   ConceptNode,
   ConversationHistoryResponse,
+  MasteryStatus,
   SourceRecord,
   TutorMode,
+  TutorStreamStatus,
+  TutorToolEvent,
 } from "@/lib/types";
+
+type ReasoningView = "summary" | "full";
 
 interface TutorPanelProps {
   workspaceId: string;
@@ -37,6 +44,7 @@ interface TutorPanelProps {
   concept: ConceptNode;
   sources?: SourceRecord[];
   onBack?: () => void;
+  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
 }
 
 export function TutorPanel({
@@ -45,10 +53,12 @@ export function TutorPanel({
   concept,
   sources = [],
   onBack,
+  onMasteryUpdated,
 }: TutorPanelProps) {
   const [history, setHistory] = useState<ConversationHistoryResponse | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [mode, setMode] = useState<TutorMode | null>(null);
+  const [streamStatus, setStreamStatus] = useState<TutorStreamStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
   const [chatError, setChatError] = useState("");
@@ -62,6 +72,7 @@ export function TutorPanel({
     setHistory(null);
     setConversationId(null);
     setMode(null);
+    setStreamStatus(null);
 
     async function loadHistory() {
       try {
@@ -91,7 +102,13 @@ export function TutorPanel({
 
   if (loading) {
     return (
-      <TutorShell concept={concept} sources={sources ?? []} mode={mode} onBack={onBack}>
+      <TutorShell
+        concept={concept}
+        sources={sources ?? []}
+        mode={mode}
+        streamStatus={streamStatus}
+        onBack={onBack}
+      >
         <div className="p-4 text-sm text-slate-500">Loading conversation...</div>
       </TutorShell>
     );
@@ -99,7 +116,13 @@ export function TutorPanel({
 
   if (historyError || !history) {
     return (
-      <TutorShell concept={concept} sources={sources ?? []} mode={mode} onBack={onBack}>
+      <TutorShell
+        concept={concept}
+        sources={sources ?? []}
+        mode={mode}
+        streamStatus={streamStatus}
+        onBack={onBack}
+      >
         <div className="m-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {historyError || "Conversation unavailable"}
         </div>
@@ -126,6 +149,7 @@ export function TutorPanel({
       history={history}
       conversationId={conversationId}
       mode={mode}
+      streamStatus={streamStatus}
       chatError={chatError}
       onBack={onBack}
       onConversationId={setConversationId}
@@ -133,7 +157,9 @@ export function TutorPanel({
         setMode(nextMode);
         setChatError("");
       }}
+      onStatus={setStreamStatus}
       onError={setChatError}
+      onMasteryUpdated={onMasteryUpdated}
     />
   );
 }
@@ -146,20 +172,31 @@ function TutorRuntimePanel({
   history,
   conversationId,
   mode,
+  streamStatus,
   chatError,
   onBack,
   onConversationId,
   onMode,
+  onStatus,
   onError,
+  onMasteryUpdated,
 }: TutorPanelProps & {
   history: ConversationHistoryResponse;
   conversationId: string | null;
   mode: TutorMode | null;
+  streamStatus: TutorStreamStatus | null;
   chatError: string;
   onConversationId: (conversationId: string) => void;
   onMode: (mode: TutorMode) => void;
+  onStatus: (status: TutorStreamStatus | null) => void;
   onError: (message: string) => void;
 }) {
+  const [reasoningView, setReasoningView] = useState<ReasoningView>(() => {
+    if (typeof window === "undefined") {
+      return "summary";
+    }
+    return window.localStorage.getItem("colearni.reasoningView") === "full" ? "full" : "summary";
+  });
   const runtime = useTutorRuntime({
     workspaceId,
     trailId,
@@ -168,12 +205,26 @@ function TutorRuntimePanel({
     history,
     onConversationId,
     onMode,
+    onStatus,
     onError,
+    onMasteryUpdated,
   });
+
+  useEffect(() => {
+    window.localStorage.setItem("colearni.reasoningView", reasoningView);
+  }, [reasoningView]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <TutorShell concept={concept} sources={sources ?? []} mode={mode} onBack={onBack}>
+      <TutorShell
+        concept={concept}
+        sources={sources ?? []}
+        mode={mode}
+        streamStatus={streamStatus}
+        onBack={onBack}
+        reasoningView={reasoningView}
+        onReasoningViewChange={setReasoningView}
+      >
         {chatError ? (
           <div className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {chatError}
@@ -181,10 +232,10 @@ function TutorRuntimePanel({
         ) : null}
         {mode === "quiz_prompt" ? (
           <div className="mx-4 mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Ready to level up? Quiz cards arrive in Phase 5.
+            Ready to level up? Go back to the concept details and use the Level Up button.
           </div>
         ) : null}
-        <TutorThread />
+        <TutorThread reasoningView={reasoningView} />
       </TutorShell>
     </AssistantRuntimeProvider>
   );
@@ -194,24 +245,49 @@ function TutorShell({
   concept,
   sources,
   mode,
+  streamStatus,
   onBack,
+  reasoningView,
+  onReasoningViewChange,
   children,
 }: {
   concept: ConceptNode;
   sources: SourceRecord[];
   mode: TutorMode | null;
+  streamStatus: TutorStreamStatus | null;
   onBack?: () => void;
+  reasoningView?: ReasoningView;
+  onReasoningViewChange?: (view: ReasoningView) => void;
   children: ReactNode;
 }) {
   return (
-    <section className="flex min-h-[420px] flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-white">
-      <div className="border-b border-slate-200 p-4">
+    <section className="flex h-full min-h-[520px] flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-white md:min-h-0">
+      <div className="shrink-0 border-b border-slate-200 bg-white/95 p-3 backdrop-blur">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              {onBack ? (
+                <button
+                  type="button"
+                  aria-label="Back to concept details"
+                  onClick={onBack}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 px-2.5 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                >
+                  <span aria-hidden="true">←</span>
+                  <span>Concept</span>
+                </button>
+              ) : null}
+              {reasoningView && onReasoningViewChange ? (
+                <ReasoningViewToggle value={reasoningView} onChange={onReasoningViewChange} />
+              ) : null}
+            </div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Tutor for this concept
+              Learning thread
             </p>
-            <h3 className="mt-1 text-base font-semibold text-slate-950">{concept.title}</h3>
+            <h3 className="mt-1 truncate text-base font-semibold text-slate-950">{concept.title}</h3>
+            {streamStatus ? (
+              <p className="mt-1 text-xs text-slate-500">Status: {formatStreamStatus(streamStatus)}</p>
+            ) : null}
           </div>
           <ModeBadge mode={mode} />
         </div>
@@ -221,94 +297,157 @@ function TutorShell({
           <ContextBadge>Difficulty: {concept.difficulty}</ContextBadge>
         </div>
         {sources.length > 0 ? <SourceChips sources={sources} /> : null}
-        {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="mt-3 text-xs font-medium text-slate-500 hover:text-slate-900"
-          >
-            Back to concept details
-          </button>
-        ) : null}
       </div>
       {children}
     </section>
   );
 }
 
-function TutorThread() {
+function TutorThread({ reasoningView }: { reasoningView: ReasoningView }) {
   const messageCount = useThread((state) => state.messages.length);
   const isRunning = useThread((state) => state.isRunning);
 
   return (
-    <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-      <ThreadPrimitive.Viewport autoScroll className="min-h-0 flex-1 overflow-y-auto p-4">
+    <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col bg-gradient-to-b from-white to-slate-50/80">
+      <ThreadPrimitive.Viewport
+        autoScroll
+        scrollToBottomOnRunStart
+        scrollToBottomOnInitialize
+        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5"
+      >
         {messageCount === 0 ? (
-          <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-            Ask the tutor to help you reason through this concept.
-          </div>
+          <WelcomeSuggestions />
         ) : null}
-        <div className="grid gap-3">
+        <div className="grid gap-5">
           <ThreadPrimitive.Messages>
-            {({ message }) => <ChatMessage message={message} />}
+            {({ message }) => <ChatMessage message={message} reasoningView={reasoningView} />}
           </ThreadPrimitive.Messages>
         </div>
+        <ThreadPrimitive.ScrollToBottom className="sticky bottom-24 ml-auto mt-3 grid size-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 disabled:hidden">
+          <ArrowDownIcon className="size-4" />
+        </ThreadPrimitive.ScrollToBottom>
+        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto pt-4">
+          <div className="bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pb-3 pt-6">
+            <ComposerPrimitive.Root className="rounded-3xl border border-slate-200 bg-white p-2 shadow-lg shadow-slate-200/70">
+              <ComposerPrimitive.Input
+                aria-label="Message tutor"
+                placeholder="Ask for a hint, test an idea, or explain your thinking..."
+                submitMode="enter"
+                className="max-h-36 min-h-11 w-full resize-none bg-transparent px-3 pb-2 pt-2 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 disabled:text-slate-400"
+              />
+              <div className="flex items-center justify-between gap-2 px-1 pb-1">
+                <span className="hidden pl-2 text-[11px] text-slate-400 sm:inline">Enter to send, Shift+Enter for a new line</span>
+                {isRunning ? (
+                  <ComposerPrimitive.Cancel className="h-9 rounded-full border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                    Stop
+                  </ComposerPrimitive.Cancel>
+                ) : (
+                  <ComposerPrimitive.Send
+                    aria-label="Send"
+                    className="grid size-9 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    <ArrowUpIcon className="size-4" />
+                  </ComposerPrimitive.Send>
+                )}
+              </div>
+            </ComposerPrimitive.Root>
+          </div>
+        </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
-      <ComposerPrimitive.Root className="flex shrink-0 gap-2 border-t border-slate-200 p-3">
-        <ComposerPrimitive.Input
-          aria-label="Message tutor"
-          placeholder="Ask the tutor to help you reason..."
-          submitMode="enter"
-          className="max-h-32 min-h-10 flex-1 resize-none rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-slate-50"
-        />
-        <ComposerPrimitive.Send className="h-10 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">
-          {isRunning ? "Sending" : "Send"}
-        </ComposerPrimitive.Send>
-      </ComposerPrimitive.Root>
     </ThreadPrimitive.Root>
   );
 }
 
-function ChatMessage({ message }: { message: MessageState }) {
+function ChatMessage({ message, reasoningView }: { message: MessageState; reasoningView: ReasoningView }) {
   const assistant = message.role === "assistant";
 
   return (
     <MessagePrimitive.Root
-      className={`rounded-lg border px-3 py-2 text-sm ${
-        assistant
-          ? "border-blue-100 bg-blue-50 text-blue-950"
-          : "border-slate-200 bg-white text-slate-800"
-      }`}
+      className={`group flex w-full flex-col gap-1 text-sm ${assistant ? "items-start" : "items-end"}`}
     >
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-        {assistant ? "Tutor" : "You"}
-      </div>
-      {assistant ? <AssistantMessageBody message={message} /> : <UserMessageBody message={message} />}
+      {assistant ? (
+        <div className="flex w-full max-w-3xl gap-3">
+          <div className="mt-1 grid size-7 shrink-0 place-items-center rounded-full bg-slate-950 text-[11px] font-semibold text-white">
+            CL
+          </div>
+          <div className="min-w-0 flex-1 text-slate-900">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Tutor
+            </div>
+            <AssistantMessageBody message={message} reasoningView={reasoningView} />
+            <AssistantActionBar />
+          </div>
+        </div>
+      ) : (
+        <div className="max-w-[88%] rounded-3xl bg-slate-950 px-4 py-2.5 text-white shadow-sm">
+          <UserMessageBody message={message} />
+          <UserActionBar />
+        </div>
+      )}
     </MessagePrimitive.Root>
   );
 }
 
-function AssistantMessageBody({ message }: { message: MessageState }) {
+function AssistantMessageBody({
+  message,
+  reasoningView,
+}: {
+  message: MessageState;
+  reasoningView: ReasoningView;
+}) {
   return (
     <MessagePrimitive.GroupedParts
       groupBy={(part) => {
+        if (
+          part.type === "data" &&
+          (part.name === "tutor-status" ||
+            part.name === "tutor-thinking" ||
+            part.name === "tutor-tool-call" ||
+            part.name === "tutor-tool-result")
+        ) {
+          return ["group-chain-of-thought"];
+        }
         if (part.type === "reasoning") {
-          return ["group-reasoning"];
+          return ["group-chain-of-thought"];
         }
         return null;
       }}
     >
       {({ part, children }) => {
-        if (part.type === "group-reasoning") {
+        if (part.type === "group-chain-of-thought") {
           const running = part.status.type === "running";
+          const full = reasoningView === "full";
           return (
             <ReasoningRoot defaultOpen={running}>
-              <ReasoningTrigger active={running} />
+              <ReasoningTrigger
+                active={running}
+                label={
+                  full
+                    ? undefined
+                    : { open: "Hide reasoning summary", closed: "Show reasoning summary" }
+                }
+              />
               <ReasoningContent busy={running}>
-                <ReasoningText>{children}</ReasoningText>
+                {full ? (
+                  <div className="grid gap-3">{children}</div>
+                ) : (
+                  <CompactReasoningTrace message={message} running={running} />
+                )}
               </ReasoningContent>
             </ReasoningRoot>
           );
+        }
+        if (part.type === "data" && part.name === "tutor-status") {
+          return <TutorStatusLine status={(part.data as { status?: TutorStreamStatus }).status ?? null} />;
+        }
+        if (part.type === "data" && part.name === "tutor-thinking") {
+          return <TutorThinkingLine text={(part.data as { text?: string }).text ?? ""} />;
+        }
+        if (part.type === "data" && part.name === "tutor-tool-call") {
+          return <TutorToolCallLine tool={part.data as TutorToolEvent} />;
+        }
+        if (part.type === "data" && part.name === "tutor-tool-result") {
+          return <TutorToolResultLine tool={part.data as TutorToolEvent} />;
         }
         if (part.type === "text") {
           return <MarkdownText />;
@@ -328,6 +467,112 @@ function UserMessageBody({ message }: { message: MessageState }) {
   }
 
   return <UserMarkdownText text={messageText(message)} />;
+}
+
+function WelcomeSuggestions() {
+  const suggestions = [
+    "Give me one hint to get started.",
+    "Ask me a Socratic question about this concept.",
+    "Check whether my current understanding is right.",
+  ];
+
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col items-center rounded-3xl border border-dashed border-slate-300 bg-white/80 p-5 text-center shadow-sm">
+      <div className="text-sm font-semibold text-slate-900">Start with a learning move</div>
+      <p className="mt-1 text-sm text-slate-500">Pick a prompt or write your own. The tutor will keep you reasoning one step at a time.</p>
+      <div className="mt-4 grid w-full gap-2 sm:grid-cols-3">
+        {suggestions.map((suggestion) => (
+          <ThreadPrimitive.Suggestion
+            key={suggestion}
+            prompt={suggestion}
+            send
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-left text-xs font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-800"
+          >
+            {suggestion}
+          </ThreadPrimitive.Suggestion>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReasoningViewToggle({
+  value,
+  onChange,
+}: {
+  value: ReasoningView;
+  onChange: (view: ReasoningView) => void;
+}) {
+  const full = value === "full";
+  return (
+    <button
+      type="button"
+      aria-pressed={full}
+      aria-label={full ? "Use learner-safe reasoning summary" : "Show full reasoning trace"}
+      onClick={() => onChange(full ? "summary" : "full")}
+      className="inline-flex h-8 items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+    >
+      Reasoning: {full ? "Full trace" : "Summary"}
+    </button>
+  );
+}
+
+function CompactReasoningTrace({ message, running }: { message: MessageState; running: boolean }) {
+  const firstThinking = firstReasoningText(message);
+  const toolSeen = message.content.some(
+    (part) => part.type === "data" && (part.name === "tutor-tool-call" || part.name === "tutor-tool-result"),
+  );
+  const snippet = learnerSafeSnippet(firstThinking);
+
+  return (
+    <div className="rounded-md border border-amber-200 bg-white/70 px-3 py-2 text-sm text-amber-950">
+      <div className="flex items-center gap-2 font-semibold">
+        <span>Thinking through the next step</span>
+        {running ? <span className="h-2 w-16 animate-pulse rounded-full bg-amber-200" /> : null}
+      </div>
+      <p className="mt-1 text-amber-950/75">
+        {snippet || (running ? "Choosing a focused question..." : "Reasoning trace available.")}
+      </p>
+      {toolSeen ? (
+        <p className="mt-1 text-xs font-medium text-amber-800/80">
+          Checked tutor guidance without exposing internal instructions.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function AssistantActionBar() {
+  return (
+    <ActionBarPrimitive.Root
+      hideWhenRunning
+      autohide="not-last"
+      autohideFloat="always"
+      className="mt-1 flex gap-1 text-xs text-slate-400 data-[floating]:opacity-0 data-[floating]:transition-opacity group-hover:data-[floating]:opacity-100"
+    >
+      <ActionBarPrimitive.Copy className="rounded-md px-2 py-1 hover:bg-slate-100 hover:text-slate-700">
+        Copy
+      </ActionBarPrimitive.Copy>
+      <ActionBarPrimitive.Reload className="rounded-md px-2 py-1 hover:bg-slate-100 hover:text-slate-700">
+        Regenerate
+      </ActionBarPrimitive.Reload>
+    </ActionBarPrimitive.Root>
+  );
+}
+
+function UserActionBar() {
+  return (
+    <ActionBarPrimitive.Root
+      hideWhenRunning
+      autohide="always"
+      autohideFloat="always"
+      className="mt-1 flex justify-end text-xs text-slate-300 data-[floating]:opacity-0 data-[floating]:transition-opacity group-hover:data-[floating]:opacity-100"
+    >
+      <ActionBarPrimitive.Edit className="rounded-md px-2 py-1 hover:bg-white/10 hover:text-white">
+        Edit
+      </ActionBarPrimitive.Edit>
+    </ActionBarPrimitive.Root>
+  );
 }
 
 function ModeBadge({ mode }: { mode: TutorMode | null }) {
@@ -391,5 +636,106 @@ function messageText(message: MessageState): string {
 }
 
 function UserMarkdownText({ text }: { text: string }) {
-  return <div className="whitespace-pre-wrap leading-6 text-slate-800">{text}</div>;
+  return <div className="whitespace-pre-wrap leading-6 text-white">{text}</div>;
+}
+
+function firstReasoningText(message: MessageState): string {
+  for (const part of message.content) {
+    if (part.type === "reasoning") {
+      return part.text;
+    }
+    if (isTutorDataPart(part, "tutor-thinking")) {
+      return (part.data as { text?: string }).text ?? "";
+    }
+  }
+  return "";
+}
+
+function isTutorDataPart(
+  part: MessageState["content"][number],
+  name: string,
+): part is MessageState["content"][number] & { type: "data"; name: string } {
+  return part.type === "data" && part.name === name;
+}
+
+function learnerSafeSnippet(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  const firstSentence = normalized.match(/^(.{20,180}?[.!?])\s/)?.[1];
+  if (firstSentence) {
+    return firstSentence;
+  }
+  const words = normalized.split(" ").slice(0, 18).join(" ");
+  return words.length < normalized.length ? `${words}...` : words;
+}
+
+function TutorStatusLine({ status }: { status: TutorStreamStatus | null }) {
+  if (!status) {
+    return null;
+  }
+
+  return (
+    <div className="mb-2 rounded border border-amber-200 bg-amber-100/60 px-2 py-1 text-xs font-medium text-amber-900">
+      {formatStreamStatus(status)}
+    </div>
+  );
+}
+
+function TutorThinkingLine({ text }: { text: string }) {
+  if (!text.trim()) {
+    return null;
+  }
+
+  return (
+    <ReasoningText>
+      <div className="italic text-amber-950/75">{text}</div>
+    </ReasoningText>
+  );
+}
+
+function TutorToolCallLine({ tool }: { tool: TutorToolEvent }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-semibold">{tool.name}</span>
+        {tool.mode ? (
+          <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">
+            {tool.mode}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function TutorToolResultLine({ tool }: { tool: TutorToolEvent }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white text-sm text-slate-800">
+      <div className="border-b border-slate-200 px-3 py-2 font-semibold">{tool.name} result</div>
+      {tool.result ? (
+        <pre className="max-h-44 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-xs leading-5 text-slate-600">
+          {tool.result}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
+function formatStreamStatus(status: TutorStreamStatus): string {
+  switch (status) {
+    case "thinking":
+      return "Thinking";
+    case "calling_tool":
+      return "Calling tool";
+    case "tool_called":
+      return "Tool requested";
+    case "tool_complete":
+      return "Tool result ready";
+    case "responding":
+      return "Responding";
+    case "retrying_without_thinking":
+      return "Retrying without thinking";
+  }
 }

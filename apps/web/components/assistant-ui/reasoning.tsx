@@ -47,8 +47,17 @@ export function ReasoningRoot({
   );
 }
 
-export function ReasoningTrigger({ active = false }: { active?: boolean }) {
+export function ReasoningTrigger({
+  active = false,
+  label,
+}: {
+  active?: boolean;
+  label?: { open: string; closed: string };
+}) {
   const context = useReasoningContext();
+  const triggerLabel = context.open
+    ? (label?.open ?? "Hide reasoning")
+    : (label?.closed ?? "Show reasoning");
 
   return (
     <button
@@ -58,7 +67,7 @@ export function ReasoningTrigger({ active = false }: { active?: boolean }) {
     >
       <BrainIcon className="size-4 shrink-0" />
       <span className="relative inline-flex items-center gap-2 font-medium">
-        <span>{context.open ? "Hide reasoning" : "Show reasoning"}</span>
+        <span>{triggerLabel}</span>
         {active ? <span className="text-xs text-amber-700">streaming</span> : null}
       </span>
       <ChevronDownIcon

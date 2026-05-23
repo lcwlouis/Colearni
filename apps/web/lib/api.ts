@@ -4,13 +4,17 @@ import type {
   ConversationMessage,
   GradeResult,
   LevelUpCard,
+  MasteryStatus,
   QuizAnswer,
+  QuizGenerateRequest,
   QuizQuestion,
   TrailDetail,
   TrailGenerateRequest,
   TrailGenerateResponse,
   TutorChatRequest,
   TutorMode,
+  TutorStreamStatus,
+  TutorToolEvent,
   Workspace,
 } from "@/lib/types";
 
@@ -30,11 +34,15 @@ interface ErrorEnvelope {
 }
 
 interface TutorStreamEvent {
-  type?: "mode" | "thinking" | "token" | "done" | "error";
+  type?: "mode" | "status" | "thinking" | "tool_call" | "tool_result" | "token" | "done" | "error";
   mode?: TutorMode;
+  status?: TutorStreamStatus;
   content?: string;
+  name?: string;
+  result?: string;
   conversation_id?: string;
   message?: ConversationMessage | string;
+  mastery_update?: { concept_id: string; status: MasteryStatus; score: number };
   code?: string;
   error?: { message?: string };
   detail?: unknown;
@@ -48,9 +56,13 @@ export interface StreamTutorChatOptions {
   conversationId: string | null;
   signal?: AbortSignal;
   onMode: (mode: TutorMode) => void;
+  onStatus?: (status: TutorStreamStatus) => void;
   onThinking?: (content: string) => void;
+  onToolCall?: (tool: TutorToolEvent) => void;
+  onToolResult?: (tool: TutorToolEvent) => void;
   onToken: (content: string) => void;
   onDone: (conversationId: string, message: ConversationMessage) => void;
+  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
 }
 
 export async function createWorkspace(name: string): Promise<Workspace> {
@@ -115,10 +127,11 @@ export async function generateLevelUpQuiz(
   workspaceId: string,
   trailId: string,
   conceptId: string,
+  body: QuizGenerateRequest = {},
 ): Promise<LevelUpCard> {
   return request<LevelUpCard>(
     `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/level-up`,
-    { method: "POST" },
+    { method: "POST", body: JSON.stringify(body) },
   );
 }
 
@@ -126,10 +139,11 @@ export async function generatePracticeQuiz(
   workspaceId: string,
   trailId: string,
   conceptId: string,
+  body: QuizGenerateRequest = {},
 ): Promise<LevelUpCard> {
   return request<LevelUpCard>(
     `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/practice`,
-    { method: "POST" },
+    { method: "POST", body: JSON.stringify(body) },
   );
 }
 
@@ -203,9 +217,13 @@ export async function streamTutorChat({
   conversationId,
   signal,
   onMode,
+  onStatus,
   onThinking,
+  onToolCall,
+  onToolResult,
   onToken,
   onDone,
+  onMasteryUpdated,
 }: StreamTutorChatOptions): Promise<void> {
   const body: TutorChatRequest = {
     message,
@@ -228,7 +246,16 @@ export async function streamTutorChat({
     throw new Error("Tutor stream is unavailable");
   }
 
-  const sawDone = await readTutorStream(response.body, { onMode, onThinking, onToken, onDone });
+  const sawDone = await readTutorStream(response.body, {
+    onMode,
+    onStatus,
+    onThinking,
+    onToolCall,
+    onToolResult,
+    onToken,
+    onDone,
+    onMasteryUpdated,
+  });
   if (!sawDone) {
     throw new Error("Tutor stream ended before completion");
   }
@@ -285,7 +312,17 @@ async function responseErrorMessage(response: Response): Promise<string> {
 
 async function readTutorStream(
   body: ReadableStream<Uint8Array>,
-  callbacks: Pick<StreamTutorChatOptions, "onMode" | "onThinking" | "onToken" | "onDone">,
+  callbacks: Pick<
+    StreamTutorChatOptions,
+    | "onMode"
+    | "onStatus"
+    | "onThinking"
+    | "onToolCall"
+    | "onToolResult"
+    | "onToken"
+    | "onDone"
+    | "onMasteryUpdated"
+  >,
 ): Promise<boolean> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -314,7 +351,17 @@ async function readTutorStream(
 
 function handleTutorStreamEvent(
   chunk: string,
-  callbacks: Pick<StreamTutorChatOptions, "onMode" | "onThinking" | "onToken" | "onDone">,
+  callbacks: Pick<
+    StreamTutorChatOptions,
+    | "onMode"
+    | "onStatus"
+    | "onThinking"
+    | "onToolCall"
+    | "onToolResult"
+    | "onToken"
+    | "onDone"
+    | "onMasteryUpdated"
+  >,
 ): boolean {
   const dataLines = chunk
     .split("\n")
@@ -332,6 +379,12 @@ function handleTutorStreamEvent(
     }
     return false;
   }
+  if (payload.type === "status") {
+    if (payload.status) {
+      callbacks.onStatus?.(payload.status);
+    }
+    return false;
+  }
   if (payload.type === "token") {
     if (typeof payload.content === "string") {
       callbacks.onToken(payload.content);
@@ -344,9 +397,30 @@ function handleTutorStreamEvent(
     }
     return false;
   }
+  if (payload.type === "tool_call") {
+    callbacks.onToolCall?.({
+      name: typeof payload.name === "string" ? payload.name : "tool",
+      mode: payload.mode ?? null,
+    });
+    return false;
+  }
+  if (payload.type === "tool_result") {
+    callbacks.onToolResult?.({
+      name: typeof payload.name === "string" ? payload.name : "tool",
+      mode: payload.mode ?? null,
+      result: typeof payload.result === "string" ? payload.result : undefined,
+    });
+    return false;
+  }
   if (payload.type === "done") {
     if (typeof payload.conversation_id === "string" && isConversationMessage(payload.message)) {
       callbacks.onDone(payload.conversation_id, payload.message);
+      if (payload.mastery_update) {
+        callbacks.onMasteryUpdated?.(payload.mastery_update.concept_id, {
+          status: payload.mastery_update.status,
+          score: payload.mastery_update.score,
+        });
+      }
       return true;
     }
     throw new Error("Tutor stream returned a malformed completion event");

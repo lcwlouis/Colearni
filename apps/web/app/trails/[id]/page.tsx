@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 
 import { deleteTrail, getTrail } from "@/lib/api";
-import type { TrailDetail } from "@/lib/types";
+import type { MasteryRecord, MasteryStatus, TrailDetail } from "@/lib/types";
 import { ensureWorkspaceId } from "@/lib/workspace";
 
 import { TrailGraph } from "./components/TrailGraph";
@@ -58,6 +58,42 @@ export default function TrailPage() {
       setDeleting(false);
       setConfirmingDelete(false);
     }
+  }
+
+  function handleMasteryUpdated(conceptId: string, update: { status: MasteryStatus; score: number }) {
+    setDetail((current) => {
+      if (!current) {
+        return current;
+      }
+      const existing = current.graph.mastery[conceptId];
+      const updatedRecord: MasteryRecord = {
+        id: existing?.id ?? null,
+        workspace_id: existing?.workspace_id ?? current.trail.workspace_id,
+        concept_id: conceptId,
+        status: update.status,
+        bloom_level: existing?.bloom_level ?? "understand",
+        score: update.score,
+        updated_at: new Date().toISOString(),
+      };
+      const updatedMastery = { ...current.graph.mastery, [conceptId]: updatedRecord };
+      const nodes = current.graph.nodes;
+      const summary = {
+        total: nodes.length,
+        not_started: 0,
+        learning: 0,
+        needs_review: 0,
+        mastered: 0,
+      };
+      for (const node of nodes) {
+        const status: MasteryStatus = updatedMastery[node.id]?.status ?? "not_started";
+        summary[status] += 1;
+      }
+      return {
+        ...current,
+        graph: { ...current.graph, mastery: updatedMastery },
+        mastery_summary: summary,
+      };
+    });
   }
 
   if (loading) {
@@ -134,6 +170,7 @@ export default function TrailPage() {
         trail={detail.trail}
         graph={detail.graph}
         masterySummary={detail.mastery_summary}
+        onMasteryUpdated={handleMasteryUpdated}
       />
     </main>
   );

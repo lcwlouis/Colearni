@@ -35,6 +35,7 @@ import type {
   ConceptDetail,
   ConceptLevel,
   ConceptNode,
+  MasteryRecord,
   MasteryStatus,
   Trail,
   TrailGraph as TrailGraphData,
@@ -72,9 +73,16 @@ interface TrailGraphProps {
     needs_review: number;
     mastered: number;
   };
+  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
 }
 
-export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailGraphProps) {
+export function TrailGraph({
+  workspaceId,
+  trail,
+  graph,
+  masterySummary,
+  onMasteryUpdated,
+}: TrailGraphProps) {
   const [query, setQuery] = useState("");
   const [visibleLevels, setVisibleLevels] = useState<Set<ConceptLevel>>(
     () => new Set(levels),
@@ -207,6 +215,22 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
     } catch (exc) {
       setPanelError(exc instanceof Error ? exc.message : "Could not load concept");
     }
+  }
+
+  function handleMasteryUpdated(conceptId: string, update: { status: MasteryStatus; score: number }) {
+    setDetail((prev) => {
+      if (!prev || prev.concept.id !== conceptId) {
+        return prev;
+      }
+      const updatedRecord: MasteryRecord = {
+        ...prev.mastery,
+        status: update.status,
+        score: update.score,
+        updated_at: new Date().toISOString(),
+      };
+      return { ...prev, mastery: updatedRecord };
+    });
+    onMasteryUpdated?.(conceptId, update);
   }
 
   function clearSelection() {
@@ -441,6 +465,7 @@ export function TrailGraph({ workspaceId, trail, graph, masterySummary }: TrailG
           detail={detail}
           onClose={clearSelection}
           onSelectConcept={openConcept}
+          onMasteryUpdated={handleMasteryUpdated}
         />
       ) : null}
     </section>

@@ -10,7 +10,7 @@ export type Difficulty = "beginner" | "intermediate" | "advanced";
 export type NodeType = "concept" | "skill" | "misconception" | "example";
 export type RelationType = "prerequisite" | "contains" | "application" | "related";
 export type MasteryStatus = "not_started" | "learning" | "needs_review" | "mastered";
-export type TutorMode = "socratic" | "direct" | "repair" | "quiz_prompt" | "explore";
+export type TutorMode = "socratic" | "direct" | "repair" | "quiz_prompt" | "explore" | "free_explore";
 export type SourceOrigin = "research_agent" | "user_upload" | "manual" | "system";
 export type SourceAccess = "public" | "private" | "restricted" | "unknown";
 
@@ -95,9 +95,11 @@ export interface ConceptDetail {
 
 export interface QuizQuestion {
   id: string;
-  type: "explain" | "apply" | "compare";
+  type: "multiple_choice" | "short_answer" | "long_answer";
   prompt: string;
   mastery_label: string;
+  difficulty?: "light" | "standard" | "challenge";
+  options?: string[] | null;
 }
 
 export interface QuizAnswer {
@@ -111,10 +113,17 @@ export interface LevelUpCard {
   questions: QuizQuestion[];
 }
 
+export interface PerQuestionEvaluation {
+  question_id: string;
+  score: number;
+  feedback: string;
+}
+
 export interface GradeResult {
   passed: boolean;
   score: number;
   feedback: string;
+  per_question?: PerQuestionEvaluation[];
   mastery_status: MasteryStatus;
   attempt_id: string;
 }
@@ -137,11 +146,39 @@ export interface TutorChatRequest {
   conversation_id: string | null;
 }
 
+export interface QuizGenerateRequest {
+  force_new?: boolean;
+}
+
+export type TutorStreamStatus =
+  | "thinking"
+  | "calling_tool"
+  | "tool_called"
+  | "tool_complete"
+  | "responding"
+  | "retrying_without_thinking";
+
+export interface TutorToolEvent {
+  name: string;
+  mode: TutorMode | null;
+  result?: string;
+}
+
+export interface ConversationReasoningPart {
+  kind: "status" | "thinking" | "tool_call" | "tool_result";
+  status?: TutorStreamStatus | null;
+  text?: string | null;
+  name?: string | null;
+  mode?: TutorMode | null;
+  result?: string | null;
+}
+
 export interface ConversationMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   reasoning: string | null;
+  reasoning_parts?: ConversationReasoningPart[];
   mode: TutorMode | null;
   created_at: string;
 }

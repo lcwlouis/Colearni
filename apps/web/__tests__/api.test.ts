@@ -165,6 +165,161 @@ describe("api client", () => {
     );
   });
 
+  test("streamTutorChat forwards tool call and result events", async () => {
+    const encoder = new TextEncoder();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"tool_call","name":"get_tutor_instructions","mode":"direct"}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"tool_result","name":"get_tutor_instructions","mode":"direct","result":"Use direct mode."}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"done","conversation_id":"conversation-1","message":{"id":"message-1","role":"assistant","content":"Hi","reasoning":null,"mode":"direct","created_at":"2026-01-01T00:00:00Z"}}\n\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const calls: unknown[] = [];
+    const results: unknown[] = [];
+
+    await streamTutorChat({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      message: "Explain directly.",
+      conversationId: null,
+      onMode: vi.fn(),
+      onToolCall: (tool) => calls.push(tool),
+      onToolResult: (tool) => results.push(tool),
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+    });
+
+    expect(calls).toEqual([{ name: "get_tutor_instructions", mode: "direct" }]);
+    expect(results).toEqual([
+      { name: "get_tutor_instructions", mode: "direct", result: "Use direct mode." },
+    ]);
+  });
+
+  test("streamTutorChat forwards status events", async () => {
+    const encoder = new TextEncoder();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"type":"status","status":"thinking"}\n\n'));
+            controller.enqueue(encoder.encode('data: {"type":"status","status":"calling_tool"}\n\n'));
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"done","conversation_id":"conversation-1","message":{"id":"message-1","role":"assistant","content":"Hi","reasoning":null,"mode":"socratic","created_at":"2026-01-01T00:00:00Z"}}\n\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const statuses: string[] = [];
+
+    await streamTutorChat({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      message: "Explain directly.",
+      conversationId: null,
+      onMode: vi.fn(),
+      onStatus: (status) => statuses.push(status),
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+    });
+
+    expect(statuses).toEqual(["thinking", "calling_tool"]);
+  });
+
+  test("streamTutorChat calls onMasteryUpdated when done event includes mastery_update", async () => {
+    const encoder = new TextEncoder();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"done","conversation_id":"conversation-1","message":{"id":"message-1","role":"assistant","content":"Hi","reasoning":null,"mode":"socratic","created_at":"2026-01-01T00:00:00Z"},"mastery_update":{"concept_id":"concept-1","status":"learning","score":0.0}}\n\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const onMasteryUpdated = vi.fn();
+
+    await streamTutorChat({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      message: "Help me.",
+      conversationId: null,
+      onMode: vi.fn(),
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onMasteryUpdated,
+    });
+
+    expect(onMasteryUpdated).toHaveBeenCalledWith("concept-1", { status: "learning", score: 0.0 });
+  });
+
+  test("streamTutorChat does not call onMasteryUpdated when done event lacks mastery_update", async () => {
+    const encoder = new TextEncoder();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"done","conversation_id":"conversation-1","message":{"id":"message-1","role":"assistant","content":"Hi","reasoning":null,"mode":"socratic","created_at":"2026-01-01T00:00:00Z"}}\n\n',
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const onMasteryUpdated = vi.fn();
+
+    await streamTutorChat({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      message: "Help me.",
+      conversationId: null,
+      onMode: vi.fn(),
+      onToken: vi.fn(),
+      onDone: vi.fn(),
+      onMasteryUpdated,
+    });
+
+    expect(onMasteryUpdated).not.toHaveBeenCalled();
+  });
+
   test("streamTutorChat throws readable errors for error events", async () => {
     const encoder = new TextEncoder();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

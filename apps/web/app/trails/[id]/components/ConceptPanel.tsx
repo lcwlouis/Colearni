@@ -2,8 +2,9 @@
 
 import { useEffect, useState, type PointerEvent } from "react";
 
-import type { ConceptDetail, ConceptNode } from "@/lib/types";
+import type { ConceptDetail, ConceptNode, MasteryStatus } from "@/lib/types";
 
+import { QuizPanel } from "./QuizPanel";
 import { TutorPanel } from "./TutorPanel";
 
 interface ConceptPanelProps {
@@ -12,6 +13,7 @@ interface ConceptPanelProps {
   detail: ConceptDetail;
   onClose: () => void;
   onSelectConcept?: (conceptId: string) => void;
+  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
 }
 
 export function ConceptPanel({
@@ -20,15 +22,18 @@ export function ConceptPanel({
   detail,
   onClose,
   onSelectConcept,
+  onMasteryUpdated,
 }: ConceptPanelProps) {
   const concept = detail.concept;
   const [tutorOpen, setTutorOpen] = useState(false);
+  const [quizMode, setQuizMode] = useState<"level_up" | "practice" | null>(null);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [dragStartY, setDragStartY] = useState<number | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
 
   useEffect(() => {
     setTutorOpen(false);
+    setQuizMode(null);
   }, [concept.id]);
 
   function startDrag(event: PointerEvent<HTMLElement>) {
@@ -105,20 +110,23 @@ export function ConceptPanel({
         </div>
         <button
           type="button"
+          aria-label="Close"
           onPointerDown={(event) => event.stopPropagation()}
           onPointerUp={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
             onClose();
           }}
-          className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50"
+          className="grid size-8 place-items-center rounded-md border border-slate-200 text-lg leading-none text-slate-600 hover:bg-slate-50"
         >
-          Close
+          ×
         </button>
       </div>
       <div
         data-testid="concept-sheet-body"
-        className={`flex-1 overflow-y-auto p-4 md:block md:p-5 ${
+        className={`flex-1 ${
+          tutorOpen ? "min-h-0 overflow-hidden p-0 md:p-0" : "overflow-y-auto p-4 md:block md:p-5"
+        } ${
           mobileExpanded ? "block" : "hidden"
         }`}
       >
@@ -129,6 +137,16 @@ export function ConceptPanel({
             concept={concept}
             sources={detail.sources}
             onBack={() => setTutorOpen(false)}
+            onMasteryUpdated={onMasteryUpdated}
+          />
+        ) : quizMode ? (
+          <QuizPanel
+            workspaceId={workspaceId}
+            trailId={trailId}
+            conceptId={concept.id}
+            mode={quizMode}
+            onBack={() => setQuizMode(null)}
+            onMasteryUpdated={onMasteryUpdated}
           />
         ) : (
           <>
@@ -175,7 +193,7 @@ export function ConceptPanel({
           </>
         )}
       </div>
-      {!tutorOpen ? (
+      {!tutorOpen && !quizMode ? (
         <div
           className={`border-t border-slate-200 p-4 md:block md:p-5 ${
             mobileExpanded ? "block" : "hidden"
@@ -191,6 +209,28 @@ export function ConceptPanel({
           >
             Start Learning
           </button>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setQuizMode("level_up");
+                setMobileExpanded(true);
+              }}
+              className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Level Up
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setQuizMode("practice");
+                setMobileExpanded(true);
+              }}
+              className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Practice
+            </button>
+          </div>
         </div>
       ) : null}
     </aside>

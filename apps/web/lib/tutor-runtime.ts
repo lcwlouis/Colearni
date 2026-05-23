@@ -8,7 +8,20 @@ import {
 } from "@assistant-ui/react";
 
 import { streamTutorChat } from "@/lib/api";
-import type { ConversationHistoryResponse, TutorMode } from "@/lib/types";
+import type {
+  ConversationHistoryResponse,
+  ConversationReasoningPart,
+  MasteryStatus,
+  TutorToolEvent,
+  TutorMode,
+  TutorStreamStatus,
+} from "@/lib/types";
+
+type TutorRuntimePart =
+  | { kind: "status"; status: TutorStreamStatus }
+  | { kind: "thinking"; text: string }
+  | { kind: "tool_call"; tool: TutorToolEvent }
+  | { kind: "tool_result"; tool: TutorToolEvent };
 
 interface TutorRuntimeOptions {
   workspaceId: string;
@@ -18,7 +31,9 @@ interface TutorRuntimeOptions {
   history?: ConversationHistoryResponse | null;
   onConversationId: (conversationId: string) => void;
   onMode: (mode: TutorMode) => void;
+  onStatus?: (status: TutorStreamStatus) => void;
   onError?: (message: string) => void;
+  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
 }
 
 interface CreateTutorModelAdapterOptions
@@ -34,7 +49,9 @@ export function useTutorRuntime({
   history,
   onConversationId,
   onMode,
+  onStatus,
   onError,
+  onMasteryUpdated,
 }: TutorRuntimeOptions) {
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
@@ -51,7 +68,9 @@ export function useTutorRuntime({
         getConversationId,
         onConversationId,
         onMode,
+        onStatus,
         onError,
+        onMasteryUpdated,
       }),
     [
       workspaceId,
@@ -61,7 +80,9 @@ export function useTutorRuntime({
       getConversationId,
       onConversationId,
       onMode,
+      onStatus,
       onError,
+      onMasteryUpdated,
     ],
   );
 
@@ -79,7 +100,9 @@ export function createTutorModelAdapter({
   getConversationId,
   onConversationId,
   onMode,
+  onStatus,
   onError,
+  onMasteryUpdated,
 }: CreateTutorModelAdapterOptions): ChatModelAdapter {
   return {
     async *run({ messages, abortSignal }) {
@@ -89,7 +112,7 @@ export function createTutorModelAdapter({
       }
 
       let text = "";
-      let reasoning = "";
+      const parts: TutorRuntimePart[] = [];
       const queue = createRunQueue();
 
       // LocalRuntime expects yielded message snapshots, while our backend streams callback-style SSE.
@@ -101,17 +124,36 @@ export function createTutorModelAdapter({
         conversationId: getConversationId?.() ?? conversationId,
         signal: abortSignal,
         onMode,
+        onStatus(nextStatus) {
+          onStatus?.(nextStatus);
+          parts.push({ kind: "status", status: nextStatus });
+          queue.push(assistantRunUpdate(text, parts));
+        },
+        onMasteryUpdated,
         onThinking(content) {
-          reasoning += content;
-          queue.push(assistantRunUpdate(text, reasoning));
+          const last = parts[parts.length - 1];
+          if (last?.kind === "thinking") {
+            last.text += content;
+          } else {
+            parts.push({ kind: "thinking", text: content });
+          }
+          queue.push(assistantRunUpdate(text, parts));
+        },
+        onToolCall(tool) {
+          parts.push({ kind: "tool_call", tool });
+          queue.push(assistantRunUpdate(text, parts));
+        },
+        onToolResult(tool) {
+          parts.push({ kind: "tool_result", tool });
+          queue.push(assistantRunUpdate(text, parts));
         },
         onToken(content) {
           text += content;
-          queue.push(assistantRunUpdate(text, reasoning));
+          queue.push(assistantRunUpdate(text, parts));
         },
         onDone(nextConversationId) {
           onConversationId(nextConversationId);
-          queue.push(assistantRunResult(text, reasoning));
+          queue.push(assistantRunResult(text, parts));
           queue.close();
         },
       })
@@ -119,7 +161,7 @@ export function createTutorModelAdapter({
         .catch((exc) => {
           const message = exc instanceof Error ? exc.message : "Tutor chat failed";
           onError?.(message);
-          queue.fail(exc);
+          queue.close();
         });
 
       while (true) {
@@ -162,31 +204,84 @@ function toThreadMessageContent(message: ConversationHistoryResponse["messages"]
     return message.content;
   }
 
-  return assistantMessageContent(message.content, message.reasoning ?? "");
+  return assistantMessageContent(message.content, reasoningParts(message));
 }
 
-function assistantRunUpdate(text: string, reasoning: string): ChatModelRunResult {
+function assistantRunUpdate(
+  text: string,
+  parts: TutorRuntimePart[],
+): ChatModelRunResult {
   return {
-    content: assistantMessageContent(text, reasoning),
+    content: assistantMessageContent(text, parts),
   };
 }
 
-function assistantRunResult(text: string, reasoning: string): ChatModelRunResult {
+function assistantRunResult(
+  text: string,
+  parts: TutorRuntimePart[],
+): ChatModelRunResult {
   return {
-    content: assistantMessageContent(text, reasoning),
+    content: assistantMessageContent(text, parts),
     status: { type: "complete", reason: "stop" },
   };
 }
 
-function assistantMessageContent(text: string, reasoning: string): ThreadAssistantMessagePart[] {
+function assistantMessageContent(
+  text: string,
+  parts: TutorRuntimePart[],
+): ThreadAssistantMessagePart[] {
   const content: ThreadAssistantMessagePart[] = [];
-  if (reasoning) {
-    content.push({ type: "reasoning", text: reasoning });
+  for (const part of parts) {
+    if (part.kind === "status") {
+      if (part.status !== "responding") {
+        content.push({
+          type: "data",
+          name: "tutor-status",
+          data: { status: part.status },
+        });
+      }
+      continue;
+    }
+    if (part.kind === "thinking") {
+      content.push({
+        type: "data",
+        name: "tutor-thinking",
+        data: { text: part.text },
+      });
+      continue;
+    }
+    content.push({
+      type: "data",
+      name: `tutor-${part.kind.replace("_", "-")}`,
+      data: part.tool,
+    });
   }
   if (text || content.length === 0) {
     content.push({ type: "text", text });
   }
   return content;
+}
+
+function reasoningParts(message: ConversationHistoryResponse["messages"][number]): TutorRuntimePart[] {
+  if (message.reasoning_parts?.length) {
+    return message.reasoning_parts.flatMap(reasoningPartToRuntimePart);
+  }
+  return message.reasoning ? [{ kind: "thinking", text: message.reasoning }] : [];
+}
+
+function reasoningPartToRuntimePart(part: ConversationReasoningPart): TutorRuntimePart[] {
+  if (part.kind === "status") {
+    return part.status ? [{ kind: "status", status: part.status }] : [];
+  }
+  if (part.kind === "thinking") {
+    return part.text ? [{ kind: "thinking", text: part.text }] : [];
+  }
+  const tool = {
+    name: part.name ?? "tool",
+    mode: part.mode ?? null,
+    result: part.result ?? undefined,
+  };
+  return [{ kind: part.kind, tool }];
 }
 
 function createRunQueue() {
