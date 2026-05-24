@@ -17,6 +17,7 @@ If this file conflicts with an older phase description, follow this file and upd
 - Public `tool_result` payloads are sanitized previews only. Raw internal tutor instructions must not be exposed.
 - Hidden tool-call/tool-result turns are persisted for prompt replay, but the public conversation history still returns only visible user/assistant messages.
 - Assistant turns persist both full `reasoning` text and ordered public `reasoning_parts`.
+- `get_tutor_instructions` is wrapped by the normalized provider-tool schema internally, while the tutor still emits/persists the existing tagged compatibility representation for public SSE and replay stability.
 - If a reasoning-enabled call ends with no visible answer, the tutor retries once with `thinking=False` and emits `retrying_without_thinking` before failing.
 - Automatic conversation summarization is still deferred. Prompt context currently uses the latest 10 visible turns plus any tool turns within that same retained window.
 
@@ -56,7 +57,7 @@ If this file conflicts with an older phase description, follow this file and upd
 
 ## Deferred Work
 
-- Provider-native tool calling behind a cross-provider adapter is now planned early after safe Trail Pack export/import foundations, before source ingestion and retrieval/context tooling expand.
+- Full provider-native retrieval/research/hydration/quiz/learner-state tool execution beyond the current abstraction foundation and tutor compatibility adapter.
 - Automatic conversation summarization.
 - True per-message citation/source parts and quotes.
 - Global cross-Trail assistant surfaces.

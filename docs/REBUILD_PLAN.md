@@ -87,7 +87,7 @@ Implementation overlay:
 
 ## Current Build Snapshot
 
-Last updated: 2026-05-23.
+Last updated: 2026-05-24.
 
 Implemented:
 
@@ -102,11 +102,12 @@ Implemented:
 - Mastery records, quiz attempts, and quiz drafts persisted in the DB, with real concept/trail mastery reads, first tutor turn `not_started -> learning`, tutor-stream mastery updates, mixed-format level-up/practice quiz generation from `mastery_check_labels`, per-question grading feedback, backend draft reuse with `force_new` refresh, duplicate-request protection (frontend dedupe plus backend advisory lock), practice retry-in-place, and mastery updates on level-up pass/fail only.
 - Source provenance sanitizer and safe JSON Trail Pack export, plus backend Trail Pack import/fork, imported research trace preservation/retrieval, and a narrow private hydration-placeholder API.
 - LLM client support for OpenAI Responses API, OpenAI-compatible providers including OpenRouter/DeepSeek/Gemini/custom, and optional Anthropic SDK.
+- Provider-tool abstraction foundation with explicit internal tool definitions/calls/results, provider registration/normalization helpers, normalized stream events, fake-provider test coverage, and a compatibility adapter for the tutor instruction tool.
 
 Not implemented yet:
 
 - True per-message citation/source parts and quote support.
-- Automatic conversation summarisation and provider-native tool calling.
+- Automatic conversation summarisation and full provider-native tool execution loops beyond the current tutor compatibility adapter.
 - Automated research-agent search, real hydration fetching/indexing, durable generation jobs, dark mode, deployment, auth, and SaaS features.
 - Learning dashboard, Learn/Inspect graph mode split, deterministic recommended next concept, source ingestion, controlled retrieval tools, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
 
@@ -600,6 +601,8 @@ Current implementation note:
 
 ## Phase 8: Provider Tool Abstraction Foundation
 
+Status: implemented for the backend foundation slice; provider-native retrieval/research/hydration/quiz/learner-state tools remain deferred.
+
 Goal: add provider-native tool calling early enough that research, hydration, retrieval, guided learning, quiz suggestions, and learner-state updates do not grow ad-hoc JSON plumbing.
 
 Implementation scope:
@@ -642,6 +645,13 @@ Acceptance criteria:
 
 - Future source/retrieval/quiz/learner-state tools can be added without provider-specific parsing in each service.
 - Current tutor streaming and replay behavior are preserved.
+
+Current implementation note:
+
+- `backend/app/agents/provider_tools.py` defines the internal tool schema, strict argument validation subset, normalized calls/results, sanitized public previews, provider tool-definition adapters, and normalized stream events.
+- `backend/app/agents/llm_client.py` keeps direct provider calls and can register/normalize tools for OpenAI Responses API, OpenAI-compatible Chat Completions/OpenRouter, and Anthropic.
+- The existing tutor `get_tutor_instructions` flow is wrapped by the normalized tool schema through a compatibility adapter. It intentionally preserves legacy tagged prompt replay, public SSE `tool_call` / `tool_result` payloads, hidden tool turns, ordered `reasoning_parts`, and empty-completion retry behavior.
+- Tool execution remains service-owned. No retrieval/search/hydration/provider-tool loop was added in this slice.
 
 Non-goals:
 

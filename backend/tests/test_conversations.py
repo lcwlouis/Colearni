@@ -40,6 +40,21 @@ class _FakeAgent:
         yield ("text", "Response text")
 
 
+class _ToolAgent:
+    async def respond_stream(self, context: TutorContext):
+        yield ("status", "calling_tool")
+        yield ("tool_call", '<tool name="get_tutor_instructions" mode="direct" />')
+        yield ("status", "tool_called")
+        yield (
+            "tool_result",
+            '<tool_result name="get_tutor_instructions" mode="direct">'
+            "Use direct mode.</tool_result>",
+        )
+        yield ("status", "tool_complete")
+        yield ("mode", "direct")
+        yield ("text", "Direct answer")
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -379,6 +394,51 @@ async def test_history_endpoint_returns_reasoning_for_assistant_turns(db_engine)
     assistant_message = next(message for message in messages if message["role"] == "assistant")
     assert assistant_message["content"] == "Stored answer"
     assert assistant_message["reasoning"] == "Stored reasoning"
+
+
+async def test_hidden_tool_turns_persist_but_history_returns_rehydrated_assistant_trace(
+    db_engine,
+):
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async def override_session():
+        async with async_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_tutor_agent] = lambda: _ToolAgent()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        ws_id, trail_id, concept_id = await _seed(db_engine)
+        await ac.post(
+            f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+            json={"message": "Explain directly."},
+        )
+        history = await ac.get(
+            f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversation"
+        )
+
+    app.dependency_overrides.clear()
+
+    async with async_session() as session:
+        rows = list(
+            await session.scalars(select(ConversationTurn).order_by(ConversationTurn.turn_index))
+        )
+
+    assert [row.kind for row in rows] == ["visible", "tool_call", "tool_result", "visible"]
+    payload = history.json()
+    assert [message["role"] for message in payload["messages"]] == ["user", "assistant"]
+    assistant = payload["messages"][1]
+    assert assistant["content"] == "Direct answer"
+    assert [part["kind"] for part in assistant["reasoning_parts"]] == [
+        "status",
+        "tool_call",
+        "status",
+        "tool_result",
+        "status",
+    ]
+    assert assistant["reasoning_parts"][1]["name"] == "get_tutor_instructions"
+    assert assistant["reasoning_parts"][3]["result"] == '{"status": "received", "mode": "direct"}'
 
 
 async def test_history_endpoint_limit_param_returns_most_recent_turns_chronologically(

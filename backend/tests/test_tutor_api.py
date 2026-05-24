@@ -57,7 +57,8 @@ class _ToolAgent:
         yield ("status", "tool_called")
         yield (
             "tool_result",
-            '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+            '<tool_result name="get_tutor_instructions" mode="direct">'
+            "Use direct mode.</tool_result>",
         )
         yield ("status", "tool_complete")
         yield ("mode", "direct")
@@ -71,10 +72,26 @@ class _ReasoningToolAgent:
         yield ("tool_call", '<tool name="get_tutor_instructions" mode="direct" />')
         yield (
             "tool_result",
-            '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+            '<tool_result name="get_tutor_instructions" mode="direct">'
+            "Use direct mode.</tool_result>",
         )
         yield ("thinking", "Now answer.\n")
         yield ("text", "Direct answer")
+
+
+class _InvalidToolAgent:
+    async def respond_stream(self, context: TutorContext):
+        yield ("status", "calling_tool")
+        yield ("tool_call", '<tool name="get_tutor_instructions" mode="lecture" />')
+        yield ("status", "tool_called")
+        yield (
+            "tool_result",
+            '<tool_result name="get_tutor_instructions" mode="lecture">'
+            "raw secret instructions</tool_result>",
+        )
+        yield ("status", "tool_complete")
+        yield ("mode", "socratic")
+        yield ("text", "Safe fallback question?")
 
 
 class _FailingAgent:
@@ -307,7 +324,9 @@ async def test_chat_can_emit_status_events(api_client, db_engine):
     )
 
     events = _parse_sse(resp.text)
-    status_values = [event["data"]["status"] for event in events if event["data"]["type"] == "status"]
+    status_values = [
+        event["data"]["status"] for event in events if event["data"]["type"] == "status"
+    ]
     assert status_values == ["calling_tool", "tool_called", "tool_complete", "responding"]
 
 
@@ -372,6 +391,43 @@ async def test_chat_done_event_includes_structured_reasoning_parts(api_client, d
     assert reasoning_parts[1]["name"] == "get_tutor_instructions"
     assert reasoning_parts[2]["result"] == '{"status": "received", "mode": "direct"}'
     assert reasoning_parts[3]["text"] == "Now answer.\n"
+
+
+async def test_invalid_tool_arguments_are_sanitized_in_public_sse(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _InvalidToolAgent()
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Try invalid tool."},
+    )
+
+    events = _parse_sse(resp.text)
+    event_types = [event["data"]["type"] for event in events]
+    assert event_types == [
+        "status",
+        "tool_call",
+        "status",
+        "tool_result",
+        "status",
+        "mode",
+        "status",
+        "token",
+        "done",
+    ]
+    tool_call = next(event for event in events if event["data"]["type"] == "tool_call")
+    tool_result = next(event for event in events if event["data"]["type"] == "tool_result")
+
+    assert tool_call["data"] == {
+        "type": "tool_call",
+        "name": "get_tutor_instructions",
+        "mode": None,
+    }
+    assert json.loads(tool_result["data"]["result"]) == {
+        "status": "received",
+        "mode": "unknown",
+    }
+    assert "raw secret instructions" not in resp.text
 
 
 # ---------------------------------------------------------------------------

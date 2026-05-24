@@ -43,8 +43,20 @@ Usage:
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 
+from backend.app.agents.provider_tools import (
+    AnthropicStreamState,
+    NormalizedStreamEvent,
+    ProviderToolDefinition,
+    anthropic_tool_definitions,
+    normalize_anthropic_stream_event,
+    normalize_openai_chat_stream_chunk,
+    normalize_openai_chat_tool_call,
+    normalize_openai_responses_stream_event,
+    openai_chat_tool_definitions,
+    openai_responses_tool_definitions,
+)
 from backend.app.settings import Settings
 
 # Type alias for tagged token stream: (kind, chunk) where kind is "text" or "thinking".
@@ -217,13 +229,14 @@ class LLMClient:
         *,
         temperature: float = 0.4,
         max_tokens: int = 4096,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> str:
         """Send a chat-completion request and return the assistant text."""
         if self._provider in _NATIVE_SDK_PROVIDERS:
-            return await self._anthropic_chat(messages, temperature, max_tokens)
+            return await self._anthropic_chat(messages, temperature, max_tokens, tools=tools)
         if self._provider in _RESPONSES_API_PROVIDERS:
-            return await self._openai_responses_chat(messages, temperature, max_tokens)
-        return await self._openai_compatible_chat(messages, temperature, max_tokens)
+            return await self._openai_responses_chat(messages, temperature, max_tokens, tools=tools)
+        return await self._openai_compatible_chat(messages, temperature, max_tokens, tools=tools)
 
     async def chat_stream(
         self,
@@ -288,6 +301,49 @@ class LLMClient:
             ):
                 yield item
 
+    async def chat_stream_events(
+        self,
+        messages: list[dict],
+        *,
+        temperature: float = 0.4,
+        max_tokens: int = 4096,
+        thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
+    ) -> AsyncIterator[NormalizedStreamEvent]:
+        """Streaming chat normalized to text/thinking/tool events.
+
+        This is the tool-aware path for future services. Existing tutor streaming
+        still uses chat_stream_tagged() so public event behavior stays unchanged.
+        """
+        requested_thinking = self._thinking_enabled if thinking is None else thinking
+        if self._provider in _NATIVE_SDK_PROVIDERS:
+            async for item in self._anthropic_chat_stream_events(
+                messages,
+                temperature,
+                max_tokens,
+                thinking=requested_thinking,
+                tools=tools,
+            ):
+                yield item
+        elif self._provider in _RESPONSES_API_PROVIDERS:
+            async for item in self._openai_responses_chat_stream_events(
+                messages,
+                temperature,
+                max_tokens,
+                thinking=requested_thinking,
+                tools=tools,
+            ):
+                yield item
+        else:
+            async for item in self._openai_compatible_chat_stream_events(
+                messages,
+                temperature,
+                max_tokens,
+                thinking=requested_thinking,
+                tools=tools,
+            ):
+                yield item
+
     # ------------------------------------------------------------------
     # OpenAI Responses API path  (provider == "openai")
     # ------------------------------------------------------------------
@@ -298,6 +354,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
         thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> dict:
         """Convert a messages list to kwargs for client.responses.create.
 
@@ -319,7 +376,9 @@ class LLMClient:
                 input_items.append(msg)
 
         requested_thinking = self._thinking_enabled if thinking is None else thinking
-        effective_max_tokens = max_tokens + self._thinking_budget if requested_thinking else max_tokens
+        effective_max_tokens = (
+            max_tokens + self._thinking_budget if requested_thinking else max_tokens
+        )
 
         kwargs: dict = {
             "model": self._model,
@@ -331,6 +390,9 @@ class LLMClient:
 
         if instructions:
             kwargs["instructions"] = instructions
+
+        if tools:
+            kwargs["tools"] = openai_responses_tool_definitions(tools)
 
         if requested_thinking:
             # Reasoning models use effort instead of temperature.
@@ -348,10 +410,12 @@ class LLMClient:
         messages: list[dict],
         temperature: float,
         max_tokens: int,
+        *,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> str:
         """Non-streaming call via the OpenAI Responses API."""
         client = self._openai_client()
-        kwargs = self._build_responses_api_kwargs(messages, temperature, max_tokens)
+        kwargs = self._build_responses_api_kwargs(messages, temperature, max_tokens, tools=tools)
         response = await client.responses.create(**kwargs)
         # output_text is a convenience property that concatenates all text output.
         return response.output_text or ""
@@ -363,6 +427,7 @@ class LLMClient:
         max_tokens: int,
         *,
         thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> AsyncIterator[TaggedChunk]:
         """Tagged streaming via the OpenAI Responses API.
 
@@ -377,7 +442,13 @@ class LLMClient:
           response.output_text.delta             — text
         """
         client = self._openai_client()
-        kwargs = self._build_responses_api_kwargs(messages, temperature, max_tokens, thinking=thinking)
+        kwargs = self._build_responses_api_kwargs(
+            messages,
+            temperature,
+            max_tokens,
+            thinking=thinking,
+            tools=tools,
+        )
         kwargs["stream"] = True
         stream = await client.responses.create(**kwargs)
         async for event in stream:
@@ -390,6 +461,30 @@ class LLMClient:
                 yield ("thinking", delta)
             elif event_type == "response.output_text.delta":
                 yield ("text", delta)
+
+    async def _openai_responses_chat_stream_events(
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        *,
+        thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
+    ) -> AsyncIterator[NormalizedStreamEvent]:
+        client = self._openai_client()
+        kwargs = self._build_responses_api_kwargs(
+            messages,
+            temperature,
+            max_tokens,
+            thinking=thinking,
+            tools=tools,
+        )
+        kwargs["stream"] = True
+        stream = await client.responses.create(**kwargs)
+        async for event in stream:
+            normalized = normalize_openai_responses_stream_event(event, tools or ())
+            if normalized is not None:
+                yield normalized
 
     # ------------------------------------------------------------------
     # OpenAI-compatible path (OpenRouter, DeepSeek, Gemini, custom)
@@ -422,6 +517,7 @@ class LLMClient:
         *,
         thinking: bool,
         max_tokens: int = 4096,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> dict:
         """Build the kwargs dict for an OpenAI-compatible completions call.
 
@@ -447,6 +543,9 @@ class LLMClient:
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
 
+        if tools:
+            kwargs["tools"] = openai_chat_tool_definitions(tools)
+
         if self._provider == "openrouter":
             # OpenRouter normalises reasoning across all its models via extra_body.
             # Always send an explicit effort level so the model's default reasoning
@@ -465,11 +564,20 @@ class LLMClient:
         return kwargs
 
     async def _openai_compatible_chat(
-        self, messages: list[dict], temperature: float, max_tokens: int = 4096
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int = 4096,
+        *,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> str:
         client = self._openai_client()
         kwargs = self._build_openai_kwargs(
-            messages, temperature, thinking=self._thinking_enabled, max_tokens=max_tokens
+            messages,
+            temperature,
+            thinking=self._thinking_enabled,
+            max_tokens=max_tokens,
+            tools=tools,
         )
         try:
             response = await client.chat.completions.create(**kwargs)
@@ -482,7 +590,11 @@ class LLMClient:
                     exc,
                 )
                 kwargs = self._build_openai_kwargs(
-                    messages, temperature, thinking=False, max_tokens=max_tokens
+                    messages,
+                    temperature,
+                    thinking=False,
+                    max_tokens=max_tokens,
+                    tools=tools,
                 )
                 response = await client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content or ""
@@ -505,6 +617,7 @@ class LLMClient:
         max_tokens: int = 4096,
         *,
         thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> AsyncIterator[TaggedChunk]:
         """Tagged OpenAI-compatible stream.
 
@@ -519,7 +632,11 @@ class LLMClient:
         client = self._openai_client()
         requested_thinking = self._thinking_enabled if thinking is None else thinking
         kwargs = self._build_openai_kwargs(
-            messages, temperature, thinking=requested_thinking, max_tokens=max_tokens
+            messages,
+            temperature,
+            thinking=requested_thinking,
+            max_tokens=max_tokens,
+            tools=tools,
         )
         kwargs["stream"] = True
         reasoning_so_far = ""
@@ -535,9 +652,7 @@ class LLMClient:
                     if next_reasoning:
                         logger.debug("Reasoning chunk received (len=%d)", len(next_reasoning))
                         yield ("thinking", next_reasoning)
-                    reasoning_so_far = (
-                        reasoning if len(reasoning) >= len(reasoning_so_far) else reasoning_so_far + reasoning
-                    )
+                    reasoning_so_far = _next_reasoning_so_far(reasoning_so_far, reasoning)
                 if delta.content:
                     yield ("text", delta.content)
         except Exception as exc:
@@ -548,7 +663,11 @@ class LLMClient:
                     exc,
                 )
                 kwargs = self._build_openai_kwargs(
-                    messages, temperature, thinking=False, max_tokens=max_tokens
+                    messages,
+                    temperature,
+                    thinking=False,
+                    max_tokens=max_tokens,
+                    tools=tools,
                 )
                 kwargs["stream"] = True
                 stream = await client.chat.completions.create(**kwargs)
@@ -562,11 +681,93 @@ class LLMClient:
                         if next_reasoning:
                             logger.debug("Reasoning chunk received (len=%d)", len(next_reasoning))
                             yield ("thinking", next_reasoning)
-                        reasoning_so_far = (
-                            reasoning if len(reasoning) >= len(reasoning_so_far) else reasoning_so_far + reasoning
-                        )
+                        reasoning_so_far = _next_reasoning_so_far(reasoning_so_far, reasoning)
                     if delta.content:
                         yield ("text", delta.content)
+            else:
+                raise
+
+    async def _openai_compatible_chat_stream_events(
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int = 4096,
+        *,
+        thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
+    ) -> AsyncIterator[NormalizedStreamEvent]:
+        client = self._openai_client()
+        requested_thinking = self._thinking_enabled if thinking is None else thinking
+        kwargs = self._build_openai_kwargs(
+            messages,
+            temperature,
+            thinking=requested_thinking,
+            max_tokens=max_tokens,
+            tools=tools,
+        )
+        kwargs["stream"] = True
+        reasoning_so_far = ""
+        tool_call_parts: dict[int, dict] = {}
+        try:
+            stream = await client.chat.completions.create(**kwargs)
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+                reasoning = _extract_delta_reasoning(delta)
+                if reasoning:
+                    next_reasoning = _delta_suffix(reasoning_so_far, reasoning)
+                    if next_reasoning:
+                        yield NormalizedStreamEvent.thinking_delta(next_reasoning)
+                    reasoning_so_far = (
+                        reasoning
+                        if len(reasoning) >= len(reasoning_so_far)
+                        else reasoning_so_far + reasoning
+                    )
+                for event in normalize_openai_chat_stream_chunk(chunk, tools or ()):
+                    if event.kind != "tool_call":
+                        yield event
+                _accumulate_openai_chat_tool_call_deltas(delta, tool_call_parts)
+                if getattr(choice, "finish_reason", None) == "tool_calls":
+                    for item in tool_call_parts.values():
+                        yield NormalizedStreamEvent.tool_call_event(
+                            normalize_openai_chat_tool_call(item, tools or ())
+                    )
+                    tool_call_parts.clear()
+            yield NormalizedStreamEvent.done_event()
+        except Exception as exc:
+            if requested_thinking and _is_thinking_error(exc):
+                logger.warning(
+                    "Thinking not supported by model %r; retrying without. Error: %s",
+                    self._model,
+                    exc,
+                )
+                kwargs = self._build_openai_kwargs(
+                    messages,
+                    temperature,
+                    thinking=False,
+                    max_tokens=max_tokens,
+                    tools=tools,
+                )
+                kwargs["stream"] = True
+                stream = await client.chat.completions.create(**kwargs)
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
+                    for event in normalize_openai_chat_stream_chunk(chunk, tools or ()):
+                        if event.kind != "tool_call":
+                            yield event
+                    _accumulate_openai_chat_tool_call_deltas(delta, tool_call_parts)
+                    if getattr(choice, "finish_reason", None) == "tool_calls":
+                        for item in tool_call_parts.values():
+                            yield NormalizedStreamEvent.tool_call_event(
+                                normalize_openai_chat_tool_call(item, tools or ())
+                            )
+                        tool_call_parts.clear()
+                yield NormalizedStreamEvent.done_event()
             else:
                 raise
 
@@ -586,6 +787,7 @@ class LLMClient:
         max_tokens: int,
         *,
         thinking: bool,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> tuple[dict, list[dict]]:
         """Return (kwargs, turns) for an Anthropic messages call.
 
@@ -615,6 +817,9 @@ class LLMClient:
         if system:
             kwargs["system"] = system
 
+        if tools:
+            kwargs["tools"] = anthropic_tool_definitions(tools)
+
         if thinking:
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": self._thinking_budget}
             kwargs["temperature"] = 1  # required by Anthropic when thinking is enabled
@@ -624,11 +829,20 @@ class LLMClient:
         return kwargs, turns
 
     async def _anthropic_chat(
-        self, messages: list[dict], temperature: float, max_tokens: int
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        *,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> str:
         client = self._anthropic_client()
         kwargs, _ = self._build_anthropic_kwargs(
-            messages, temperature, max_tokens, thinking=self._thinking_enabled
+            messages,
+            temperature,
+            max_tokens,
+            thinking=self._thinking_enabled,
+            tools=tools,
         )
         try:
             response = await client.messages.create(**kwargs)
@@ -640,7 +854,11 @@ class LLMClient:
                     exc,
                 )
                 kwargs, _ = self._build_anthropic_kwargs(
-                    messages, temperature, max_tokens, thinking=False
+                    messages,
+                    temperature,
+                    max_tokens,
+                    thinking=False,
+                    tools=tools,
                 )
                 response = await client.messages.create(**kwargs)
             else:
@@ -668,6 +886,7 @@ class LLMClient:
         max_tokens: int,
         *,
         thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
     ) -> AsyncIterator[TaggedChunk]:
         """Anthropic stream that yields (kind, chunk) tuples.
 
@@ -678,7 +897,11 @@ class LLMClient:
         client = self._anthropic_client()
         requested_thinking = self._thinking_enabled if thinking is None else thinking
         kwargs, _ = self._build_anthropic_kwargs(
-            messages, temperature, max_tokens, thinking=requested_thinking
+            messages,
+            temperature,
+            max_tokens,
+            thinking=requested_thinking,
+            tools=tools,
         )
         try:
             async with client.messages.stream(**kwargs) as stream:
@@ -697,10 +920,89 @@ class LLMClient:
                     exc,
                 )
                 kwargs, _ = self._build_anthropic_kwargs(
-                    messages, temperature, max_tokens, thinking=False
+                    messages,
+                    temperature,
+                    max_tokens,
+                    thinking=False,
+                    tools=tools,
                 )
                 async with client.messages.stream(**kwargs) as stream:
                     async for text in stream.text_stream:
                         yield ("text", text)
             else:
                 raise
+
+    async def _anthropic_chat_stream_events(
+        self,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        *,
+        thinking: bool | None = None,
+        tools: Sequence[ProviderToolDefinition] | None = None,
+    ) -> AsyncIterator[NormalizedStreamEvent]:
+        client = self._anthropic_client()
+        requested_thinking = self._thinking_enabled if thinking is None else thinking
+        kwargs, _ = self._build_anthropic_kwargs(
+            messages,
+            temperature,
+            max_tokens,
+            thinking=requested_thinking,
+            tools=tools,
+        )
+        try:
+            state = AnthropicStreamState()
+            async with client.messages.stream(**kwargs) as stream:
+                async for event in stream:
+                    normalized = normalize_anthropic_stream_event(event, tools or (), state)
+                    if normalized is not None:
+                        yield normalized
+        except Exception as exc:
+            if requested_thinking and _is_thinking_error(exc):
+                logger.warning(
+                    "Thinking not supported by model %r; retrying without. Error: %s",
+                    self._model,
+                    exc,
+                )
+                kwargs, _ = self._build_anthropic_kwargs(
+                    messages,
+                    temperature,
+                    max_tokens,
+                    thinking=False,
+                    tools=tools,
+                )
+                state = AnthropicStreamState()
+                async with client.messages.stream(**kwargs) as stream:
+                    async for event in stream:
+                        normalized = normalize_anthropic_stream_event(event, tools or (), state)
+                        if normalized is not None:
+                            yield normalized
+            else:
+                raise
+
+
+def _accumulate_openai_chat_tool_call_deltas(  # type: ignore[no-untyped-def]
+    delta,
+    parts: dict[int, dict],
+) -> None:
+    for tool_call in getattr(delta, "tool_calls", None) or []:
+        index = getattr(tool_call, "index", None)
+        if index is None:
+            index = len(parts)
+        item = parts.setdefault(index, {"id": "", "function": {"name": "", "arguments": ""}})
+        call_id = getattr(tool_call, "id", None)
+        if call_id:
+            item["id"] = call_id
+        function = getattr(tool_call, "function", None)
+        if function is None:
+            continue
+        name = getattr(function, "name", None)
+        if name:
+            item["function"]["name"] = name
+        arguments = getattr(function, "arguments", None)
+        if arguments:
+            item["function"]["arguments"] += arguments
+
+
+def _next_reasoning_so_far(previous: str, current: str) -> str:
+    return current if len(current) >= len(previous) else previous + current

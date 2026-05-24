@@ -350,18 +350,23 @@ Do not use git internally for user source tracking in V1. Use content hashes, pa
 
 Provider-native tool calling should be supported through a small internal abstraction before retrieval/source tools expand. This is not a full agent framework rewrite.
 
-The abstraction should define:
+The backend foundation now lives in `backend/app/agents/provider_tools.py` and defines:
 
 - Provider-agnostic tool definitions.
-- Tool call ids, names, normalized JSON arguments, and validation errors.
+- Explicit JSON argument schemas and strict validation errors.
+- Tool call ids, names, normalized JSON arguments, raw provider arguments for internal diagnostics, and validation status.
 - Tool result payloads plus learner-safe public previews.
 - Normalized streaming events for `tool_call` and `tool_result`.
 
-Adapters should cover:
+Adapters cover:
 
 - OpenAI Responses API.
 - OpenAI-compatible Chat Completions providers, including OpenRouter.
 - Anthropic Claude native tool use.
+
+`backend/app/agents/llm_client.py` remains the direct-provider boundary. It can register internal tool definitions in each provider's native shape and expose normalized stream events through a tool-aware path. Existing text/thinking streaming stays available for flows that do not need provider tools.
+
+The current tutor instruction tool is wrapped through the normalized schema as a compatibility adapter. Public tutor SSE events and persisted replay still use the existing XML-like tagged content so frontend/history behavior does not change.
 
 Rules:
 

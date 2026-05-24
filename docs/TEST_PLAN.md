@@ -206,7 +206,7 @@ These are critical and should be treated as regression tests for every export/im
 - OpenAI-compatible Chat Completions/OpenRouter tool calls normalize to the same shape.
 - Anthropic tool use normalizes to the same shape.
 - Fake provider streams text, reasoning, tool calls, tool results, and final text without live LLM calls.
-- Tutor instruction tool migration preserves SSE event order and public `tool_call` / `tool_result` previews.
+- Tutor instruction tool compatibility adapter preserves SSE event order and public `tool_call` / `tool_result` previews.
 - Hidden tool turns are persisted for replay but excluded from public conversation history.
 - Invalid tool arguments fail safely without unbounded retries.
 

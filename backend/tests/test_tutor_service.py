@@ -32,6 +32,7 @@ from backend.app.services.tutor import (
     LLMTutorAgent,
     _build_chat_messages,
     _context_to_prompt_vars,
+    _normalize_tutor_instruction_request,
     _parse_mode_json,
     _strip_control_prefix,
 )
@@ -302,7 +303,10 @@ async def test_context_keeps_tool_turns_with_retained_visible_window(db_engine, 
             conversation_id=conv.id,
             role="tool",
             kind="tool_result",
-            content='<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+            content=(
+                '<tool_result name="get_tutor_instructions" mode="direct">'
+                "Use direct mode.</tool_result>"
+            ),
             mode="direct",
             turn_index=13,
         )
@@ -333,10 +337,11 @@ async def test_context_keeps_tool_turns_with_retained_visible_window(db_engine, 
 
     kept_contents = [turn.content for turn in ctx.recent_turns]
     assert '<tool name="get_tutor_instructions" mode="direct" />' in kept_contents
-    assert (
-        '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>'
-        in kept_contents
+    expected_tool_result = (
+        '<tool_result name="get_tutor_instructions" mode="direct">'
+        "Use direct mode.</tool_result>"
     )
+    assert expected_tool_result in kept_contents
     assert "visible-0" not in kept_contents
 
 
@@ -625,7 +630,10 @@ def test_build_chat_messages_replays_tool_turns_as_assistant_messages():
         SimpleNamespace(
             role="tool",
             kind="tool_result",
-            content='<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+            content=(
+                '<tool_result name="get_tutor_instructions" mode="direct">'
+                "Use direct mode.</tool_result>"
+            ),
             mode="direct",
         ),
     ]
@@ -637,7 +645,10 @@ def test_build_chat_messages_replays_tool_turns_as_assistant_messages():
         {"role": "assistant", "content": '<tool name="get_tutor_instructions" mode="direct" />'},
         {
             "role": "assistant",
-            "content": '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>',
+            "content": (
+                '<tool_result name="get_tutor_instructions" mode="direct">'
+                "Use direct mode.</tool_result>"
+            ),
         },
         {"role": "user", "content": "Latest"},
     ]
@@ -660,6 +671,24 @@ def test_strip_control_prefix_removes_leaked_mode_line():
 def test_strip_control_prefix_removes_leaked_tool_line():
     raw = '<tool name="get_tutor_instructions" mode="direct" />\nVisible answer.'
     assert _strip_control_prefix(raw) == "Visible answer."
+
+
+def test_tutor_instruction_request_uses_normalized_tool_schema():
+    call = _normalize_tutor_instruction_request("direct")
+
+    assert call.is_valid
+    assert call.name == "get_tutor_instructions"
+    assert call.arguments == {"mode": "direct"}
+    assert call.provider == "colearni_compat"
+
+
+def test_tutor_instruction_request_rejects_invalid_arguments_safely():
+    call = _normalize_tutor_instruction_request("lecture")
+
+    assert not call.is_valid
+    assert call.arguments == {"mode": "lecture"}
+    assert call.validation_error is not None
+    assert "lecture" not in call.validation_error
 
 
 def test_build_chat_messages_learner_message_is_always_last():

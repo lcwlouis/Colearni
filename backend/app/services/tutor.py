@@ -29,6 +29,12 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.prompts import prompt_registry
+from backend.app.agents.provider_tools import (
+    NormalizedToolCall,
+    NormalizedToolResult,
+    ProviderToolDefinition,
+    normalize_tool_call,
+)
 from backend.app.schemas.tutor import ConversationMessage, TutorMode
 from backend.app.services.conversations import (
     TutorContext,
@@ -119,6 +125,19 @@ _PROMPT_MODE_TASKS: dict[str, str] = {
     "free_explore": "tutor_free_explore_instructions",
 }
 _MASTERED_ONLY_TOOL_MODES: frozenset[str] = frozenset({"direct", "free_explore"})
+_TUTOR_INSTRUCTIONS_TOOL = ProviderToolDefinition(
+    name="get_tutor_instructions",
+    description="Return internal continuation instructions for mastery-gated tutor modes.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "mode": {"type": "string", "enum": sorted(_TOOL_GATED_MODES)},
+        },
+        "required": ["mode"],
+        "additionalProperties": False,
+    },
+    public_argument_fields=("mode",),
+)
 _CONTROL_MODE_RE = re.compile(r'^<mode\s+name="([a-z_]+)"\s*/?>$')
 _CONTROL_TOOL_RE = re.compile(
     r'^<tool\s+name="get_tutor_instructions"\s+mode="([a-z_]+)"\s*/?>$'
@@ -136,6 +155,8 @@ class _ToolInstructionResult:
     requested_mode: str
     final_mode: TutorMode
     content: str
+    normalized_call: NormalizedToolCall | None = None
+    normalized_result: NormalizedToolResult | None = None
 
 
 @dataclass(frozen=True)
@@ -197,7 +218,11 @@ class LLMTutorAgent:
             context.learner_message,
         )
 
-        raw_stream = self._client_chat_stream_tagged(messages, temperature=0.4, max_tokens=self._max_tokens)
+        raw_stream = self._client_chat_stream_tagged(
+            messages,
+            temperature=0.4,
+            max_tokens=self._max_tokens,
+        )
         buffered_text = ""
         emitted_first_pass_thinking_status = False
 
@@ -415,16 +440,14 @@ class LLMTutorAgent:
             if mode is None:
                 return _PreparedStream(
                     mode="socratic",
-                    initial_chunks=tuple(
-                        initial_chunks + ([(("text"), buffered_text)] if buffered_text else [])
-                    ),
+                    initial_chunks=_append_text_chunk(initial_chunks, buffered_text),
                     stream=_empty_stream(),
                 )
 
             remainder = parsed.remainder.lstrip("\n")
             return _PreparedStream(
                 mode=mode,
-                initial_chunks=tuple(initial_chunks + ([("text", remainder)] if remainder else [])),
+                initial_chunks=_append_text_chunk(initial_chunks, remainder),
                 stream=_continue_text_stream(raw_stream),
             )
 
@@ -434,16 +457,16 @@ class LLMTutorAgent:
             if mode is not None:
                 return _PreparedStream(
                     mode=mode,
-                    initial_chunks=tuple(
-                        initial_chunks
-                        + ([("text", parsed.remainder.lstrip("\n"))] if parsed.remainder.lstrip("\n") else [])
+                    initial_chunks=_append_text_chunk(
+                        initial_chunks,
+                        parsed.remainder.lstrip("\n"),
                     ),
                     stream=_empty_stream(),
                 )
 
         return _PreparedStream(
             mode="socratic",
-            initial_chunks=tuple(initial_chunks + ([("text", buffered_text)] if buffered_text else [])),
+            initial_chunks=_append_text_chunk(initial_chunks, buffered_text),
             stream=_empty_stream(),
         )
 
@@ -452,14 +475,50 @@ class LLMTutorAgent:
         requested_mode: str,
         context: TutorContext,
     ) -> _ToolInstructionResult:
+        tool_call = _normalize_tutor_instruction_request(requested_mode)
+        if not tool_call.is_valid:
+            content = _wrap_tool_result(
+                "socratic",
+                (
+                    "Tool arguments were invalid. Stay Socratic, ask one focused question, "
+                    "and do not mention internal tooling."
+                ),
+            )
+            return _ToolInstructionResult(
+                requested_mode="socratic",
+                final_mode="socratic",
+                content=content,
+                normalized_call=tool_call,
+                normalized_result=NormalizedToolResult(
+                    call_id=tool_call.call_id,
+                    name=tool_call.name,
+                    content=content,
+                    provider=tool_call.provider,
+                    is_error=True,
+                    public_preview={"status": "invalid_arguments", "mode": "unknown"},
+                ),
+            )
+
+        requested_mode = str(tool_call.arguments["mode"])
         if requested_mode not in _TOOL_GATED_MODES:
+            content = (
+                "<tool_result name=\"get_tutor_instructions\" mode=\"socratic\">\n"
+                "Unsupported gated mode request. Stay Socratic, ask one focused question, "
+                "and do not mention internal tooling.\n"
+                "</tool_result>"
+            )
             return _ToolInstructionResult(
                 requested_mode=requested_mode,
                 final_mode="socratic",
-                content=(
-                    "<tool_result name=\"get_tutor_instructions\" mode=\"socratic\">\n"
-                    "Unsupported gated mode request. Stay Socratic, ask one focused question, and do not mention internal tooling.\n"
-                    "</tool_result>"
+                content=content,
+                normalized_call=tool_call,
+                normalized_result=NormalizedToolResult(
+                    call_id=tool_call.call_id,
+                    name=tool_call.name,
+                    content=content,
+                    provider=tool_call.provider,
+                    is_error=True,
+                    public_preview={"status": "received", "mode": "socratic"},
                 ),
             )
 
@@ -477,18 +536,36 @@ class LLMTutorAgent:
                     "mastery_status": context.mastery_status,
                 },
             )
+            content = _wrap_tool_result(requested_mode, denial)
             return _ToolInstructionResult(
                 requested_mode=requested_mode,
                 final_mode=fallback_mode,
-                content=_wrap_tool_result(requested_mode, denial),
+                content=content,
+                normalized_call=tool_call,
+                normalized_result=NormalizedToolResult(
+                    call_id=tool_call.call_id,
+                    name=tool_call.name,
+                    content=content,
+                    provider=tool_call.provider,
+                    public_preview={"status": "received", "mode": requested_mode},
+                ),
             )
 
         prompt_task = _PROMPT_MODE_TASKS[requested_mode]
         instructions = self._registry.render(prompt_task, _context_to_base_prompt_vars(context))
+        content = _wrap_tool_result(requested_mode, instructions)
         return _ToolInstructionResult(
             requested_mode=requested_mode,
             final_mode=requested_mode,  # type: ignore[arg-type]
-            content=_wrap_tool_result(requested_mode, instructions),
+            content=content,
+            normalized_call=tool_call,
+            normalized_result=NormalizedToolResult(
+                call_id=tool_call.call_id,
+                name=tool_call.name,
+                content=content,
+                provider=tool_call.provider,
+                public_preview={"status": "received", "mode": requested_mode},
+            ),
         )
 
 
@@ -563,7 +640,10 @@ async def stream_chat_response(
                 yield _sse("status", {"type": "status", "status": status})
                 continue
             if kind == "tool_call":
-                tool_mode = _safe_tool_mode(_extract_tool_mode(chunk))
+                tool_call = _normalize_tutor_instruction_content(chunk)
+                tool_mode = _safe_tool_mode(
+                    str(tool_call.arguments.get("mode")) if tool_call.is_valid else None
+                )
                 tool_turns.append(("assistant", "tool_call", chunk, tool_mode))
                 reasoning_parts.append(
                     {
@@ -684,12 +764,18 @@ async def stream_chat_response(
     )
 
 
-async def _continue_text_stream(stream: AsyncIterator[TutorStreamChunk]) -> AsyncIterator[TutorStreamChunk]:
+async def _continue_text_stream(
+    stream: AsyncIterator[TutorStreamChunk],
+) -> AsyncIterator[TutorStreamChunk]:
     async for kind, chunk in stream:
         if kind == "thinking":
             yield ("thinking", chunk)
         else:
             yield ("text", chunk)
+
+
+def _append_text_chunk(chunks: list[TutorStreamChunk], text: str) -> tuple[TutorStreamChunk, ...]:
+    return tuple(chunks + ([("text", text)] if text else []))
 
 
 async def _empty_stream() -> AsyncIterator[TutorStreamChunk]:
@@ -921,6 +1007,20 @@ def _context_to_prompt_vars(mode: TutorMode, context: TutorContext) -> dict[str,
     return variables
 
 
+def _normalize_tutor_instruction_request(mode: str) -> NormalizedToolCall:
+    return normalize_tool_call(
+        call_id=f"get_tutor_instructions:{mode}",
+        name="get_tutor_instructions",
+        raw_arguments={"mode": mode},
+        provider="colearni_compat",
+        definition=_TUTOR_INSTRUCTIONS_TOOL,
+    )
+
+
+def _normalize_tutor_instruction_content(content: str) -> NormalizedToolCall:
+    return _normalize_tutor_instruction_request(_extract_tool_mode(content) or "")
+
+
 def _tool_call_content(mode: str) -> str:
     return f'<tool name="get_tutor_instructions" mode="{mode}" />'
 
@@ -940,7 +1040,7 @@ def _tool_result_content(result: _ToolInstructionResult) -> str:
 
 
 def _tool_result_preview(content: str) -> str:
-    mode = _extract_tool_mode(content) or "unknown"
+    mode = _safe_tool_mode(_extract_tool_mode(content)) or "unknown"
     return json.dumps({"status": "received", "mode": mode})
 
 

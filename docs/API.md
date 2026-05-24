@@ -638,6 +638,9 @@ Send a message to the Socratic tutor for a concept. Returns a **Server-Sent Even
 Internally the tutor may persist hidden tool-call/tool-result turns to support
 prompt replay for mastery-gated modes. Those internal turns are never returned
 by the public conversation history endpoint.
+The current `get_tutor_instructions` step is validated through the backend
+provider-tool abstraction, but the public SSE payloads below intentionally keep
+the existing compatibility shape.
 
 **Request body:**
 
@@ -682,6 +685,7 @@ Optional public trace event showing that the tutor requested the internal instru
 { "type": "tool_result", "name": "get_tutor_instructions", "mode": "TutorMode", "result": "string" }
 ```
 Optional public trace event showing the sanitized result preview for that internal tool call. The `result` field is a learner-safe preview, not the raw internal instructions.
+If tool arguments fail validation, the public preview still uses this shape and omits raw provider/internal payloads.
 
 ```json
 { "type": "thinking", "content": "string" }

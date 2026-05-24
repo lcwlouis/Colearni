@@ -15,6 +15,19 @@ from typing import Any
 import pytest
 
 from backend.app.agents.llm_client import LLMClient, _is_thinking_error
+from backend.app.agents.provider_tools import (
+    AnthropicStreamState,
+    NormalizedStreamEvent,
+    NormalizedToolResult,
+    ProviderToolDefinition,
+    normalize_anthropic_stream_event,
+    normalize_anthropic_tool_call,
+    normalize_anthropic_tool_result,
+    normalize_openai_chat_tool_call,
+    normalize_openai_chat_tool_result,
+    normalize_openai_responses_tool_call,
+    normalize_openai_responses_tool_result,
+)
 from backend.app.settings import Settings
 
 # ---------------------------------------------------------------------------
@@ -31,6 +44,22 @@ def make_client(**kwargs: Any) -> LLMClient:
         thinking_enabled=kwargs.get("thinking_enabled", False),
         thinking_budget=kwargs.get("thinking_budget", 8000),
         thinking_level=kwargs.get("thinking_level", "medium"),
+    )
+
+
+def tutor_tool_definition() -> ProviderToolDefinition:
+    return ProviderToolDefinition(
+        name="get_tutor_instructions",
+        description="Return tutor instructions.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "enum": ["direct", "free_explore"]},
+            },
+            "required": ["mode"],
+            "additionalProperties": False,
+        },
+        public_argument_fields=("mode",),
     )
 
 
@@ -112,6 +141,26 @@ def test_anthropic_kwargs_no_thinking():
     assert turns == [{"role": "user", "content": "hi"}]
 
 
+def test_anthropic_kwargs_registers_normalized_tools():
+    client = make_client(provider="anthropic", thinking_enabled=False)
+    tool = tutor_tool_definition()
+    kwargs, _ = client._build_anthropic_kwargs(
+        [{"role": "user", "content": "hi"}],
+        temperature=0.4,
+        max_tokens=4096,
+        thinking=False,
+        tools=[tool],
+    )
+
+    assert kwargs["tools"] == [
+        {
+            "name": "get_tutor_instructions",
+            "description": "Return tutor instructions.",
+            "input_schema": tool.parameters,
+        }
+    ]
+
+
 def test_anthropic_kwargs_with_thinking():
     client = make_client(provider="anthropic", thinking_enabled=True, thinking_budget=3000)
     messages = [{"role": "user", "content": "hi"}]
@@ -156,6 +205,28 @@ def test_openai_kwargs_no_thinking():
     )
     assert kwargs["temperature"] == 0.4
     assert "reasoning_effort" not in kwargs
+
+
+def test_openai_chat_kwargs_registers_normalized_tools():
+    client = make_client(provider="openrouter", thinking_enabled=False)
+    tool = tutor_tool_definition()
+    kwargs = client._build_openai_kwargs(
+        [{"role": "user", "content": "hi"}],
+        temperature=0.4,
+        thinking=False,
+        tools=[tool],
+    )
+
+    assert kwargs["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_tutor_instructions",
+                "description": "Return tutor instructions.",
+                "parameters": tool.parameters,
+            },
+        }
+    ]
 
 
 def test_openai_kwargs_with_thinking():
@@ -300,6 +371,27 @@ def test_responses_api_kwargs_no_thinking():
     assert "reasoning" not in kwargs
 
 
+def test_responses_api_kwargs_registers_normalized_tools():
+    client = make_client(provider="openai", thinking_enabled=False)
+    tool = tutor_tool_definition()
+
+    kwargs = client._build_responses_api_kwargs(
+        [{"role": "user", "content": "hi"}],
+        temperature=0.4,
+        max_tokens=1024,
+        tools=[tool],
+    )
+
+    assert kwargs["tools"] == [
+        {
+            "type": "function",
+            "name": "get_tutor_instructions",
+            "description": "Return tutor instructions.",
+            "parameters": tool.parameters,
+        }
+    ]
+
+
 def test_responses_api_kwargs_with_thinking():
     client = make_client(provider="openai", thinking_enabled=True, thinking_level="high")
     messages = [{"role": "user", "content": "hi"}]
@@ -394,7 +486,10 @@ def test_extract_delta_reasoning_falls_through_to_details():
 def test_delta_suffix_returns_only_new_reasoning_content():
     from backend.app.agents.llm_client import _delta_suffix
 
-    assert _delta_suffix("We need to decide.", "We need to decide. Then call the tool.") == " Then call the tool."
+    assert (
+        _delta_suffix("We need to decide.", "We need to decide. Then call the tool.")
+        == " Then call the tool."
+    )
     assert _delta_suffix("", "Fresh reasoning") == "Fresh reasoning"
 
 
@@ -565,3 +660,252 @@ async def test_responses_api_stream_yields_text_and_thinking(monkeypatch):
         ("text", " world"),
         # response.created skipped (no delta)
     ]
+
+
+@pytest.mark.anyio
+async def test_openai_compatible_stream_events_emit_done(monkeypatch):
+    class FakeDelta:
+        content = "Hello"
+        model_extra = None
+
+    class FakeChoice:
+        delta = FakeDelta()
+        finish_reason = "stop"
+
+    class FakeChunk:
+        choices = [FakeChoice()]
+
+    async def fake_stream():
+        yield FakeChunk()
+
+    async def fake_create(**kwargs):
+        return fake_stream()
+
+    class FakeOAIClient:
+        class chat:
+            class completions:
+                create = staticmethod(fake_create)
+
+    client = make_client(provider="openrouter", thinking_enabled=False)
+    monkeypatch.setattr(client, "_openai_client", lambda: FakeOAIClient())
+
+    events = [
+        event
+        async for event in client.chat_stream_events([{"role": "user", "content": "hi"}])
+    ]
+
+    assert [event.kind for event in events] == ["text", "done"]
+    assert events[0].text == "Hello"
+
+
+# ---------------------------------------------------------------------------
+# Provider-tool normalization
+# ---------------------------------------------------------------------------
+
+
+def test_openai_responses_tool_call_normalizes_to_internal_shape():
+    call = normalize_openai_responses_tool_call(
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "get_tutor_instructions",
+            "arguments": '{"mode":"direct"}',
+        },
+        [tutor_tool_definition()],
+    )
+
+    assert call.call_id == "call_1"
+    assert call.name == "get_tutor_instructions"
+    assert call.arguments == {"mode": "direct"}
+    assert call.provider == "openai_responses"
+    assert call.validation_error is None
+
+
+def test_openai_responses_tool_result_normalizes_to_internal_shape():
+    result = normalize_openai_responses_tool_result(
+        {"call_id": "call_1", "output": "hidden instructions"},
+        name="get_tutor_instructions",
+        public_preview={"status": "received", "mode": "direct"},
+    )
+
+    assert result.call_id == "call_1"
+    assert result.name == "get_tutor_instructions"
+    assert result.content == "hidden instructions"
+    assert result.public_preview == {"status": "received", "mode": "direct"}
+
+
+def test_openai_chat_tool_call_normalizes_to_internal_shape():
+    call = normalize_openai_chat_tool_call(
+        {
+            "id": "chat_call_1",
+            "type": "function",
+            "function": {
+                "name": "get_tutor_instructions",
+                "arguments": '{"mode":"free_explore"}',
+            },
+        },
+        [tutor_tool_definition()],
+    )
+
+    assert call.call_id == "chat_call_1"
+    assert call.name == "get_tutor_instructions"
+    assert call.arguments == {"mode": "free_explore"}
+    assert call.provider == "openai_chat"
+    assert call.validation_error is None
+
+
+def test_openai_chat_tool_result_normalizes_to_internal_shape():
+    result = normalize_openai_chat_tool_result(
+        {"role": "tool", "tool_call_id": "chat_call_1", "content": "hidden instructions"},
+        name="get_tutor_instructions",
+        public_preview={"status": "received", "mode": "free_explore"},
+    )
+
+    assert result.call_id == "chat_call_1"
+    assert result.name == "get_tutor_instructions"
+    assert result.content == "hidden instructions"
+    assert result.public_preview == {"status": "received", "mode": "free_explore"}
+
+
+def test_anthropic_tool_use_normalizes_to_internal_shape():
+    call = normalize_anthropic_tool_call(
+        {
+            "type": "tool_use",
+            "id": "anthropic_call_1",
+            "name": "get_tutor_instructions",
+            "input": {"mode": "direct"},
+        },
+        [tutor_tool_definition()],
+    )
+
+    assert call.call_id == "anthropic_call_1"
+    assert call.name == "get_tutor_instructions"
+    assert call.arguments == {"mode": "direct"}
+    assert call.provider == "anthropic"
+    assert call.validation_error is None
+
+
+def test_anthropic_tool_result_normalizes_to_internal_shape():
+    result = normalize_anthropic_tool_result(
+        {"type": "tool_result", "tool_use_id": "anthropic_call_1", "content": "hidden"},
+        name="get_tutor_instructions",
+        public_preview={"status": "received", "mode": "direct"},
+    )
+
+    assert result.call_id == "anthropic_call_1"
+    assert result.name == "get_tutor_instructions"
+    assert result.content == "hidden"
+    assert result.public_preview == {"status": "received", "mode": "direct"}
+
+
+def test_anthropic_stream_accumulates_incremental_tool_input_json():
+    state = AnthropicStreamState()
+    tool = tutor_tool_definition()
+
+    start = type(
+        "Event",
+        (),
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": "anthropic_call_1",
+                "name": "get_tutor_instructions",
+            },
+        },
+    )()
+    delta_1 = type(
+        "Event",
+        (),
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"mode":"dir'},
+        },
+    )()
+    delta_2 = type(
+        "Event",
+        (),
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": 'ect"}'},
+        },
+    )()
+    stop = type("Event", (), {"type": "content_block_stop", "index": 0})()
+
+    assert normalize_anthropic_stream_event(start, [tool], state) is None
+    assert normalize_anthropic_stream_event(delta_1, [tool], state) is None
+    assert normalize_anthropic_stream_event(delta_2, [tool], state) is None
+    event = normalize_anthropic_stream_event(stop, [tool], state)
+
+    assert event is not None
+    assert event.kind == "tool_call"
+    assert event.tool_call is not None
+    assert event.tool_call.arguments == {"mode": "direct"}
+    assert event.tool_call.validation_error is None
+
+
+def test_invalid_tool_arguments_fail_safely_without_raw_payload_leakage():
+    call = normalize_openai_chat_tool_call(
+        {
+            "id": "bad_call",
+            "function": {
+                "name": "get_tutor_instructions",
+                "arguments": '{"mode":"lecture","secret":"raw provider payload"}',
+            },
+        },
+        [tutor_tool_definition()],
+    )
+
+    assert call.validation_error is not None
+    assert "lecture" not in call.validation_error
+    assert "raw provider payload" not in call.validation_error
+
+
+@pytest.mark.anyio
+async def test_fake_provider_streams_normalized_tool_events():
+    tool = tutor_tool_definition()
+
+    class FakeProvider:
+        async def stream(self):
+            yield NormalizedStreamEvent.thinking_delta("Plan. ")
+            yield NormalizedStreamEvent.tool_call_event(
+                normalize_openai_chat_tool_call(
+                    {
+                        "id": "fake_call",
+                        "function": {
+                            "name": "get_tutor_instructions",
+                            "arguments": '{"mode":"direct"}',
+                        },
+                    },
+                    [tool],
+                )
+            )
+            yield NormalizedStreamEvent.tool_result_event(
+                NormalizedToolResult(
+                    call_id="fake_call",
+                    name="get_tutor_instructions",
+                    content="hidden instructions",
+                    provider="fake",
+                    public_preview={"status": "received", "mode": "direct"},
+                )
+            )
+            yield NormalizedStreamEvent.text_delta("Visible answer")
+            yield NormalizedStreamEvent.done_event()
+
+    events = [event async for event in FakeProvider().stream()]
+
+    assert [event.kind for event in events] == [
+        "thinking",
+        "tool_call",
+        "tool_result",
+        "text",
+        "done",
+    ]
+    assert events[1].tool_call is not None
+    assert events[1].tool_call.arguments == {"mode": "direct"}
+    assert events[2].tool_result is not None
+    assert events[2].tool_result.public_preview == {"status": "received", "mode": "direct"}
+    assert events[3].text == "Visible answer"

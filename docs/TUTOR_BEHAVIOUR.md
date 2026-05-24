@@ -146,6 +146,8 @@ If provider-exposed reasoning is available, it may also be stored on the assista
 
 Public `tool_result` previews must stay sanitized. They are for learner-safe trace/debug UI and must not expose raw internal tutor instructions.
 
+The internal `get_tutor_instructions` step is validated through the provider-tool abstraction, but the tutor continues to expose and persist the existing tagged compatibility form. Invalid tool arguments fail closed to a safe Socratic fallback and public previews do not include raw tool arguments or raw internal result content.
+
 If a reasoning-enabled attempt ends with no visible tutor text, the service should retry once without provider thinking and emit `retrying_without_thinking` as a status milestone.
 
 If the LLM call fails, emit `error` and close the stream. The service must not emit partial tokens after an error.

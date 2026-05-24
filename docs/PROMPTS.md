@@ -155,7 +155,7 @@ If validation fails, attempt one repair call with the validation errors appended
 
 **Expected output:** first line is a control tag, followed by visible text when applicable.
 
-Current implementation note: these control tags are the local-ready compatibility path for tutor mode/tool selection. The Provider Tool Abstraction Foundation phase should migrate eligible flows, starting with `get_tutor_instructions` if safe, to provider-native tool calls behind CoLearni's normalized internal tool schema. Prompt changes for that migration must preserve tutor streaming, sanitized public tool previews, hidden tool-turn replay, and conversation rehydration behavior.
+Current implementation note: these control tags remain the public/replay compatibility path for tutor mode/tool selection. `get_tutor_instructions` is now wrapped by CoLearni's normalized internal tool schema, but the tutor still emits and persists the tagged representation to preserve SSE ordering, sanitized public tool previews, hidden tool-turn replay, and conversation rehydration behavior. A full provider-native prompt migration is deferred until it can be done without changing the tutor contract.
 
 ```text
 <mode name="socratic" />
