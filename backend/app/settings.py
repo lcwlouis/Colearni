@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     llm_thinking_level: str = "medium"
     # Requested tutor answer budget per LLM call.
     llm_tutor_max_tokens: int = 4096
+    # Tokens allocated per node when calculating the graph generation token budget.
+    # Budget = clamp(max_nodes * this, 4096, 16000).
+    llm_generation_tokens_per_node: int = 300
 
     # Reasoning token visibility by provider:
     #   anthropic   — visible via native SDK thinking blocks (requires llm_thinking_enabled=true)

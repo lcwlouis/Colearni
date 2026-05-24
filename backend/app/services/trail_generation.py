@@ -19,7 +19,12 @@ from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.schemas.concept import ConceptEdgeRead, ConceptNodeRead
-from backend.app.schemas.trail import TrailGenerateResponse, TrailGraphRead, TrailInsert, TrailRead
+from backend.app.schemas.trail import (
+    TrailGenerateResponse,
+    TrailGraphRead,
+    TrailInsert,
+    TrailRead,
+)
 from backend.app.schemas.types import TargetDepth
 from backend.app.services.graph_validation import (
     GraphValidationError,
@@ -27,13 +32,13 @@ from backend.app.services.graph_validation import (
     RawNode,
     validate_graph,
 )
+from backend.app.settings import settings
 
 if TYPE_CHECKING:
     from backend.app.agents.llm_client import LLMClient
 
 _MIN_GENERATION_MAX_TOKENS = 4096
 _MAX_GENERATION_MAX_TOKENS = 16000
-_GENERATION_TOKENS_PER_NODE = 300
 _REPAIR_MAX_TOKENS = 12000
 
 
@@ -370,7 +375,7 @@ async def stream_generate_trail_events(
 def _generation_max_tokens(max_nodes: int) -> int:
     return min(
         _MAX_GENERATION_MAX_TOKENS,
-        max(_MIN_GENERATION_MAX_TOKENS, max_nodes * _GENERATION_TOKENS_PER_NODE),
+        max(_MIN_GENERATION_MAX_TOKENS, max_nodes * settings.llm_generation_tokens_per_node),
     )
 
 
