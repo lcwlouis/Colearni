@@ -287,6 +287,45 @@ Quiz generation reuses the existing backend draft for the same `(concept_id, qui
 }
 ```
 
+### TrailPack
+
+The Phase 6 JSON export is content-light. For round-trip import compatibility,
+export now includes additive Trail and node fields that older clients may ignore:
+
+```json
+{
+  "manifest": {
+    "id": "string",
+    "title": "string",
+    "topic": "string | null",
+    "goal": "string | null",
+    "target_depth": "TargetDepth | null",
+    "version": "string",
+    "pack_type": "structure",
+    "content_included": false,
+    "hydration_supported": true
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "string",
+        "title": "string",
+        "node_type": "NodeType",
+        "concept_level": "ConceptLevel",
+        "difficulty": "Difficulty | null",
+        "bloom_level": "BloomLevel | null"
+      }
+    ],
+    "edges": [
+      {"source": "string", "target": "string", "relation_type": "RelationType"}
+    ]
+  },
+  "concepts": {},
+  "sources": [],
+  "research_trace": {}
+}
+```
+
 ### ImportReport
 
 ```json
@@ -424,7 +463,7 @@ Generate a new Trail from a topic description. Calls the graph generator LLM, va
 
 #### `POST /api/workspaces/{workspace_id}/trails/generate/stream`
 
-Generate a new Trail while streaming progress events to the frontend. This endpoint is a local-ready progress helper for the current UI. It is **not durable across page refreshes**; Phase 9 replaces this with backend jobs and polling.
+Generate a new Trail while streaming progress events to the frontend. This endpoint is a local-ready progress helper for the current UI. It is **not durable across page refreshes**; Phase 16 demo polish replaces this with backend jobs and polling.
 
 **Request body:** same as `POST /api/workspaces/{workspace_id}/trails/generate`.
 
@@ -727,7 +766,7 @@ List all source records in a workspace.
 
 Upload a source file. Stored as a private source. Defaults: `origin: user_upload`, `access: private`, `include_on_public_export: false`.
 
-This endpoint supports hydration/import workflows after the core learning loop exists. Do not implement it as the first milestone, and do not build PDF ingestion before Trail generation, graph viewing, tutor chat, mastery, and safe export are working.
+This endpoint supports hydration/import workflows after the core learning loop and safe Trail Pack sharing foundations exist. Do not implement it as the first milestone, and do not build PDF ingestion before Trail generation, graph viewing, tutor chat, mastery, safe export, Trail Pack import/fork, and provider tool foundations are working.
 
 **Request:** `multipart/form-data`
 
@@ -742,41 +781,11 @@ This endpoint supports hydration/import workflows after the core learning loop e
 
 ### Research
 
-#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/research`
-
-Run the research agent on the Trail. Searches public sources, selects relevant links, and stores a research trace. Stores links and metadata only — never copied content.
-
-**Request body:**
-
-```json
-{
-  "concept_id": "uuid | null",
-  "max_sources": "int (default: 5, max: 20)"
-}
-```
-
-**Response 200:**
-
-```json
-{
-  "sources_found": "int",
-  "sources_selected": "int",
-  "trace": {
-    "topic": "string",
-    "queries": ["string"],
-    "selected_sources": ["SourceRecord"],
-    "excluded_sources": [
-      {"title": "string", "reason": "string"}
-    ]
-  }
-}
-```
-
----
+Automated `POST /research` is deferred until a real search/provider-tool stack exists. The current Phase 7 backend slice only preserves imported research traces and exposes stored trace retrieval.
 
 #### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/research`
 
-Get the stored research trace for a Trail.
+Get the stored research trace for a Trail. Returns `{ "trace": {} }` when no trace has been imported or stored.
 
 **Response 200:**
 
@@ -786,7 +795,9 @@ Get the stored research trace for a Trail.
     "topic": "string",
     "generated_by": "string",
     "queries": ["string"],
-    "selected_sources": ["SourceRecord"],
+    "selected_public_sources": [
+      {"source_id": "string", "reason": "string"}
+    ],
     "excluded_sources": [
       {"title": "string", "reason": "string"}
     ]
@@ -800,7 +811,7 @@ Get the stored research trace for a Trail.
 
 #### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/hydrate`
 
-Hydrate a Trail with private local evidence. Fetches allowed public sources and indexes content privately. Hydrated content stays private.
+Record private hydration intent for a Trail. The current Phase 7 MVP does not fetch, chunk, embed, or index remote content. It creates private workspace-scoped `SourceRecord` placeholders from selected imported public research sources and/or model-knowledge intent. These records are `include_on_public_export=false` and are excluded by the public export sanitizer.
 
 **Request body:**
 
@@ -836,7 +847,7 @@ Export a Trail as a safe public Trail Pack. Runs the export sanitizer before gen
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| `format` | `json` or `yaml` | `json` | Output format |
+| `format` | `json` | `json` | Output format for the Phase 6 slice |
 
 **Response 200:**
 
@@ -857,7 +868,7 @@ The sanitizer enforces these rules before generating the response:
 - `user_upload` sources are excluded.
 - `private` or `restricted` sources are excluded.
 - Chunks, embeddings, private notes, chat history, and mastery records are excluded.
-- Only `research_agent` + `public` sources appear, as links/metadata only.
+- Only `research_agent` + `public` + `include_on_public_export=true` sources appear, as links/metadata only.
 
 ---
 
@@ -867,19 +878,28 @@ The sanitizer enforces these rules before generating the response:
 
 Import a Trail Pack into a workspace. Forks the Trail. Validates the pack before import.
 
-**Request:** `multipart/form-data` or `application/json`
+**Request:** `application/json`
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `pack` | JSON object or file | yes | Trail Pack payload |
+The endpoint accepts either the raw Trail Pack object or the Phase 6 export wrapper shape:
+
+```json
+{
+  "pack": {},
+  "report": {}
+}
+```
 
 **Validation rejects:**
 - Missing required manifest fields.
 - Unknown node references in edges.
 - Duplicate node ids.
+- Duplicate concept slugs in the imported trail.
 - Unknown `concept_level` values.
-- Packs containing raw chunks, embeddings, uploaded files, private notes, or mastery records.
-- Malformed YAML/JSON.
+- Private or uploaded-like source entries.
+- Packs containing raw chunks, embeddings, uploaded files, private notes, mastery records, chat history, raw source prose, generated summaries, or generated quizzes.
+- Malformed JSON.
+
+If an older content-light pack lacks the additive round-trip fields, import uses conservative defaults and reports warnings: `topic = manifest.title`, `goal = "Imported from Trail Pack"`, `target_depth = "understand"`, missing node `difficulty = "beginner"`, and missing node `bloom_level = "understand"`.
 
 **Response 201:**
 

@@ -6,6 +6,8 @@ A Trail Pack is a shareable/exportable package containing the safe public struct
 
 Trail Packs are content-light by default. They may include graph structure, concept metadata, learning objectives, mastery check labels, source metadata, and research trace. They must not include private workspace content or raw source-derived content.
 
+Trail Pack export/import is part of CoLearni's MVP identity. Source ingestion, retrieval tooling, dashboard polish, provider-native tools, and future visualisers must preserve this safety boundary rather than moving sharing later or weakening the sanitizer.
+
 ## File Structure
 
 ```text
@@ -27,6 +29,9 @@ Example:
 ```yaml
 id: linear-algebra-for-ml
 title: Linear Algebra for Machine Learning
+topic: Linear Algebra
+goal: Understand enough for machine learning
+target_depth: apply
 version: 1.0.0
 created_by: local_user
 pack_type: structure
@@ -46,6 +51,8 @@ Required fields:
 
 `pack_type` should be `structure` for the MVP.
 
+`topic`, `goal`, and `target_depth` are additive JSON export fields used for clean same-server round-trip imports. Older content-light packs may omit them; import then uses documented conservative defaults and reports warnings.
+
 ## graph.yaml
 
 Example:
@@ -56,10 +63,14 @@ nodes:
     title: Vectors
     node_type: concept
     concept_level: topic
+    difficulty: beginner
+    bloom_level: understand
   - id: matrices
     title: Matrices
     node_type: concept
     concept_level: topic
+    difficulty: beginner
+    bloom_level: apply
 
 edges:
   - source: vectors
@@ -71,6 +82,7 @@ Rules:
 
 - Node ids must be unique within the pack.
 - Every node must include `concept_level`.
+- `difficulty` and `bloom_level` are additive round-trip fields in current JSON export. Older packs may omit them; import defaults missing values to `beginner` and `understand` with warnings.
 - Valid concept levels are `umbrella`, `topic`, `subtopic`, and `granular`.
 - Edge endpoints must reference known node ids.
 - Prerequisite edges should be acyclic unless the pack explicitly allows cycles.
@@ -106,13 +118,13 @@ mastery_check_labels:
 
 source_refs:
   - source_id: mit_ocw_linear_algebra_lecture_21
-    relevance: primary_explanation
+    relation: reference
 
 content_included: false
 hydration_required: true
 ```
 
-Concept files may include abstract objectives and mastery labels. They must not include copied source prose, private notes, generated summaries from private/user-uploaded sources, or private quiz content.
+Concept files may include abstract objectives and mastery labels. `source_refs[]` uses a lightweight `relation` string to describe how a source supports the concept. Concept files must not include copied source prose, private notes, generated summaries from private/user-uploaded sources, or private quiz content.
 
 `parents` and `children` are convenience references for hierarchy/navigation. They do not replace `concept_level`.
 
@@ -199,6 +211,7 @@ Reject any public Trail Pack that contains:
 - Concrete source-derived prose by default.
 - Generated summaries from private/user-uploaded sources.
 - Generated quizzes from private/user-uploaded sources.
+- Artifact payloads derived from private/user-uploaded sources unless a future explicit open-license policy allows them.
 
 Import validation must also reject malformed YAML, missing required manifest fields, unknown node references, duplicate node ids, unknown concept levels, and unsafe fields.
 

@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from backend.app.schemas.trail import (
     TrailListResponse,
     TrailRead,
 )
+from backend.app.schemas.trail_pack import TrailPackExportResponse
 from backend.app.services.graph_view import delete_trail, get_trail_detail, list_trails
 from backend.app.services.trail_generation import (
     GenerationError,
@@ -26,6 +27,7 @@ from backend.app.services.trail_generation import (
     generate_and_store_trail,
     stream_generate_trail_events,
 )
+from backend.app.services.trail_pack_export import export_trail_pack
 from backend.app.settings import settings
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/trails")
@@ -125,6 +127,23 @@ async def get_trail_detail_route(
     )
 
 
+@router.get("/{trail_id}/export", response_model=TrailPackExportResponse)
+async def export_trail_route(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    format: str = Query(default="json"),
+    session: AsyncSession = Depends(get_session),
+) -> TrailPackExportResponse | JSONResponse:
+    if format != "json":
+        return _invalid_input(
+            f"Unsupported export format '{format}'. Only 'json' is currently available."
+        )
+    try:
+        return await export_trail_pack(session, workspace_id=workspace_id, trail_id=trail_id)
+    except LookupError as exc:
+        return _not_found(str(exc))
+
+
 @router.delete("/{trail_id}", status_code=204, response_model=None)
 async def delete_trail_route(
     workspace_id: uuid.UUID,
@@ -157,4 +176,11 @@ def _not_found(message: str) -> JSONResponse:
     return JSONResponse(
         status_code=404,
         content=ErrorEnvelope(error=ErrorBody(code="not_found", message=message)).model_dump(),
+    )
+
+
+def _invalid_input(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content=ErrorEnvelope(error=ErrorBody(code="invalid_input", message=message)).model_dump(),
     )

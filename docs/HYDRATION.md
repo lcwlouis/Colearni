@@ -30,6 +30,10 @@ Hydration may create:
 
 Hydration output must remain private by default.
 
+Hydration belongs after safe Trail Pack export/import foundations. It should make content-light Trail Packs locally useful without moving Trail sharing behind broad ingestion or retrieval work.
+
+Current Phase 7 MVP: hydration records private intent only. `POST /hydrate` creates private `SourceRecord` placeholders from selected imported public research sources and/or model-knowledge intent. It does not fetch remote content, parse files, create chunks, create embeddings, generate explanations, or build retrieval indexes.
+
 ## Flow
 
 ```text
@@ -37,8 +41,8 @@ Import Trail Pack
 -> show source manifest
 -> identify available public sources
 -> user optionally uploads restricted/private sources
--> backend indexes allowed content
--> tutor can use hydrated evidence in this workspace
+-> backend records private hydration placeholders
+-> later ingestion/retrieval phases fetch, index, and expose evidence through controlled tools
 ```
 
 ## Rules
@@ -75,3 +79,23 @@ After import, the UI should show:
 ## Export Interaction
 
 Public export after hydration must still run the export sanitizer. Hydrated chunks, embeddings, generated summaries, generated quizzes, private notes, and uploaded source text are excluded unless a future explicit policy allows a specific open-licensed artifact.
+
+## Source Ingestion Relationship
+
+Full source ingestion is later than safe sharing/import and provider tool foundations. The V1 ingestion flow should be:
+
+```text
+Uploaded file
+-> private object storage
+-> parser
+-> markdown-like canonical text
+-> source revision
+-> chunks
+-> embeddings / full-text index
+-> concept-source links
+-> controlled retrieval/open tools
+```
+
+Priority formats are PDF, DOCX, and PPTX. Do not use git internally for user source tracking in V1; use content hashes, parser versions, source revision records, object keys, and database/object-storage versioning.
+
+Raw filesystem browsing must not be the primary retrieval architecture. Retrieval should happen through controlled tools such as `search_sources`, `open_source_chunk`, `get_concept_sources`, and `get_graph_neighbourhood`, with workspace/Trail/concept budgets.

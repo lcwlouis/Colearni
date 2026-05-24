@@ -4,6 +4,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.concept import ConceptEdge, ConceptNode
+from backend.app.models.research import TrailResearchTrace
 from backend.app.models.source import ConceptSourceLink, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
@@ -78,6 +79,7 @@ async def delete_trail(
     session: AsyncSession, *, workspace_id: uuid.UUID, trail_id: uuid.UUID
 ) -> None:
     await _get_scoped_trail(session, workspace_id=workspace_id, trail_id=trail_id)
+    await session.execute(delete(TrailResearchTrace).where(TrailResearchTrace.trail_id == trail_id))
     await session.execute(delete(ConceptEdge).where(ConceptEdge.trail_id == trail_id))
     await session.execute(delete(ConceptNode).where(ConceptNode.trail_id == trail_id))
     await session.execute(delete(Trail).where(Trail.id == trail_id))
