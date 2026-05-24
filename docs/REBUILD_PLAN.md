@@ -103,13 +103,15 @@ Implemented:
 - Source provenance sanitizer and safe JSON Trail Pack export, plus backend Trail Pack import/fork, imported research trace preservation/retrieval, and a narrow private hydration-placeholder API.
 - LLM client support for OpenAI Responses API, OpenAI-compatible providers including OpenRouter/DeepSeek/Gemini/custom, and optional Anthropic SDK.
 - Provider-tool abstraction foundation with explicit internal tool definitions/calls/results, provider registration/normalization helpers, normalized stream events, fake-provider test coverage, and a compatibility adapter for the tutor instruction tool.
+- Learning dashboard home with Continue Learning, recent/older Trail sections, delete confirmation, per-Trail progress summaries, and a deterministic frontend recommended-next helper.
+- Per-Trail graph Learn/Inspect mode split with `?concept=<id>` deep-link opening, neighbourhood focus in Learn Mode, inspect-only graph controls and edge-label toggle, mastery-aware concept-panel CTAs, and mobile concept sheet refinement.
 
 Not implemented yet:
 
 - True per-message citation/source parts and quote support.
 - Automatic conversation summarisation and full provider-native tool execution loops beyond the current tutor compatibility adapter.
 - Automated research-agent search, real hydration fetching/indexing, durable generation jobs, dark mode, deployment, auth, and SaaS features.
-- Learning dashboard, Learn/Inspect graph mode split, deterministic recommended next concept, source ingestion, controlled retrieval tools, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
+- Source ingestion, controlled retrieval tools, guided graph navigation beyond the current frontend recommendation helper, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
 
 ## Phase 0: Foundation Cleanup
 
@@ -661,6 +663,8 @@ Non-goals:
 
 ## Phase 9: Learning Dashboard + Learn/Inspect Graph UX
 
+Status: implemented for the current frontend slice.
+
 Goal: make CoLearni feel approachable to non-technical learners while preserving the current technical graph for inspect and power-user use.
 
 Implementation scope:
@@ -726,6 +730,11 @@ Non-goals:
 
 - No heavy gamification before the learning loop, sharing, ingestion, and retrieval work are stable.
 - XP/streaks may be future polish, but are not core in this phase.
+
+Current implementation note:
+
+- Home now computes per-Trail progress and the Continue Learning / recommended-next card client-side from Trail detail records using deterministic mastery/graph heuristics.
+- Learn Mode is the default graph surface with simplified controls and selected-neighbourhood focus; Inspect Mode preserves filters/layout/legend plus the edge-label toggle, and `?concept=<id>` opens the concept sheet directly.
 
 ## Phase 10: Source Ingestion MVP
 

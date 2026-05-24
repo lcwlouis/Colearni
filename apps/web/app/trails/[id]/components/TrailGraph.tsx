@@ -61,6 +61,7 @@ const layoutModes: Array<{ value: GraphLayoutMode; label: string }> = [
   { value: "radial", label: "Radial" },
   { value: "compact", label: "Compact" },
 ];
+const EDGE_LABEL_MIN_ZOOM = 0.78;
 
 interface TrailGraphProps {
   workspaceId: string;
@@ -73,16 +74,22 @@ interface TrailGraphProps {
     needs_review: number;
     mastered: number;
   };
+  /** When set, this concept is opened automatically once the graph is ready. */
+  initialConceptId?: string | null;
   onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
 }
+
+type GraphMode = "learn" | "inspect";
 
 export function TrailGraph({
   workspaceId,
   trail,
   graph,
   masterySummary,
+  initialConceptId,
   onMasteryUpdated,
 }: TrailGraphProps) {
+  const [mode, setMode] = useState<GraphMode>("learn");
   const [query, setQuery] = useState("");
   const [visibleLevels, setVisibleLevels] = useState<Set<ConceptLevel>>(
     () => new Set(levels),
@@ -91,12 +98,14 @@ export function TrailGraph({
   const [toolsExpanded, setToolsExpanded] = useState(true);
   const [legendExpanded, setLegendExpanded] = useState(false);
   const [neighborsOnly, setNeighborsOnly] = useState(false);
+  const [showEdgeLabels, setShowEdgeLabels] = useState(true);
+  const [edgeLabelsZoomedIn, setEdgeLabelsZoomedIn] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [positions, setPositions] = useState<Map<string, GraphPosition>>(new Map());
   const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [panelError, setPanelError] = useState("");
-  const lastViewState = useRef({ layoutMode, selectedNodeId, visibleCount: 0 });
+  const lastViewState = useRef({ layoutMode, mode, selectedNodeId, visibleCount: 0 });
 
   const selectedNode = useMemo(
     () => graph.nodes.find((node) => node.id === selectedNodeId) ?? null,
@@ -111,19 +120,25 @@ export function TrailGraph({
     [graph.mastery, graph.nodes],
   );
 
+  const isLearnMode = mode === "learn";
+  // In Learn Mode, focus the selected neighborhood to reduce clutter even if
+  // the user hasn't toggled the explicit power-user "Neighbors only" filter.
+  const effectiveNeighborsOnly = neighborsOnly || (isLearnMode && Boolean(selectedNodeId));
+  const effectiveShowEdgeLabels = showEdgeLabels && edgeLabelsZoomedIn;
+
   const visibleNodeIds = useMemo(() => {
     const levelVisible = new Set(
       graph.nodes
         .filter((node) => visibleLevels.has(node.concept_level))
         .map((node) => node.id),
     );
-    if (!neighborsOnly || !selectedNodeId) {
+    if (!effectiveNeighborsOnly || !selectedNodeId) {
       return levelVisible;
     }
     return new Set(
       [...levelVisible].filter((nodeId) => isFocusedNode(nodeId, focusSet)),
     );
-  }, [focusSet, graph.nodes, neighborsOnly, selectedNodeId, visibleLevels]);
+  }, [effectiveNeighborsOnly, focusSet, graph.nodes, selectedNodeId, visibleLevels]);
 
   const computedPositions = useMemo(
     () =>
@@ -153,8 +168,8 @@ export function TrailGraph({
     [computedPositions, focusSet, graph.mastery, graph.nodes, query, visibleNodeIds],
   );
   const flowEdges = useMemo(
-    () => buildFlowEdges(graph.edges, visibleNodeIds, focusSet),
-    [focusSet, graph.edges, visibleNodeIds],
+    () => buildFlowEdges(graph.edges, visibleNodeIds, focusSet, effectiveShowEdgeLabels),
+    [effectiveShowEdgeLabels, focusSet, graph.edges, visibleNodeIds],
   );
 
   const focusConceptInView = useCallback(
@@ -183,24 +198,26 @@ export function TrailGraph({
 
     const previous = lastViewState.current;
     const layoutChanged = previous.layoutMode !== layoutMode;
+    const modeChanged = previous.mode !== mode;
     const selectionChanged = previous.selectedNodeId !== selectedNodeId;
     const visibleCountChanged = previous.visibleCount !== flowNodes.length;
-    lastViewState.current = { layoutMode, selectedNodeId, visibleCount: flowNodes.length };
+    lastViewState.current = { layoutMode, mode, selectedNodeId, visibleCount: flowNodes.length };
 
     if (selectedNodeId) {
-      if (selectionChanged || layoutChanged) {
+      if (selectionChanged || layoutChanged || modeChanged || visibleCountChanged) {
         focusConceptInView(selectedNodeId, window.innerWidth < 768 ? 0.92 : 1);
       }
       return;
     }
 
-    if (layoutChanged || visibleCountChanged) {
+    if (layoutChanged || modeChanged || visibleCountChanged) {
       fitVisibleGraph(window.innerWidth < 768 ? 0.18 : 0.24);
     }
   }, [
     flow,
     flowNodes.length,
     layoutMode,
+    mode,
     selectedNodeId,
     computedPositions,
     fitVisibleGraph,
@@ -216,6 +233,23 @@ export function TrailGraph({
       setPanelError(exc instanceof Error ? exc.message : "Could not load concept");
     }
   }
+
+  // Auto-open a concept if the page was opened with `?concept=<id>`.
+  const autoOpenRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenRef.current || !initialConceptId) {
+      return;
+    }
+    if (graph.nodes.some((node) => node.id === initialConceptId)) {
+      autoOpenRef.current = true;
+      // Defer past render so we don't trigger cascading setState in this effect.
+      queueMicrotask(() => {
+        void openConcept(initialConceptId);
+      });
+    }
+    // openConcept depends on stable props; safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph.nodes, initialConceptId]);
 
   function handleMasteryUpdated(conceptId: string, update: { status: MasteryStatus; score: number }) {
     setDetail((prev) => {
@@ -309,13 +343,19 @@ export function TrailGraph({
     setLayoutMode(mode);
   }
 
+  function updateEdgeLabelZoom(zoom: number) {
+    const next = zoom >= EDGE_LABEL_MIN_ZOOM;
+    setEdgeLabelsZoomedIn((current) => (current === next ? current : next));
+  }
+
   function initializeFlow(instance: ReactFlowInstance) {
     setFlow(instance);
+    updateEdgeLabelZoom(instance.getZoom());
     window.requestAnimationFrame(() => {
       void instance.fitView({
         padding: window.innerWidth < 768 ? 0.14 : 0.22,
         duration: 180,
-      });
+      }).then(() => updateEdgeLabelZoom(instance.getZoom()));
     });
   }
 
@@ -330,6 +370,7 @@ export function TrailGraph({
           edges={flowEdges}
           minZoom={0.12}
           onInit={initializeFlow}
+          onMove={(_, viewport) => updateEdgeLabelZoom(viewport.zoom)}
           onNodeClick={(_, node) => openConcept(node.id)}
           onNodeDoubleClick={(_, node) => openConcept(node.id)}
           onPaneClick={clearSelection}
@@ -344,14 +385,16 @@ export function TrailGraph({
           nodesDraggable
         >
           <Background color="#dbe3ee" gap={32} />
-          <MiniMap
-            className="hidden md:block"
-            pannable
-            zoomable
-            nodeStrokeWidth={3}
-            position="bottom-left"
-            style={{ bottom: 16, left: 76, height: 118, width: 180 }}
-          />
+          {isLearnMode ? null : (
+            <MiniMap
+              className="hidden md:block"
+              pannable
+              zoomable
+              nodeStrokeWidth={3}
+              position="bottom-left"
+              style={{ bottom: 16, left: 76, height: 118, width: 180 }}
+            />
+          )}
           <Controls
             position="bottom-left"
             style={{ bottom: 16, left: 12 }}
@@ -365,90 +408,134 @@ export function TrailGraph({
                   placeholder="Search concepts"
                   className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 px-2 text-xs outline-none focus:border-blue-500 md:h-9 md:px-3 md:text-sm"
                 />
-                <ToolbarButton
-                  icon={<SlidersHorizontal size={15} />}
-                  label="Tools"
-                  onClick={() => setToolsExpanded((current) => !current)}
-                  active={toolsExpanded}
-                />
-                <ToolbarButton
-                  icon={<MapIcon size={15} />}
-                  label="Legend"
-                  onClick={() => setLegendExpanded((current) => !current)}
-                  active={legendExpanded}
-                />
+                <div
+                  role="group"
+                  aria-label="Graph mode"
+                  className="inline-flex shrink-0 rounded-md border border-slate-200 bg-slate-100 p-0.5"
+                >
+                  {(["learn", "inspect"] as GraphMode[]).map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setMode(value)}
+                      aria-pressed={mode === value}
+                      className={`h-7 rounded px-2 text-xs font-medium transition md:h-8 md:px-3 ${
+                        mode === value
+                          ? "bg-white text-blue-700 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      {value === "learn" ? "Learn" : "Inspect"}
+                    </button>
+                  ))}
+                </div>
+                {isLearnMode ? null : (
+                  <>
+                    <ToolbarButton
+                      icon={<SlidersHorizontal size={15} />}
+                      label="Tools"
+                      onClick={() => setToolsExpanded((current) => !current)}
+                      active={toolsExpanded}
+                    />
+                    <ToolbarButton
+                      icon={<MapIcon size={15} />}
+                      label="Legend"
+                      onClick={() => setLegendExpanded((current) => !current)}
+                      active={legendExpanded}
+                    />
+                  </>
+                )}
               </div>
               {selectedNode ? (
                 <p className="text-xs font-medium text-blue-800">Selected: {selectedNode.title}</p>
               ) : (
-                <p className="text-xs text-slate-500">Select a node to highlight its connections.</p>
+                <p className="text-xs text-slate-500">
+                  {isLearnMode
+                    ? "Tap a concept to see what it is and what to do next."
+                    : "Select a node to highlight its connections."}
+                </p>
               )}
-              {legendExpanded ? (
+              {!isLearnMode && legendExpanded ? (
                 <div>
                   <GraphLegendContent compact={false} />
                 </div>
               ) : null}
-              <div className={`${toolsExpanded ? "grid" : "hidden"} gap-2 md:gap-3`}>
-                <div className="flex flex-wrap gap-2">
-                  <ToolbarButton
-                    icon={<Eye size={15} />}
-                    label="Readable"
-                    onClick={setReadableZoom}
-                    subtle
-                  />
-                  <ToolbarButton
-                    icon={<Maximize2 size={15} />}
-                    label="Overview"
-                    onClick={() => flow?.fitView({ padding: 0.2, duration: 220 })}
-                    subtle
-                  />
-                  <ToolbarButton
-                    icon={<Crosshair size={15} />}
-                    label="Focus selected"
-                    onClick={centerSelected}
-                    subtle
-                  />
-                </div>
-                <div className="inline-flex w-fit flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-100 p-1">
-                  {layoutModes.map((mode) => (
-                    <button
-                      key={mode.value}
-                      type="button"
-                      onClick={() => changeLayoutMode(mode.value)}
-                      aria-pressed={layoutMode === mode.value}
-                      className={`h-8 rounded px-2 text-xs font-medium transition md:px-3 ${
-                        layoutMode === mode.value
-                          ? "bg-white text-blue-700 shadow-sm"
-                          : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
-                      }`}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {levels.map((level) => (
-                    <FilterPill
-                      key={level}
-                      active={visibleLevels.has(level)}
-                      label={level}
-                      onClick={() => toggleLevel(level)}
+              {!isLearnMode ? (
+                <div
+                  data-testid="inspect-tools"
+                  className={`${toolsExpanded ? "grid" : "hidden"} gap-2 md:gap-3`}
+                >
+                  <div className="flex flex-wrap gap-2">
+                    <ToolbarButton
+                      icon={<Eye size={15} />}
+                      label="Readable"
+                      onClick={setReadableZoom}
+                      subtle
                     />
-                  ))}
-                  <FilterPill
-                    active={neighborsOnly}
-                    label="Neighbors only"
-                    onClick={() => setNeighborsOnly((current) => !current)}
-                  />
+                    <ToolbarButton
+                      icon={<Maximize2 size={15} />}
+                      label="Overview"
+                      onClick={() => flow?.fitView({ padding: 0.2, duration: 220 })}
+                      subtle
+                    />
+                    <ToolbarButton
+                      icon={<Crosshair size={15} />}
+                      label="Focus selected"
+                      onClick={centerSelected}
+                      subtle
+                    />
+                  </div>
+                  <div className="inline-flex w-fit flex-wrap gap-1 rounded-md border border-slate-200 bg-slate-100 p-1">
+                    {layoutModes.map((modeOption) => (
+                      <button
+                        key={modeOption.value}
+                        type="button"
+                        onClick={() => changeLayoutMode(modeOption.value)}
+                        aria-pressed={layoutMode === modeOption.value}
+                        className={`h-8 rounded px-2 text-xs font-medium transition md:px-3 ${
+                          layoutMode === modeOption.value
+                            ? "bg-white text-blue-700 shadow-sm"
+                            : "text-slate-600 hover:bg-white/70 hover:text-slate-900"
+                        }`}
+                      >
+                        {modeOption.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {levels.map((level) => (
+                      <FilterPill
+                        key={level}
+                        active={visibleLevels.has(level)}
+                        label={level}
+                        onClick={() => toggleLevel(level)}
+                      />
+                    ))}
+                    <FilterPill
+                      active={neighborsOnly}
+                      label="Neighbors only"
+                      onClick={() => setNeighborsOnly((current) => !current)}
+                    />
+                    <FilterPill
+                      active={showEdgeLabels}
+                      label="Edge labels"
+                      onClick={() => setShowEdgeLabels((current) => !current)}
+                    />
+                  </div>
+                  {showEdgeLabels && !edgeLabelsZoomedIn ? (
+                    <p className="text-xs text-slate-500">
+                      Edge labels appear when you zoom in closer.
+                    </p>
+                  ) : null}
+                  <div className="grid grid-cols-5 gap-1 text-xs text-slate-600 md:gap-2">
+                    <Metric label="Total" value={statusCounts.total || masterySummary.total} />
+                    <Metric label="New" value={statusCounts.not_started} />
+                    <Metric label="Learning" value={statusCounts.learning} />
+                    <Metric label="Review" value={statusCounts.needs_review} />
+                    <Metric label="Mastered" value={statusCounts.mastered} />
+                  </div>
                 </div>
-                <div className="grid grid-cols-5 gap-1 text-xs text-slate-600 md:gap-2">
-                  <Metric label="Total" value={statusCounts.total || masterySummary.total} />
-                  <Metric label="New" value={statusCounts.not_started} />
-                  <Metric label="Learning" value={statusCounts.learning} />
-                  <Metric label="Review" value={statusCounts.needs_review} />
-                  <Metric label="Mastered" value={statusCounts.mastered} />
-                </div>
-              </div>
+              ) : null}
             </div>
           </Panel>
         </ReactFlow>
@@ -514,6 +601,7 @@ function buildFlowEdges(
   edges: TrailGraphData["edges"],
   visibleNodeIds: Set<string>,
   focusSet: ReturnType<typeof buildFocusSet>,
+  showLabels: boolean,
 ): Edge[] {
   return edges
     .filter(
@@ -525,6 +613,12 @@ function buildFlowEdges(
         id: edge.id,
         source: edge.source_node_id,
         target: edge.target_node_id,
+        label: showLabels ? edge.relation_type : undefined,
+        labelStyle: showLabels
+          ? { fontSize: 10, fill: "#475569", fontWeight: 500 }
+          : undefined,
+        labelBgStyle: showLabels ? { fill: "#ffffff", fillOpacity: 0.85 } : undefined,
+        labelBgPadding: showLabels ? ([4, 2] as [number, number]) : undefined,
         markerEnd:
           edge.relation_type === "prerequisite"
             ? { type: MarkerType.ArrowClosed, color: edgeColor(edge.relation_type) }

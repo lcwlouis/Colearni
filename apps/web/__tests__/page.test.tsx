@@ -8,6 +8,8 @@ import type { MasteryStatus, TrailDetail } from "@/lib/types";
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "trail-1" }),
   useRouter: () => ({ push: vi.fn() }),
+  // ?concept=<id> deep-link support added in Phase 9.
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/lib/workspace", () => ({

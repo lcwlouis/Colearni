@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 
 import { deleteTrail, getTrail } from "@/lib/api";
@@ -13,6 +13,8 @@ import { TrailGraph } from "./components/TrailGraph";
 export default function TrailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialConceptId = searchParams?.get("concept") ?? null;
   const [workspaceId, setWorkspaceId] = useState("");
   const [detail, setDetail] = useState<TrailDetail | null>(null);
   const [error, setError] = useState("");
@@ -170,6 +172,7 @@ export default function TrailPage() {
         trail={detail.trail}
         graph={detail.graph}
         masterySummary={detail.mastery_summary}
+        initialConceptId={initialConceptId}
         onMasteryUpdated={handleMasteryUpdated}
       />
     </main>

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 
@@ -42,12 +42,16 @@ vi.mock("@xyflow/react", async () => {
     ...actual,
     ReactFlow: ({
       nodes,
+      edges,
+      onMove,
       onNodeClick,
       onNodeDoubleClick,
       onPaneClick,
       children,
     }: {
       nodes: Array<{ id: string; data: { label: React.ReactNode } }>;
+      edges: Array<{ id: string; label?: React.ReactNode }>;
+      onMove?: (_event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
       onNodeClick?: (event: unknown, node: { id: string }) => void;
       onNodeDoubleClick?: (event: unknown, node: { id: string }) => void;
       onPaneClick?: () => void;
@@ -67,6 +71,15 @@ vi.mock("@xyflow/react", async () => {
         <button type="button" onClick={() => onPaneClick?.()}>
           Pane
         </button>
+        <button type="button" onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 0.35 })}>
+          Zoom overview
+        </button>
+        <button type="button" onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 1 })}>
+          Zoom detail
+        </button>
+        {edges.map((edge) =>
+          edge.label ? <span key={edge.id}>{edge.label}</span> : null,
+        )}
         {children}
       </div>
     ),
@@ -199,6 +212,96 @@ describe("TrailGraph", () => {
     expect(screen.getByText("Mastered")).toBeInTheDocument();
     expect(screen.getAllByText("1").length).toBeGreaterThan(0);
   });
+
+  test("edge labels are on by default but only render when zoomed in", async () => {
+    renderGraph();
+
+    expect(screen.getByText("Edge labels appear when you zoom in closer.")).toBeInTheDocument();
+    expect(screen.queryByText("prerequisite")).not.toBeInTheDocument();
+    expect(screen.queryByText("contains")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Zoom detail" }));
+
+    expect(screen.queryByText("Edge labels appear when you zoom in closer.")).not.toBeInTheDocument();
+    expect(screen.getByText("prerequisite")).toBeInTheDocument();
+    expect(screen.getByText("contains")).toBeInTheDocument();
+  });
+
+  test("Learn Mode also shows default edge labels when zoomed in", async () => {
+    render(
+      <TrailGraph
+        workspaceId="workspace-1"
+        trail={trail}
+        graph={{ nodes, edges, mastery }}
+        masterySummary={{
+          total: 3,
+          not_started: 3,
+          learning: 0,
+          needs_review: 0,
+          mastered: 0,
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Zoom detail" }));
+
+    expect(screen.getByText("prerequisite")).toBeInTheDocument();
+    expect(screen.getByText("contains")).toBeInTheDocument();
+  });
+
+  test("defaults to Learn Mode and hides Inspect-only tools", () => {
+    render(
+      <TrailGraph
+        workspaceId="workspace-1"
+        trail={trail}
+        graph={{ nodes, edges, mastery }}
+        masterySummary={{
+          total: 3,
+          not_started: 3,
+          learning: 0,
+          needs_review: 0,
+          mastered: 0,
+        }}
+      />,
+    );
+
+    // Learn Mode is the default per docs/FRONTEND.md.
+    expect(screen.getByRole("button", { name: "Learn" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Inspect" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
+    // Power-user controls are hidden in Learn Mode.
+    expect(screen.queryByRole("button", { name: "Tools" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Legend" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hierarchy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Neighbors only" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edge labels" })).not.toBeInTheDocument();
+  });
+
+  test("opens initial concept when initialConceptId is provided", async () => {
+    render(
+      <TrailGraph
+        workspaceId="workspace-1"
+        trail={trail}
+        graph={{ nodes, edges, mastery }}
+        masterySummary={{
+          total: 3,
+          not_started: 3,
+          learning: 0,
+          needs_review: 0,
+          mastered: 0,
+        }}
+        initialConceptId="matrices"
+      />,
+    );
+
+    await screen.findByText("Selected: Matrices");
+  });
 });
 
 function renderGraph() {
@@ -216,6 +319,11 @@ function renderGraph() {
       }}
     />,
   );
+  // Inspect Mode exposes power-user controls (layout, filters, legend, metrics).
+  // Learn Mode (the default) intentionally hides them — see TrailGraph mode toggle.
+  act(() => {
+    screen.getByRole("button", { name: "Inspect" }).click();
+  });
 }
 
 function node(id: string, title: string, concept_level: ConceptNode["concept_level"]): ConceptNode {

@@ -228,4 +228,36 @@ describe("ConceptPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Level Up" }));
     expect(screen.getByTestId("quiz-panel")).toBeInTheDocument();
   });
+
+  test("primary CTA reflects mastery status: learning -> Continue Tutor", () => {
+    const d = { ...detail, mastery: { ...detail.mastery, status: "learning" as const } };
+    render(
+      <ConceptPanel workspaceId="workspace-1" trailId="trail-1" detail={d} onClose={() => undefined} />,
+    );
+    expect(screen.getByRole("button", { name: "Continue Tutor" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start Learning" })).not.toBeInTheDocument();
+  });
+
+  test("primary CTA reflects mastery status: needs_review -> Review Weak Points", async () => {
+    const d = { ...detail, mastery: { ...detail.mastery, status: "needs_review" as const } };
+    render(
+      <ConceptPanel workspaceId="workspace-1" trailId="trail-1" detail={d} onClose={() => undefined} />,
+    );
+    const cta = screen.getByRole("button", { name: "Review Weak Points" });
+    expect(cta).toBeInTheDocument();
+    await userEvent.click(cta);
+    // Repair-oriented CTA routes through the tutor.
+    expect(screen.getByTestId("tutor-panel")).toBeInTheDocument();
+  });
+
+  test("primary CTA reflects mastery status: mastered -> Practice / Explore Further (opens practice quiz)", async () => {
+    const d = { ...detail, mastery: { ...detail.mastery, status: "mastered" as const } };
+    render(
+      <ConceptPanel workspaceId="workspace-1" trailId="trail-1" detail={d} onClose={() => undefined} />,
+    );
+    const cta = screen.getByRole("button", { name: "Practice / Explore Further" });
+    expect(cta).toBeInTheDocument();
+    await userEvent.click(cta);
+    expect(screen.getByTestId("quiz-panel")).toHaveTextContent("Quiz Panel: practice");
+  });
 });
