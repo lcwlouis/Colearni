@@ -66,6 +66,9 @@ Public export must exclude:
 - Mastery state.
 - Generated summaries from private/user-uploaded content.
 - Generated quizzes from private/user-uploaded content.
+- Artifact payloads derived from private/user-uploaded content unless a future explicit open-license policy allows them.
+
+Trail Pack sharing/import is part of the MVP product identity. Source ingestion, retrieval, and visual artifacts must preserve this public/private boundary rather than moving Trail sharing later or weakening the sanitizer.
 
 ## Sanitizer Pseudocode
 
@@ -92,6 +95,23 @@ Examples:
 - A quiz generated from a restricted source is private.
 - Chunks and embeddings are never public Trail Pack content.
 - A research-agent public source URL may be exported as metadata, but copied page text may not.
+- Future visualiser/artifact templates inherit the most restrictive source provenance used to create them.
+
+## Ingestion Provenance
+
+Source ingestion V1 should track uploaded/private files without using git internally for user source history.
+
+Required provenance fields for ingested sources and revisions:
+
+- Object key.
+- Content hash.
+- Parser name/version.
+- Source revision record.
+- Access level.
+- License/access status.
+- Export eligibility.
+
+Priority ingestion formats are PDF, DOCX, and PPTX. Parsed canonical text, chunks, embeddings, generated summaries, and concept-source links derived from private uploads stay private unless a future explicit licensing policy says otherwise.
 
 ## Research Agent Sources
 

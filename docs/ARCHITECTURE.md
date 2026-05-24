@@ -2,20 +2,29 @@
 
 ## Direction
 
-CoLearni is a local-ready, graph-first learning system. It should be architected so SaaS features can be added later as a thin shell, but the MVP must first prove the learning loop:
+CoLearni is a local-ready, graph-first learning system. It should be architected so SaaS features can be added later as a thin shell, but the MVP must first prove the Trail learning and sharing loop:
 
 ```text
-Trail -> concept graph -> Socratic tutor -> mastery check -> safe Trail Pack sharing
+Create Trail
+-> Learn concept
+-> Level-up quiz
+-> Graph mastery update
+-> Safe Trail Pack export
+-> Trail Pack import/fork
+-> Optional research trace/hydration
 ```
 
 The product is not a generic RAG chatbot. The graph and mastery model are first-class data structures, and every source used for retrieval must carry provenance.
+
+Dashboard UX, Learn/Inspect graph modes, source ingestion, retrieval tooling, provider-native tools, and future visualisers exist to improve that Trail experience. They must not weaken or outrank safe Trail Pack sharing/import.
 
 ## High-Level System
 
 ```text
 Frontend
+  - Learning dashboard with Continue Learning, Trail progress, and Recommended Next
   - Trail creation UI
-  - Graph viewer — React Flow per-Trail view (≤100 nodes); Sigma.js if combined/workspace view is ever built
+  - Graph viewer — React Flow per-Trail view (≤100 nodes) with Learn Mode and Inspect Mode
   - Tutor chat (assistant-ui + custom LocalRuntime adapter)
   - Level-up quiz cards
   - Import/export UI
@@ -29,6 +38,8 @@ Backend API
   - Research service
   - Hydration service
   - Trail Pack import/export service
+  - Provider tool adapter layer for normalized tool calls/results
+  - Source ingestion and controlled retrieval services
 
 Database
   - workspaces
@@ -44,6 +55,7 @@ Database
 
 Private Storage
   - uploaded files
+  - parsed source revisions
   - hydrated source text
   - chunks
   - embeddings
@@ -257,11 +269,12 @@ User selects concept
 Tutor context should be scoped in this order:
 
 1. Current concept.
-2. Prerequisites.
-3. Containing nodes and contained nodes.
-4. Current Trail.
+2. Mastery state.
+3. Learner state summary, when available.
+4. Prerequisites, containing, contained, and related nodes.
 5. Explicitly linked sources.
-6. Broader workspace only when needed.
+6. Recent turns or conversation summary.
+7. Source chunks only when needed.
 
 The tutor must not search the entire graph by default.
 
@@ -296,10 +309,67 @@ CoLearni should remain evidence-first. User-visible sourced answers must either 
 
 Retrieval should stay scoped and budgeted:
 
-- Prefer current concept and nearby graph context.
-- Use Trail-linked source records before broad workspace retrieval.
+- Prefer current concept, mastery state, learner state summary, and nearby graph context.
+- Use concept-linked source records before broad workspace retrieval.
+- Use source chunks only when needed and only through controlled retrieval/open tools.
 - Use hybrid vector + full-text search where available.
 - Avoid unbounded loops and whole-workspace searches by default.
+
+Planned controlled tools:
+
+- `search_sources(query, concept_id?)`.
+- `open_source_chunk(chunk_id)`.
+- `get_concept_sources(concept_id)`.
+- `get_graph_neighbourhood(concept_id)`.
+
+These tools should be registered through the provider tool abstraction, enforce workspace/Trail/concept/source budgets, and return citation-ready source metadata rather than dumping large source text into every prompt.
+
+## Source Ingestion Pattern
+
+Source ingestion arrives after safe export/import and provider tool foundations. It must create private, provenance-aware source records before retrieval uses uploaded material.
+
+Preferred V1 flow:
+
+```text
+Uploaded file
+-> private object storage
+-> parser
+-> markdown-like canonical text
+-> source revision
+-> chunks
+-> embeddings / full-text index
+-> concept-source links
+-> controlled retrieval/open tools
+```
+
+Priority formats are PDF, DOCX, and PPTX. CSV/Excel, arbitrary file types, and broad filesystem browsing are deferred.
+
+Do not use git internally for user source tracking in V1. Use content hashes, parser versions, source revision records, object keys, and database/object-storage versioning. Uploaded files, parsed text, chunks, embeddings, and derived summaries remain private by default and must be excluded by the Trail Pack sanitizer.
+
+## Provider Tool Abstraction
+
+Provider-native tool calling should be supported through a small internal abstraction before retrieval/source tools expand. This is not a full agent framework rewrite.
+
+The abstraction should define:
+
+- Provider-agnostic tool definitions.
+- Tool call ids, names, normalized JSON arguments, and validation errors.
+- Tool result payloads plus learner-safe public previews.
+- Normalized streaming events for `tool_call` and `tool_result`.
+
+Adapters should cover:
+
+- OpenAI Responses API.
+- OpenAI-compatible Chat Completions providers, including OpenRouter.
+- Anthropic Claude native tool use.
+
+Rules:
+
+- Keep direct provider calls in `LLMClient`; do not introduce LiteLLM.
+- Tool execution is service-owned and budgeted.
+- Hidden/internal tool turns may be persisted for replay, but public APIs only expose sanitized previews.
+- Invalid tool arguments fail safely without unbounded retries.
+- The existing tutor SSE stream, reasoning trace UI, and conversation replay behavior must remain compatible.
 
 ## LLM Client Pattern
 

@@ -80,6 +80,16 @@ Tutor detects readiness
 
 The tutor may invite the learner to level up, but it should not mark a concept mastered without an explicit grade/evaluation step.
 
+Future tutor-suggested quizzes should use an event/tool-style handoff rather than inline quiz generation:
+
+```text
+tutor emits suggest_quiz(concept_id, quiz_type, reason)
+-> frontend shows quiz CTA/card
+-> backend-owned quiz draft system generates/reuses the card
+```
+
+This preserves the existing rule that quiz drafts, grading, attempts, and mastery updates are backend-owned.
+
 ## Level-Up Card Shape
 
 A practical level-up card should usually include 2-4 questions chosen dynamically from the current concept's mastery labels.
@@ -152,6 +162,18 @@ Practice quizzes use the same `quiz_generation` prompt as level-up quizzes. The 
 | Feedback returned | yes | yes |
 
 Practice endpoints: `POST .../practice` and `POST .../practice/grade`.
+
+## Learner State Summaries
+
+Quiz attempts are immutable records. A later learner state summary is mutable and should reflect the learner's current understanding.
+
+Rules:
+
+- Old failed quizzes should inform repair, but should not permanently bias the tutor after later improvement.
+- Passing a level-up quiz should update the learner state summary toward demonstrated mastery.
+- Failing a level-up quiz should update the learner state summary with specific repair targets.
+- Practice attempts may update learner state hints without changing mastery status.
+- The tutor still cannot mark mastery directly.
 
 ## Product Requirement
 

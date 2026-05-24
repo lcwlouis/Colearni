@@ -56,7 +56,7 @@ If this file conflicts with an older phase description, follow this file and upd
 
 ## Deferred Work
 
-- Provider-native tool calling behind a cross-provider adapter.
+- Provider-native tool calling behind a cross-provider adapter is now planned early after safe Trail Pack export/import foundations, before source ingestion and retrieval/context tooling expand.
 - Automatic conversation summarization.
 - True per-message citation/source parts and quotes.
 - Global cross-Trail assistant surfaces.

@@ -40,12 +40,16 @@ A user can create or import a Trail, learn through a Socratic tutor, see progres
 The first demo should prove:
 
 ```text
-A user can create a Trail,
-learn one concept Socratically,
-pass a level-up quiz,
-see graph progress update,
-and export/import a safe Trail Pack.
+Create Trail
+-> Learn concept
+-> Level-up quiz
+-> Graph mastery update
+-> Safe Trail Pack export
+-> Trail Pack import/fork
+-> Optional research trace/hydration
 ```
+
+Trail sharing is part of the MVP product identity. Dashboard, graph UX, ingestion, retrieval, provider-native tools, and future visualisers should improve this Trail experience, not replace safe export/import as the product spine.
 
 ## User Story: Create a Trail
 
@@ -68,6 +72,19 @@ Expected behavior:
 - Every node has a title, slug, node type, concept level, Bloom target, and mastery check labels.
 - The Trail can exist before any document ingestion or hydration.
 
+## User Story: Learning Dashboard
+
+As a learner, I can return to CoLearni and immediately understand what to continue next.
+
+Expected behavior:
+
+- Home shows Continue Learning for the most relevant active Trail/concept.
+- Home shows mastery progress per recent Trail.
+- Home shows a deterministic recommended next concept/action before any LLM recommendation is needed.
+- Recent Trails and older Trail search/list remain available.
+- Creating a new Trail stays easy to find.
+- Heavy gamification is deferred until the core learning/share loop is stable.
+
 ## User Story: Explore a Trail
 
 As a learner, I can view the concept graph and click nodes to understand what to learn next.
@@ -80,6 +97,22 @@ Expected behavior:
 - Clicking a node opens a side panel.
 - The side panel shows title, concept level, prerequisites, contained/related concepts, mastery checks, and sources if available.
 - The graph remains usable up to at least 100 nodes.
+- Learn Mode is the approachable default, with fewer visible controls, selected-node neighbourhood focus, and progressive disclosure.
+- Inspect Mode preserves the current technical React Flow graph with full edge types, filters, layout controls, legend, and optional edge labels.
+- Edge labels are not shown globally by default; relation meaning appears through focus, hover, side panel context, or an Inspect Mode toggle.
+
+## User Story: Concept Detail
+
+As a learner, I can select a concept and see what it is, why it matters, what to do next, what it connects to, and what sources support it.
+
+Expected primary CTA by mastery state:
+
+| Mastery state | Primary CTA |
+|---|---|
+| `not_started` | Start Learning |
+| `learning` | Continue Tutor |
+| `needs_review` | Review Weak Points |
+| `mastered` | Practice / Explore Further |
 
 ## User Story: Learn a Concept
 
@@ -131,6 +164,29 @@ Expected behavior:
 - The learner can hydrate with public links, open-license sources, user uploads, or model knowledge.
 - Hydrated content is private by default.
 
+## Future User Story: Source Ingestion
+
+As a learner, I can upload common study materials and use them privately inside a Trail.
+
+Expected behavior:
+
+- Priority formats are PDF, DOCX, and PPTX.
+- Uploaded files are stored privately and tracked by object key, content hash, parser version, source revision records, and database/object-storage versioning.
+- Parsed text becomes markdown-like canonical text, then chunks and indexes behind scoped retrieval tools.
+- Uploaded/private/source-derived content never enters public Trail Pack export by default.
+- Raw filesystem browsing is not the primary retrieval architecture.
+
+## Future User Story: Tutor-Suggested Quiz
+
+As a learner, I can accept a tutor's suggestion to practice or level up without the tutor bypassing the quiz system.
+
+Expected behavior:
+
+- The tutor emits a `suggest_quiz(concept_id, quiz_type, reason)` event/tool result.
+- The frontend shows a quiz CTA/card.
+- The backend-owned quiz draft system generates or reuses the card.
+- The tutor cannot mark mastery directly.
+
 ## MVP Non-Goals
 
 - No full SaaS marketplace yet.
@@ -139,6 +195,9 @@ Expected behavior:
 - No complex multi-agent framework yet.
 - No PDF ingestion as the first milestone.
 - No public sharing of uploaded/source-derived content.
+- No raw filesystem-browsing agent as the primary retrieval architecture.
+- No arbitrary LLM-generated JavaScript visualisers in the MVP.
+- No LiteLLM or large provider abstraction rewrite.
 - No public pack moderation workflow until SaaS prep.
 - No multi-organization permissions model in the local-ready MVP.
 

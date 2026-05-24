@@ -78,13 +78,14 @@ Prompt context should include:
 
 - Current concept.
 - Current concept level: umbrella, topic, subtopic, or granular.
+- Mastery state.
+- Learner state summary, when available.
 - Prerequisites.
 - Containing and contained nodes.
 - Nearby graph nodes.
 - Learning goal.
-- Mastery state.
 - Safe source references.
-- Conversation summary.
+- Recent turns or conversation summary.
 
 Prompt context must not include:
 
@@ -98,13 +99,23 @@ Prompt context must not include:
 Default retrieval order:
 
 1. Current concept.
-2. Prerequisites.
-3. Containing and contained nodes.
-4. Current Trail.
+2. Mastery state.
+3. Learner state summary, when available.
+4. Prerequisites, containing, contained, and related nodes.
 5. Explicitly linked sources.
-6. Broader workspace only when needed.
+6. Recent turns or conversation summary.
+7. Source chunks only when needed.
 
-Avoid searching the entire graph by default. Broad retrieval is more expensive, noisier, and less pedagogically focused.
+Avoid searching the entire graph or workspace by default. Broad retrieval is more expensive, noisier, and less pedagogically focused.
+
+Planned retrieval tools should stay controlled and budgeted:
+
+- `search_sources(query, concept_id?)`.
+- `open_source_chunk(chunk_id)`.
+- `get_concept_sources(concept_id)`.
+- `get_graph_neighbourhood(concept_id)`.
+
+These tools should plug into the provider tool abstraction once it exists. They must enforce workspace/Trail/concept scope and return citation-ready metadata rather than dumping full source text into every tutor prompt.
 
 ## Grounding and Citations
 
@@ -151,6 +162,32 @@ Context window rules:
 - Context included in prompt: summary (if any) → recent turns → current message.
 
 This keeps token costs bounded and the prompt focused on recent reasoning while summary generation remains future work.
+
+## Learner State
+
+Future learner state should be mutable and reflect the learner's current understanding, not a permanent average of every old mistake.
+
+Rules:
+
+- Quiz attempts remain immutable records.
+- Conversation summaries summarize historical turns.
+- Learner state summary is mutable and should capture current strengths, misconceptions, and likely next repair targets.
+- Old failed quizzes should not permanently bias the tutor after the learner later demonstrates improvement.
+- Learner state updates must be performed by owned services/tools, not arbitrary visible tutor text.
+
+## Quiz Suggestions
+
+The tutor may eventually suggest a quiz, but it must not inline-generate the quiz or mark mastery directly.
+
+Planned flow:
+
+```text
+tutor emits suggest_quiz(concept_id, quiz_type, reason)
+-> frontend shows quiz CTA/card
+-> backend-owned quiz draft system generates/reuses the card
+```
+
+Mastery remains owned by the grading flow documented in `docs/MASTERY_MODEL.md`.
 
 ## Tone
 

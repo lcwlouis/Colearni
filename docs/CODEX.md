@@ -29,8 +29,11 @@
 - The graph and mastery model are core primitives.
 - Concept graph nodes must carry explicit levels: `umbrella`, `topic`, `subtopic`, or `granular`.
 - The tutor should feel like a mentor/coach, not a search engine.
+- Trail Pack export/import is part of the MVP product identity; do not move safe sharing behind dashboard polish, ingestion, retrieval, provider tools, or SaaS work.
+- Provider-native tool foundations should be small, direct-provider adapters, not a large agent-framework rewrite.
 - Build local-ready first and keep SaaS as a later thin layer.
 - Do not start the MVP with PDF ingestion, SaaS billing/auth, or a public marketplace.
+- Do not make raw filesystem browsing the primary retrieval architecture.
 
 ## Safety Rules
 

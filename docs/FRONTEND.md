@@ -18,7 +18,7 @@ create Trail
 -> export/import safe Trail Pack
 ```
 
-Do not build a marketing landing page as the main experience. The first screen should help the learner create or open a Trail.
+Do not build a marketing landing page as the main experience. The first screen should become a learning dashboard that helps the learner continue progress, understand recent Trail mastery, follow a recommended next action, search older Trails, and create a new Trail. Trail sharing/import remains part of the core MVP identity, not a later nice-to-have.
 
 ## Planned Stack
 
@@ -123,7 +123,7 @@ AssistantModal evaluation:
 Artifact roadmap:
 
 - Start with structured artifact payloads such as JSON or CSV rendered by a frontend component registry.
-- Flashcard sets and mini quizzes should arrive through that artifact path when mastery gating lands.
+- Flashcard sets, worked examples, mini graphs, and other trusted templates should arrive through that artifact path after the current mastery and Trail sharing loop is stable.
 - Raw React or JavaScript artifacts are a much-later option, not part of the current MVP phases.
 
 ### Installation
@@ -165,6 +165,65 @@ The graph UI should:
 - Show prerequisites, containing nodes, contained nodes, related nodes, mastery checks, and sources.
 - Stay usable at 100 nodes.
 - Avoid layout shifts in graph controls and side panels.
+
+### Learn Mode / Inspect Mode
+
+The per-Trail React Flow graph should support two modes rather than replacing the current implementation.
+
+Learn Mode:
+
+- Default, approachable learner view.
+- Fewer controls visible by default.
+- Progressive disclosure for filters and layout tools.
+- Selected-node neighbourhood focus.
+- Relationship meaning shown through hover/focus states, side panel context, and selected-neighbourhood explanations instead of global clutter.
+- Concept panel emphasizes the next learning action.
+
+Inspect Mode:
+
+- Preserves the current technical graph behavior.
+- Full edge types, filters, layout controls, legend, and power-user/debug controls.
+- Optional `show edge labels` toggle.
+
+Do not show all edge labels globally by default. Preserve existing line styles for relationship types; labels are progressive disclosure, not the primary encoding.
+
+### Concept Panel Actions
+
+The concept panel should answer:
+
+- What is this?
+- Why does it matter?
+- What should I do next?
+- What is connected to it?
+- What sources support it?
+
+Primary CTA by mastery state:
+
+| Mastery state | Primary CTA |
+|---|---|
+| `not_started` | Start Learning |
+| `learning` | Continue Tutor |
+| `needs_review` | Review Weak Points |
+| `mastered` | Practice / Explore Further |
+
+Mobile should prioritize clear next actions, selected concept detail, tutor/quiz access, and simple Trail progress over dense graph controls.
+
+## Dashboard Requirements
+
+Home should be a learning dashboard, not only a Trail list.
+
+Include:
+
+- Continue Learning.
+- Mastery progress per Trail.
+- Recommended next concept/action.
+- Recent Trails.
+- Older Trail search/list.
+- Create new Trail entry point.
+
+Recommended next concept V1 should be deterministic before LLM-based. Prefer `not_started` or `needs_review` concepts whose prerequisites are `mastered` or `learning`, prefer `topic`/`subtopic` over `umbrella`/`granular`, then prefer lower difficulty. If all concepts are mastered, suggest review, adjacent exploration, or generating an extension.
+
+Defer heavy gamification. XP/streaks can be future polish, but they are not core before the learning loop, import/export, ingestion, and retrieval work are stable.
 
 ## Interaction Guidelines
 
@@ -224,7 +283,7 @@ export default {
 
 ### When to implement
 
-Dark mode is a Phase 9 (Demo Polish) requirement. It should be implemented before the product is shown to external users.
+Dark mode is a Phase 16 demo polish requirement. It should be implemented before the product is shown to external users.
 
 ## API Access
 

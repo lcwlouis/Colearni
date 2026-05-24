@@ -11,18 +11,26 @@ Recommended MVP build order:
 2. Workspace + Trail database models
 3. Trail generation endpoint
 4. Graph viewer
-5. Tutor chat for one concept
-6. Mastery + level-up quiz
-7. Source provenance + export sanitizer
-8. Trail Pack export
-9. Research trace
-10. Hydration
-11. Trail Pack import
-12. Demo polish
-13. SaaS prep
+5. Phase 3.5 hardening + docs alignment
+6. Tutor chat backend for one concept
+7. Tutor chat frontend with assistant-ui
+8. Mastery + level-up quiz
+9. Source provenance + safe Trail Pack export
+10. Trail Pack import + research trace/hydration MVP
+11. Provider tool abstraction foundation
+12. Learning dashboard + Learn/Inspect graph UX
+13. Source ingestion MVP
+14. Retrieval + context tooling
+15. Guided graph navigation / recommended next concept
+16. Conversation summaries + learner state
+17. Tutor-suggested quiz cards
+18. Deferred visualiser / artifact templates
+19. Demo polish/user testing
+20. Deployment
+21. SaaS prep
 ```
 
-Do not start with PDF ingestion, SaaS billing/auth, or a public marketplace.
+Do not start with PDF ingestion, SaaS billing/auth, or a public marketplace. Safe Trail Pack export/import stays early and central; provider tool foundations come before source ingestion and retrieval tools expand.
 
 ## Foundation Tests
 
@@ -88,6 +96,21 @@ Photography Exposure Triangle
 - Concept level filters or visual distinctions work.
 - Status colors are correct.
 - Graph remains usable at 10, 50, and 100 nodes.
+- Learn Mode hides advanced controls by default.
+- Inspect Mode preserves filters, layout controls, legend, and full edge types.
+- Edge labels are not globally visible by default.
+- Optional edge labels appear only in Inspect Mode.
+- Concept panel CTA changes by mastery state.
+- Mobile view prioritizes selected concept detail and next actions over dense controls.
+
+## Dashboard Tests
+
+- Dashboard renders empty, loading, populated, and error states.
+- Continue Learning chooses a valid active/recent Trail or concept.
+- Trail mastery summaries render correct counts/progress.
+- Recommended Next uses deterministic graph/mastery heuristics.
+- Recent Trails and older Trail search/list work.
+- Create new Trail entry point remains visible.
 
 ## Tutor Tests
 
@@ -161,6 +184,8 @@ These are critical and should be treated as regression tests for every export/im
 - Missing sources shown clearly.
 - Imported graph displays correctly.
 - Imported pack can be hydrated.
+- Imported pack forks into the current workspace.
+- Imported pack can be learned from without hydration.
 
 ## Research and Hydration Tests
 
@@ -174,6 +199,68 @@ These are critical and should be treated as regression tests for every export/im
 - Hydrated embeddings are not included in public export.
 - Unknown-license source marked no-redistribution.
 - User can skip hydration and still learn.
+
+## Provider Tool Tests
+
+- OpenAI Responses tool calls normalize to the internal tool call/result shape.
+- OpenAI-compatible Chat Completions/OpenRouter tool calls normalize to the same shape.
+- Anthropic tool use normalizes to the same shape.
+- Fake provider streams text, reasoning, tool calls, tool results, and final text without live LLM calls.
+- Tutor instruction tool migration preserves SSE event order and public `tool_call` / `tool_result` previews.
+- Hidden tool turns are persisted for replay but excluded from public conversation history.
+- Invalid tool arguments fail safely without unbounded retries.
+
+## Source Ingestion Tests
+
+- PDF/DOCX/PPTX uploads create private source records.
+- Content hash, parser version, object key, and source revision record are stored.
+- Parser failure is visible and does not create partial public content.
+- Chunks and embeddings are excluded from export.
+- Concept-source links can be created and read.
+- No endpoint exposes raw private source text without workspace scope.
+
+## Retrieval and Context Tests
+
+- Retrieval scopes to current concept and linked sources first.
+- Whole-workspace retrieval does not run unless explicitly requested and budgeted.
+- Tool result sizes are capped.
+- Private sources from other workspaces cannot be read.
+- `open_source_chunk` requires a valid chunk id in scope.
+- Sourced tutor answers cite allowed evidence or refuse in strict mode.
+- Tool failures degrade without crashing tutor streaming.
+
+## Recommended Next Tests
+
+- Mixed mastery states produce expected recommendations.
+- Prerequisites are respected.
+- `needs_review` concepts can be prioritized for repair.
+- Topic/subtopic preference wins over umbrella/granular when otherwise tied.
+- All-mastered Trails return review/explore/extension guidance.
+- Dashboard and concept panel render recommendation reasons.
+
+## Learner State Tests
+
+- Conversation summaries cover the intended turn range and record `turns_covered_to`.
+- Summary generation is idempotent.
+- Quiz attempts remain immutable.
+- Learner state updates after pass/review events.
+- Improved learner state can supersede old failed-quiz bias.
+- Tutor prompt uses learner state summary within context budget.
+
+## Tutor-Suggested Quiz Tests
+
+- `suggest_quiz` creates a frontend-visible CTA without grading.
+- Clicking the CTA reuses an existing backend draft when present.
+- Tutor cannot update mastery through the suggestion event.
+- Duplicate suggestion events dedupe safely.
+- Suggestion reason is learner-visible.
+
+## Artifact Template Tests
+
+- Valid artifact payload renders through the expected trusted component.
+- Unknown artifact type falls back safely.
+- Source-derived private artifacts are excluded from public export.
+- Raw script execution is not allowed.
 
 ## Integration Tests
 
@@ -207,7 +294,7 @@ The first demo should prove:
 5. Take level-up quiz
 6. Node turns mastered
 7. Click "Eigenvectors"
-8. Research public sources
-9. Export safe Trail Pack
-10. Import that Trail Pack into a new workspace
+8. Export safe Trail Pack
+9. Import/fork that Trail Pack into a new workspace
+10. Optionally run research trace/hydration for the imported Trail
 ```
