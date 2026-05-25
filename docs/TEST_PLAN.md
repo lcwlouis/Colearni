@@ -212,12 +212,16 @@ These are critical and should be treated as regression tests for every export/im
 
 ## Source Ingestion Tests
 
-- PDF/DOCX/PPTX uploads create private source records.
-- Content hash, parser version, object key, and source revision record are stored.
-- Parser failure is visible and does not create partial public content.
+- Current foundation: uploads create private source records and immutable source revision records.
+- Content hash, parser version, object key, file size/content type, and source revision status are stored internally.
+- Upload/source metadata API responses expose sanitized revision summaries, not storage object keys or content hashes.
+- Invalid uploads or storage failures do not create partial public content.
+- Workspace-scoped source metadata reads cannot access another workspace's upload.
+- Source metadata reads do not expose raw private uploaded bytes/text.
 - Chunks and embeddings are excluded from export.
 - Concept-source links can be created and read.
 - No endpoint exposes raw private source text without workspace scope.
+- Deferred parser expansion: PDF/DOCX/PPTX parsing should add format-specific tests when real parser support lands.
 
 ## Retrieval and Context Tests
 

@@ -298,11 +298,29 @@ async def test_import_rejects_missing_concept_payload_for_graph_node(api_client,
     assert "matrices" in resp.json()["error"]["message"]
 
 
-@pytest.mark.parametrize("unsafe_field", ["chunks", "embeddings", "private_notes", "mastery"])
+@pytest.mark.parametrize(
+    "unsafe_field",
+    ["chunks", "embeddings", "source_revisions", "private_notes", "mastery"],
+)
 async def test_import_rejects_unsafe_fields(api_client, db_engine, unsafe_field):
     workspace_id, trail_id, _ = await _seed_exportable_trail(db_engine)
     pack = (await _export(api_client, workspace_id, trail_id))["pack"]
     pack[unsafe_field] = []
+
+    resp = await api_client.post(
+        f"/api/workspaces/{workspace_id}/trail-packs/import",
+        json=pack,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_input"
+    assert "Unsafe Trail Pack field" in resp.json()["error"]["message"]
+
+
+async def test_import_rejects_source_revision_provenance_fields(api_client, db_engine):
+    workspace_id, trail_id, _ = await _seed_exportable_trail(db_engine)
+    pack = (await _export(api_client, workspace_id, trail_id))["pack"]
+    pack["sources"][0]["object_key"] = "workspaces/private/source.pdf"
 
     resp = await api_client.post(
         f"/api/workspaces/{workspace_id}/trail-packs/import",

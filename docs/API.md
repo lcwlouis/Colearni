@@ -71,6 +71,9 @@ TutorStreamStatus = Literal[
     "responding",
     "retrying_without_thinking",
 ]
+
+# Source ingestion revision status
+SourceRevisionStatus = Literal["pending_parse", "parsed", "failed", "skipped"]
 ```
 
 ## Schemas
@@ -267,6 +270,69 @@ Quiz generation reuses the existing backend draft for the same `(concept_id, qui
 }
 ```
 
+### SourceRevision
+
+Internal persistence record. Stored in the database; not returned directly by learner-facing APIs.
+
+```json
+{
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "source_id": "uuid",
+  "revision_number": "int",
+  "object_key": "string (private storage key; metadata only, not a public URL)",
+  "content_hash": "sha256:<hex>",
+  "content_type": "string | null",
+  "file_size_bytes": "int",
+  "parser_name": "string",
+  "parser_version": "string",
+  "status": "pending_parse | parsed | failed | skipped",
+  "error_message": "string | null",
+  "metadata_json": {},
+  "created_at": "ISO 8601 datetime"
+}
+```
+
+The current Phase 10 slice creates one immutable revision per upload with `parser_name: "none"`, `parser_version: "upload-only-v1"`, and `status: "pending_parse"`. It stores uploaded bytes in local private storage and records provenance only; canonical parsed text, chunks, embeddings, and retrieval indexes are still deferred. `object_key` and `content_hash` are internal storage/provenance fields and must never appear in public Trail Pack export or learner-facing source metadata responses.
+
+### SourceRevisionSummary
+
+Sanitized revision summary returned by upload/source metadata endpoints.
+
+```json
+{
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "source_id": "uuid",
+  "revision_number": "int",
+  "content_type": "string | null",
+  "file_size_bytes": "int",
+  "parser_name": "string",
+  "parser_version": "string",
+  "status": "pending_parse | parsed | failed | skipped",
+  "error_message": "string | null",
+  "metadata_json": {},
+  "created_at": "ISO 8601 datetime"
+}
+```
+
+### SourceUploadResponse
+
+```json
+{
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "title": "string",
+  "url": null,
+  "origin": "user_upload",
+  "access": "private",
+  "license": null,
+  "include_on_public_export": false,
+  "metadata_json": {},
+  "revision": "SourceRevisionSummary"
+}
+```
+
 ### ExportReport
 
 ```json
@@ -279,6 +345,7 @@ Quiz generation reuses the existing backend draft for the same `(concept_id, qui
   },
   "excluded": {
     "uploaded_files": "int",
+    "source_revisions": "int",
     "chunks": "int",
     "embeddings": "int",
     "private_notes": "int",
@@ -361,8 +428,10 @@ Common error codes:
 | 400 | `invalid_input` | Request body failed validation |
 | 404 | `not_found` | Resource does not exist |
 | 409 | `conflict` | Duplicate slug, etc. |
+| 413 | `invalid_input` | Upload/request exceeds the configured limit |
 | 422 | `validation_error` | Pydantic validation failed |
 | 500 | `llm_error` | LLM call failed or returned malformed output |
+| 500 | `storage_error` | Private local storage operation failed |
 | 503 | `budget_exceeded` | Resolver or gardener budget hit |
 
 ---
@@ -747,7 +816,7 @@ Retrieve the conversation history for a concept in the current workspace.
 
 #### `GET /api/workspaces/{workspace_id}/sources`
 
-List all source records in a workspace.
+Planned source listing endpoint. It is not implemented in the current backend slice.
 
 **Query params:**
 
@@ -770,7 +839,7 @@ List all source records in a workspace.
 
 Upload a source file. Stored as a private source. Defaults: `origin: user_upload`, `access: private`, `include_on_public_export: false`.
 
-This endpoint supports hydration/import workflows after the core learning loop and safe Trail Pack sharing foundations exist. Do not implement it as the first milestone, and do not build PDF ingestion before Trail generation, graph viewing, tutor chat, mastery, safe export, Trail Pack import/fork, and provider tool foundations are working.
+The current Phase 10 slice stores the uploaded bytes under `SOURCE_STORAGE_ROOT`, creates a private `SourceRecord`, creates one immutable `SourceRevision`, and leaves parsing/chunking/indexing in `pending_parse` for later phases. No raw private file text, storage object key, or content hash is returned by this endpoint.
 
 **Request:** `multipart/form-data`
 
@@ -779,7 +848,24 @@ This endpoint supports hydration/import workflows after the core learning loop a
 | `file` | binary | yes | File to upload |
 | `title` | string | no | Defaults to filename |
 
-**Response 201:** `SourceRecord`
+**Response 201:** `SourceUploadResponse`
+
+**Errors:**
+- `400 invalid_input` — empty file or invalid upload metadata
+- `404 not_found` — workspace does not exist
+- `413 invalid_input` — uploaded file exceeds the current 50 MB limit
+- `500 storage_error` — local private storage failed before a valid source state could be committed
+
+---
+
+#### `GET /api/workspaces/{workspace_id}/sources/{source_id}`
+
+Read private uploaded-source metadata and latest sanitized revision summary for one workspace-scoped upload. This endpoint does not return raw uploaded bytes, parsed text, chunks, embeddings, storage object keys, or content hashes. Non-upload source records use the existing concept/detail metadata surfaces for now.
+
+**Response 200:** `SourceUploadResponse`
+
+**Errors:**
+- `404 not_found` — source does not exist in the workspace or has no revision
 
 ---
 
@@ -871,7 +957,7 @@ Export a Trail as a safe public Trail Pack. Runs the export sanitizer before gen
 The sanitizer enforces these rules before generating the response:
 - `user_upload` sources are excluded.
 - `private` or `restricted` sources are excluded.
-- Chunks, embeddings, private notes, chat history, and mastery records are excluded.
+- Source revisions, chunks, embeddings, private notes, chat history, and mastery records are excluded.
 - Only `research_agent` + `public` + `include_on_public_export=true` sources appear, as links/metadata only.
 
 ---
@@ -900,7 +986,7 @@ The endpoint accepts either the raw Trail Pack object or the Phase 6 export wrap
 - Duplicate concept slugs in the imported trail.
 - Unknown `concept_level` values.
 - Private or uploaded-like source entries.
-- Packs containing raw chunks, embeddings, uploaded files, private notes, mastery records, chat history, raw source prose, generated summaries, or generated quizzes.
+- Packs containing source revisions, object keys, content hashes, raw chunks, embeddings, uploaded files, private notes, mastery records, chat history, raw source prose, generated summaries, or generated quizzes.
 - Malformed JSON.
 
 If an older content-light pack lacks the additive round-trip fields, import uses conservative defaults and reports warnings: `topic = manifest.title`, `goal = "Imported from Trail Pack"`, `target_depth = "understand"`, missing node `difficulty = "beginner"`, and missing node `bloom_level = "understand"`.

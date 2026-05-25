@@ -164,16 +164,22 @@ Expected behavior:
 - The learner can hydrate with public links, open-license sources, user uploads, or model knowledge.
 - Hydrated content is private by default.
 
-## Future User Story: Source Ingestion
+## User Story: Source Ingestion Foundation
 
-As a learner, I can upload common study materials and use them privately inside a Trail.
+As a learner, I can upload study material into my private workspace so CoLearni records provenance for later retrieval work.
 
-Expected behavior:
+Current foundation behavior:
+
+- Uploaded files are private workspace objects stored under the configured local source storage root.
+- Uploaded files create private `SourceRecord` rows and immutable `SourceRevision` rows with object key, content hash, parser metadata, and status.
+- Learner-facing source metadata shows sanitized ingestion status, not storage object keys or content hashes.
+- Parser/chunk/index work is not yet implemented, so uploaded content is not used by tutor retrieval.
+- Uploaded/private/source-derived content never enters public Trail Pack export by default.
+
+Future expected behavior:
 
 - Priority formats are PDF, DOCX, and PPTX.
-- Uploaded files are stored privately and tracked by object key, content hash, parser version, source revision records, and database/object-storage versioning.
 - Parsed text becomes markdown-like canonical text, then chunks and indexes behind scoped retrieval tools.
-- Uploaded/private/source-derived content never enters public Trail Pack export by default.
 - Raw filesystem browsing is not the primary retrieval architecture.
 
 ## Future User Story: Tutor-Suggested Quiz

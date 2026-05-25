@@ -13,6 +13,7 @@ export type MasteryStatus = "not_started" | "learning" | "needs_review" | "maste
 export type TutorMode = "socratic" | "direct" | "repair" | "quiz_prompt" | "explore" | "free_explore";
 export type SourceOrigin = "research_agent" | "user_upload" | "manual" | "system";
 export type SourceAccess = "public" | "private" | "restricted" | "unknown";
+export type SourceRevisionStatus = "pending_parse" | "parsed" | "failed" | "skipped";
 
 export interface Workspace {
   id: string;
@@ -139,6 +140,42 @@ export interface SourceRecord {
   include_on_public_export: boolean;
   metadata_json: Record<string, unknown>;
   relation?: string;
+}
+
+export interface SourceRevisionSummary {
+  id: string;
+  workspace_id: string;
+  source_id: string;
+  revision_number: number;
+  content_type: string | null;
+  file_size_bytes: number;
+  parser_name: string;
+  parser_version: string;
+  status: SourceRevisionStatus;
+  error_message: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface SourceUploadResponse extends SourceRecord {
+  revision: SourceRevisionSummary;
+}
+
+export interface ConceptSourceLinkRead {
+  id: string;
+  source_id: string;
+  concept_id: string;
+  relation: string;
+}
+
+export interface ConceptSourceListItem {
+  source_id: string;
+  title: string;
+  origin: SourceOrigin;
+  access: SourceAccess;
+  url: string | null;
+  relation: string;
+  ingestion_status: SourceRevisionStatus | null;
 }
 
 export interface TutorChatRequest {

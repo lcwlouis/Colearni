@@ -14,6 +14,8 @@ from backend.app.schemas.mastery import (
     QuizGenerateRequest,
     QuizGradeRequest,
 )
+from backend.app.schemas.source import ConceptSourceListItem, ConceptSourcesResponse
+from backend.app.services.concept_source_links import list_concept_sources
 from backend.app.services.graph_view import get_concept_detail
 from backend.app.services.quizzes import (
     LLMQuizGenerator,
@@ -29,6 +31,7 @@ from backend.app.services.quizzes import (
 from backend.app.settings import settings
 
 router = APIRouter(prefix="/api/workspaces/{workspace_id}/trails/{trail_id}/concepts")
+concept_sources_router = APIRouter(prefix="/api/workspaces/{workspace_id}/concepts")
 
 
 def get_quiz_generator() -> QuizGenerator:
@@ -56,6 +59,40 @@ async def get_concept_detail_route(
     except LookupError as exc:
         return _not_found(str(exc))
     return ConceptDetailResponse.model_validate(detail)
+
+
+@concept_sources_router.get(
+    "/{concept_id}/sources",
+    response_model=ConceptSourcesResponse,
+    responses={404: {"model": ErrorEnvelope}},
+)
+async def get_concept_sources_route(
+    workspace_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ConceptSourcesResponse | JSONResponse:
+    try:
+        rows = await list_concept_sources(
+            session,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+        )
+    except LookupError as exc:
+        return _not_found(str(exc))
+    sources = []
+    for link, source, ingestion_status in rows:
+        sources.append(
+            ConceptSourceListItem(
+                source_id=source.id,
+                title=source.title,
+                origin=source.origin,
+                access=source.access,
+                url=source.url,
+                relation=link.relation,
+                ingestion_status=ingestion_status,
+            )
+        )
+    return ConceptSourcesResponse(sources=sources)
 
 
 @router.post("/{concept_id}/level-up", response_model=LevelUpCard)

@@ -6,6 +6,7 @@ import { TrailGraph } from "@/app/trails/[id]/components/TrailGraph";
 import type { ConceptEdge, ConceptNode, Trail } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
+  getConceptSources: vi.fn(async () => ({ sources: [] })),
   getConcept: vi.fn(async (_workspaceId: string, _trailId: string, conceptId: string) => ({
     concept: {
       id: conceptId,

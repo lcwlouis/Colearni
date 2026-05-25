@@ -1,9 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { ConceptPanel } from "@/app/trails/[id]/components/ConceptPanel";
+import { getConceptSources, linkSourceToConcept, uploadSource } from "@/lib/api";
 import type { ConceptDetail } from "@/lib/types";
+
+vi.mock("@/lib/api", () => ({
+  getConceptSources: vi.fn(),
+  linkSourceToConcept: vi.fn(),
+  uploadSource: vi.fn(),
+}));
 
 vi.mock("@/app/trails/[id]/components/TutorPanel", () => ({
   TutorPanel: ({ concept }: { concept: { title: string } }) => (
@@ -52,6 +59,42 @@ const detail: ConceptDetail = {
 };
 
 describe("ConceptPanel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getConceptSources).mockResolvedValue({ sources: [] });
+    vi.mocked(uploadSource).mockResolvedValue({
+      id: "source-upload-1",
+      workspace_id: "workspace-1",
+      title: "Uploaded Notes",
+      url: null,
+      origin: "user_upload",
+      access: "private",
+      license: null,
+      include_on_public_export: false,
+      metadata_json: {},
+      revision: {
+        id: "revision-1",
+        workspace_id: "workspace-1",
+        source_id: "source-upload-1",
+        revision_number: 1,
+        content_type: "text/plain",
+        file_size_bytes: 10,
+        parser_name: "none",
+        parser_version: "upload-only-v1",
+        status: "pending_parse",
+        error_message: null,
+        metadata_json: {},
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    });
+    vi.mocked(linkSourceToConcept).mockResolvedValue({
+      id: "link-1",
+      source_id: "source-upload-1",
+      concept_id: "concept-1",
+      relation: "primary",
+    });
+  });
+
   test("renders concept title and level", () => {
     render(
       <ConceptPanel
@@ -259,5 +302,127 @@ describe("ConceptPanel", () => {
     expect(cta).toBeInTheDocument();
     await userEvent.click(cta);
     expect(screen.getByTestId("quiz-panel")).toHaveTextContent("Quiz Panel: practice");
+  });
+
+  test("sources section renders empty state when no sources are linked", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Expand concept details" }));
+
+    expect(await screen.findByText("No sources linked yet.")).toBeInTheDocument();
+  });
+
+  test("sources section renders source items from the API", async () => {
+    vi.mocked(getConceptSources).mockResolvedValueOnce({
+      sources: [
+        {
+          source_id: "source-1",
+          title: "Vector Notes",
+          origin: "user_upload",
+          access: "private",
+          url: null,
+          relation: "primary",
+          ingestion_status: "pending_parse",
+        },
+        {
+          source_id: "source-2",
+          title: "Research Link",
+          origin: "research_agent",
+          access: "public",
+          url: "https://example.com/research",
+          relation: "reference",
+          ingestion_status: null,
+        },
+      ],
+    });
+
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Expand concept details" }));
+
+    expect(await screen.findByText("Vector Notes")).toBeInTheDocument();
+    expect(screen.getByText("upload")).toBeInTheDocument();
+    expect(screen.getByText("Processing")).toBeInTheDocument();
+    expect(screen.getByText("Research Link")).toBeInTheDocument();
+    expect(screen.getByText("research")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute(
+      "href",
+      "https://example.com/research",
+    );
+  });
+
+  test("Add source button shows the upload form", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Expand concept details" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add source" }));
+
+    expect(screen.getByLabelText("Source file")).toBeInTheDocument();
+    expect(screen.getByLabelText("Optional title")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload & link" })).toBeInTheDocument();
+  });
+
+  test("upload form calls uploadSource then linkSourceToConcept on submit", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getConceptSources)
+      .mockResolvedValueOnce({ sources: [] })
+      .mockResolvedValueOnce({
+        sources: [
+          {
+            source_id: "source-upload-1",
+            title: "Uploaded Notes",
+            origin: "user_upload",
+            access: "private",
+            url: null,
+            relation: "primary",
+            ingestion_status: "pending_parse",
+          },
+        ],
+      });
+
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Expand concept details" }));
+    await user.click(screen.getByRole("button", { name: "Add source" }));
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Source file"), { target: { files: [file] } });
+    await user.type(screen.getByLabelText("Optional title"), "Uploaded Notes");
+    await user.click(screen.getByRole("button", { name: "Upload & link" }));
+
+    await waitFor(() => {
+      expect(uploadSource).toHaveBeenCalledWith("workspace-1", file, "Uploaded Notes");
+    });
+    expect(linkSourceToConcept).toHaveBeenCalledWith(
+      "workspace-1",
+      "source-upload-1",
+      "concept-1",
+      "primary",
+    );
+    expect(await screen.findByText("Uploaded Notes")).toBeInTheDocument();
   });
 });

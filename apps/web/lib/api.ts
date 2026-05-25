@@ -1,5 +1,7 @@
 import type {
   ConceptDetail,
+  ConceptSourceLinkRead,
+  ConceptSourceListItem,
   ConversationHistoryResponse,
   ConversationMessage,
   GradeResult,
@@ -8,6 +10,7 @@ import type {
   QuizAnswer,
   QuizGenerateRequest,
   QuizQuestion,
+  SourceUploadResponse,
   TrailDetail,
   TrailGenerateRequest,
   TrailGenerateResponse,
@@ -26,6 +29,10 @@ interface WorkspaceListResponse {
 
 interface TrailListResponse {
   trails: TrailDetail["trail"][];
+}
+
+interface ConceptSourcesResponse {
+  sources: ConceptSourceListItem[];
 }
 
 interface ErrorEnvelope {
@@ -196,6 +203,47 @@ export async function getConcept(
   );
 }
 
+export async function uploadSource(
+  workspaceId: string,
+  file: File,
+  title?: string,
+): Promise<SourceUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (title?.trim()) {
+    formData.append("title", title.trim());
+  }
+  return request<SourceUploadResponse>(`/api/workspaces/${workspaceId}/sources/upload`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export async function linkSourceToConcept(
+  workspaceId: string,
+  sourceId: string,
+  conceptId: string,
+  relation: string,
+): Promise<ConceptSourceLinkRead> {
+  return request<ConceptSourceLinkRead>(
+    `/api/workspaces/${workspaceId}/sources/${sourceId}/links`,
+    {
+      method: "POST",
+      body: JSON.stringify({ concept_id: conceptId, relation }),
+    },
+  );
+}
+
+export async function getConceptSources(
+  workspaceId: string,
+  conceptId: string,
+): Promise<ConceptSourcesResponse> {
+  return request<ConceptSourcesResponse>(
+    `/api/workspaces/${workspaceId}/concepts/${conceptId}/sources`,
+    { method: "GET" },
+  );
+}
+
 export async function getConversation(
   workspaceId: string,
   trailId: string,
@@ -262,12 +310,13 @@ export async function streamTutorChat({
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init.headers ?? {}),
-    },
     ...init,
+    headers,
   });
   if (response.status === 204) {
     return undefined as T;

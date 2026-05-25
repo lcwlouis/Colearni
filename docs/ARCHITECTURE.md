@@ -47,6 +47,7 @@ Database
   - concept_nodes
   - concept_edges
   - source_records
+  - source_revisions
   - concept_source_links
   - mastery_records
   - quiz_attempts
@@ -166,6 +167,22 @@ source_records
 - license
 - include_on_public_export
 - metadata_json
+
+source_revisions
+- id
+- workspace_id
+- source_id
+- revision_number
+- object_key
+- content_hash
+- content_type
+- file_size_bytes
+- parser_name
+- parser_version
+- status              (pending_parse | parsed | failed | skipped)
+- error_message
+- metadata_json
+- created_at
 
 concept_source_links
 - id
@@ -327,6 +344,15 @@ These tools should be registered through the provider tool abstraction, enforce 
 ## Source Ingestion Pattern
 
 Source ingestion arrives after safe export/import and provider tool foundations. It must create private, provenance-aware source records before retrieval uses uploaded material.
+
+Current Phase 10 foundation:
+
+- `POST /api/workspaces/{workspace_id}/sources/upload` stores uploaded bytes in local private storage under `SOURCE_STORAGE_ROOT`.
+- Uploads create `SourceRecord(origin="user_upload", access="private", include_on_public_export=false)`.
+- Uploads create immutable `SourceRevision` rows with object key, SHA-256 content hash, file size/content type, parser metadata, and status.
+- Parser metadata is intentionally `parser_name="none"`, `parser_version="upload-only-v1"`, and `status="pending_parse"` until a real parser pipeline lands.
+- Source metadata APIs return sanitized revision summaries and do not expose object keys or content hashes.
+- Public export excludes user uploads and source revisions; import rejects revision/object/hash fields.
 
 Preferred V1 flow:
 

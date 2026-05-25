@@ -1,3 +1,4 @@
+import hashlib
 import json
 import uuid
 
@@ -11,7 +12,7 @@ from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.conversation import Conversation, ConversationTurn
 from backend.app.models.mastery import MasteryRecord, QuizAttempt, QuizDraft
-from backend.app.models.source import ConceptSourceLink, SourceRecord
+from backend.app.models.source import ConceptSourceLink, SourceRecord, SourceRevision
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 
@@ -231,6 +232,7 @@ async def test_export_trail_pack_happy_path(api_client, db_engine):
         },
         "excluded": {
             "uploaded_files": 0,
+            "source_revisions": 0,
             "chunks": 0,
             "embeddings": 0,
             "private_notes": 0,
@@ -260,6 +262,50 @@ async def test_export_excludes_user_upload_sources(api_client, db_engine):
     assert data["pack"]["concepts"]["vectors"]["source_refs"] == []
     assert data["report"]["included"]["source_links"] == 0
     assert data["report"]["excluded"]["uploaded_files"] == 1
+
+
+async def test_export_excludes_uploaded_source_revisions(api_client, db_engine):
+    workspace_id, trail_id, concepts = await _seed_trail(db_engine)
+    content = b"PRIVATE UPLOADED CONTENT"
+    source_id = await _add_source(
+        db_engine,
+        workspace_id,
+        origin="user_upload",
+        access="private",
+        title="Uploaded Notes",
+        url=None,
+        include_on_public_export=False,
+    )
+    await _link_source(db_engine, concepts["vectors"], source_id)
+
+    sessionmaker = _sessionmaker(db_engine)
+    async with sessionmaker() as session:
+        session.add(
+            SourceRevision(
+                workspace_id=workspace_id,
+                source_id=source_id,
+                revision_number=1,
+                object_key=f"workspaces/{workspace_id}/sources/{source_id}/revisions/1/file.txt",
+                content_hash="sha256:" + hashlib.sha256(content).hexdigest(),
+                content_type="text/plain",
+                file_size_bytes=len(content),
+                parser_name="none",
+                parser_version="upload-only-v1",
+                status="pending_parse",
+                metadata_json={"raw_text": content.decode()},
+            )
+        )
+        await session.commit()
+
+    resp = await api_client.get(f"/api/workspaces/{workspace_id}/trails/{trail_id}/export")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pack"]["sources"] == []
+    assert "PRIVATE UPLOADED CONTENT" not in resp.text
+    assert "source_revisions" not in json.dumps(data["pack"])
+    assert data["report"]["excluded"]["uploaded_files"] == 1
+    assert data["report"]["excluded"]["source_revisions"] == 1
 
 
 async def test_export_excludes_public_research_source_without_export_flag(api_client, db_engine):
@@ -462,6 +508,7 @@ async def test_export_report_counts_safe_links_and_excluded_mastery(api_client, 
         },
         "excluded": {
             "uploaded_files": 1,
+            "source_revisions": 0,
             "chunks": 0,
             "embeddings": 0,
             "private_notes": 0,

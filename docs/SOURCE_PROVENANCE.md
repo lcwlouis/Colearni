@@ -101,6 +101,16 @@ Examples:
 
 Source ingestion V1 should track uploaded/private files without using git internally for user source history.
 
+Current implemented foundation:
+
+- Uploaded files are stored as private local objects under `SOURCE_STORAGE_ROOT`.
+- Each upload creates a private `SourceRecord` with `origin = user_upload`, `access = private`, and `include_on_public_export = false`.
+- Each upload creates one immutable `SourceRevision` with object key, `sha256:<hex>` content hash, file size/content type, parser metadata, status, and metadata.
+- Parser metadata is honest for the current slice: `parser_name = none`, `parser_version = upload-only-v1`, `status = pending_parse`.
+- No canonical parsed text, chunks, embeddings, full-text index, or retrieval tool reads uploaded content yet.
+- Learner-facing source metadata APIs return sanitized revision summaries, not storage object keys or content hashes.
+- Public export excludes uploaded sources and revision artifacts; import rejects source revision/object/hash fields.
+
 Required provenance fields for ingested sources and revisions:
 
 - Object key.

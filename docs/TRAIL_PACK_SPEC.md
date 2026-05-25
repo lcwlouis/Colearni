@@ -205,6 +205,7 @@ Reject any public Trail Pack that contains:
 - Raw chunks.
 - Embeddings.
 - Uploaded files.
+- Source revisions, object keys, and content hashes.
 - Chat history.
 - Private notes.
 - Mastery records.
@@ -228,6 +229,7 @@ Included:
 
 Excluded:
 - 2 uploaded PDFs
+- 2 source revisions
 - 145 chunks
 - 23 embeddings
 - 4 private notes

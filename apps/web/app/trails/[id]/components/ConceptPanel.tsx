@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type PointerEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent, type PointerEvent } from "react";
 
-import type { ConceptDetail, ConceptNode, MasteryStatus } from "@/lib/types";
+import { getConceptSources, linkSourceToConcept, uploadSource } from "@/lib/api";
+import type { ConceptDetail, ConceptNode, ConceptSourceListItem, MasteryStatus } from "@/lib/types";
 
 import { QuizPanel } from "./QuizPanel";
 import { TutorPanel } from "./TutorPanel";
@@ -220,28 +221,7 @@ function ConceptPanelBody({
             </section>
 
             <section className="mt-6">
-              <h3 className="text-sm font-semibold text-slate-900">Sources</h3>
-              {detail.sources.length === 0 ? (
-                <p className="mt-2 text-sm text-slate-500">No sources linked yet.</p>
-              ) : (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {detail.sources.map((source) =>
-                    source.url ? (
-                      <a
-                        key={source.id}
-                        href={source.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700 hover:border-blue-300 hover:text-blue-700"
-                      >
-                        {source.title}
-                      </a>
-                    ) : (
-                      <Badge key={source.id}>{source.title}</Badge>
-                    ),
-                  )}
-                </div>
-              )}
+              <SourcesSection workspaceId={workspaceId} conceptId={concept.id} />
             </section>
           </>
         )}
@@ -352,6 +332,170 @@ function ConceptActions({
       </div>
     </div>
   );
+}
+
+function SourcesSection({ workspaceId, conceptId }: { workspaceId: string; conceptId: string }) {
+  const [sources, setSources] = useState<ConceptSourceListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(null);
+    getConceptSources(workspaceId, conceptId)
+      .then((response) => {
+        if (!cancelled) {
+          setSources(response.sources);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setLoadError(errorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, conceptId]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!file) {
+      setUploadError("Choose a file to upload.");
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const uploaded = await uploadSource(workspaceId, file, title);
+      await linkSourceToConcept(workspaceId, uploaded.id, conceptId, "primary");
+      const refreshed = await getConceptSources(workspaceId, conceptId);
+      setSources(refreshed.sources);
+      setFormOpen(false);
+      setFile(null);
+      setTitle("");
+    } catch (error) {
+      setUploadError(errorMessage(error));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-slate-900">Sources</h3>
+        <button
+          type="button"
+          onClick={() => {
+            setFormOpen((current) => !current);
+            setUploadError(null);
+          }}
+          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Add source
+        </button>
+      </div>
+
+      {loading ? <p className="mt-2 text-sm text-slate-500">Loading sources...</p> : null}
+      {loadError ? <p className="mt-2 text-sm text-red-600">{loadError}</p> : null}
+      {!loading && !loadError && sources.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">No sources linked yet.</p>
+      ) : null}
+      {!loading && !loadError && sources.length > 0 ? (
+        <ul className="mt-3 grid gap-2">
+          {sources.map((source) => (
+            <li key={`${source.source_id}-${source.relation}`} className="rounded-md border border-slate-200 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-slate-800">{source.title}</span>
+                <Badge>{originLabel(source.origin)}</Badge>
+                {source.origin === "user_upload" && source.ingestion_status ? (
+                  <Badge>{statusLabel(source.ingestion_status)}</Badge>
+                ) : null}
+              </div>
+              {source.url ? (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-block text-xs font-medium text-blue-700 hover:text-blue-800"
+                >
+                  Open source
+                </a>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {formOpen ? (
+        <form onSubmit={handleSubmit} className="mt-3 grid gap-3 rounded-md border border-slate-200 p-3">
+          <label className="grid gap-1 text-xs font-medium text-slate-700">
+            Source file
+            <input
+              type="file"
+              accept="*"
+              onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                setFile(event.target.files?.[0] ?? null);
+                setUploadError(null);
+              }}
+              className="text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1 file:text-sm file:font-medium file:text-slate-700"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-medium text-slate-700">
+            Optional title
+            <input
+              type="text"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Defaults to filename"
+              className="h-9 rounded-md border border-slate-200 px-3 text-sm font-normal text-slate-900 outline-none focus:border-blue-400"
+            />
+          </label>
+          {uploadError ? <p className="text-sm text-red-600">{uploadError}</p> : null}
+          <button
+            type="submit"
+            disabled={uploading}
+            className="h-9 rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+          >
+            {uploading ? "Uploading..." : "Upload & link"}
+          </button>
+        </form>
+      ) : null}
+    </>
+  );
+}
+
+function originLabel(origin: string): string {
+  if (origin === "user_upload") {
+    return "upload";
+  }
+  if (origin === "research_agent") {
+    return "research";
+  }
+  return origin.replaceAll("_", " ");
+}
+
+function statusLabel(status: string): string {
+  if (status === "pending_parse") {
+    return "Processing";
+  }
+  return status.replaceAll("_", " ");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Source action failed.";
 }
 
 function whyItMatters(level: string, bloom: string, difficulty: string): string {

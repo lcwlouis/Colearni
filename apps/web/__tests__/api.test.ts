@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { generateTrail, listTrails, streamTutorChat } from "@/lib/api";
+import { generateTrail, linkSourceToConcept, listTrails, streamTutorChat, uploadSource } from "@/lib/api";
 import type { Trail } from "@/lib/types";
 
 describe("api client", () => {
@@ -348,6 +348,75 @@ describe("api client", () => {
         onDone: vi.fn(),
       }),
     ).rejects.toThrow("Generation failed");
+  });
+
+  test("uploadSource posts multipart form data without JSON content type", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "source-1",
+          workspace_id: "workspace-1",
+          title: "Notes",
+          url: null,
+          origin: "user_upload",
+          access: "private",
+          license: null,
+          include_on_public_export: false,
+          metadata_json: {},
+          revision: {
+            id: "revision-1",
+            workspace_id: "workspace-1",
+            source_id: "source-1",
+            revision_number: 1,
+            content_type: "text/plain",
+            file_size_bytes: 5,
+            parser_name: "none",
+            parser_version: "upload-only-v1",
+            status: "pending_parse",
+            error_message: null,
+            metadata_json: {},
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+
+    const response = await uploadSource("workspace-1", file, "Notes");
+
+    expect(response.id).toBe("source-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/workspaces/workspace-1/sources/upload",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.headers).toBeInstanceOf(Headers);
+    expect((init.headers as Headers).has("Content-Type")).toBe(false);
+  });
+
+  test("linkSourceToConcept posts concept link payload", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "link-1",
+          source_id: "source-1",
+          concept_id: "concept-1",
+          relation: "primary",
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await linkSourceToConcept("workspace-1", "source-1", "concept-1", "primary");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/workspaces/workspace-1/sources/source-1/links",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ concept_id: "concept-1", relation: "primary" }),
+      }),
+    );
   });
 });
 

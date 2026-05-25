@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://colearni:colearni@localhost:5432/colearni"
+    source_storage_root: str = ".colearni/source-storage"
     llm_provider: str = "openai"  # openai | openrouter | anthropic | gemini | deepseek
     llm_model: str = "gpt-4o-mini"
     llm_api_key: str = ""

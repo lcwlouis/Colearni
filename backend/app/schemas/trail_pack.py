@@ -95,6 +95,7 @@ class TrailPackExportIncludedReport(BaseModel):
 
 class TrailPackExportExcludedReport(BaseModel):
     uploaded_files: int
+    source_revisions: int = 0
     chunks: int
     embeddings: int
     private_notes: int

@@ -78,11 +78,11 @@ After import, the UI should show:
 
 ## Export Interaction
 
-Public export after hydration must still run the export sanitizer. Hydrated chunks, embeddings, generated summaries, generated quizzes, private notes, and uploaded source text are excluded unless a future explicit policy allows a specific open-licensed artifact.
+Public export after hydration must still run the export sanitizer. Source revisions, object keys, hydrated chunks, embeddings, generated summaries, generated quizzes, private notes, and uploaded source text are excluded unless a future explicit policy allows a specific open-licensed artifact.
 
 ## Source Ingestion Relationship
 
-Full source ingestion is later than safe sharing/import and provider tool foundations. The V1 ingestion flow should be:
+The current source ingestion foundation stores private uploads and immutable revision provenance only. Full parsing/indexing is later than safe sharing/import and provider tool foundations. The V1 ingestion flow should be:
 
 ```text
 Uploaded file
