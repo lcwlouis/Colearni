@@ -103,16 +103,17 @@ Implemented:
 - Source provenance sanitizer and safe JSON Trail Pack export, plus backend Trail Pack import/fork, imported research trace preservation/retrieval, and a narrow private hydration-placeholder API.
 - LLM client support for OpenAI Responses API, OpenAI-compatible providers including OpenRouter/DeepSeek/Gemini/custom, and optional Anthropic SDK.
 - Provider-tool abstraction foundation with explicit internal tool definitions/calls/results, provider registration/normalization helpers, normalized stream events, fake-provider test coverage, and a compatibility adapter for the tutor instruction tool.
-- Learning dashboard home with Continue Learning, recent/older Trail sections, delete confirmation, per-Trail progress summaries, and a deterministic frontend recommended-next helper.
+- Learning dashboard home with Continue Learning, recent/older Trail sections, delete confirmation, per-Trail progress summaries, and backend-backed recommended-next UI.
 - Per-Trail graph Learn/Inspect mode split with `?concept=<id>` deep-link opening, neighbourhood focus in Learn Mode, inspect-only graph controls and edge-label toggle, mastery-aware concept-panel CTAs, and mobile concept sheet refinement.
 - Source ingestion foundation: workspace-scoped private upload API, local private object storage root, source revision records with immutable identity fields and mutable parser status/error metadata, concept-source linking API, minimal concept-panel upload/link UI, and export/import safety regressions for revision artifacts.
+- Deterministic backend next-concept recommendation service and per-Trail API endpoint.
 
 Not implemented yet:
 
 - True per-message citation/source parts and quote support.
 - Automatic conversation summarisation and full provider-native tool execution loops beyond the current tutor compatibility adapter.
 - Automated research-agent search, real hydration fetching/indexing, durable generation jobs, dark mode, deployment, auth, and SaaS features.
-- Parsing into canonical text, chunks, embeddings/indexes, controlled retrieval tools, guided graph navigation beyond the current frontend recommendation helper, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
+- Parsing into canonical text, chunks, embeddings/indexes, controlled retrieval tools, guided graph focus controls, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
 
 ## Phase 0: Foundation Cleanup
 
@@ -734,7 +735,7 @@ Non-goals:
 
 Current implementation note:
 
-- Home now computes per-Trail progress and the Continue Learning / recommended-next card client-side from Trail detail records using deterministic mastery/graph heuristics.
+- Home computes per-Trail progress and Continue Learning selection from Trail detail records, while recommended-next concept UI is populated from the backend `/next` endpoint.
 - Learn Mode is the default graph surface with simplified controls and selected-neighbourhood focus; Inspect Mode preserves filters/layout/legend plus the edge-label toggle, and `?concept=<id>` opens the concept sheet directly.
 
 ## Phase 10: Source Ingestion MVP
@@ -877,6 +878,8 @@ Non-goals:
 - No unbounded source-search loops.
 
 ## Phase 12: Guided Graph Navigation / Recommended Next Concept
+
+Status: recommendation service, API endpoint, dashboard consumption, and Trail-detail recommendation UI implemented. Guided focus controls remain deferred.
 
 Goal: guide the learner through the Trail with deterministic graph/mastery heuristics before adding LLM-based navigation.
 

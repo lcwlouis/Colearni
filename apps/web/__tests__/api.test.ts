@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { generateTrail, linkSourceToConcept, listTrails, streamTutorChat, uploadSource } from "@/lib/api";
+import {
+  generateTrail,
+  getTrailNext,
+  linkSourceToConcept,
+  listTrails,
+  streamTutorChat,
+  uploadSource,
+} from "@/lib/api";
 import type { Trail } from "@/lib/types";
 
 describe("api client", () => {
@@ -21,6 +28,36 @@ describe("api client", () => {
     expect(result.trails).toEqual([]);
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/workspaces/workspace-1/trails",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  test("getTrailNext calls the backend recommendation endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          concept_id: "concept-1",
+          concept_title: "Vectors",
+          reason: "Prerequisites ready.",
+          all_mastered: false,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    const result = await getTrailNext("workspace-1", "trail-1");
+
+    expect(result).toEqual({
+      concept_id: "concept-1",
+      concept_title: "Vectors",
+      reason: "Prerequisites ready.",
+      all_mastered: false,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8000/api/workspaces/workspace-1/trails/trail-1/next",
       expect.objectContaining({ method: "GET" }),
     );
   });

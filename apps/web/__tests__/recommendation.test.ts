@@ -1,43 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { pickContinueTrail, pickRecommendedConcept, summarizeTrail } from "@/lib/recommendation";
-import type {
-  ConceptEdge,
-  ConceptLevel,
-  ConceptNode,
-  Difficulty,
-  MasteryRecord,
-  MasteryStatus,
-  TrailDetail,
-} from "@/lib/types";
-
-function node(
-  id: string,
-  overrides: Partial<ConceptNode> & { level?: ConceptLevel; difficulty?: Difficulty } = {},
-): ConceptNode {
-  return {
-    id,
-    trail_id: "trail-1",
-    slug: id,
-    title: overrides.title ?? id,
-    node_type: "concept",
-    concept_level: overrides.level ?? "topic",
-    difficulty: overrides.difficulty ?? "beginner",
-    bloom_level: "understand",
-    mastery_check_labels: [],
-    metadata_json: {},
-  };
-}
-
-function edge(source: string, target: string): ConceptEdge {
-  return {
-    id: `${source}->${target}`,
-    trail_id: "trail-1",
-    source_node_id: source,
-    target_node_id: target,
-    relation_type: "prerequisite",
-  };
-}
+import { pickContinueTrail, summarizeTrail } from "@/lib/recommendation";
+import type { MasteryRecord, MasteryStatus, TrailDetail } from "@/lib/types";
 
 function mastery(
   concept_id: string,
@@ -54,66 +18,6 @@ function mastery(
     updated_at,
   };
 }
-
-describe("pickRecommendedConcept", () => {
-  test("returns null when there are no nodes", () => {
-    expect(pickRecommendedConcept([], [], {})).toBeNull();
-  });
-
-  test("prefers needs_review over learning over not_started over mastered", () => {
-    const nodes = [
-      node("a"),
-      node("b"),
-      node("c"),
-      node("d"),
-    ];
-    const rec = pickRecommendedConcept(nodes, [], {
-      a: mastery("a", "not_started"),
-      b: mastery("b", "learning"),
-      c: mastery("c", "needs_review"),
-      d: mastery("d", "mastered"),
-    });
-    expect(rec?.concept.id).toBe("c");
-    expect(rec?.status).toBe("needs_review");
-  });
-
-  test("falls back to review/extension when every concept is mastered", () => {
-    const nodes = [
-      node("a", { difficulty: "advanced", title: "Advanced" }),
-      node("b", { difficulty: "beginner", title: "Beginner" }),
-    ];
-    const rec = pickRecommendedConcept(nodes, [], {
-      a: mastery("a", "mastered"),
-      b: mastery("b", "mastered"),
-    });
-    // Lower difficulty wins on tiebreak when all mastered.
-    expect(rec?.concept.id).toBe("b");
-    expect(rec?.status).toBe("mastered");
-    expect(rec?.reason).toMatch(/mastered/i);
-  });
-
-  test("prefers candidates whose prerequisites are mastered/learning", () => {
-    const nodes = [
-      node("intro", { title: "Intro" }),
-      node("advanced", { title: "Advanced" }),
-    ];
-    const edges = [edge("intro", "advanced")];
-    // Both not_started, but "advanced" has an unstarted prereq, so "intro" wins.
-    const rec = pickRecommendedConcept(nodes, edges, {});
-    expect(rec?.concept.id).toBe("intro");
-  });
-
-  test("prefers topic > subtopic > umbrella > granular when status ties", () => {
-    const nodes = [
-      node("u", { level: "umbrella", title: "U" }),
-      node("t", { level: "topic", title: "T" }),
-      node("s", { level: "subtopic", title: "S" }),
-      node("g", { level: "granular", title: "G" }),
-    ];
-    const rec = pickRecommendedConcept(nodes, [], {});
-    expect(rec?.concept.id).toBe("t");
-  });
-});
 
 describe("summarizeTrail + pickContinueTrail", () => {
   function makeDetail(
@@ -157,6 +61,7 @@ describe("summarizeTrail + pickContinueTrail", () => {
     const p = summarizeTrail(detail);
     // (2 + 2*0.5 + 4*0.25) / 10 = 4/10
     expect(p.progress).toBeCloseTo(0.4, 5);
+    expect("recommended" in p).toBe(false);
   });
 
   test("pickContinueTrail prefers most recent lastActivity", () => {

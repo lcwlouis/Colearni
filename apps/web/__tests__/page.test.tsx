@@ -18,6 +18,7 @@ vi.mock("@/lib/workspace", () => ({
 
 vi.mock("@/lib/api", () => ({
   getTrail: vi.fn(),
+  getTrailNext: vi.fn(),
   deleteTrail: vi.fn(),
 }));
 
@@ -155,6 +156,14 @@ const mockTrailDetail: TrailDetail = {
 describe("TrailPage mastery update", () => {
   test("renders initial mastery summary from getTrail", async () => {
     vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
+    vi.mocked(api.getTrailNext).mockResolvedValue({
+      concept_id: "concept-id-2",
+      concept_title: "Matrices",
+      reason: "Backend says to repair this next.",
+      all_mastered: false,
+      mastery_status: null,
+      concept_level: null,
+    });
 
     render(<TrailPage />);
 
@@ -166,10 +175,56 @@ describe("TrailPage mastery update", () => {
     expect(screen.getByTestId("summary-learning")).toHaveTextContent("1");
     expect(screen.getByTestId("summary-needs-review")).toHaveTextContent("1");
     expect(screen.getByTestId("summary-mastered")).toHaveTextContent("0");
+    expect(screen.getByText("Recommended next:")).toBeInTheDocument();
+    expect(screen.getByText("Matrices")).toBeInTheDocument();
+    expect(screen.getByText("Backend says to repair this next.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start Learning" })).toBeInTheDocument();
+  });
+
+  test("renders all-mastered recommendation state without concept link", async () => {
+    vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
+    vi.mocked(api.getTrailNext).mockResolvedValue({
+      concept_id: null,
+      concept_title: null,
+      reason: "Review the Trail or extend it.",
+      all_mastered: true,
+      mastery_status: null,
+      concept_level: null,
+    });
+
+    render(<TrailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("All concepts mastered — well done.")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Review the Trail or extend it.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Focus concept" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("next-banner-cta")).not.toBeInTheDocument();
+  });
+
+  test("hides recommendation banner when getTrailNext fails", async () => {
+    vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
+    vi.mocked(api.getTrailNext).mockRejectedValue(new Error("Recommendation unavailable"));
+
+    render(<TrailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("summary-total")).toHaveTextContent("3");
+    });
+    expect(screen.queryByText(/Recommended next:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/All concepts mastered/)).not.toBeInTheDocument();
   });
 
   test("onMasteryUpdated updates mastery_summary counts", async () => {
     vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
+    vi.mocked(api.getTrailNext).mockResolvedValue({
+      concept_id: "concept-id-2",
+      concept_title: "Matrices",
+      reason: "Backend says to repair this next.",
+      all_mastered: false,
+      mastery_status: null,
+      concept_level: null,
+    });
 
     render(<TrailPage />);
 
@@ -194,6 +249,14 @@ describe("TrailPage mastery update", () => {
 
   test("onMasteryUpdated to needs_review adjusts counts correctly", async () => {
     vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
+    vi.mocked(api.getTrailNext).mockResolvedValue({
+      concept_id: "concept-id-2",
+      concept_title: "Matrices",
+      reason: "Backend says to repair this next.",
+      all_mastered: false,
+      mastery_status: null,
+      concept_level: null,
+    });
 
     render(<TrailPage />);
 
@@ -220,6 +283,14 @@ describe("TrailPage mastery update", () => {
 
   test("multiple mastery updates accumulate correctly", async () => {
     vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
+    vi.mocked(api.getTrailNext).mockResolvedValue({
+      concept_id: "concept-id-2",
+      concept_title: "Matrices",
+      reason: "Backend says to repair this next.",
+      all_mastered: false,
+      mastery_status: null,
+      concept_level: null,
+    });
 
     render(<TrailPage />);
 

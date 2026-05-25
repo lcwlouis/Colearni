@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
-import type { Trail, TrailDetail } from "@/lib/types";
+import type { NextConceptResponse, Trail, TrailDetail } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -14,10 +14,12 @@ vi.mock("@/lib/workspace", () => ({
 
 const listTrailsMock = vi.fn();
 const getTrailMock = vi.fn();
+const getTrailNextMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listTrails: (...args: unknown[]) => listTrailsMock(...args),
   getTrail: (...args: unknown[]) => getTrailMock(...args),
+  getTrailNext: (...args: unknown[]) => getTrailNextMock(...args),
   deleteTrail: vi.fn(),
 }));
 
@@ -76,6 +78,17 @@ function detail(t: Trail, status: "not_started" | "learning" | "needs_review" | 
   };
 }
 
+function nextConcept(overrides: Partial<NextConceptResponse> = {}): NextConceptResponse {
+  return {
+    concept_id: overrides.concept_id ?? "backend-concept-1",
+    concept_title: overrides.concept_title ?? "Backend recommendation",
+    reason: overrides.reason ?? "Backend reason",
+    all_mastered: overrides.all_mastered ?? false,
+    mastery_status: overrides.mastery_status ?? null,
+    concept_level: overrides.concept_level ?? null,
+  };
+}
+
 async function loadPage() {
   const mod = await import("@/app/page");
   return mod.default;
@@ -101,6 +114,21 @@ describe("Dashboard (home)", () => {
       if (id === "t1") return detail(t1, "learning");
       return detail(t2, "mastered");
     });
+    getTrailNextMock.mockImplementation(async (_ws: string, id: string) => {
+      if (id === "t1") {
+        return nextConcept({
+          concept_id: "backend-t1-c9",
+          concept_title: "Backend Linear Algebra focus",
+          reason: "Continue the server-picked concept.",
+        });
+      }
+      return nextConcept({
+        concept_id: null,
+        concept_title: null,
+        reason: "All concepts mastered — review or explore further.",
+        all_mastered: true,
+      });
+    });
 
     const Home = await loadPage();
     render(<Home />);
@@ -112,22 +140,28 @@ describe("Dashboard (home)", () => {
     const continueSection = screen.getByTestId("continue-learning");
     expect(continueSection).toHaveTextContent("Linear Algebra");
 
-    // Primary CTA in continue card reflects "learning" -> "Continue Tutor"
+    expect(continueSection).toHaveTextContent("Backend Linear Algebra focus");
+    expect(continueSection).toHaveTextContent("Continue the server-picked concept.");
+
+    // Primary CTA uses the backend recommendation deep link.
     await waitFor(() => {
-      expect(continueSection.querySelector("a")?.textContent).toMatch(/Continue Tutor/);
+      expect(continueSection.querySelector("a")?.textContent).toMatch(/Start Learning/);
     });
 
-    // Recent Trails show both, with mastery-aware per-card CTAs
+    // Recent Trails show both, including the all-mastered backend state.
     expect(screen.getByText("Recent Trails")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText("Practice / Explore Further")).toBeInTheDocument();
+      expect(screen.getByText("All mastered")).toBeInTheDocument();
     });
   });
 
-  test("Continue Learning deep-links to ?concept=<recommended>", async () => {
+  test("Continue Learning deep-links to the backend recommended concept", async () => {
     const t1 = trail("t1");
     listTrailsMock.mockResolvedValueOnce({ trails: [t1] });
     getTrailMock.mockResolvedValueOnce(detail(t1, "not_started"));
+    getTrailNextMock.mockResolvedValueOnce(
+      nextConcept({ concept_id: "backend-c42", concept_title: "Backend-picked concept" }),
+    );
 
     const Home = await loadPage();
     render(<Home />);
@@ -137,8 +171,38 @@ describe("Dashboard (home)", () => {
         .getByTestId("continue-learning")
         .querySelector('a[href*="?concept="]') as HTMLAnchorElement | null;
       expect(link).not.toBeNull();
-      expect(link!.getAttribute("href")).toBe("/trails/t1?concept=t1-c1");
+      expect(link!.getAttribute("href")).toBe("/trails/t1?concept=backend-c42");
       expect(link!.textContent).toMatch(/Start Learning/);
+    });
+  });
+
+  test("Continue Learning all-mastered state shows achievement card with Create New Trail CTA", async () => {
+    const t1 = trail("t1");
+    listTrailsMock.mockResolvedValueOnce({ trails: [t1] });
+    getTrailMock.mockResolvedValueOnce(detail(t1, "mastered"));
+    getTrailNextMock.mockResolvedValueOnce(
+      nextConcept({
+        concept_id: null,
+        concept_title: null,
+        reason: "All concepts mastered — well done.",
+        all_mastered: true,
+      }),
+    );
+
+    const Home = await loadPage();
+    render(<Home />);
+
+    await waitFor(() => {
+      const section = screen.getByTestId("continue-learning");
+      // Achievement state: correct heading and body copy
+      expect(section).toHaveTextContent("All trails mastered");
+      expect(section).toHaveTextContent("You have mastered every concept. Ready to go deeper?");
+      // No deep-link to a concept
+      expect(section.querySelector('a[href*="?concept="]')).toBeNull();
+      // Primary CTA is "Create New Trail"
+      expect(section.querySelector('a[href="/trails/new"]')).not.toBeNull();
+      // View graph still links to the trail
+      expect(section.querySelector('a[href="/trails/t1"]')).not.toBeNull();
     });
   });
 });

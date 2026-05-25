@@ -42,6 +42,11 @@ If this file conflicts with an older phase description, follow this file and upd
 - Older persisted `explain` / `apply` / `compare` question snapshots are normalized to `long_answer` on read.
 - Grading clears the matching backend draft after the attempt is stored.
 
+## Graph Recommendations
+
+- The frontend consumes `GET /api/workspaces/{workspace_id}/trails/{trail_id}/next` for dashboard and Trail-detail recommended-next UI.
+- The client-side duplicate recommendation heuristic has been removed; `summarizeTrail` only computes progress, mastery counts, and last activity.
+
 ## Duplicate-Request Protection
 
 - The frontend `QuizPanel` dedupes in-flight generation requests so StrictMode/dev effect replay does not create duplicate generation calls.
@@ -63,6 +68,7 @@ If this file conflicts with an older phase description, follow this file and upd
 - Automatic conversation summarization.
 - True per-message citation/source parts and quotes.
 - Global cross-Trail assistant surfaces.
+- Guided graph focus controls.
 
 ## Update Rule
 

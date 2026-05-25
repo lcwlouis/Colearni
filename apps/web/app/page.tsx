@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { deleteTrail, getTrail, listTrails } from "@/lib/api";
+import { deleteTrail, getTrail, getTrailNext, listTrails } from "@/lib/api";
 import {
   type TrailProgress,
+  isFullyMastered,
   pickContinueTrail,
   summarizeTrail,
 } from "@/lib/recommendation";
-import type { MasteryStatus, Trail } from "@/lib/types";
+import type { NextConceptResponse, Trail } from "@/lib/types";
 import { ensureWorkspaceId } from "@/lib/workspace";
 
 const RECENT_LIMIT = 4;
@@ -18,6 +19,7 @@ export default function Home() {
   const [workspaceId, setWorkspaceId] = useState<string>("");
   const [trails, setTrails] = useState<Trail[]>([]);
   const [progressByTrail, setProgressByTrail] = useState<Record<string, TrailProgress>>({});
+  const [nextByTrail, setNextByTrail] = useState<Record<string, NextConceptResponse>>({});
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [progressLoading, setProgressLoading] = useState(false);
@@ -42,10 +44,14 @@ export default function Home() {
           return;
         }
         setProgressLoading(true);
-        const details = await Promise.all(
+        const summaries = await Promise.all(
           response.trails.map(async (trail) => {
             try {
-              return await getTrail(id, trail.id);
+              const [detail, next] = await Promise.all([
+                getTrail(trail.workspace_id, trail.id),
+                getTrailNext(trail.workspace_id, trail.id).catch(() => null),
+              ]);
+              return { detail, next };
             } catch {
               return null;
             }
@@ -55,12 +61,17 @@ export default function Home() {
           return;
         }
         const map: Record<string, TrailProgress> = {};
-        for (const detail of details) {
-          if (detail) {
-            map[detail.trail.id] = summarizeTrail(detail);
+        const nextMap: Record<string, NextConceptResponse> = {};
+        for (const result of summaries) {
+          if (result) {
+            map[result.detail.trail.id] = summarizeTrail(result.detail);
+            if (result.next) {
+              nextMap[result.detail.trail.id] = result.next;
+            }
           }
         }
         setProgressByTrail(map);
+        setNextByTrail(nextMap);
       } catch (exc) {
         if (!cancelled) {
           setError(exc instanceof Error ? exc.message : "Could not load workspace");
@@ -107,6 +118,11 @@ export default function Home() {
       await deleteTrail(workspaceId, trailId);
       setTrails((current) => current.filter((t) => t.id !== trailId));
       setProgressByTrail((current) => {
+        const next = { ...current };
+        delete next[trailId];
+        return next;
+      });
+      setNextByTrail((current) => {
         const next = { ...current };
         delete next[trailId];
         return next;
@@ -163,12 +179,14 @@ export default function Home() {
         <>
           <ContinueLearningSection
             progress={continueTrail}
+            next={continueTrail ? nextByTrail[continueTrail.detail.trail.id] : undefined}
             loadingProgress={progressLoading && progresses.length === 0}
           />
 
           <RecentTrailsSection
             trails={recentTrails}
             progressByTrail={progressByTrail}
+            nextByTrail={nextByTrail}
             confirmingDeleteId={confirmingDeleteId}
             deletingId={deletingId}
             deleteError={deleteError}
@@ -214,11 +232,17 @@ function EmptyState() {
 
 function ContinueLearningSection({
   progress,
+  next,
   loadingProgress,
 }: {
   progress: TrailProgress | null;
+  next: NextConceptResponse | undefined;
   loadingProgress: boolean;
 }) {
+  // True when pickContinueTrail fell back to an all-mastered trail because
+  // every trail is complete. Use local data so we don't wait for /next.
+  const allDone = progress !== null && isFullyMastered(progress);
+
   return (
     <section data-testid="continue-learning" className="flex flex-col gap-3">
       <h2 className="text-lg font-semibold text-slate-950">Continue Learning</h2>
@@ -226,11 +250,50 @@ function ContinueLearningSection({
         <p className="text-sm text-slate-500">Loading progress...</p>
       ) : null}
       {!loadingProgress && !progress ? (
-        <p className="text-sm text-slate-500">
-          Pick a Trail below to start.
-        </p>
+        <p className="text-sm text-slate-500">Pick a Trail below to start.</p>
       ) : null}
-      {progress ? (
+
+      {/* All trails fully mastered — achievement state */}
+      {progress && allDone ? (
+        <article
+          data-testid="continue-learning-all-done"
+          className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm sm:p-5"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">
+                All trails mastered
+              </p>
+              <h3 className="mt-1 truncate text-base font-semibold text-slate-950">
+                {progress.detail.trail.title}
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                You have mastered every concept. Ready to go deeper?
+              </p>
+            </div>
+            <div className="shrink-0">
+              <ProgressBadge progress={progress} />
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href="/trails/new"
+              className="inline-flex h-9 items-center justify-center rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              Create New Trail
+            </Link>
+            <Link
+              href={`/trails/${progress.detail.trail.id}`}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              View graph
+            </Link>
+          </div>
+        </article>
+      ) : null}
+
+      {/* Normal state — there is learning to do */}
+      {progress && !allDone ? (
         <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -246,32 +309,27 @@ function ContinueLearningSection({
               <ProgressBadge progress={progress} />
             </div>
           </div>
-          {progress.recommended ? (
+          {next ? (
             <div className="mt-4 rounded-md border border-blue-100 bg-blue-50/60 p-3">
               <p className="text-xs font-medium uppercase tracking-wide text-blue-700">
                 Recommended next concept
               </p>
               <p className="mt-1 text-sm font-medium text-slate-950">
-                {progress.recommended.concept.title}
-                <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600">
-                  {progress.recommended.concept.concept_level}
-                </span>
+                {next.concept_title ?? "Open Trail"}
               </p>
-              <p className="mt-1 text-xs text-slate-600">{progress.recommended.reason}</p>
+              <p className="mt-1 text-xs text-slate-600">{next.reason}</p>
             </div>
           ) : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <Link
               href={
-                progress.recommended
-                  ? `/trails/${progress.detail.trail.id}?concept=${progress.recommended.concept.id}`
+                next?.concept_id
+                  ? `/trails/${progress.detail.trail.id}?concept=${next.concept_id}`
                   : `/trails/${progress.detail.trail.id}`
               }
               className="inline-flex h-9 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
             >
-              {progress.recommended
-                ? primaryCtaLabelFor(progress.recommended.status)
-                : "Open Trail"}
+              {next?.concept_id ? primaryCtaLabelFor(next.mastery_status) : "Open Trail"}
             </Link>
             <Link
               href={`/trails/${progress.detail.trail.id}`}
@@ -289,6 +347,7 @@ function ContinueLearningSection({
 function RecentTrailsSection({
   trails,
   progressByTrail,
+  nextByTrail,
   confirmingDeleteId,
   deletingId,
   deleteError,
@@ -298,6 +357,7 @@ function RecentTrailsSection({
 }: {
   trails: Trail[];
   progressByTrail: Record<string, TrailProgress>;
+  nextByTrail: Record<string, NextConceptResponse>;
   confirmingDeleteId: string | null;
   deletingId: string | null;
   deleteError: string;
@@ -325,6 +385,7 @@ function RecentTrailsSection({
             <TrailCard
               trail={trail}
               progress={progressByTrail[trail.id]}
+              next={nextByTrail[trail.id]}
               confirming={confirmingDeleteId === trail.id}
               deleting={deletingId === trail.id}
               onAskDelete={() => onAskDelete(trail.id)}
@@ -398,6 +459,7 @@ function OlderTrailsSection({
 function TrailCard({
   trail,
   progress,
+  next,
   confirming,
   deleting,
   onAskDelete,
@@ -406,6 +468,7 @@ function TrailCard({
 }: {
   trail: Trail;
   progress: TrailProgress | undefined;
+  next: NextConceptResponse | undefined;
   confirming: boolean;
   deleting: boolean;
   onAskDelete: () => void;
@@ -430,12 +493,19 @@ function TrailCard({
         </div>
       </Link>
       <div className="flex shrink-0 flex-row items-center justify-between gap-3 border-t border-slate-100 pt-3 sm:w-52 sm:flex-col sm:items-stretch sm:justify-between sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-        {progress?.recommended ? (
+        {next?.concept_id && !next.all_mastered ? (
           <Link
-            href={`/trails/${trail.id}?concept=${progress.recommended.concept.id}`}
+            href={`/trails/${trail.id}?concept=${next.concept_id}`}
             className="inline-flex h-8 items-center justify-center rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-800 hover:bg-blue-100"
           >
-            {primaryCtaLabelFor(progress.recommended.status)}
+            Start Recommended
+          </Link>
+        ) : next?.all_mastered ? (
+          <Link
+            href={`/trails/${trail.id}`}
+            className="inline-flex h-8 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+          >
+            All mastered
           </Link>
         ) : (
           <span className="inline-flex h-8 items-center justify-center text-xs text-slate-500">
@@ -494,6 +564,15 @@ function ProgressBadge({
   );
 }
 
+function primaryCtaLabelFor(status: string | null | undefined): string {
+  switch (status) {
+    case "learning":     return "Continue Tutor";
+    case "needs_review": return "Review Weak Points";
+    case "mastered":     return "Practice / Explore Further";
+    default:             return "Start Learning";
+  }
+}
+
 function ProgressBar({ progress }: { progress: TrailProgress }) {
   const masteredPct = (progress.mastered / Math.max(progress.total, 1)) * 100;
   const learningPct = (progress.learning / Math.max(progress.total, 1)) * 100;
@@ -525,18 +604,4 @@ function ProgressBar({ progress }: { progress: TrailProgress }) {
       </div>
     </div>
   );
-}
-
-function primaryCtaLabelFor(status: MasteryStatus): string {
-  switch (status) {
-    case "learning":
-      return "Continue Tutor";
-    case "needs_review":
-      return "Review Weak Points";
-    case "mastered":
-      return "Practice / Explore Further";
-    case "not_started":
-    default:
-      return "Start Learning";
-  }
 }

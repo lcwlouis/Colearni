@@ -11,6 +11,7 @@ from backend.app.schemas.concept import ConceptEdgeRead, ConceptNodeRead
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
 from backend.app.schemas.mastery import MasteryRecordRead
 from backend.app.schemas.trail import (
+    NextConceptResponse,
     TrailDetailResponse,
     TrailGenerateRequest,
     TrailGenerateResponse,
@@ -20,6 +21,7 @@ from backend.app.schemas.trail import (
 )
 from backend.app.schemas.trail_pack import TrailPackExportResponse
 from backend.app.services.graph_view import delete_trail, get_trail_detail, list_trails
+from backend.app.services.recommendation import get_next_concept_for_trail
 from backend.app.services.trail_generation import (
     GenerationError,
     GraphGenerator,
@@ -124,6 +126,31 @@ async def get_trail_detail_route(
         trail=TrailRead.model_validate(trail),
         graph=_graph_read(nodes, edges, getattr(trail, "mastery_by_concept", {})),
         mastery_summary=mastery_summary,
+    )
+
+
+@router.get("/{trail_id}/next", response_model=NextConceptResponse)
+async def get_next_concept_route(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> NextConceptResponse | JSONResponse:
+    try:
+        recommendation = await get_next_concept_for_trail(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+        )
+    except LookupError as exc:
+        return _not_found(str(exc))
+
+    return NextConceptResponse(
+        concept_id=recommendation.concept.id if recommendation.concept else None,
+        concept_title=recommendation.concept.title if recommendation.concept else None,
+        reason=recommendation.reason,
+        all_mastered=recommendation.all_mastered,
+        mastery_status=recommendation.mastery_status,
+        concept_level=recommendation.concept_level,
     )
 
 

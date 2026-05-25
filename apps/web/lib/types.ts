@@ -84,6 +84,15 @@ export interface TrailDetail {
   mastery_summary: MasterySummary;
 }
 
+export interface NextConceptResponse {
+  concept_id: string | null;
+  concept_title: string | null;
+  reason: string;
+  all_mastered: boolean;
+  mastery_status: MasteryStatus | null;
+  concept_level: ConceptLevel | null;
+}
+
 export interface ConceptDetail {
   concept: ConceptNode;
   prerequisites: ConceptNode[];

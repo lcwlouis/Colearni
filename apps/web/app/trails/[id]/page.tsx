@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 
-import { deleteTrail, getTrail } from "@/lib/api";
-import type { MasteryRecord, MasteryStatus, TrailDetail } from "@/lib/types";
+import { deleteTrail, getTrail, getTrailNext } from "@/lib/api";
+import type { MasteryRecord, MasteryStatus, NextConceptResponse, TrailDetail } from "@/lib/types";
 import { ensureWorkspaceId } from "@/lib/workspace";
 
 import { TrailGraph } from "./components/TrailGraph";
@@ -17,6 +17,8 @@ export default function TrailPage() {
   const initialConceptId = searchParams?.get("concept") ?? null;
   const [workspaceId, setWorkspaceId] = useState("");
   const [detail, setDetail] = useState<TrailDetail | null>(null);
+  const [next, setNext] = useState<NextConceptResponse | null>(null);
+  const [focusConceptId, setFocusConceptId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -28,10 +30,14 @@ export default function TrailPage() {
     async function load() {
       try {
         const id = await ensureWorkspaceId();
-        const trail = await getTrail(id, params.id);
+        const [trail, recommendation] = await Promise.all([
+          getTrail(id, params.id),
+          getTrailNext(id, params.id).catch(() => null),
+        ]);
         if (!cancelled) {
           setWorkspaceId(id);
           setDetail(trail);
+          setNext(recommendation);
         }
       } catch (exc) {
         if (!cancelled) {
@@ -167,14 +173,93 @@ export default function TrailPage() {
           </div>
         </div>
       </header>
+      {next ? (
+        <NextConceptBanner
+          next={next}
+          onFocus={() => {
+            if (next.concept_id) {
+              setFocusConceptId(next.concept_id);
+            }
+          }}
+        />
+      ) : null}
       <TrailGraph
         workspaceId={workspaceId}
         trail={detail.trail}
         graph={detail.graph}
         masterySummary={detail.mastery_summary}
         initialConceptId={initialConceptId}
+        focusConceptId={focusConceptId}
         onMasteryUpdated={handleMasteryUpdated}
       />
     </main>
+  );
+}
+
+function NextConceptBanner({
+  next,
+  onFocus,
+}: {
+  next: NextConceptResponse;
+  onFocus: () => void;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+
+  if (dismissed) {
+    return null;
+  }
+  if (!next.all_mastered && !next.concept_id) {
+    return null;
+  }
+
+  const ctaLabel = (() => {
+    if (next.all_mastered) return null;
+    switch (next.mastery_status) {
+      case "needs_review": return "Review Weak Points";
+      case "learning":     return "Continue Tutor";
+      case "mastered":     return "Practice / Explore Further";
+      default:             return "Start Learning";
+    }
+  })();
+
+  return (
+    <section
+      data-testid="next-concept-banner"
+      className="shrink-0 border-b border-blue-100 bg-blue-50 px-5 py-3 text-sm"
+    >
+      <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          {next.all_mastered ? (
+            <p className="font-medium text-slate-950">All concepts mastered — well done.</p>
+          ) : (
+            <p className="font-medium text-slate-950">
+              Recommended next:{" "}
+              <span className="text-blue-700">{next.concept_title ?? "Open concept"}</span>
+            </p>
+          )}
+          <p className="mt-0.5 text-xs text-slate-600">{next.reason}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {ctaLabel && next.concept_id ? (
+            <button
+              type="button"
+              data-testid="next-banner-cta"
+              onClick={() => { onFocus(); setDismissed(true); }}
+              className="inline-flex h-8 items-center justify-center rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700"
+            >
+              {ctaLabel}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-label="Dismiss recommendation"
+            onClick={() => setDismissed(true)}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-blue-100 hover:text-slate-700"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }

@@ -76,6 +76,8 @@ interface TrailGraphProps {
   };
   /** When set, this concept is opened automatically once the graph is ready. */
   initialConceptId?: string | null;
+  /** When changed to a non-null value, imperatively open that concept panel. */
+  focusConceptId?: string | null;
   onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
 }
 
@@ -87,6 +89,7 @@ export function TrailGraph({
   graph,
   masterySummary,
   initialConceptId,
+  focusConceptId,
   onMasteryUpdated,
 }: TrailGraphProps) {
   const [mode, setMode] = useState<GraphMode>("learn");
@@ -250,6 +253,23 @@ export function TrailGraph({
     // openConcept depends on stable props; safe to omit from deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph.nodes, initialConceptId]);
+
+  // Imperatively open a concept when the parent requests it (e.g. "Focus concept" banner).
+  // Unlike initialConceptId this fires every time focusConceptId changes to a non-null value.
+  const lastFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusConceptId || focusConceptId === lastFocusRef.current) {
+      return;
+    }
+    if (graph.nodes.some((node) => node.id === focusConceptId)) {
+      lastFocusRef.current = focusConceptId;
+      queueMicrotask(() => {
+        void openConcept(focusConceptId);
+      });
+    }
+    // openConcept is stable; safe to omit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusConceptId, graph.nodes]);
 
   function handleMasteryUpdated(conceptId: string, update: { status: MasteryStatus; score: number }) {
     setDetail((prev) => {

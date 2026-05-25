@@ -145,6 +145,17 @@ SourceRevisionStatus = Literal["pending_parse", "parsed", "failed", "skipped"]
 }
 ```
 
+### NextConceptResponse
+
+```json
+{
+  "concept_id": "uuid | null",
+  "concept_title": "string | null",
+  "reason": "string",
+  "all_mastered": "bool"
+}
+```
+
 ### MasteryRecord
 
 ```json
@@ -599,6 +610,30 @@ Get a Trail with its full graph and mastery summary.
   }
 }
 ```
+
+---
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/next`
+
+Get the deterministic recommended next concept for a Trail.
+
+**Response 200:**
+
+```json
+{
+  "concept_id": "uuid | null",
+  "concept_title": "string | null",
+  "reason": "string",
+  "all_mastered": "bool"
+}
+```
+
+`concept_id` and `concept_title` are `null` when `all_mastered` is `true`.
+
+The recommendation is scoped to the current Trail and uses mastery status,
+prerequisite edges, concept level, difficulty, and title as deterministic tie-breakers.
+
+**Response 404:** Trail not found or does not belong to the workspace.
 
 ---
 

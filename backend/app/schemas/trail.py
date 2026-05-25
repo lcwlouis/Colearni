@@ -73,3 +73,12 @@ class TrailDetailResponse(BaseModel):
     trail: TrailRead
     graph: TrailGraphRead
     mastery_summary: MasterySummary
+
+
+class NextConceptResponse(BaseModel):
+    concept_id: uuid.UUID | None
+    concept_title: str | None
+    reason: str
+    all_mastered: bool
+    mastery_status: str | None = None
+    concept_level: str | None = None

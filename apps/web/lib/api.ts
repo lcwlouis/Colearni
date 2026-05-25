@@ -7,6 +7,7 @@ import type {
   GradeResult,
   LevelUpCard,
   MasteryStatus,
+  NextConceptResponse,
   QuizAnswer,
   QuizGenerateRequest,
   QuizQuestion,
@@ -126,6 +127,15 @@ export async function generateTrail(
 
 export async function getTrail(workspaceId: string, trailId: string): Promise<TrailDetail> {
   return request<TrailDetail>(`/api/workspaces/${workspaceId}/trails/${trailId}`, {
+    method: "GET",
+  });
+}
+
+export async function getTrailNext(
+  workspaceId: string,
+  trailId: string,
+): Promise<NextConceptResponse> {
+  return request<NextConceptResponse>(`/api/workspaces/${workspaceId}/trails/${trailId}/next`, {
     method: "GET",
   });
 }
