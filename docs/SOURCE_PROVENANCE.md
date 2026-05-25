@@ -123,6 +123,31 @@ Required provenance fields for ingested sources and revisions:
 
 Priority ingestion formats are PDF, DOCX, and PPTX. Parsed canonical text, chunks, embeddings, generated summaries, and concept-source links derived from private uploads stay private unless a future explicit licensing policy says otherwise.
 
+## Tutor Context Sources
+
+The tutor assembles source metadata for the current concept before each turn. The access rules here are deliberately more permissive than the export sanitizer — the workspace owner is allowed to see their own private material inside the tutor.
+
+**Allowed in tutor context (same workspace only):**
+
+```text
+access = public   -> included
+access = private  -> included (workspace owner's own material)
+```
+
+**Excluded from tutor context:**
+
+```text
+access = restricted  -> excluded (contractual/paywalled limits apply inside the workspace too)
+access = unknown     -> excluded (redistribution status unclear; do not expose)
+```
+
+Additional safety rules applied by `get_concept_sources_for_tutor` and `search_sources_by_title`:
+
+- Only sources linked to the current concept via `ConceptSourceLink` are returned by `get_concept_sources_for_tutor`. `search_sources_by_title` may search the full workspace when no `concept_id` is given, but still scopes to the same workspace and access filter.
+- Cross-workspace isolation is enforced with a double check: `SourceRecord.workspace_id == workspace_id` AND `Trail.workspace_id == workspace_id` (via a JOIN through `ConceptNode → Trail`).
+- Results are capped at 10 by `_MAX_RETRIEVAL_RESULTS`; callers may request a lower cap.
+- Only whitelisted metadata fields are returned (`id`, `title`, `url`, `origin`, `access`, `license`, `relation`). Object keys, content hashes, raw text, chunks, and embeddings are never included.
+
 ## Research Agent Sources
 
 Research-agent sources may be included in public export only as links and metadata:
