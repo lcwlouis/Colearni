@@ -57,7 +57,9 @@ If this file conflicts with an older phase description, follow this file and upd
 
 ## Deferred Work
 
-- Full provider-native retrieval/research/hydration/quiz/learner-state tool execution beyond the current abstraction foundation and tutor compatibility adapter.
+- Full provider-native LLM-invoked retrieval tool execution. Retrieval service functions (get_concept_sources_for_tutor, get_graph_neighbourhood, search_sources_by_title) and ProviderToolDefinition schemas (retrieval_tools.py) are implemented; the LLM multi-turn tool calling loop remains deferred.
+- open_source_chunk: deferred until source parsing and chunk records exist.
+- Full-text and vector search: deferred until the parser pipeline produces chunks and embeddings.
 - Automatic conversation summarization.
 - True per-message citation/source parts and quotes.
 - Global cross-Trail assistant surfaces.

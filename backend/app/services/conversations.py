@@ -32,6 +32,7 @@ from backend.app.models.source import ConceptSourceLink, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.services.mastery import get_mastery_state
+from backend.app.services.retrieval import get_concept_sources_for_tutor, get_graph_neighbourhood
 
 # Maximum number of recent visible turns included in the prompt context window.
 _RECENT_VISIBLE_TURNS_LIMIT = 10
@@ -41,7 +42,7 @@ _RECENT_VISIBLE_TURNS_LIMIT = 10
 class TutorSourceMetadata:
     """Safe, whitelisted source metadata included in tutor context.
 
-    Only public, non-user-upload linked source records are represented here.
+    Public and private-access linked sources are represented here.
     No raw content, chunks, embeddings, private notes, or source-derived
     summaries are included — metadata only.
 
@@ -78,8 +79,8 @@ class TutorContext:
     recent_turns: list[ConversationTurn] = field(default_factory=list)
     conversation_summary: ConversationSummary | None = None
 
-    # Safe public linked source metadata for the current concept.
-    # Populated by _load_safe_sources; empty when no public sources are linked.
+    # Safe linked source metadata for the current concept.
+    # Populated by get_concept_sources_for_tutor; empty when no allowed sources are linked.
     sources: list[TutorSourceMetadata] = field(default_factory=list)
 
 
@@ -197,55 +198,26 @@ async def build_tutor_context(
       3. Containing / contained nodes.
       4. Related / application nodes.
       5. Trail topic and goal.
-      6. Safe public linked source metadata for the current concept.
+      6. Public and private-access linked source metadata for the current concept.
       7. Recent conversation turns (last RECENT_TURNS_LIMIT).
       8. Conversation summary (if present).
 
-    Deliberately does NOT search the whole workspace or include private sources.
+    Deliberately does NOT search the whole workspace or include sources from
+    other workspaces. Private sources from the current workspace are included
+    (access == "public" or "private"); restricted and unknown are excluded.
     """
     # --- Load all edges for this trail once (cheap, bounded by trail size) ---
     all_nodes = list(
         await session.scalars(select(ConceptNode).where(ConceptNode.trail_id == trail.id))
     )
-    node_by_id: dict[uuid.UUID, ConceptNode] = {n.id: n for n in all_nodes}
 
     edges = list(await session.scalars(select(ConceptEdge).where(ConceptEdge.trail_id == trail.id)))
 
-    prerequisites: list[ConceptNode] = []
-    contained_nodes: list[ConceptNode] = []
-    containing_nodes: list[ConceptNode] = []
-    related: list[ConceptNode] = []
-    application_nodes: list[ConceptNode] = []
-    seen: set[uuid.UUID] = set()
-
-    for edge in edges:
-        src = node_by_id.get(edge.source_node_id)
-        tgt = node_by_id.get(edge.target_node_id)
-        if src is None or tgt is None:
-            continue
-
-        if edge.relation_type == "prerequisite" and edge.target_node_id == concept.id:
-            prerequisites.append(src)
-        elif edge.relation_type == "contains" and edge.source_node_id == concept.id:
-            contained_nodes.append(tgt)
-        elif edge.relation_type == "contains" and edge.target_node_id == concept.id:
-            containing_nodes.append(src)
-        elif edge.relation_type == "application":
-            if edge.source_node_id == concept.id and tgt.id not in seen:
-                seen.add(tgt.id)
-                application_nodes.append(tgt)
-            elif edge.target_node_id == concept.id and src.id not in seen:
-                seen.add(src.id)
-                application_nodes.append(src)
-        elif edge.relation_type == "related":
-            neighbor = None
-            if edge.source_node_id == concept.id:
-                neighbor = tgt
-            elif edge.target_node_id == concept.id:
-                neighbor = src
-            if neighbor is not None and neighbor.id not in seen:
-                seen.add(neighbor.id)
-                related.append(neighbor)
+    neighbourhood = get_graph_neighbourhood(
+        concept=concept,
+        all_nodes=all_nodes,
+        edges=edges,
+    )
 
     # --- Conversation history ---
     # Keep the visible history window bounded, but preserve internal tool turns
@@ -305,18 +277,19 @@ async def build_tutor_context(
         trail=trail,
         learner_message=learner_message,
         user_turn_index=user_turn_index,
-        prerequisites=prerequisites,
-        contained_nodes=contained_nodes,
-        containing_nodes=containing_nodes,
-        related=related,
-        application_nodes=application_nodes,
+        prerequisites=neighbourhood["prerequisites"],
+        contained_nodes=neighbourhood["contained_nodes"],
+        containing_nodes=neighbourhood["containing_nodes"],
+        related=neighbourhood["related"],
+        application_nodes=neighbourhood["application_nodes"],
         mastery_status=mastery_state.status,
         recent_turns=recent_turns,
         conversation_summary=summary,
-        sources=await _load_safe_sources(
+        sources=await get_concept_sources_for_tutor(
             session,
-            concept_id=concept.id,
             workspace_id=trail.workspace_id,
+            concept_id=concept.id,
+            max_sources=10,
         ),
     )
 
@@ -473,6 +446,10 @@ async def _load_safe_sources(
     workspace_id: uuid.UUID,
 ) -> list[TutorSourceMetadata]:
     """Load whitelisted source metadata for tutor context.
+
+    Legacy public-only helper kept for direct provenance unit tests. New code
+    should use get_concept_sources_for_tutor so private linked uploads are
+    visible to the tutor under the current retrieval policy.
 
     Safety rules enforced here (see docs/SOURCE_PROVENANCE.md):
       - Only sources linked to the current concept via ConceptSourceLink.

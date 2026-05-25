@@ -1,10 +1,9 @@
 """Source provenance safety tests for tutor context.
 
 Verifies that:
-  - Public linked source metadata appears in TutorContext.sources.
+  - Public/private linked source metadata appears in TutorContext.sources.
   - Prompt vars include title, URL, license, and relation for public sources.
-  - User-upload sources are excluded regardless of access level.
-  - Private, restricted, and unknown-access sources are excluded.
+  - Restricted and unknown-access sources are excluded.
   - Unlinked public sources are excluded.
   - Sources from other workspaces are excluded.
   - No raw content fields from metadata_json leak into prompt variables.
@@ -214,19 +213,18 @@ async def test_prompt_vars_include_public_source_metadata(db_engine, db_session)
 
 
 # ---------------------------------------------------------------------------
-# Test 3: User-upload source is excluded
+# Test 3: User-upload source metadata is available when linked
 # ---------------------------------------------------------------------------
 
 
-async def test_user_upload_source_is_excluded(db_engine, db_session):
+async def test_user_upload_source_metadata_appears_in_context(db_engine, db_session):
     ws_id, trail_id, concept_id = await _seed_concept(db_engine)
 
-    # Upload with access=public — origin check alone must block it.
     src_id = await _make_source(
         db_engine,
         ws_id,
         origin="user_upload",
-        access="public",
+        access="private",
         title="My Uploaded PDF",
         url=None,
     )
@@ -234,12 +232,14 @@ async def test_user_upload_source_is_excluded(db_engine, db_session):
 
     ctx = await _build_context(db_session, ws_id, trail_id, concept_id)
 
-    assert ctx.sources == []
+    assert [source.title for source in ctx.sources] == ["My Uploaded PDF"]
+    assert ctx.sources[0].origin == "user_upload"
+    assert ctx.sources[0].access == "private"
     vars_ = _context_to_prompt_vars("socratic", ctx)
-    assert "My Uploaded PDF" not in vars_["sources"]
+    assert "My Uploaded PDF" in vars_["sources"]
 
 
-async def test_user_upload_source_private_access_excluded(db_engine, db_session):
+async def test_user_upload_source_private_access_included(db_engine, db_session):
     ws_id, trail_id, concept_id = await _seed_concept(db_engine)
 
     src_id = await _make_source(
@@ -252,15 +252,15 @@ async def test_user_upload_source_private_access_excluded(db_engine, db_session)
     await _link_source(db_engine, concept_id, src_id)
 
     ctx = await _build_context(db_session, ws_id, trail_id, concept_id)
-    assert ctx.sources == []
+    assert [source.title for source in ctx.sources] == ["Private Upload"]
 
 
 # ---------------------------------------------------------------------------
-# Test 4: Private, restricted, unknown-access sources are excluded
+# Test 4: Private sources are included; restricted/unknown sources are excluded
 # ---------------------------------------------------------------------------
 
 
-async def test_private_access_source_excluded(db_engine, db_session):
+async def test_private_access_source_included(db_engine, db_session):
     ws_id, trail_id, concept_id = await _seed_concept(db_engine)
 
     src_id = await _make_source(
@@ -273,8 +273,8 @@ async def test_private_access_source_excluded(db_engine, db_session):
     await _link_source(db_engine, concept_id, src_id)
 
     ctx = await _build_context(db_session, ws_id, trail_id, concept_id)
-    assert ctx.sources == []
-    assert "Private Notes" not in _context_to_prompt_vars("socratic", ctx)["sources"]
+    assert [source.title for source in ctx.sources] == ["Private Notes"]
+    assert "Private Notes" in _context_to_prompt_vars("socratic", ctx)["sources"]
 
 
 async def test_restricted_access_source_excluded(db_engine, db_session):
@@ -341,7 +341,7 @@ async def test_unlinked_public_source_excluded(db_engine, db_session):
 # ---------------------------------------------------------------------------
 
 
-async def test_other_workspace_source_excluded(db_engine, db_session):
+async def test_other_workspace_source_excluded_by_tutor_context(db_engine, db_session):
     ws_id, trail_id, concept_id = await _seed_concept(db_engine)
 
     # Create a second workspace with its own source.
@@ -369,18 +369,48 @@ async def test_other_workspace_source_excluded(db_engine, db_session):
     # workspace filter blocks it even if the association row exists.
     await _link_source(db_engine, concept_id, other_src_id)
 
+    ctx = await _build_context(db_session, ws_id, trail_id, concept_id)
+
+    titles = [s.title for s in ctx.sources]
+    assert "Other WS Source" not in titles
+
+
+async def test_legacy_load_safe_sources_excludes_other_workspace_source(db_engine):
+    ws_id, _, concept_id = await _seed_concept(db_engine)
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        other_ws = Workspace(name="Other WS Legacy")
+        session.add(other_ws)
+        await session.flush()
+        other_src = SourceRecord(
+            workspace_id=other_ws.id,
+            origin="research_agent",
+            access="public",
+            title="Other WS Legacy Source",
+            url="https://other.com/legacy-source",
+            license=None,
+            include_on_public_export=False,
+            metadata_json={},
+        )
+        session.add(other_src)
+        await session.flush()
+        other_src_id = other_src.id
+        await session.commit()
+
+    # Legacy public-only helper is kept for this direct unit test only.
+    await _link_source(db_engine, concept_id, other_src_id)
+
     from backend.app.services.conversations import _load_safe_sources
 
-    # Open a new session over the seeded data.
     async with async_session() as session:
         sources = await _load_safe_sources(
             session,
             concept_id=concept_id,
-            workspace_id=ws_id,  # our workspace
+            workspace_id=ws_id,
         )
-    # other_src is in other_ws, so it must not appear even if we link it.
+
     titles = [s.title for s in sources]
-    assert "Other WS Source" not in titles
+    assert "Other WS Legacy Source" not in titles
 
 
 # ---------------------------------------------------------------------------

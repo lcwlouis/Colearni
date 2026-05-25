@@ -87,7 +87,7 @@ Implementation overlay:
 
 ## Current Build Snapshot
 
-Last updated: 2026-05-24.
+Last updated: 2026-05-25.
 
 Implemented:
 
@@ -105,13 +105,14 @@ Implemented:
 - Provider-tool abstraction foundation with explicit internal tool definitions/calls/results, provider registration/normalization helpers, normalized stream events, fake-provider test coverage, and a compatibility adapter for the tutor instruction tool.
 - Learning dashboard home with Continue Learning, recent/older Trail sections, delete confirmation, per-Trail progress summaries, and a deterministic frontend recommended-next helper.
 - Per-Trail graph Learn/Inspect mode split with `?concept=<id>` deep-link opening, neighbourhood focus in Learn Mode, inspect-only graph controls and edge-label toggle, mastery-aware concept-panel CTAs, and mobile concept sheet refinement.
+- Source ingestion foundation: workspace-scoped private upload API, local private object storage root, source revision records with immutable identity fields and mutable parser status/error metadata, concept-source linking API, minimal concept-panel upload/link UI, and export/import safety regressions for revision artifacts.
 
 Not implemented yet:
 
 - True per-message citation/source parts and quote support.
 - Automatic conversation summarisation and full provider-native tool execution loops beyond the current tutor compatibility adapter.
 - Automated research-agent search, real hydration fetching/indexing, durable generation jobs, dark mode, deployment, auth, and SaaS features.
-- Source ingestion, controlled retrieval tools, guided graph navigation beyond the current frontend recommendation helper, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
+- Parsing into canonical text, chunks, embeddings/indexes, controlled retrieval tools, guided graph navigation beyond the current frontend recommendation helper, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
 
 ## Phase 0: Foundation Cleanup
 
@@ -738,6 +739,8 @@ Current implementation note:
 
 ## Phase 10: Source Ingestion MVP
 
+Status: foundation slice and concept-source linking implemented. Parser pipeline, chunks, embeddings, and full-text indexes remain deferred.
+
 Goal: ingest common learner documents into private, provenance-aware source records that can later power controlled retrieval.
 
 Priority formats:
@@ -784,14 +787,14 @@ Requirements:
 
 PR-sized breakdown:
 
-- Source object/revision schema and upload storage.
+- Source object/revision schema and upload storage. Implemented as upload-only foundation with `parser_name="none"`, `parser_version="upload-only-v1"`, and no parsed text/chunks/indexes.
 - Parser pipeline for one format, then extend to the other priority formats.
 - Chunk/index job and source status UI.
 - Concept-source linking and export safety regressions.
 
 Tests:
 
-- PDF/DOCX/PPTX uploads create private source records.
+- Generic upload-only storage creates private source records; PDF/DOCX/PPTX parser support is deferred.
 - Content hash and parser version are stored.
 - Source revisions are immutable records.
 - Parser failure is visible and does not create partial public content.
@@ -809,6 +812,9 @@ Non-goals:
 - No public redistribution of uploaded or parsed content.
 
 ## Phase 11: Retrieval + Context Tooling
+
+Status: retrieval service and tool definitions implemented.
+LLM tool calling loop, open_source_chunk, and full-text/vector search remain deferred.
 
 Goal: provide scoped, budgeted retrieval tools that support tutor grounding without whole-workspace search by default.
 
