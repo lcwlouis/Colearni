@@ -47,6 +47,7 @@ interface TutorStreamEvent {
   status?: TutorStreamStatus;
   content?: string;
   name?: string;
+  query?: string;
   result?: string;
   conversation_id?: string;
   message?: ConversationMessage | string;
@@ -62,6 +63,8 @@ export interface StreamTutorChatOptions {
   conceptId: string;
   message: string;
   conversationId: string | null;
+  regenerate?: boolean;
+  replaceLatestUser?: boolean;
   signal?: AbortSignal;
   onMode: (mode: TutorMode) => void;
   onStatus?: (status: TutorStreamStatus) => void;
@@ -273,6 +276,8 @@ export async function streamTutorChat({
   conceptId,
   message,
   conversationId,
+  regenerate,
+  replaceLatestUser,
   signal,
   onMode,
   onStatus,
@@ -286,6 +291,8 @@ export async function streamTutorChat({
   const body: TutorChatRequest = {
     message,
     conversation_id: conversationId,
+    regenerate,
+    replace_latest_user: replaceLatestUser,
   };
   const response = await fetch(
     `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/chat`,
@@ -460,6 +467,7 @@ function handleTutorStreamEvent(
     callbacks.onToolCall?.({
       name: typeof payload.name === "string" ? payload.name : "tool",
       mode: payload.mode ?? null,
+      query: typeof payload.query === "string" ? payload.query : undefined,
     });
     return false;
   }

@@ -14,11 +14,18 @@ from __future__ import annotations
 
 import uuid
 from typing import cast
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.app.agents.prompts.registry import PromptRegistry
+from backend.app.agents.provider_tools import (
+    NormalizedStreamEvent,
+    NormalizedToolCall,
+    NormalizedToolResult,
+)
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.conversation import Conversation, ConversationTurn  # noqa: F401
@@ -26,7 +33,12 @@ from backend.app.models.mastery import MasteryRecord
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
-from backend.app.services.conversations import TutorContext, build_tutor_context
+from backend.app.services.conversations import (
+    RETRIEVAL_TOOLS,
+    TutorContext,
+    TutorSourceMetadata,
+    build_tutor_context,
+)
 from backend.app.services.tutor import (
     FallbackTutorModeClassifier,
     LLMTutorAgent,
@@ -34,6 +46,9 @@ from backend.app.services.tutor import (
     _context_to_prompt_vars,
     _normalize_tutor_instruction_request,
     _parse_mode_json,
+    _restore_final_system_prompt,
+    _retrieval_planning_messages,
+    _should_replay_retrieval_result,
     _strip_control_prefix,
 )
 
@@ -338,8 +353,7 @@ async def test_context_keeps_tool_turns_with_retained_visible_window(db_engine, 
     kept_contents = [turn.content for turn in ctx.recent_turns]
     assert '<tool name="get_tutor_instructions" mode="direct" />' in kept_contents
     expected_tool_result = (
-        '<tool_result name="get_tutor_instructions" mode="direct">'
-        "Use direct mode.</tool_result>"
+        '<tool_result name="get_tutor_instructions" mode="direct">Use direct mode.</tool_result>'
     )
     assert expected_tool_result in kept_contents
     assert "visible-0" not in kept_contents
@@ -367,6 +381,7 @@ async def test_context_sources_are_empty_when_none_linked(db_engine, db_session)
 
     vars_ = _context_to_prompt_vars("socratic", ctx)
     assert vars_["sources"] == "none available"
+    assert vars_["concept_id"] == str(concept_id)
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +425,25 @@ class _StubTaggedLLMClient:
         self.calls.append(messages)
         for kind, chunk in self._streams.pop(0):
             yield (kind, chunk)
+
+
+class _StubToolEventLLMClient(_StubTaggedLLMClient):
+    def __init__(self, *streams: list[tuple[str, str]], event_streams: list | None = None) -> None:
+        super().__init__(*streams)
+        self._event_streams = list(event_streams or [])
+        self.event_calls: list[list[dict]] = []
+
+    async def chat_stream_events(self, messages: list[dict], **_: object):
+        if not self._event_streams:
+            raise AssertionError("Unexpected extra chat_stream_events call")
+        self.event_calls.append(messages)
+        for event in self._event_streams.pop(0):
+            yield event
+
+
+class _StaticPromptRegistry(PromptRegistry):
+    def render(self, task: str, variables: dict[str, object], version: int | None = None) -> str:
+        return f"{task} prompt mastery={variables.get('mastery_status')}"
 
 
 async def test_fallback_classifier_default_is_socratic():
@@ -764,3 +798,234 @@ async def test_locked_direct_summary_without_question_uses_default_socratic_ques
     assert [chunk for kind, chunk in events if kind == "text"] == [
         "What do you think are the main topics or themes within Mylo Xyloto?"
     ]
+
+
+async def test_prepare_mode_stream_emits_first_pass_thinking_live():
+    """First-call reasoning must stream as live thinking events, not be buffered."""
+    client = _StubTaggedLLMClient(
+        [
+            ("thinking", "Considering the learner's question..."),
+            ("thinking", " choosing a mode."),
+            ("text", '<mode name="socratic" />'),
+        ],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+
+    events: list[tuple[str, object]] = []
+    prep = None
+    async for kind, payload in agent.prepare_mode_stream(_make_context("Help me")):
+        if kind == "__prep__":
+            prep = payload
+            break
+        events.append((kind, payload))
+
+    assert prep is not None
+    assert prep.mode == "socratic"
+    # Thinking streamed live during the first pass.
+    assert ("status", "thinking") in events
+    assert [chunk for kind, chunk in events if kind == "thinking"] == [
+        "Considering the learner's question...",
+        " choosing a mode.",
+    ]
+    # Live-streamed reasoning must NOT be duplicated in the buffered events.
+    assert all(kind != "thinking" for kind, _ in prep.buffered_events)
+
+
+async def test_non_tool_mode_final_call_uses_final_response_prompt():
+    client = _StubTaggedLLMClient(
+        [("text", '<mode name="socratic" />')],
+        [("text", "What do you already understand about this concept?")],
+    )
+    agent = LLMTutorAgent(client, max_tokens=512)
+
+    events = [
+        (kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Check me"))
+    ]
+
+    assert [chunk for kind, chunk in events if kind == "text"] == [
+        "What do you already understand about this concept?"
+    ]
+    assert len(client.calls) == 2
+    final_system_prompt = client.calls[1][0]["content"]
+    assert "Final response contract" in final_system_prompt
+    assert "First choose the response mode" not in final_system_prompt
+    assert {"role": "assistant", "content": '<mode name="socratic" />'} not in client.calls[1]
+
+
+async def test_mastered_direct_request_keeps_direct_mode_and_prompt():
+    client = _StubTaggedLLMClient(
+        [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
+        [("text", "feelslikeimfallinginlove is the only lead single.")],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    ctx = _make_context("Which are the lead singles?")
+    ctx.mastery_status = "mastered"
+
+    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(ctx)]
+
+    assert [chunk for kind, chunk in events if kind == "mode"] == ["direct"]
+    assert [chunk for kind, chunk in events if kind == "text"] == [
+        "feelslikeimfallinginlove is the only lead single."
+    ]
+    assert [kind for kind, _chunk in events if kind in {"tool_call", "tool_result"}] == []
+    final_system_prompt = client.calls[1][0]["content"]
+    assert "tutor_direct prompt mastery=mastered" in final_system_prompt
+    assert "do not append a Socratic follow-up" in final_system_prompt
+    assert len(client.calls[1]) == 2
+
+
+async def test_retrieval_planner_text_is_reused_when_no_tool_called(db_session):
+    client = _StubToolEventLLMClient(
+        [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
+        event_streams=[
+            [
+                NormalizedStreamEvent.text_delta("Direct answer from no-tool planner."),
+                NormalizedStreamEvent.done_event(),
+            ]
+        ],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    ctx = _make_context("What is the answer?")
+    ctx.mastery_status = "mastered"
+    ctx.sources = [
+        TutorSourceMetadata(
+            id=uuid.uuid4(),
+            title="Notes",
+            url=None,
+            origin="manual",
+            access="private",
+            license=None,
+            relation="supports",
+        )
+    ]
+
+    events = []
+    prep = await agent.prepare_mode(ctx)
+    for event in prep.buffered_events:
+        events.append(event)
+    retrieval_messages = _retrieval_planning_messages(prep.messages_after_mode)
+    from backend.app.services.conversations import _run_retrieval_loop
+
+    retrieval_loop = await _run_retrieval_loop(
+        retrieval_messages,
+        RETRIEVAL_TOOLS,
+        session=db_session,
+        workspace_id=uuid.uuid4(),
+        concept_id=ctx.concept.id,
+        llm_client=client,
+    )
+
+    assert retrieval_loop.tool_results == []
+    assert retrieval_loop.text == "Direct answer from no-tool planner."
+    assert len(client.calls) == 1
+    assert len(client.event_calls) == 1
+
+
+async def test_retrieval_tool_call_preview_includes_search_query(db_session):
+    client = _StubToolEventLLMClient(
+        event_streams=[
+            [
+                NormalizedStreamEvent.tool_call_event(
+                    NormalizedToolCall(
+                        call_id="call_search",
+                        name="search_sources",
+                        arguments={"query": "lead singles"},
+                    )
+                )
+            ],
+            [
+                NormalizedStreamEvent.text_delta("enough context"),
+                NormalizedStreamEvent.done_event(),
+            ],
+        ],
+    )
+
+    async def fake_search(*, query, workspace_id, session, concept_id):
+        assert query == "lead singles"
+        return []
+
+    from backend.app.services.conversations import _run_retrieval_loop
+
+    with patch(
+        "backend.app.services.conversations.search_sources_by_text",
+        side_effect=fake_search,
+    ):
+        retrieval_loop = await _run_retrieval_loop(
+            [{"role": "user", "content": "Which are the lead singles?"}],
+            RETRIEVAL_TOOLS,
+            session=db_session,
+            workspace_id=uuid.uuid4(),
+            concept_id=uuid.uuid4(),
+            llm_client=client,
+        )
+
+    assert retrieval_loop.tool_results[0].public_preview["query"] == "lead singles"
+
+
+def test_direct_prompt_tells_mastered_mode_not_to_append_socratic_followup():
+    ctx = _make_context("Which are the lead singles?")
+    ctx.mastery_status = "mastered"
+    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
+
+    prompt = agent._final_response_prompt("direct", ctx)
+
+    assert "Mastery status**: mastered" in prompt
+    assert "do not append a Socratic follow-up" in prompt
+
+
+def test_retrieval_planning_messages_reuse_no_tool_answers():
+    messages = [
+        {"role": "system", "content": "Final response contract"},
+        {"role": "user", "content": "Check me"},
+    ]
+
+    retrieval_messages = _retrieval_planning_messages(messages)
+
+    assert "selecting retrieval tools" in retrieval_messages[0]["content"]
+    assert (
+        "answer the learner directly in the already-selected mode"
+        in retrieval_messages[0]["content"]
+    )
+    assert "Do not output `<mode .../>` tags" in retrieval_messages[0]["content"]
+    assert "Prefer search_sources" in retrieval_messages[0]["content"]
+    assert "Once you have enough context" in retrieval_messages[0]["content"]
+    assert (
+        "omit concept_id unless you are given an explicit UUID" in retrieval_messages[0]["content"]
+    )
+
+
+def test_restore_final_system_prompt_removes_retrieval_instruction_before_final_call():
+    final_messages = [
+        {"role": "system", "content": "Final response contract"},
+        {"role": "user", "content": "What do you know?"},
+    ]
+    retrieval_messages = [
+        {"role": "system", "content": "Final response contract\n\n## Retrieval tool planning only"},
+        {"role": "user", "content": "What do you know?"},
+        {"role": "assistant", "content": [{"type": "tool_call", "name": "search_sources"}]},
+        {"role": "tool", "name": "search_sources", "content": "Result"},
+    ]
+
+    restored = _restore_final_system_prompt(final_messages, retrieval_messages)
+
+    assert restored[0]["content"] == "Final response contract"
+    assert "Retrieval tool planning only" not in restored[0]["content"]
+    assert restored[2:] == retrieval_messages[2:]
+
+
+def test_only_directed_document_reads_are_replayed_in_future_prompt_context():
+    search_result = NormalizedToolResult(
+        call_id="call_search",
+        name="search_sources",
+        content="Search metadata dump",
+        public_preview={"preview": "Search metadata dump"},
+    )
+    document_result = NormalizedToolResult(
+        call_id="call_read",
+        name="read_document_section",
+        content="Directed document content",
+        public_preview={"preview": "Directed document content"},
+    )
+
+    assert _should_replay_retrieval_result(search_result) is False
+    assert _should_replay_retrieval_result(document_result) is True

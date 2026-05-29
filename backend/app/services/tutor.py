@@ -37,14 +37,18 @@ from backend.app.agents.provider_tools import (
 )
 from backend.app.schemas.tutor import ConversationMessage, TutorMode
 from backend.app.services.conversations import (
+    RETRIEVAL_TOOLS,
     TutorContext,
     TutorSourceMetadata,
+    _run_retrieval_loop,
     build_tutor_context,
     get_next_turn_index,
     get_or_create_conversation,
     persist_assistant_turn,
     persist_tool_turn,
     persist_user_turn,
+    prepare_regenerated_user_turn,
+    replace_latest_user_turn,
     validate_concept_scope,
 )
 from backend.app.services.mastery import mark_learning_from_tutor_turn
@@ -124,6 +128,23 @@ _PROMPT_MODE_TASKS: dict[str, str] = {
     "direct": "tutor_direct_instructions",
     "free_explore": "tutor_free_explore_instructions",
 }
+_FINAL_MODE_TASKS: dict[str, str] = {
+    "socratic": "tutor_socratic",
+    "direct": "tutor_direct",
+    "repair": "tutor_repair",
+    "explore": "tutor_explore",
+}
+_FINAL_MODE_FALLBACKS: dict[str, str] = {
+    "quiz_prompt": (
+        "Briefly acknowledge that the learner seems ready for a level-up check. "
+        "Direct them to use the quiz panel. Do not mark mastery directly. Keep it under 60 words."
+    ),
+    "free_explore": (
+        "Explore the learner's curiosity broadly but coherently. Stay educational, connect back "
+        "to the current concept, and end with one reflection question. Keep it under 170 words."
+    ),
+}
+_RETRIEVAL_PLANNING_MARKER = "## Retrieval tool planning only"
 _MASTERED_ONLY_TOOL_MODES: frozenset[str] = frozenset({"direct", "free_explore"})
 _TUTOR_INSTRUCTIONS_TOOL = ProviderToolDefinition(
     name="get_tutor_instructions",
@@ -139,11 +160,9 @@ _TUTOR_INSTRUCTIONS_TOOL = ProviderToolDefinition(
     public_argument_fields=("mode",),
 )
 _CONTROL_MODE_RE = re.compile(r'^<mode\s+name="([a-z_]+)"\s*/?>$')
-_CONTROL_TOOL_RE = re.compile(
-    r'^<tool\s+name="get_tutor_instructions"\s+mode="([a-z_]+)"\s*/?>$'
-)
+_CONTROL_TOOL_RE = re.compile(r'^<tool\s+name="get_tutor_instructions"\s+mode="([a-z_]+)"\s*/?>$')
 _QUESTION_SENTENCE_START_RE = re.compile(
-    r'(^|[.!?\n:;]\s+)(what|why|how|which|when|where|who|whom|whose|can|could|would|should|do|does|did|is|are|am|was|were|have|has|had)\b',
+    r"(^|[.!?\n:;]\s+)(what|why|how|which|when|where|who|whom|whose|can|could|would|should|do|does|did|is|are|am|was|were|have|has|had)\b",
     re.IGNORECASE,
 )
 
@@ -167,10 +186,58 @@ class _ParsedControl:
 
 
 @dataclass(frozen=True)
-class _PreparedStream:
+class _ModePreparation:
+    """Result of the first-pass LLM call (mode selection).
+
+    buffered_events — events to re-emit immediately (status, tool_call, tool_result, mode).
+    messages_after_mode — message history to pass to the second LLM call (with retrieval
+                          context optionally injected between prepare_mode and stream_text).
+    locked_socratic — True when a direct mode request was denied due to mastery gate; the
+                      stream_text call must buffer and coerce the reply to a Socratic question.
+    """
+
     mode: TutorMode
-    initial_chunks: tuple[TutorStreamChunk, ...]
-    stream: AsyncIterator[TutorStreamChunk]
+    locked_socratic: bool
+    messages_after_mode: list[dict]
+    buffered_events: tuple[TutorStreamChunk, ...]
+
+
+class _ControlPrefixStripper:
+    """Strip a leaked leading control tag even when it arrives across chunks."""
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._decided = False
+
+    def feed(self, chunk: str) -> str:
+        if self._decided:
+            return chunk
+        self._buffer += chunk
+        stripped = _strip_control_prefix(self._buffer)
+        if stripped != self._buffer:
+            self._buffer = ""
+            self._decided = True
+            return stripped
+        if self._could_be_control_prefix(self._buffer):
+            return ""
+        self._buffer = ""
+        self._decided = True
+        return stripped
+
+    @staticmethod
+    def _could_be_control_prefix(text: str) -> bool:
+        stripped = text.lstrip()
+        if not stripped:
+            return True
+        controls = (
+            '<mode name="socratic" />',
+            '<mode name="repair" />',
+            '<mode name="quiz_prompt" />',
+            '<mode name="explore" />',
+            '<tool name="get_tutor_instructions" mode="direct" />',
+            '<tool name="get_tutor_instructions" mode="free_explore" />',
+        )
+        return any(control.startswith(stripped) for control in controls)
 
 
 @runtime_checkable
@@ -209,7 +276,25 @@ class LLMTutorAgent:
         self._registry = registry
         self._max_tokens = max(256, max_tokens)
 
+    @property
+    def llm_client(self) -> LLMClient:
+        """Expose the underlying LLM client for tool-loop callers."""
+        return self._client
+
     async def respond_stream(self, context: TutorContext) -> AsyncIterator[TutorStreamChunk]:
+        """Backward-compatible single-turn stream: prepare_mode → buffered events → stream_text."""
+        prep = await self.prepare_mode(context)
+        for event in prep.buffered_events:
+            yield event
+        async for event in self.stream_text(context, prep):
+            yield event
+
+    async def prepare_mode(self, context: TutorContext) -> _ModePreparation:
+        """Run the first LLM call (mode selection only) and return a preparation object.
+
+        The caller may inject retrieval context into prep.messages_after_mode between
+        prepare_mode() and stream_text() to ground the final response in sources.
+        """
         prompt_vars = _context_to_base_prompt_vars(context)
         system_prompt = self._registry.render("tutor_base", prompt_vars)
         messages = _build_chat_messages(
@@ -217,21 +302,114 @@ class LLMTutorAgent:
             context.recent_turns,
             context.learner_message,
         )
+        return await self._run_first_pass(messages, context)
 
+    async def prepare_mode_stream(self, context: TutorContext) -> AsyncIterator[tuple[str, object]]:
+        """Streaming variant of prepare_mode.
+
+        Yields live ``("status"|"thinking", chunk)`` events from the first LLM call as
+        they arrive, then yields a final ``("__prep__", _ModePreparation)`` sentinel.
+        This lets the caller stream first-call reasoning instead of buffering it until
+        the first LLM call completes.
+        """
+        prompt_vars = _context_to_base_prompt_vars(context)
+        system_prompt = self._registry.render("tutor_base", prompt_vars)
+        messages = _build_chat_messages(
+            system_prompt,
+            context.recent_turns,
+            context.learner_message,
+        )
+        async for item in self._run_first_pass_stream(messages, context):
+            yield item
+
+    async def _run_first_pass_stream(
+        self,
+        messages: list[dict],
+        context: TutorContext,
+        *,
+        thinking: bool | None = None,
+    ) -> AsyncIterator[tuple[str, object]]:
+        """Generator twin of _run_first_pass that streams pre-mode events live.
+
+        Yields ``("status", ...)`` / ``("thinking", chunk)`` as the first LLM call emits
+        them and a terminal ``("__prep__", _ModePreparation)``. Because reasoning is
+        streamed here, the resulting prep carries no buffered pre-events (only the
+        tool/mode events the caller still emits after mode resolution).
+        """
         raw_stream = self._client_chat_stream_tagged(
             messages,
             temperature=0.4,
             max_tokens=self._max_tokens,
+            thinking=thinking,
         )
         buffered_text = ""
-        emitted_first_pass_thinking_status = False
+        emitted_thinking_status = False
+        saw_thinking = False
 
         async for kind, chunk in raw_stream:
             if kind == "thinking":
-                if not emitted_first_pass_thinking_status:
+                if not emitted_thinking_status:
                     yield ("status", "thinking")
-                    emitted_first_pass_thinking_status = True
+                    emitted_thinking_status = True
+                saw_thinking = True
                 yield ("thinking", chunk)
+                continue
+
+            buffered_text += chunk
+            parsed = _parse_control_from_buffer(buffered_text)
+            if parsed is None:
+                continue
+
+            mode = _control_value_to_mode(parsed) or "socratic"
+            yield ("__prep__", self._make_mode_prep(mode, context, messages, []))
+            return
+
+        parsed = _parse_control_eof(buffered_text)
+        if parsed is not None:
+            mode = _control_value_to_mode(parsed)
+            if mode is not None:
+                yield ("__prep__", self._make_mode_prep(mode, context, messages, []))
+                return
+
+        if saw_thinking and not buffered_text.strip():
+            yield ("status", "retrying_without_thinking")
+            async for item in self._run_first_pass_stream(messages, context, thinking=False):
+                yield item
+            return
+
+        yield ("__prep__", self._make_mode_prep("socratic", context, messages, []))
+
+    async def _run_first_pass(
+        self,
+        messages: list[dict],
+        context: TutorContext,
+        *,
+        thinking: bool | None = None,
+        _pre_events: tuple[TutorStreamChunk, ...] = (),
+    ) -> _ModePreparation:
+        """Drive the first LLM call, stopping at the mode/tool control line.
+
+        On a thinking-only response (reasoning but no text), retries without thinking
+        enabled, accumulating pre-events across the recursion.
+        """
+        raw_stream = self._client_chat_stream_tagged(
+            messages,
+            temperature=0.4,
+            max_tokens=self._max_tokens,
+            thinking=thinking,
+        )
+        buffered_text = ""
+        pre_events: list[TutorStreamChunk] = list(_pre_events)
+        emitted_thinking_status = False
+        saw_thinking = False
+
+        async for kind, chunk in raw_stream:
+            if kind == "thinking":
+                if not emitted_thinking_status:
+                    pre_events.append(("status", "thinking"))
+                    emitted_thinking_status = True
+                saw_thinking = True
+                pre_events.append(("thinking", chunk))
                 continue
 
             buffered_text += chunk
@@ -242,48 +420,146 @@ class LLMTutorAgent:
             mode = _control_value_to_mode(parsed)
             if mode is None:
                 mode = "socratic"
+            # Control line found — stop reading stream and build preparation.
+            return self._make_mode_prep(mode, context, messages, pre_events)
 
-            if mode in _TOOL_GATED_MODES:
-                async for event in self._stream_tool_continuation(mode, context, messages):
-                    yield event
-                return
-
-            yield ("mode", mode)
-            remainder = parsed.remainder.lstrip("\n")
-            if remainder:
-                yield ("text", remainder)
-            async for next_kind, next_chunk in raw_stream:
-                if next_kind == "thinking":
-                    if not emitted_first_pass_thinking_status:
-                        yield ("status", "thinking")
-                        emitted_first_pass_thinking_status = True
-                    yield ("thinking", next_chunk)
-                else:
-                    yield ("text", next_chunk)
-            return
-
+        # EOF path
         parsed = _parse_control_eof(buffered_text)
         if parsed is not None:
             mode = _control_value_to_mode(parsed)
             if mode is not None:
-                if mode in _TOOL_GATED_MODES:
-                    async for event in self._stream_tool_continuation(mode, context, messages):
-                        yield event
-                    return
-                yield ("mode", mode)
-                remainder = parsed.remainder.lstrip("\n")
-                if remainder:
-                    yield ("text", remainder)
-                return
+                return self._make_mode_prep(mode, context, messages, pre_events)
 
-        if emitted_first_pass_thinking_status and not buffered_text.strip():
-            async for event in self._retry_first_pass_without_thinking(messages, context):
-                yield event
+        # Thinking-only retry: model produced reasoning but no text/control line
+        if saw_thinking and not buffered_text.strip():
+            pre_events.append(("status", "retrying_without_thinking"))
+            return await self._run_first_pass(
+                messages,
+                context,
+                thinking=False,
+                _pre_events=tuple(pre_events),
+            )
+
+        # Fallback: treat as socratic
+        return self._make_mode_prep("socratic", context, messages, pre_events)
+
+    def _make_mode_prep(
+        self,
+        mode: str,
+        context: TutorContext,
+        messages: list[dict],
+        pre_events: list[TutorStreamChunk],
+    ) -> _ModePreparation:
+        """Build a _ModePreparation given a resolved mode.
+
+        For tool-gated modes: calls _get_tutor_instructions to resolve the instruction
+        content, builds the tool-call / tool-result message history, and sets
+        locked_socratic when the mastery gate denied direct mode.
+
+        For non-tool modes: appends a synthetic mode-hint assistant message so the
+        second LLM call does not re-emit the control header.
+        """
+        if mode in _TOOL_GATED_MODES:
+            tool_result = self._get_tutor_instructions(mode, context)
+            if context.mastery_status == "mastered" and tool_result.final_mode == "direct":
+                tool_result = _without_instruction_tool_replay(tool_result)
+            tool_call_content = _tool_call_content(tool_result.requested_mode)
+            tool_message = _tool_result_content(tool_result)
+            locked_socratic = _should_buffer_locked_socratic_fallback(tool_result, context)
+            tool_events: tuple[TutorStreamChunk, ...]
+            if tool_result.normalized_call is None and tool_result.normalized_result is None:
+                tool_events = ()
+            else:
+                tool_events = (
+                    ("status", "calling_tool"),
+                    ("tool_call", tool_call_content),
+                    ("status", "tool_called"),
+                    ("tool_result", tool_message),
+                    ("status", "tool_complete"),
+                )
+            buffered_events: tuple[TutorStreamChunk, ...] = (
+                tuple(pre_events) + tool_events + (("mode", tool_result.final_mode),)
+            )
+            messages_after_mode = _replace_system_prompt(
+                _append_instruction_tool_replay(
+                    messages,
+                    tool_call_content,
+                    tool_message,
+                    tool_result,
+                ),
+                self._final_response_prompt(tool_result.final_mode, context),
+            )
+            return _ModePreparation(
+                mode=tool_result.final_mode,
+                locked_socratic=locked_socratic,
+                messages_after_mode=messages_after_mode,
+                buffered_events=buffered_events,
+            )
+        else:
+            buffered_events = tuple(pre_events) + (("mode", mode),)  # type: ignore[assignment]
+            messages_after_mode = _replace_system_prompt(
+                messages,
+                self._final_response_prompt(mode, context),
+            )
+            return _ModePreparation(
+                mode=mode,  # type: ignore[arg-type]
+                locked_socratic=False,
+                messages_after_mode=messages_after_mode,
+                buffered_events=buffered_events,
+            )
+
+    async def stream_text(
+        self,
+        context: TutorContext,
+        prep: _ModePreparation,
+        *,
+        messages: list[dict] | None = None,
+    ) -> AsyncIterator[TutorStreamChunk]:
+        """Run the second LLM call and stream the final visible text.
+
+        *messages* overrides prep.messages_after_mode when the caller has injected
+        retrieval context between prepare_mode and stream_text.
+
+        When prep.locked_socratic is True, the entire response is buffered and
+        coerced to a single focused Socratic question before yielding.
+        """
+        effective_messages = messages if messages is not None else prep.messages_after_mode
+        effective_messages = _strip_control_assistant_seeds(effective_messages)
+
+        emitted_thinking_status = False
+        if prep.locked_socratic:
+            buffered_text = ""
+            async for kind, chunk in self._chat_stream_with_empty_retry(
+                effective_messages,
+                temperature=0.4,
+                max_tokens=self._max_tokens,
+            ):
+                if kind == "status":
+                    yield ("status", chunk)
+                elif kind == "thinking":
+                    if not emitted_thinking_status:
+                        yield ("status", "thinking")
+                        emitted_thinking_status = True
+                    yield ("thinking", chunk)
+                else:
+                    buffered_text += chunk
+            yield ("text", _coerce_locked_socratic_reply(buffered_text, context))
             return
 
-        yield ("mode", "socratic")
-        if buffered_text:
-            yield ("text", buffered_text)
+        async for kind, chunk in self._chat_stream_with_empty_retry(
+            effective_messages,
+            temperature=0.4,
+            max_tokens=self._max_tokens,
+        ):
+            if kind == "status":
+                yield ("status", chunk)
+            elif kind == "thinking":
+                if not emitted_thinking_status:
+                    yield ("status", "thinking")
+                    emitted_thinking_status = True
+                yield ("thinking", chunk)
+            else:
+                yield ("text", chunk)
 
     def _client_chat_stream_tagged(
         self,
@@ -298,62 +574,27 @@ class LLMTutorAgent:
             kwargs["thinking"] = thinking
         return self._client.chat_stream_tagged(messages, **kwargs)
 
-    async def _stream_tool_continuation(
-        self,
-        requested_mode: str,
-        context: TutorContext,
-        messages: list[dict],
-    ) -> AsyncIterator[TutorStreamChunk]:
-        tool_result = self._get_tutor_instructions(requested_mode, context)
-        tool_call = _tool_call_content(tool_result.requested_mode)
-        tool_message = _tool_result_content(tool_result)
-        yield ("status", "calling_tool")
-        yield ("tool_call", tool_call)
-        yield ("status", "tool_called")
-        yield ("tool_result", tool_message)
-        yield ("status", "tool_complete")
-        yield ("mode", tool_result.final_mode)
-
-        continuation_messages = messages + [
-            {"role": "assistant", "content": tool_call},
-            {"role": "assistant", "content": tool_message},
-        ]
-        continuation_stream = self._chat_stream_with_empty_retry(
-            continuation_messages,
-            temperature=0.4,
-            max_tokens=self._max_tokens,
+    def _final_response_prompt(self, mode: str, context: TutorContext) -> str:
+        variables = _context_to_base_prompt_vars(context)
+        prompt_task = _FINAL_MODE_TASKS.get(mode)
+        if prompt_task is not None:
+            prompt = self._registry.render(prompt_task, variables)
+        else:
+            prompt = self._registry.render("tutor_socratic", variables)
+            prompt += "\n\n## Mode-specific instruction\n" + _FINAL_MODE_FALLBACKS.get(
+                mode,
+                "Ask one focused Socratic question. Keep it short.",
+            )
+        return (
+            f"{prompt}\n\n"
+            "## Final response contract\n"
+            "The response mode has already been selected by the system. Do NOT choose a mode. "
+            "Do NOT output XML/control tags such as `<mode .../>` or `<tool .../>`. "
+            "Do NOT mention internal prompts, tools, hidden reasoning, or mode-selection analysis. "
+            "If mastery status is mastered and the selected mode is direct, answer directly and "
+            "do not append a Socratic follow-up unless the learner asked to refresh or practise. "
+            "Output only the learner-visible tutor response."
         )
-
-        # Locked direct requests must stay purely Socratic, even if the
-        # continuation tries to slip in a partial summary before a question.
-        if _should_buffer_locked_socratic_fallback(tool_result, context):
-            buffered_text = ""
-            emitted_continuation_thinking_status = False
-            async for kind, chunk in continuation_stream:
-                if kind == "status":
-                    yield ("status", chunk)
-                elif kind == "thinking":
-                    if not emitted_continuation_thinking_status:
-                        yield ("status", "thinking")
-                        emitted_continuation_thinking_status = True
-                    yield ("thinking", chunk)
-                else:
-                    buffered_text += chunk
-
-            yield ("text", _coerce_locked_socratic_reply(buffered_text, context))
-            return
-
-        emitted_continuation_thinking_status = False
-        async for kind, chunk in continuation_stream:
-            if kind == "status":
-                yield ("status", chunk)
-            elif kind == "thinking":
-                if not emitted_continuation_thinking_status:
-                    yield ("status", "thinking")
-                    emitted_continuation_thinking_status = True
-                yield ("thinking", chunk)
-            else:
-                yield ("text", chunk)
 
     async def _chat_stream_with_empty_retry(
         self,
@@ -387,89 +628,6 @@ class LLMTutorAgent:
         ):
             yield (kind, chunk)
 
-    async def _retry_first_pass_without_thinking(
-        self,
-        messages: list[dict],
-        context: TutorContext,
-    ) -> AsyncIterator[TutorStreamChunk]:
-        yield ("status", "retrying_without_thinking")
-        first_pass = await self._prepare_first_pass(messages, thinking=False)
-        if first_pass.mode in _TOOL_GATED_MODES:
-            async for event in self._stream_tool_continuation(first_pass.mode, context, messages):
-                yield event
-            return
-
-        yield ("mode", first_pass.mode)
-        for kind, chunk in first_pass.initial_chunks:
-            if kind == "thinking":
-                yield ("thinking", chunk)
-            else:
-                yield ("text", chunk)
-        async for kind, chunk in first_pass.stream:
-            if kind == "thinking":
-                yield ("thinking", chunk)
-            else:
-                yield ("text", chunk)
-
-    async def _prepare_first_pass(
-        self,
-        messages: list[dict],
-        *,
-        thinking: bool | None = None,
-    ) -> _PreparedStream:
-        raw_stream = self._client_chat_stream_tagged(
-            messages,
-            temperature=0.4,
-            max_tokens=self._max_tokens,
-            thinking=thinking,
-        )
-        buffered_text = ""
-        initial_chunks: list[TutorStreamChunk] = []
-
-        async for kind, chunk in raw_stream:
-            if kind == "thinking":
-                initial_chunks.append(("thinking", chunk))
-                continue
-
-            buffered_text += chunk
-            parsed = _parse_control_from_buffer(buffered_text)
-            if parsed is None:
-                continue
-
-            mode = _control_value_to_mode(parsed)
-            if mode is None:
-                return _PreparedStream(
-                    mode="socratic",
-                    initial_chunks=_append_text_chunk(initial_chunks, buffered_text),
-                    stream=_empty_stream(),
-                )
-
-            remainder = parsed.remainder.lstrip("\n")
-            return _PreparedStream(
-                mode=mode,
-                initial_chunks=_append_text_chunk(initial_chunks, remainder),
-                stream=_continue_text_stream(raw_stream),
-            )
-
-        parsed = _parse_control_eof(buffered_text)
-        if parsed is not None:
-            mode = _control_value_to_mode(parsed)
-            if mode is not None:
-                return _PreparedStream(
-                    mode=mode,
-                    initial_chunks=_append_text_chunk(
-                        initial_chunks,
-                        parsed.remainder.lstrip("\n"),
-                    ),
-                    stream=_empty_stream(),
-                )
-
-        return _PreparedStream(
-            mode="socratic",
-            initial_chunks=_append_text_chunk(initial_chunks, buffered_text),
-            stream=_empty_stream(),
-        )
-
     def _get_tutor_instructions(
         self,
         requested_mode: str,
@@ -502,7 +660,7 @@ class LLMTutorAgent:
         requested_mode = str(tool_call.arguments["mode"])
         if requested_mode not in _TOOL_GATED_MODES:
             content = (
-                "<tool_result name=\"get_tutor_instructions\" mode=\"socratic\">\n"
+                '<tool_result name="get_tutor_instructions" mode="socratic">\n'
                 "Unsupported gated mode request. Stay Socratic, ask one focused question, "
                 "and do not mention internal tooling.\n"
                 "</tool_result>"
@@ -522,10 +680,7 @@ class LLMTutorAgent:
                 ),
             )
 
-        if (
-            requested_mode in _MASTERED_ONLY_TOOL_MODES
-            and context.mastery_status != "mastered"
-        ):
+        if requested_mode in _MASTERED_ONLY_TOOL_MODES and context.mastery_status != "mastered":
             fallback_mode: TutorMode = "explore" if requested_mode == "free_explore" else "socratic"
             denial = self._registry.render(
                 "tutor_locked_mode",
@@ -574,6 +729,112 @@ def _sse(event_type: str, data: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
+def _replace_system_prompt(messages: list[dict], system_prompt: str) -> list[dict]:
+    if not messages:
+        return [{"role": "system", "content": system_prompt}]
+    updated = [dict(message) for message in messages]
+    if updated[0].get("role") == "system":
+        updated[0]["content"] = system_prompt
+        return updated
+    return [{"role": "system", "content": system_prompt}, *updated]
+
+
+def _without_instruction_tool_replay(result: _ToolInstructionResult) -> _ToolInstructionResult:
+    return _ToolInstructionResult(
+        requested_mode=result.requested_mode,
+        final_mode=result.final_mode,
+        content=result.content,
+        normalized_call=None,
+        normalized_result=None,
+    )
+
+
+def _append_instruction_tool_replay(
+    messages: list[dict],
+    tool_call_content: str,
+    tool_message: str,
+    result: _ToolInstructionResult,
+) -> list[dict]:
+    if result.normalized_call is None and result.normalized_result is None:
+        return messages
+    return messages + [
+        {"role": "assistant", "content": tool_call_content},
+        {"role": "assistant", "content": tool_message},
+    ]
+
+
+def _strip_control_assistant_seeds(messages: list[dict]) -> list[dict]:
+    return [
+        message
+        for message in messages
+        if not (
+            message.get("role") == "assistant"
+            and _parse_control_eof(str(message.get("content", ""))) is not None
+        )
+    ]
+
+
+def _sanitize_stream_event(
+    kind: str,
+    chunk: str,
+    control_prefix_stripper: _ControlPrefixStripper,
+) -> TutorStreamChunk:
+    if kind != "text":
+        return kind, chunk
+    return kind, control_prefix_stripper.feed(chunk)
+
+
+def _retrieval_planning_messages(messages: list[dict]) -> list[dict]:
+    instruction = (
+        f"{_RETRIEVAL_PLANNING_MARKER}\n"
+        "You are selecting retrieval tools for the next tutor response. "
+        "If source content is needed, call the available retrieval tools. "
+        "If no source content is needed, return no tool calls and answer the learner directly "
+        "in the already-selected mode. "
+        "Do not choose a tutor mode. Do not output `<mode .../>` tags. "
+        "The prompt already lists the current concept, graph neighbours, and linked source titles; "
+        "do not search merely to add background. Use tools only when the next response would "
+        "be materially better grounded by specific source content. Prefer search_sources when "
+        "the learner asks about source content, and call read_document_section only if the "
+        "search snippet is not enough. Once you have enough context for the next answer, "
+        "stop calling tools. "
+        "For get_concept_sources and get_graph_neighbourhood, omit concept_id unless you are given "
+        "an explicit UUID; the backend will use the current concept."
+    )
+    return [
+        (
+            {"role": "system", "content": f"{message.get('content', '')}\n\n{instruction}"}
+            if index == 0 and message.get("role") == "system"
+            else dict(message)
+        )
+        for index, message in enumerate(messages)
+    ]
+
+
+def _restore_final_system_prompt(
+    final_messages: list[dict],
+    retrieval_messages: list[dict],
+) -> list[dict]:
+    if not final_messages:
+        return retrieval_messages
+    restored = [dict(message) for message in retrieval_messages]
+    final_system = final_messages[0] if final_messages[0].get("role") == "system" else None
+    if final_system is None:
+        return restored
+    if restored and restored[0].get("role") == "system":
+        restored[0] = dict(final_system)
+        return restored
+    return [dict(final_system), *restored]
+
+
+def _should_replay_retrieval_result(result: NormalizedToolResult) -> bool:
+    return (
+        result.name == "read_document_section"
+        and not result.is_error
+        and bool(result.content.strip())
+    )
+
+
 async def stream_chat_response(
     session: AsyncSession,
     agent: TutorAgent,
@@ -583,6 +844,8 @@ async def stream_chat_response(
     concept_id: uuid.UUID,
     message: str,
     conversation_id: uuid.UUID | None,
+    regenerate: bool = False,
+    replace_latest_user: bool = False,
 ) -> AsyncIterator[str]:
     """Main SSE generator for the chat endpoint."""
     try:
@@ -610,15 +873,48 @@ async def stream_chat_response(
         concept=concept,
     )
 
-    user_turn_index = await get_next_turn_index(session, conversation.id)
-    await persist_user_turn(session, conversation.id, message.strip(), user_turn_index)
+    message = message.strip()
+    if regenerate and replace_latest_user:
+        yield _sse(
+            "error",
+            {
+                "type": "error",
+                "code": "invalid_request",
+                "message": "regenerate and replace_latest_user cannot both be true",
+            },
+        )
+        return
+
+    if regenerate:
+        try:
+            user_turn = await prepare_regenerated_user_turn(session, conversation.id, message)
+        except LookupError as exc:
+            yield _sse("error", {"type": "error", "code": "not_found", "message": str(exc)})
+            return
+        except ValueError as exc:
+            yield _sse(
+                "error",
+                {"type": "error", "code": "invalid_regenerate", "message": str(exc)},
+            )
+            return
+        user_turn_index = user_turn.turn_index
+    elif replace_latest_user:
+        try:
+            user_turn = await replace_latest_user_turn(session, conversation.id, message)
+        except LookupError as exc:
+            yield _sse("error", {"type": "error", "code": "not_found", "message": str(exc)})
+            return
+        user_turn_index = user_turn.turn_index
+    else:
+        user_turn_index = await get_next_turn_index(session, conversation.id)
+        await persist_user_turn(session, conversation.id, message, user_turn_index)
 
     context = await build_tutor_context(
         session,
         conversation=conversation,
         concept=concept,
         trail=trail,
-        learner_message=message.strip(),
+        learner_message=message,
         user_turn_index=user_turn_index,
     )
 
@@ -627,82 +923,244 @@ async def stream_chat_response(
     full_reasoning = ""
     reasoning_parts: list[dict] = []
     tool_turns: list[tuple[str, str, str, str | None]] = []
+    retrieval_tool_turns: list[tuple[str, str, str, str | None]] = []
     emitted_response_status = False
+    control_prefix_stripper = _ControlPrefixStripper()
 
-    try:
-        async for kind, chunk in agent.respond_stream(context):
-            if kind == "status":
-                if chunk == "responding":
-                    emitted_response_status = True
-                status = chunk if chunk in _VALID_STATUSES else "thinking"
-                if status != "responding":
-                    reasoning_parts.append({"kind": "status", "status": status})
-                yield _sse("status", {"type": "status", "status": status})
-                continue
-            if kind == "tool_call":
-                tool_call = _normalize_tutor_instruction_content(chunk)
-                tool_mode = _safe_tool_mode(
-                    str(tool_call.arguments.get("mode")) if tool_call.is_valid else None
-                )
-                tool_turns.append(("assistant", "tool_call", chunk, tool_mode))
-                reasoning_parts.append(
-                    {
-                        "kind": "tool_call",
-                        "name": "get_tutor_instructions",
-                        "mode": tool_mode,
-                    }
-                )
-                yield _sse(
-                    "tool_call",
-                    {
-                        "type": "tool_call",
-                        "name": "get_tutor_instructions",
-                        "mode": tool_mode,
-                    },
-                )
-                continue
-            if kind == "tool_result":
-                tool_mode = _safe_tool_mode(_extract_tool_mode(chunk))
-                preview = _tool_result_preview(chunk)
-                tool_turns.append(("tool", "tool_result", chunk, tool_mode))
-                reasoning_parts.append(
-                    {
-                        "kind": "tool_result",
-                        "name": "get_tutor_instructions",
-                        "mode": tool_mode,
-                        "result": preview,
-                    }
-                )
-                yield _sse(
-                    "tool_result",
-                    {
-                        "type": "tool_result",
-                        "name": "get_tutor_instructions",
-                        "mode": tool_mode,
-                        "result": preview,
-                    },
-                )
-                continue
-            if kind == "mode":
-                parsed_mode = chunk if chunk in _VALID_MODES else "socratic"
-                mode = parsed_mode  # type: ignore[assignment]
-                yield _sse("mode", {"type": "mode", "mode": mode})
-                continue
-            if kind == "thinking":
-                full_reasoning += chunk
-                if reasoning_parts and reasoning_parts[-1].get("kind") == "thinking":
-                    reasoning_parts[-1]["text"] = f"{reasoning_parts[-1].get('text', '')}{chunk}"
-                else:
-                    reasoning_parts.append({"kind": "thinking", "text": chunk})
-                yield _sse("thinking", {"type": "thinking", "content": chunk})
-                continue
-            visible_chunk = _strip_control_prefix(chunk)
-            full_text += visible_chunk
+    def _process_event(kind: str, chunk: str) -> None:
+        """Apply a (kind, chunk) event to mutable accumulators (no SSE yield here)."""
+        nonlocal mode, full_text, full_reasoning, emitted_response_status
+        if kind == "mode":
+            parsed_mode = chunk if chunk in _VALID_MODES else "socratic"
+            mode = parsed_mode  # type: ignore[assignment]
+        elif kind == "thinking":
+            full_reasoning += chunk
+            if reasoning_parts and reasoning_parts[-1].get("kind") == "thinking":
+                reasoning_parts[-1]["text"] = f"{reasoning_parts[-1].get('text', '')}{chunk}"
+            else:
+                reasoning_parts.append({"kind": "thinking", "text": chunk})
+        elif kind == "tool_call":
+            tool_call_nc = _normalize_tutor_instruction_content(chunk)
+            tool_mode = _safe_tool_mode(
+                str(tool_call_nc.arguments.get("mode")) if tool_call_nc.is_valid else None
+            )
+            tool_turns.append(("assistant", "tool_call", chunk, tool_mode))
+            reasoning_parts.append(
+                {"kind": "tool_call", "name": "get_tutor_instructions", "mode": tool_mode}
+            )
+        elif kind == "tool_result":
+            tool_mode = _safe_tool_mode(_extract_tool_mode(chunk))
+            preview = _tool_result_preview(chunk)
+            tool_turns.append(("tool", "tool_result", chunk, tool_mode))
+            reasoning_parts.append(
+                {
+                    "kind": "tool_result",
+                    "name": "get_tutor_instructions",
+                    "mode": tool_mode,
+                    "result": preview,
+                }
+            )
+        elif kind == "status":
+            if chunk == "responding":
+                emitted_response_status = True
+            status = chunk if chunk in _VALID_STATUSES else "thinking"
+            if status != "responding":
+                reasoning_parts.append({"kind": "status", "status": status})
+        else:
+            full_text += chunk
+
+    async def _emit_event(kind: str, chunk: str):
+        """Yield the SSE wire encoding for a (kind, chunk) event."""
+        nonlocal emitted_response_status
+        if kind == "status":
+            status = chunk if chunk in _VALID_STATUSES else "thinking"
+            yield _sse("status", {"type": "status", "status": status})
+        elif kind == "tool_call":
+            tool_call_nc = _normalize_tutor_instruction_content(chunk)
+            tool_mode = _safe_tool_mode(
+                str(tool_call_nc.arguments.get("mode")) if tool_call_nc.is_valid else None
+            )
+            yield _sse(
+                "tool_call",
+                {"type": "tool_call", "name": "get_tutor_instructions", "mode": tool_mode},
+            )
+        elif kind == "tool_result":
+            tool_mode = _safe_tool_mode(_extract_tool_mode(chunk))
+            preview = _tool_result_preview(chunk)
+            yield _sse(
+                "tool_result",
+                {
+                    "type": "tool_result",
+                    "name": "get_tutor_instructions",
+                    "mode": tool_mode,
+                    "result": preview,
+                },
+            )
+        elif kind == "mode":
+            parsed_mode = chunk if chunk in _VALID_MODES else "socratic"
+            yield _sse("mode", {"type": "mode", "mode": parsed_mode})
+        elif kind == "thinking":
+            yield _sse("thinking", {"type": "thinking", "content": chunk})
+        else:
+            visible_chunk = chunk
             if not emitted_response_status:
                 yield _sse("status", {"type": "status", "status": "responding"})
                 emitted_response_status = True
             if visible_chunk:
                 yield _sse("token", {"type": "token", "content": visible_chunk})
+
+    try:
+        if hasattr(agent, "prepare_mode") and hasattr(agent, "stream_text"):
+            # ---------------------------------------------------------------
+            # Two-phase path: mode selection → retrieval → text generation
+            # ---------------------------------------------------------------
+
+            # Phase 1: mode selection.
+            # When the agent supports prepare_mode_stream, first-call reasoning is
+            # streamed live (status/thinking) instead of being buffered until the
+            # first LLM call completes; the prep then carries only the post-mode
+            # tool/mode events to emit below.
+            prep: _ModePreparation | None = None
+            if hasattr(agent, "prepare_mode_stream"):
+                async for kind, payload in agent.prepare_mode_stream(context):  # type: ignore[union-attr]
+                    if kind == "__prep__":
+                        prep = payload  # type: ignore[assignment]
+                        break
+                    kind, chunk = _sanitize_stream_event(
+                        kind, str(payload), control_prefix_stripper
+                    )
+                    _process_event(kind, chunk)
+                    async for sse in _emit_event(kind, chunk):
+                        yield sse
+            if prep is None:
+                prep = await agent.prepare_mode(context)  # type: ignore[union-attr]
+
+            # Emit buffered events from phase 1 (status, tool_call, tool_result, mode)
+            for kind, chunk in prep.buffered_events:
+                kind, chunk = _sanitize_stream_event(kind, chunk, control_prefix_stripper)
+                _process_event(kind, chunk)
+                async for sse in _emit_event(kind, chunk):
+                    yield sse
+
+            # Retrieval loop — between phases so the LLM sees retrieved content
+            llm_client_for_retrieval = getattr(agent, "llm_client", None)
+            enriched_messages = prep.messages_after_mode
+            if llm_client_for_retrieval is not None and len(context.sources) > 0:
+                try:
+                    retrieval_messages = _retrieval_planning_messages(prep.messages_after_mode)
+                    retrieval_loop = await _run_retrieval_loop(
+                        retrieval_messages,
+                        RETRIEVAL_TOOLS,
+                        session=session,
+                        workspace_id=workspace_id,
+                        concept_id=concept_id,
+                        llm_client=llm_client_for_retrieval,
+                    )
+                    retrieval_results = retrieval_loop.tool_results
+                    enriched_messages = _restore_final_system_prompt(
+                        prep.messages_after_mode,
+                        retrieval_loop.messages,
+                    )
+                except Exception as exc:
+                    logger.warning("Retrieval loop failed: %s", exc)
+                    retrieval_results = []
+                    retrieval_loop = None
+                    enriched_messages = prep.messages_after_mode
+
+                for result in retrieval_results:
+                    retrieval_tool_turns.append(
+                        (
+                            "assistant",
+                            "tool_call",
+                            json.dumps(
+                                {
+                                    "name": result.name,
+                                    "call_id": result.call_id,
+                                    "query": result.public_preview.get("query"),
+                                }
+                            ),
+                            None,
+                        )
+                    )
+                    reasoning_parts.append(
+                        {
+                            "kind": "tool_call",
+                            "name": result.name,
+                            "mode": None,
+                            "query": result.public_preview.get("query"),
+                        }
+                    )
+                    reasoning_parts.append(
+                        {
+                            "kind": "tool_result",
+                            "name": result.name,
+                            "mode": None,
+                            "result": result.preview_json(),
+                        }
+                    )
+                    if _should_replay_retrieval_result(result):
+                        retrieval_tool_turns.append(("tool", "tool_result", result.content, None))
+                    yield _sse(
+                        "tool_call",
+                        {
+                            "type": "tool_call",
+                            "name": result.name,
+                            "query": result.public_preview.get("query"),
+                        },
+                    )
+                    yield _sse(
+                        "tool_result",
+                        {
+                            "type": "tool_result",
+                            "name": result.name,
+                            "result": result.preview_json(),
+                        },
+                    )
+
+                if retrieval_loop is not None and not retrieval_results and retrieval_loop.thinking:
+                    _process_event("thinking", retrieval_loop.thinking)
+                    async for sse in _emit_event("thinking", retrieval_loop.thinking):
+                        yield sse
+
+                if (
+                    retrieval_loop is not None
+                    and not retrieval_results
+                    and retrieval_loop.text.strip()
+                ):
+                    kind, chunk = _sanitize_stream_event(
+                        "text",
+                        retrieval_loop.text,
+                        control_prefix_stripper,
+                    )
+                    _process_event(kind, chunk)
+                    async for sse in _emit_event(kind, chunk):
+                        yield sse
+                    continue_final_generation = False
+                else:
+                    continue_final_generation = True
+            else:
+                continue_final_generation = True
+
+            if continue_final_generation:
+                # Phase 2: text generation with retrieval-enriched messages
+                async for kind, chunk in agent.stream_text(  # type: ignore[union-attr]
+                    context, prep, messages=enriched_messages
+                ):
+                    kind, chunk = _sanitize_stream_event(kind, chunk, control_prefix_stripper)
+                    _process_event(kind, chunk)
+                    async for sse in _emit_event(kind, chunk):
+                        yield sse
+
+        else:
+            # ---------------------------------------------------------------
+            # Backward-compatible path for agents without two-phase support
+            # ---------------------------------------------------------------
+            async for kind, chunk in agent.respond_stream(context):
+                kind, chunk = _sanitize_stream_event(kind, chunk, control_prefix_stripper)
+                _process_event(kind, chunk)
+                async for sse in _emit_event(kind, chunk):
+                    yield sse
+
     except Exception as exc:
         logger.error("Tutor agent failed: %s", exc)
         await session.rollback()
@@ -726,7 +1184,7 @@ async def stream_chat_response(
         mode = "socratic"
 
     next_turn_index = user_turn_index + 1
-    for role, kind, content, tool_mode in tool_turns:
+    for role, kind, content, tool_mode in tool_turns + retrieval_tool_turns:
         await persist_tool_turn(
             session,
             conversation.id,
@@ -762,25 +1220,6 @@ async def stream_chat_response(
             },
         },
     )
-
-
-async def _continue_text_stream(
-    stream: AsyncIterator[TutorStreamChunk],
-) -> AsyncIterator[TutorStreamChunk]:
-    async for kind, chunk in stream:
-        if kind == "thinking":
-            yield ("thinking", chunk)
-        else:
-            yield ("text", chunk)
-
-
-def _append_text_chunk(chunks: list[TutorStreamChunk], text: str) -> tuple[TutorStreamChunk, ...]:
-    return tuple(chunks + ([("text", text)] if text else []))
-
-
-async def _empty_stream() -> AsyncIterator[TutorStreamChunk]:
-    if False:
-        yield ("text", "")
 
 
 def _should_buffer_locked_socratic_fallback(
@@ -983,6 +1422,7 @@ def _context_to_base_prompt_vars(context: TutorContext) -> dict[str, str]:
 
     return {
         "concept": f"{context.concept.title} ({context.concept.concept_level})",
+        "concept_id": str(context.concept.id),
         "concept_level": context.concept.concept_level,
         "prerequisites": ", ".join(node.title for node in context.prerequisites) or "none",
         "contained_nodes": ", ".join(node.title for node in context.contained_nodes) or "none",

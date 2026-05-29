@@ -102,6 +102,31 @@ class _FailingAgent:
         yield  # marks this as an async generator
 
 
+class _StreamingTwoPhaseAgent:
+    """Two-phase agent that streams first-pass reasoning live via prepare_mode_stream."""
+
+    def _prep(self):
+        from backend.app.services.tutor import _ModePreparation
+
+        return _ModePreparation(
+            mode="socratic",
+            locked_socratic=False,
+            messages_after_mode=[{"role": "system", "content": "final"}],
+            buffered_events=(("mode", "socratic"),),
+        )
+
+    async def prepare_mode(self, context: TutorContext):
+        return self._prep()
+
+    async def prepare_mode_stream(self, context: TutorContext):
+        yield ("status", "thinking")
+        yield ("thinking", "first-pass reasoning")
+        yield ("__prep__", self._prep())
+
+    async def stream_text(self, context: TutorContext, prep, *, messages=None):
+        yield ("text", "Visible answer")
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -312,6 +337,33 @@ async def test_chat_can_emit_thinking_event_before_tokens(api_client, db_engine)
 
     assert "thinking" in event_types
     assert event_types.index("thinking") < event_types.index("token")
+
+
+async def test_chat_streams_first_pass_reasoning_before_mode(api_client, db_engine):
+    """Two-phase agents stream first-pass (mode-selection) reasoning live, before mode."""
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _StreamingTwoPhaseAgent()
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Think out loud"},
+    )
+
+    events = _parse_sse(resp.text)
+    event_types = [e["data"]["type"] for e in events]
+
+    # First-pass thinking is streamed before the mode event and the visible answer.
+    assert "thinking" in event_types
+    assert event_types.index("thinking") < event_types.index("mode")
+    assert event_types.index("thinking") < event_types.index("token")
+
+    thinking_event = next(e for e in events if e["data"]["type"] == "thinking")
+    assert thinking_event["data"]["content"] == "first-pass reasoning"
+
+    done_event = next(e for e in events if e["data"]["type"] == "done")
+    assert done_event["data"]["message"]["content"] == "Visible answer"
+    # The streamed first-pass reasoning is persisted exactly once.
+    assert done_event["data"]["message"]["reasoning"] == "first-pass reasoning"
 
 
 async def test_chat_can_emit_status_events(api_client, db_engine):

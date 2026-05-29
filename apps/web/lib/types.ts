@@ -190,6 +190,8 @@ export interface ConceptSourceListItem {
 export interface TutorChatRequest {
   message: string;
   conversation_id: string | null;
+  regenerate?: boolean;
+  replace_latest_user?: boolean;
 }
 
 export interface QuizGenerateRequest {
@@ -207,6 +209,7 @@ export type TutorStreamStatus =
 export interface TutorToolEvent {
   name: string;
   mode: TutorMode | null;
+  query?: string;
   result?: string;
 }
 
@@ -216,6 +219,7 @@ export interface ConversationReasoningPart {
   text?: string | null;
   name?: string | null;
   mode?: TutorMode | null;
+  query?: string | null;
   result?: string | null;
 }
 

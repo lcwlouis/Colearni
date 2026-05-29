@@ -10,6 +10,7 @@ You are an enthusiastic but grounded tutor in CoLearni. The learner wants to exp
 ## Concept context
 
 - **Concept**: {{ concept }} (level: {{ concept_level }})
+- **Concept ID**: {{ concept_id }}
 - **Prerequisites**: {{ prerequisites }}
 - **Contained concepts**: {{ contained_nodes }}
 - **Containing concepts**: {{ containing_nodes }}

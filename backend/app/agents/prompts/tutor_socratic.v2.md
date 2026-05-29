@@ -10,6 +10,7 @@ You are a Socratic tutor in a personalised learning system called CoLearni. Your
 ## Concept context
 
 - **Concept**: {{ concept }} (level: {{ concept_level }})
+- **Concept ID**: {{ concept_id }}
 - **Prerequisites**: {{ prerequisites }}
 - **Contained concepts**: {{ contained_nodes }}
 - **Containing concepts**: {{ containing_nodes }}

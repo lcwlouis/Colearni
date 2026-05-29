@@ -67,6 +67,7 @@ describe("tutor runtime adapter", () => {
         conceptId: "concept-1",
         message: "Latest message",
         conversationId: "conversation-0",
+        regenerate: false,
         signal: abortSignal,
       }),
     );
@@ -198,12 +199,12 @@ describe("tutor runtime adapter", () => {
           {
             type: "data",
             name: "tutor-tool-call",
-            data: { name: "get_tutor_instructions", mode: "direct", result: undefined },
+            data: { name: "get_tutor_instructions", mode: "direct", query: undefined, result: undefined },
           },
           {
             type: "data",
             name: "tutor-tool-result",
-            data: { name: "get_tutor_instructions", mode: "direct", result: "Use direct mode." },
+            data: { name: "get_tutor_instructions", mode: "direct", query: undefined, result: "Use direct mode." },
           },
           { type: "data", name: "tutor-thinking", data: { text: "Trace after tool." } },
           { type: "text", text: "Hi" },
@@ -212,6 +213,68 @@ describe("tutor runtime adapter", () => {
         metadata: { custom: { mode: "direct" } },
       }),
     ]);
+  });
+
+  test("marks explicit reload runs as backend regenerate requests", async () => {
+    const { streamTutorChat } = await import("@/lib/api");
+    vi.mocked(streamTutorChat).mockClear();
+    const adapter = createTutorModelAdapter({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      conversationId: "conversation-0",
+      onConversationId: vi.fn(),
+      onMode: vi.fn(),
+    });
+    const stream = adapter.run({
+      messages: [userMessage("Latest message")],
+      runConfig: { custom: { regenerate: true } },
+      abortSignal: new AbortController().signal,
+      context: {},
+      unstable_getMessage: () => assistantMessage(""),
+    });
+
+    if (!(Symbol.asyncIterator in stream)) {
+      throw new Error("Expected streaming adapter result");
+    }
+    for await (const _chunk of stream) {
+      // drain stream
+    }
+
+    expect(streamTutorChat).toHaveBeenCalledWith(
+      expect.objectContaining({ regenerate: true }),
+    );
+  });
+
+  test("marks latest user edit runs as backend latest-user replacement requests", async () => {
+    const { streamTutorChat } = await import("@/lib/api");
+    vi.mocked(streamTutorChat).mockClear();
+    const adapter = createTutorModelAdapter({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      conversationId: "conversation-0",
+      onConversationId: vi.fn(),
+      onMode: vi.fn(),
+    });
+    const stream = adapter.run({
+      messages: [userMessage("Edited latest message")],
+      runConfig: { custom: { replaceLatestUser: true } },
+      abortSignal: new AbortController().signal,
+      context: {},
+      unstable_getMessage: () => assistantMessage(""),
+    });
+
+    if (!(Symbol.asyncIterator in stream)) {
+      throw new Error("Expected streaming adapter result");
+    }
+    for await (const _chunk of stream) {
+      // drain stream
+    }
+
+    expect(streamTutorChat).toHaveBeenCalledWith(
+      expect.objectContaining({ replaceLatestUser: true }),
+    );
   });
 
   test("handled stream errors do not reject the adapter loop", async () => {

@@ -271,6 +271,47 @@ async def test_assistant_reasoning_is_stored_when_provider_exposes_it(db_engine)
     ]
 
 
+async def test_split_control_prefix_is_not_emitted_or_persisted(db_engine):
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async def override_session():
+        async with async_session() as session:
+            yield session
+
+    class _SplitTagAgent:
+        async def respond_stream(self, context: TutorContext):
+            yield ("mode", "socratic")
+            yield ("text", '<mode name="')
+            yield ("text", 'socratic" />\n')
+            yield ("text", "Visible answer")
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_tutor_agent] = lambda: _SplitTagAgent()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        ws_id, trail_id, concept_id = await _seed(db_engine)
+        resp = await ac.post(
+            f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+            json={"message": "What is inertia?"},
+        )
+
+    app.dependency_overrides.clear()
+
+    token_text = "".join(
+        event["data"].get("content", "")
+        for event in _parse_sse(resp.text)
+        if event["data"]["type"] == "token"
+    )
+    assert token_text == "Visible answer"
+
+    async with async_session() as session:
+        assistant_turn = await session.scalar(
+            select(ConversationTurn).where(ConversationTurn.role == "assistant")
+        )
+    assert assistant_turn is not None
+    assert assistant_turn.content == "Visible answer"
+
+
 async def test_turn_indexes_increment_correctly(api_client, db_engine):
     ws_id, trail_id, concept_id = await _seed(db_engine)
 
@@ -311,6 +352,73 @@ async def test_second_chat_reuses_conversation(api_client, db_engine):
         return done["data"]["conversation_id"]
 
     assert _conv_id(resp1) == _conv_id(resp2), "both chats must share the same conversation"
+
+
+async def test_regenerate_replaces_latest_assistant_turn_without_duplicate_user(
+    api_client,
+    db_engine,
+):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+
+    first = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "What is inertia?"},
+    )
+    conversation_id = next(
+        event["data"]["conversation_id"]
+        for event in _parse_sse(first.text)
+        if event["data"]["type"] == "done"
+    )
+    await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={
+            "message": "What is inertia?",
+            "conversation_id": conversation_id,
+            "regenerate": True,
+        },
+    )
+
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        turns = list(
+            await session.scalars(select(ConversationTurn).order_by(ConversationTurn.turn_index))
+        )
+
+    assert [turn.role for turn in turns] == ["user", "assistant"]
+    assert [turn.turn_index for turn in turns] == [0, 1]
+    assert turns[0].content == "What is inertia?"
+
+
+async def test_edit_replaces_latest_user_turn_and_generated_tail(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+
+    first = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Original question"},
+    )
+    conversation_id = next(
+        event["data"]["conversation_id"]
+        for event in _parse_sse(first.text)
+        if event["data"]["type"] == "done"
+    )
+    await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={
+            "message": "Edited question",
+            "conversation_id": conversation_id,
+            "replace_latest_user": True,
+        },
+    )
+
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        turns = list(
+            await session.scalars(select(ConversationTurn).order_by(ConversationTurn.turn_index))
+        )
+
+    assert [turn.role for turn in turns] == ["user", "assistant"]
+    assert [turn.turn_index for turn in turns] == [0, 1]
+    assert turns[0].content == "Edited question"
 
 
 # ---------------------------------------------------------------------------

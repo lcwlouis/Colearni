@@ -108,14 +108,14 @@ Default retrieval order:
 
 Avoid searching the entire graph or workspace by default. Broad retrieval is more expensive, noisier, and less pedagogically focused.
 
-Planned retrieval tools should stay controlled and budgeted:
+Retrieval tools are controlled and budgeted:
 
-- `search_sources(query, concept_id?)`.
-- `open_source_chunk(chunk_id)`.
-- `get_concept_sources(concept_id)`.
-- `get_graph_neighbourhood(concept_id)`.
+- `search_sources(query, concept_id?)` — chunk-text search returning `ChunkSearchResult` objects with `section_heading`, `line_start`, `line_end`, `source_revision_id`. Scoped to the current concept when `concept_id` is provided.
+- `read_document_section(source_revision_id, line_start, window_lines=50)` — reads a markdown window from `SourceRevision.raw_text`. Scoped to the current workspace.
+- `get_concept_sources(concept_id)` — service function exists; tool dispatch deferred.
+- `get_graph_neighbourhood(concept_id)` — service function exists; tool dispatch deferred.
 
-These tools should plug into the provider tool abstraction once it exists. They must enforce workspace/Trail/concept scope and return citation-ready metadata rather than dumping full source text into every tutor prompt.
+These tools enforce workspace/Trail/concept scope and return citation-ready metadata. Per-turn budget is `TOOL_CALL_BUDGET = 3` individual tool executions. Tool results are capped at `MAX_TOOL_RESULT_CHARS = 2000` characters before entering context. Retrieval tools are only offered to the LLM when the current concept has at least one linked source.
 
 ## Grounding and Citations
 

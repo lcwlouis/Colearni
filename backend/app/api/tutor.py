@@ -82,6 +82,8 @@ async def chat_endpoint(
             concept_id=concept_id,
             message=body.message,
             conversation_id=body.conversation_id,
+            regenerate=body.regenerate,
+            replace_latest_user=body.replace_latest_user,
         ):
             yield event
 

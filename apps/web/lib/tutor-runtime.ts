@@ -105,11 +105,13 @@ export function createTutorModelAdapter({
   onMasteryUpdated,
 }: CreateTutorModelAdapterOptions): ChatModelAdapter {
   return {
-    async *run({ messages, abortSignal }) {
+    async *run({ messages, abortSignal, runConfig }) {
       const latest = latestUserMessageText(messages);
       if (!latest) {
         return;
       }
+      const regenerate = runConfig.custom?.regenerate === true;
+      const replaceLatestUser = runConfig.custom?.replaceLatestUser === true;
 
       let text = "";
       const parts: TutorRuntimePart[] = [];
@@ -122,6 +124,8 @@ export function createTutorModelAdapter({
         conceptId,
         message: latest,
         conversationId: getConversationId?.() ?? conversationId,
+        regenerate,
+        replaceLatestUser,
         signal: abortSignal,
         onMode,
         onStatus(nextStatus) {
@@ -279,6 +283,7 @@ function reasoningPartToRuntimePart(part: ConversationReasoningPart): TutorRunti
   const tool = {
     name: part.name ?? "tool",
     mode: part.mode ?? null,
+    query: part.query ?? undefined,
     result: part.result ?? undefined,
   };
   return [{ kind: part.kind, tool }];

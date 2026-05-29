@@ -5,6 +5,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   type ReactNode,
@@ -24,6 +25,12 @@ export function ReasoningRoot({
   const [open, setOpen] = useState(defaultOpen);
   const ref = useRef<HTMLDivElement>(null);
   const lockScroll = useScrollLock(ref, ANIMATION_DURATION);
+
+  useEffect(() => {
+    if (defaultOpen) {
+      setOpen(true);
+    }
+  }, [defaultOpen]);
 
   const onOpenChange = useCallback(
     (nextOpen: boolean) => {

@@ -24,6 +24,8 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., max_length=4000)
     conversation_id: uuid.UUID | None = None
+    regenerate: bool = False
+    replace_latest_user: bool = False
 
     @field_validator("message", mode="before")
     @classmethod
@@ -41,6 +43,7 @@ class ConversationReasoningPart(BaseModel):
     text: str | None = None
     name: str | None = None
     mode: TutorMode | None = None
+    query: str | None = None
     result: str | None = None
 
 
