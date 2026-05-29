@@ -64,7 +64,16 @@ the backend heuristic. The two can silently diverge.
 
 ## Item 2: Phase 10 Parser Pipeline — At Least One Format + Auto-Linking
 
-**Status: pending**
+**Status: complete**
+
+Implemented end-to-end: `parser.py` (PDF via pdfplumber, markdown, plaintext; content-type is
+matched on its bare media type and falls back to the filename extension), `chunker.py`
+(heading-aware buffering + sentence splitting with whitespace-tolerant line anchoring),
+`SourceChunk` model + migration `0011` (vector column sized from `EMBEDDING_DIM`),
+`EmbeddingClient` (best-effort: provider/network failures leave embeddings NULL and fall back to
+ILIKE), the `trail_id` upload field, and `auto_link_source_to_trail` (concept title match).
+Note: the model/ingestion fields are named `status` / `error_message` (not the
+`parser_status` / `parser_error` used in the prose below).
 
 ### Problem
 
@@ -97,8 +106,9 @@ The parser pipeline is layered so that multimodal formats (images, tables, audio
 can be added later without restructuring:
 
 ```
-Upload → Parser (format-specific) → CanonicalDocument (typed elements + metadata)
-       → Chunker (structure-aware, section-boundary) → SourceChunk rows
+Upload → Parser (format-specific) → CanonicalDocument (typed elements + markdown text)
+       → Chunker (structure-aware, section-boundary, line-number tracking) → SourceChunk rows
+       → Embedder (multi-provider EmbeddingClient) → embedding vectors on SourceChunk rows
        → Linker (keyword substring matching) → ConceptSourceLink rows
 ```
 
@@ -118,14 +128,42 @@ class CanonicalDocument:
     parser_name: str
 
     @property
-    def text(self) -> str:  # concatenated text for raw_text storage
-        return "\n\n".join(e.text for e in self.elements if e.text.strip())
+    def text(self) -> str:
+        """Markdown representation stored in SourceRevision.raw_text.
+
+        Headings are serialized with # markers so the LLM can read structured
+        sections via read_document_section. Line numbers in raw_text are the
+        navigation anchor for SourceChunk.line_start/line_end.
+        """
+        lines = []
+        for e in self.elements:
+            if not e.text.strip():
+                continue
+            if e.type == "heading_1":
+                lines.append(f"# {e.text}")
+            elif e.type == "heading_2":
+                lines.append(f"## {e.text}")
+            elif e.type == "heading_3":
+                lines.append(f"### {e.text}")
+            elif e.type == "list_item":
+                lines.append(f"- {e.text}")
+            elif e.type == "code":
+                lines.append(f"```\n{e.text}\n```")
+            else:  # paragraph
+                lines.append(e.text)
+        return "\n\n".join(lines)
 ```
 
+`raw_text` is the markdown representation. The LLM reads from it via `read_document_section`
+(Item 3). Storing markdown rather than flat text preserves heading structure, which the LLM
+can use to navigate and understand document context.
+
 Format-specific element extraction:
-- **PDF** (`pdfminer.six`, MIT, fallback `pypdf`): extract raw text, split on `\n\n` or ≥2 blank
-  lines to produce `"paragraph"` elements. No heading detection from PDF at MVP (font metadata not
-  exposed by the high-level pdfminer API). All elements are `"paragraph"` type.
+- **PDF** (`pdfplumber`, MIT): extract text page by page, use basic font-size heuristics where
+  available, split on `\n\n` or ≥2 blank lines to produce `"paragraph"` elements. pdfplumber
+  is preferred over pdfminer.six because it exposes font metadata and image bounding boxes,
+  enabling richer heading detection and future image placeholder insertion (Phase 16). All
+  elements are `"paragraph"` at MVP; heading detection via font sizes is deferred.
 - **Markdown** (`text/markdown`): regex-based heading detection (`^#{1,3}\s+`), then paragraph
   splitting. Produces `"heading_1"/"heading_2"/"heading_3"` + `"paragraph"` elements.
 - **Plain text** (`text/plain`): paragraph detection only (split on `\n\n`). All `"paragraph"`.
@@ -144,83 +182,190 @@ Fallback: if a **single element** exceeds `MAX_CHUNK_CHARS` on its own, split it
 boundaries (`(?<=[.!?])\s+`), grouping sentences until the cap.
 
 Each `SourceChunk` row stores: `source_revision_id`, `workspace_id`, `chunk_index`, `text`,
-`char_start`, `char_end`, `section_heading` (nearest ancestor heading text, or `NULL`).
-No embedding column yet (pgvector deferred to Phase 16). No overlap — heading context in
-`section_heading` field replaces the need for overlap.
+`char_start`, `char_end`, `line_start`, `line_end`, `section_heading` (nearest ancestor heading
+text, or `NULL`), and `embedding` (nullable pgvector column for similarity search).
+
+`line_start`/`line_end` are 1-indexed line numbers in `SourceRevision.raw_text`. They are
+computed from `char_start`/`char_end` by counting newlines in the full markdown text:
+
+```python
+def char_to_line(text: str, offset: int) -> int:
+    return text[:offset].count('\n') + 1  # 1-indexed
+```
+
+This metadata lets the LLM navigate directly: `search_sources` returns `line_start` for any
+matching chunk; the LLM can then call `read_document_section(revision_id, line_start)` to
+read the surrounding context window from `raw_text`.
 
 `MAX_CHUNK_CHARS` default: 2 000. Configurable via env var.
+
+**Embedder stage** — runs after chunking, before auto-linking:
+- Calls `EmbeddingClient.embed(texts)` for all chunk texts in one batch call.
+- Stores returned vectors in `SourceChunk.embedding` (pgvector `vector(dim)` column).
+- If `EMBEDDING_PROVIDER=disabled` (the default), embedding is skipped; `embedding` stays NULL.
+- `EMBEDDING_DIM` controls the vector dimension (default: 1536). Changing this after initial
+  migration requires a new Alembic migration to ALTER the column type.
+
+**EmbeddingClient** — multi-provider, all routed through the OpenAI SDK (same pattern as
+`LLMClient`) since OpenAI's SDK supports `base_url` overrides for any OpenAI-compatible
+endpoint:
+
+| `EMBEDDING_PROVIDER` | Routing | Notes |
+|---|---|---|
+| `disabled` | no-op (returns None) | Default; ILIKE fallback used for search |
+| `openai` | openai SDK (default endpoint) | Recommended default when enabled |
+| `gemini` | openai SDK + Google OAI-compat base URL | Uses `text-embedding-004` by default |
+| `ollama` | openai SDK + `http://localhost:11434/v1` | Local; any Ollama embedding model |
+| `openai_compatible` | openai SDK + `EMBEDDING_API_BASE` | Any OAI-compatible endpoint |
+
+Settings:
+
+```
+EMBEDDING_PROVIDER     disabled | openai | gemini | ollama | openai_compatible
+EMBEDDING_MODEL        model name (default: text-embedding-3-small)
+EMBEDDING_API_KEY      API key (optional: falls back to LLM_API_KEY if same provider)
+EMBEDDING_API_BASE     base URL override (required for openai_compatible; used by ollama)
+EMBEDDING_DIM          vector dimension, must match model output (default: 1536)
+```
+
+**Reranker stage** — optional pipeline step between chunk retrieval and result delivery:
+
+```
+search_sources_by_text → [reranker.rerank(query, candidates)] → limit → return
+```
+
+The reranker is a no-op by default (`RERANKER_PROVIDER=none`). The interface is defined now
+so that Cohere Rerank or FlashRank (MIT, local) can be plugged in without changing the
+retrieval pipeline shape. A no-op that returns input order imposes no cost or latency.
+
+```
+RERANKER_PROVIDER      none (default) | cohere | flashrank
+RERANKER_API_KEY       API key for Cohere (not needed for none/flashrank)
+```
 
 **Linker layer** — auto-creates `ConceptSourceLink` rows when `trail_id` is provided at upload:
 - For every concept in the trail, check if the concept's `title` or `description` appears in
   any chunk (case-insensitive substring match). If yes → link with `link_type="supplementary"`.
-- This is MVP-grade keyword linking. Embedding-based candidate generation and LLM reranking are
-  planned for Phase 16 when pgvector column is added.
+- This is MVP-grade keyword linking. When embeddings are enabled, similarity-based candidate
+  generation is possible but is deferred to Phase 16 (after the embedding pipeline is proven
+  in production).
 - Linker runs only when upload includes `trail_id`. Without it, no auto-links are created.
 - Linker respects existing manual links — no duplicate `ConceptSourceLink` rows.
+
+**`search_sources_by_text`** — returns `ChunkSearchResult` objects (not bare `SourceRecord`
+rows) so the LLM receives chunk-level navigation metadata:
+
+```python
+@dataclass
+class ChunkSearchResult:
+    source_id: uuid.UUID
+    source_revision_id: uuid.UUID
+    source_title: str
+    chunk_text: str          # the matching chunk text (capped for context)
+    section_heading: str | None
+    line_start: int          # navigation anchor for read_document_section
+    line_end: int
+    similarity: float | None # cosine similarity from vector search; None for ILIKE
+```
+
+When `EMBEDDING_PROVIDER != disabled`, search uses pgvector cosine similarity. When disabled
+or when embedding is NULL, falls back to ILIKE. Both paths return the same `ChunkSearchResult`
+shape. The reranker receives this list and returns it reordered (no-op by default).
 
 ### Scope
 
 1. **Parser**: implement `parse_source(data: bytes, content_type: str) -> CanonicalDocument`
-   in `backend/app/services/parser.py`. Support `application/pdf` (via `pdfminer.six`,
-   fallback `pypdf`), `text/plain`, and `text/markdown`. Each format produces typed
-   `DocumentElement` objects (see Architecture above). Store `doc.text` in
-   `SourceRevision.raw_text`. Set `parser_name` dynamically, `parser_status="parsed"` on
-   success, `"failed"` + `parser_error` on error. Run synchronously on upload (background
-   worker is Phase 16 polish).
+   in `backend/app/services/parser.py`. Support `application/pdf` (via `pdfplumber`),
+   `text/plain`, and `text/markdown`. Each format produces typed `DocumentElement` objects.
+   `CanonicalDocument.text` returns the markdown representation (headings as #/##/###).
+   Store `doc.text` in `SourceRevision.raw_text`. Set `parser_name` dynamically,
+   `parser_status="parsed"` on success, `"failed"` + `parser_error` on error.
 
 2. **Chunker + SourceChunk model**: implement
-   `chunk_elements(elements: list[DocumentElement], revision_id, workspace_id) -> list[SourceChunk]`
-   in `backend/app/services/chunker.py`. Add `SourceChunk` SQLAlchemy model and Alembic
-   migration if the table does not exist. Each row: `id`, `source_revision_id`, `workspace_id`,
-   `chunk_index`, `text`, `char_start`, `char_end`, `section_heading` (nullable string).
+   `chunk_elements(elements, revision_id, workspace_id, full_text) -> list[SourceChunk]`
+   in `backend/app/services/chunker.py`. The chunker receives `full_text` (the markdown
+   string from `CanonicalDocument.text`) to compute `line_start`/`line_end` from
+   `char_start`/`char_end`. Add `SourceChunk` SQLAlchemy model and Alembic migration.
+   Each row: `id`, `source_revision_id`, `workspace_id`, `chunk_index`, `text`,
+   `char_start`, `char_end`, `line_start`, `line_end`, `section_heading` (nullable),
+   `embedding` (nullable `vector(EMBEDDING_DIM)`).
 
-3. **Upload route change**: accept an optional `trail_id` form field in
-   `backend/app/api/sources.py`. Pass it through to `upload_private_source` in
-   `backend/app/services/source_ingestion.py`.
+3. **EmbeddingClient**: implement `backend/app/agents/embedding_client.py`. Multi-provider
+   (OpenAI, Gemini, Ollama, OpenAI-compatible), all via OpenAI SDK + `base_url`. No-op when
+   `EMBEDDING_PROVIDER=disabled`. `embed(texts: list[str]) -> list[list[float]] | None`.
 
-4. **Linker**: implement `auto_link_source_to_trail(session, source_revision_id, trail_id)`
-   in `backend/app/services/concept_source_links.py`. Called from ingestion after chunking
-   when `trail_id` is not None.
+4. **Reranker stub**: implement `backend/app/services/reranker.py`. No-op default
+   (`RERANKER_PROVIDER=none`). Interface: `rerank(query, candidates) -> candidates`.
 
-5. **Text search**: add `search_sources_by_text(query, workspace_id, session)` to
-   `backend/app/services/retrieval.py`. Uses `ILIKE '%query%'` against `SourceChunk.text`.
-   Vector search is deferred.
+5. **Upload route change**: accept an optional `trail_id` form field in
+   `backend/app/api/sources.py`. Pass it through to `upload_private_source`.
 
-6. **Export safety**: confirm `SourceChunk` content is excluded from Trail Pack export
-   (add assertion to existing export tests).
+6. **Update `upload_private_source`**: parse → chunk → embed → auto-link pipeline. Accept
+   optional `trail_id`. Call `EmbeddingClient` for chunk embeddings after chunking.
 
-7. **Tests**: unit tests for parser, chunker, and linker. Integration test: upload PDF bytes
-   → `parser_status="parsed"`, at least one chunk created, auto-link created when `trail_id`
-   supplied. Export regression test still passes.
+7. **Linker**: implement `auto_link_source_to_trail(session, source_revision_id, trail_id)`
+   in `backend/app/services/concept_source_links.py`.
+
+8. **Text search**: add `search_sources_by_text(query, workspace_id, session)` to
+   `backend/app/services/retrieval.py`. Returns `list[ChunkSearchResult]`. Vector search
+   when available, ILIKE fallback. Applies reranker before returning.
+
+9. **New settings**: add `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_API_KEY`,
+   `EMBEDDING_API_BASE`, `EMBEDDING_DIM`, `RERANKER_PROVIDER`, `RERANKER_API_KEY` to
+   `backend/app/settings.py`.
+
+10. **Export safety**: confirm `SourceChunk` content (including embeddings) is excluded from
+    Trail Pack export (add assertion to existing export tests).
+
+11. **Tests**: unit tests for parser, chunker, linker, embedding client, reranker stub.
+    Integration test: upload PDF bytes → `parser_status="parsed"`, at least one chunk created,
+    auto-link created when `trail_id` supplied. Export regression test still passes.
 
 ### Acceptance criteria
 
-- Uploading a PDF sets `parser_status="parsed"` and populates `raw_text`.
-- At least one `SourceChunk` row is created per parsed source.
+- Uploading a PDF sets `parser_status="parsed"` and populates `raw_text` (markdown format).
+- At least one `SourceChunk` row is created per parsed source with `line_start`/`line_end`.
+- When `EMBEDDING_PROVIDER` is configured, `embedding` column is populated on chunks.
+- When `EMBEDDING_PROVIDER=disabled`, embedding is skipped and ILIKE fallback works.
 - Uploading with `trail_id` creates `ConceptSourceLink` rows for matching concepts.
-- `search_sources_by_text` returns results from chunk text.
-- Export regression tests still pass (no chunk content leaks).
+- `search_sources_by_text` returns `ChunkSearchResult` objects with line navigation metadata.
+- Export regression tests still pass (no chunk content or embeddings leak).
 
 ### Note on scope
 
 DOCX and PPTX can follow in a second pass. One working format (PDF) unblocks the retrieval
-loop. Embedding-based linking and the background-job upgrade are Phase 16 polish.
-Agentic workspace-wide file search (distinct from Phase 11 concept-scoped retrieval tools)
-needs separate architecture planning before Phase 14.
+loop. Background-job upgrade for parsing is Phase 16 polish.
 
-**Images**: `pdfminer.six` silently skips embedded image objects — they are binary blobs in the
-PDF stream that pdfminer does not read. A diagram or screenshot in a PDF produces no chunk.
-Markdown image alt text (`![alt](url)`) IS preserved as paragraph text; the image data at the
-URL is not fetched. DOCX/PPTX picture shapes produce no text. This is acceptable at MVP.
-The `DocumentElement` type list reserves `"image"` as a deferred type for Phase 16 multimodal
-support: a vision model converts image bytes → text description → `DocumentElement(type="image")`
-→ flows through the chunker identically to a paragraph. No structural change will be needed.
+**Images**: pdfplumber exposes image bounding boxes and byte data (via `page.images`). At MVP,
+images are silently skipped — no chunk is produced. A `[IMAGE: page N]` placeholder insertion
+and vision-model captioning via `LLMClient.caption_image` is reserved for Phase 16.
+The `DocumentElement` type list reserves `"image"` as a deferred type: a vision model converts
+image bytes → text description → `DocumentElement(type="image", text="...")` → flows through
+the chunker identically to a paragraph. No structural change will be needed when this lands.
+Markdown image alt text (`![alt](url)`) IS preserved as paragraph text at MVP.
+
+**Why pdfplumber instead of pdfminer.six**: pdfplumber (MIT) exposes font metadata and image
+bounding boxes through a higher-level API without the AGPL concerns of PyMuPDF. It gives us
+the hooks for heading detection (via font size heuristics) and image handling (Phase 16)
+without switching libraries later.
+
+**Why embeddings now instead of Phase 16**: The Alembic migration and EmbeddingClient add
+~100 LOC but avoid a schema migration on a live table later (adding a vector column to a
+populated table requires `ALTER TABLE ... ADD COLUMN` which is instant for nullable columns
+but still a migration event). Having the interface in place also means the reranker and
+retrieval service have a consistent data shape from day one. With `EMBEDDING_PROVIDER=disabled`
+as the default, there is zero runtime cost for deployments that don't configure an embedding
+provider.
+
+**Why a reranker stub now**: The retrieval pipeline has a natural `search → rerank → limit`
+shape. Defining the interface now means any future Cohere or FlashRank integration is a
+single provider addition, not a pipeline refactor.
 
 ---
 
 ## Item 3: Phase 11 LLM Tool Calling Loop
 
-**Status: pending**
+**Status: complete**
 
 ### Problem
 
@@ -241,6 +386,24 @@ will face the same choice — implement the loop then, or defer again.
 - Provider tool abstraction: `backend/app/agents/provider_tools.py`.
 - Tutor chat service: `backend/app/services/conversations.py`. Currently runs one tool turn
   (get_tutor_instructions) then streams the visible response. No loop for subsequent tool calls.
+
+### Architecture: Dual-Retrieval Pattern
+
+Item 3 implements a two-tier retrieval design enabled by Item 2's chunk + line-number pipeline:
+
+**Tier 1 — Chunk search** (`search_sources` tool): fast lookup returning `ChunkSearchResult`
+objects with `section_heading`, `line_start`, `line_end`, `source_revision_id`. Gives the LLM
+a map of where relevant content lives without flooding the context window.
+
+**Tier 2 — Section reading** (`read_document_section` tool): the LLM uses `line_start` from a
+Tier 1 result to call `read_document_section(source_revision_id, line_start, window_lines=50)`,
+which reads that many lines from `SourceRevision.raw_text` (the markdown representation). This
+returns the full structured section with surrounding context — headings, paragraphs, lists —
+without dumping all chunks into every prompt.
+
+The LLM decides when to drill into a section. The two-call pattern (search → read) is
+intentional: it keeps average context size small while allowing deep dives on demand within
+the tool budget.
 
 ### Scope
 
@@ -283,29 +446,37 @@ will face the same choice — implement the loop then, or defer again.
    no source data to return.
 
 5. **`SEARCH_SOURCES_TOOL` dispatch**: update the tool executor to route `search_sources` calls
-   to `search_sources_by_text` (the new chunk-text ILIKE search added in Item 2) rather than
-   the title-only `search_sources_by_title`. This is what makes uploaded content agentically
-   retrievable.
+   to `search_sources_by_text` (the chunk-text search added in Item 2, returning
+   `ChunkSearchResult` objects) rather than the title-only `search_sources_by_title`. The
+   result includes `line_start`, `line_end`, `section_heading`, `source_revision_id` so the
+   LLM can chain into `read_document_section`.
 
-6. **SSE events**: emit `tool_call` and `tool_result` SSE events for each retrieval call with
+6. **`READ_DOCUMENT_SECTION_TOOL`**: add a fourth retrieval tool. Parameters:
+   `source_revision_id` (UUID string), `line_start` (int), `window_lines` (int, default 50).
+   Reads lines `[line_start, line_start + window_lines)` from `SourceRevision.raw_text`.
+   Returns the markdown text of that window. Scoped to workspace — reject if revision does not
+   belong to the request workspace.
+
+7. **SSE events**: emit `tool_call` and `tool_result` SSE events for each retrieval call with
    sanitized previews (same pattern as the existing instruction-tool events).
 
-7. **Persistence**: persist all retrieval tool turns as hidden `ConversationTurn` rows (same
+8. **Persistence**: persist all retrieval tool turns as hidden `ConversationTurn` rows (same
    pattern as instruction tool turns) so they survive prompt replay and context stays
    consistent across turns.
 
-8. **Scope checks**: enforce existing workspace/trail scope in every tool executor. The loop
+9. **Scope checks**: enforce existing workspace/trail scope in every tool executor. The loop
    must not allow cross-workspace access.
 
-9. **Tests**: fake-provider tests covering:
-   - Two tool calls returned in one response → both executed concurrently, budget decremented by 2
-   - Budget hit mid-turn (3 calls requested, budget=3, then 1 more → capped to 0)
-   - Duplicate call → second execution skipped, cached result returned
-   - No tool call → loop exits immediately, text streams to client
-   - Malformed tool arguments → degrade safely, return error result, do not crash loop
-   - Tool offer condition: tools NOT passed when `context.sources` is empty
+10. **Tests**: fake-provider tests covering:
+    - Two tool calls returned in one response → both executed concurrently, budget decremented by 2
+    - Budget hit mid-turn (3 calls requested, budget=3, then 1 more → capped to 0)
+    - Duplicate call → second execution skipped, cached result returned
+    - No tool call → loop exits immediately, text streams to client
+    - Malformed tool arguments → degrade safely, return error result, do not crash loop
+    - Tool offer condition: tools NOT passed when `context.sources` is empty
+    - `read_document_section` returns correct lines from `raw_text`; rejects wrong workspace
 
-10. Update `docs/CURRENT_VARIANT.md` deferred list to mark the LLM tool calling loop as complete.
+11. Update `docs/CURRENT_VARIANT.md` deferred list to mark the LLM tool calling loop as complete.
 
 ### Acceptance criteria
 
@@ -314,7 +485,9 @@ will face the same choice — implement the loop then, or defer again.
 - Budget (`TOOL_CALL_BUDGET = 3`) counts individual executions; no infinite loop.
 - Each tool result is capped at `MAX_TOOL_RESULT_CHARS = 2000` before entering context.
 - Duplicate calls within a turn return cached results.
-- `search_sources` dispatches to chunk-text ILIKE search (not title-only).
+- `search_sources` dispatches to chunk-text search and returns `ChunkSearchResult` objects
+  with `line_start`/`line_end` navigation metadata.
+- `read_document_section` reads lines from `raw_text` (markdown), scoped to workspace.
 - Hidden tool turns persist and replay correctly.
 - SSE `tool_call` / `tool_result` events stream to the client.
 - All existing 349+ tests still pass.
@@ -339,7 +512,7 @@ Do not start Phase 13 until all three items are complete.
 | Item | Description | Status |
 |---|---|---|
 | 1 | Phase 12 UI: frontend recommendation consumption | complete |
-| 2 | Phase 10 parser pipeline: PDF format + chunking | pending |
-| 3 | Phase 11 LLM tool calling loop | pending |
+| 2 | Phase 10 parser pipeline: PDF format + chunking | complete |
+| 3 | Phase 11 LLM tool calling loop | complete |
 
 Update this table as items complete.

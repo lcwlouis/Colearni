@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -13,7 +14,7 @@ from backend.app.agents.retrieval_tools import (
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.conversation import Conversation
-from backend.app.models.source import ConceptSourceLink, SourceRecord, SourceRevision
+from backend.app.models.source import ConceptSourceLink, SourceChunk, SourceRecord, SourceRevision
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.services.conversations import build_tutor_context
@@ -21,6 +22,7 @@ from backend.app.services.retrieval import (
     get_concept_sources_for_tutor,
     get_graph_neighbourhood,
     search_sources_by_title,
+    search_sources_by_text,
 )
 
 
@@ -411,18 +413,82 @@ async def test_search_sources_by_title_excludes_concept_from_different_workspace
     assert matches == []
 
 
+async def test_search_sources_by_text_falls_back_to_ilike_with_line_metadata(
+    db_session: AsyncSession,
+):
+    workspace, _, _ = await _seed_concept(db_session)
+    source = await _source(
+        db_session,
+        workspace.id,
+        title="Vector Notes",
+        origin="user_upload",
+        access="private",
+    )
+    revision = SourceRevision(
+        workspace_id=workspace.id,
+        source_id=source.id,
+        revision_number=1,
+        object_key="vector-notes.txt",
+        content_hash="sha256:vector-notes",
+        content_type="text/plain",
+        file_size_bytes=12,
+        parser_name="plaintext",
+        parser_version="parser-pipeline-v1",
+        status="parsed",
+        raw_text="Vectors are quantities with magnitude and direction.",
+        metadata_json={},
+    )
+    db_session.add(revision)
+    await db_session.flush()
+    db_session.add(
+        SourceChunk(
+            source_revision_id=revision.id,
+            workspace_id=workspace.id,
+            chunk_index=0,
+            text="Vectors are quantities with magnitude and direction.",
+            char_start=0,
+            char_end=52,
+            line_start=1,
+            line_end=1,
+            section_heading="Vectors",
+            embedding=None,
+        )
+    )
+    await db_session.flush()
+
+    fake_client = AsyncMock()
+    fake_client.embed.return_value = None
+    with patch("backend.app.services.retrieval.EmbeddingClient.from_settings", return_value=fake_client):
+        matches = await search_sources_by_text(
+            "magnitude",
+            workspace.id,
+            db_session,
+        )
+
+    assert len(matches) == 1
+    assert matches[0].source_id == source.id
+    assert matches[0].source_revision_id == revision.id
+    assert matches[0].source_title == "Vector Notes"
+    assert matches[0].section_heading == "Vectors"
+    assert matches[0].line_start == 1
+    assert matches[0].similarity is None
+
+
 def test_retrieval_tool_definitions_instantiate():
     assert isinstance(GET_CONCEPT_SOURCES_TOOL, ProviderToolDefinition)
-    assert GET_CONCEPT_SOURCES_TOOL.parameters["required"] == ["concept_id"]
+    assert GET_CONCEPT_SOURCES_TOOL.parameters["required"] == []
+    assert GET_GRAPH_NEIGHBOURHOOD_TOOL.parameters["required"] == []
     assert SEARCH_SOURCES_TOOL.parameters["required"] == ["query"]
-    assert len(RETRIEVAL_TOOLS) == 3
+    assert len(RETRIEVAL_TOOLS) == 4
 
 
 @pytest.mark.parametrize(
     ("tool", "arguments"),
     [
         (GET_CONCEPT_SOURCES_TOOL, {"concept_id": str(uuid.uuid4())}),
+        (GET_CONCEPT_SOURCES_TOOL, {}),
         (GET_GRAPH_NEIGHBOURHOOD_TOOL, {"concept_id": str(uuid.uuid4())}),
+        (GET_GRAPH_NEIGHBOURHOOD_TOOL, {}),
         (SEARCH_SOURCES_TOOL, {"query": "vectors"}),
     ],
 )

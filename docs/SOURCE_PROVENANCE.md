@@ -99,17 +99,18 @@ Examples:
 
 ## Ingestion Provenance
 
-Source ingestion V1 should track uploaded/private files without using git internally for user source history.
+Source ingestion V1 tracks uploaded/private files without using git internally for user source history.
 
 Current implemented foundation:
 
 - Uploaded files are stored as private local objects under `SOURCE_STORAGE_ROOT`.
 - Each upload creates a private `SourceRecord` with `origin = user_upload`, `access = private`, and `include_on_public_export = false`.
 - Each upload creates one immutable `SourceRevision` with object key, `sha256:<hex>` content hash, file size/content type, parser metadata, status, and metadata.
-- Parser metadata is honest for the current slice: `parser_name = none`, `parser_version = upload-only-v1`, `status = pending_parse`.
-- No canonical parsed text, chunks, embeddings, full-text index, or retrieval tool reads uploaded content yet.
-- Learner-facing source metadata APIs return sanitized revision summaries, not storage object keys or content hashes.
-- Public export excludes uploaded sources and revision artifacts; import rejects source revision/object/hash fields.
+- Parser pipeline (Consolidation Item 2): `raw_text` is populated as markdown (headings serialized as `#`/`##`/`###`), `parser_status` is `"parsed"` on success or `"failed"` with `parser_error` on failure.
+- `SourceChunk` rows are created per revision with `text`, `char_start`, `char_end`, `line_start`, `line_end`, `section_heading`, and (optionally) `embedding`.
+- Chunk embeddings are stored in the `embedding` column (pgvector) when `EMBEDDING_PROVIDER` is configured. NULL when disabled.
+- Learner-facing source metadata APIs return sanitized revision summaries, not storage object keys, content hashes, raw text, chunks, or embeddings.
+- Public export excludes uploaded sources, revision artifacts, chunk rows, and embedding vectors; import rejects source revision/object/hash fields.
 
 Required provenance fields for ingested sources and revisions:
 
@@ -121,7 +122,8 @@ Required provenance fields for ingested sources and revisions:
 - License/access status.
 - Export eligibility.
 
-Priority ingestion formats are PDF, DOCX, and PPTX. Parsed canonical text, chunks, embeddings, generated summaries, and concept-source links derived from private uploads stay private unless a future explicit licensing policy says otherwise.
+Priority ingestion formats: PDF (pdfplumber), Markdown, plain text. DOCX/PPTX deferred.
+Parsed canonical text, chunks, embeddings, generated summaries, and concept-source links derived from private uploads stay private unless a future explicit licensing policy says otherwise.
 
 ## Tutor Context Sources
 
@@ -141,12 +143,15 @@ access = restricted  -> excluded (contractual/paywalled limits apply inside the 
 access = unknown     -> excluded (redistribution status unclear; do not expose)
 ```
 
-Additional safety rules applied by `get_concept_sources_for_tutor` and `search_sources_by_title`:
+Additional safety rules applied by `get_concept_sources_for_tutor`, `search_sources_by_title`,
+and `search_sources_by_text`:
 
-- Only sources linked to the current concept via `ConceptSourceLink` are returned by `get_concept_sources_for_tutor`. `search_sources_by_title` may search the full workspace when no `concept_id` is given, but still scopes to the same workspace and access filter.
+- Only sources linked to the current concept via `ConceptSourceLink` are returned by `get_concept_sources_for_tutor`. `search_sources_by_text` may search the full workspace when no `concept_id` is given, but still scopes to the same workspace and access filter.
 - Cross-workspace isolation is enforced with a double check: `SourceRecord.workspace_id == workspace_id` AND `Trail.workspace_id == workspace_id` (via a JOIN through `ConceptNode → Trail`).
+- `read_document_section` is scoped to workspace: it looks up `SourceRevision` by both `id` AND `workspace_id`. A revision from another workspace raises `LookupError` (→ 404 in routes).
 - Results are capped at 10 by `_MAX_RETRIEVAL_RESULTS`; callers may request a lower cap.
-- Only whitelisted metadata fields are returned (`id`, `title`, `url`, `origin`, `access`, `license`, `relation`). Object keys, content hashes, raw text, chunks, and embeddings are never included.
+- Only whitelisted metadata fields are returned (`id`, `title`, `url`, `origin`, `access`, `license`, `relation`). Object keys, content hashes, raw text, chunks, and embeddings are never included in tool results or source metadata APIs.
+- `read_document_section` returns markdown text from `raw_text` — this is learner-visible content scoped to the same workspace. It must never be included in Trail Pack export.
 
 ## Research Agent Sources
 

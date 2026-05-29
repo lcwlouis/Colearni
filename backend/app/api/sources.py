@@ -43,6 +43,7 @@ async def upload_source_route(
     workspace_id: uuid.UUID,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
+    trail_id: uuid.UUID | None = Form(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> SourceUploadResponse | JSONResponse:
     try:
@@ -55,6 +56,7 @@ async def upload_source_route(
             storage_root=settings.source_storage_root,
             title=title,
             content_type=file.content_type,
+            trail_id=trail_id,
         )
     except LookupError as exc:
         return _not_found(str(exc))

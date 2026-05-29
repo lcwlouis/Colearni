@@ -11,7 +11,8 @@ from backend.app.db import get_session
 from backend.app.main import app
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptNode
-from backend.app.models.source import ConceptSourceLink, SourceRecord, SourceRevision
+from backend.app.models.source import ConceptSourceLink, SourceChunk, SourceRecord, SourceRevision
+from backend.app.services.concept_source_links import auto_link_source_to_trail
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 
@@ -253,6 +254,45 @@ async def test_get_concept_sources_is_scoped_to_workspace(api_client, db_engine)
     assert resp.status_code == 200
     sources = resp.json()["sources"]
     assert [source["title"] for source in sources] == ["Local Source"]
+
+
+async def test_auto_link_source_to_trail_links_matching_concepts(db_engine):
+    workspace_id, concept_id = await _create_workspace_concept(db_engine)
+    source_id = await _create_source(db_engine, workspace_id=workspace_id, title="Upload")
+    revision_id = await _create_revision(
+        db_engine,
+        workspace_id=workspace_id,
+        source_id=source_id,
+        revision_number=1,
+        status="parsed",
+    )
+    async with _sessionmaker(db_engine)() as session:
+        trail = await session.scalar(select(Trail).where(Trail.workspace_id == workspace_id))
+        trail_id = trail.id
+        session.add(
+            SourceChunk(
+                source_revision_id=revision_id,
+                workspace_id=workspace_id,
+                chunk_index=0,
+                text="A note about vectors and scalars.",
+                char_start=0,
+                char_end=33,
+                line_start=1,
+                line_end=1,
+                section_heading=None,
+            )
+        )
+        await session.commit()
+
+    async with _sessionmaker(db_engine)() as session:
+        await auto_link_source_to_trail(session, revision_id, trail_id, workspace_id)
+        await session.commit()
+
+    async with _sessionmaker(db_engine)() as session:
+        links = list(await session.scalars(select(ConceptSourceLink)))
+    assert [(link.source_id, link.concept_id, link.relation) for link in links] == [
+        (source_id, concept_id, "supplementary")
+    ]
 
 
 async def _create_workspace_concept(

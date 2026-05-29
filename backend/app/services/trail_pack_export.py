@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.mastery import MasteryRecord
 from backend.app.models.research import TrailResearchTrace
-from backend.app.models.source import ConceptSourceLink, SourceRecord, SourceRevision
+from backend.app.models.source import ConceptSourceLink, SourceChunk, SourceRecord, SourceRevision
 from backend.app.models.trail import Trail
 from backend.app.schemas.trail_pack import (
     TrailPack,
@@ -150,11 +150,30 @@ async def export_trail_pack(
         )
     )
     source_revision_count = 0
+    source_chunk_count = 0
+    source_embedding_count = 0
     if linked_source_ids:
         source_revision_count = await session.scalar(
             select(func.count(SourceRevision.id)).where(
                 SourceRevision.workspace_id == workspace_id,
                 SourceRevision.source_id.in_(linked_source_ids),
+            )
+        ) or 0
+        source_chunk_count = await session.scalar(
+            select(func.count(SourceChunk.id))
+            .join(SourceRevision, SourceRevision.id == SourceChunk.source_revision_id)
+            .where(
+                SourceChunk.workspace_id == workspace_id,
+                SourceRevision.source_id.in_(linked_source_ids),
+            )
+        ) or 0
+        source_embedding_count = await session.scalar(
+            select(func.count(SourceChunk.id))
+            .join(SourceRevision, SourceRevision.id == SourceChunk.source_revision_id)
+            .where(
+                SourceChunk.workspace_id == workspace_id,
+                SourceRevision.source_id.in_(linked_source_ids),
+                SourceChunk.embedding.is_not(None),
             )
         ) or 0
     research_trace = await session.scalar(
@@ -206,8 +225,10 @@ async def export_trail_pack(
             excluded=TrailPackExportExcludedReport(
                 uploaded_files=len(excluded_uploaded_source_ids),
                 source_revisions=source_revision_count or 0,
-                chunks=0,
-                embeddings=0,
+                # SourceChunk rows are intentionally excluded from Trail Pack export.
+                # Chunk embeddings are also excluded -- they are private workspace artifacts.
+                chunks=source_chunk_count or 0,
+                embeddings=source_embedding_count or 0,
                 private_notes=0,
                 mastery_records=has_mastery_records,
             ),

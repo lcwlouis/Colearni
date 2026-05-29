@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.concept import ConceptNode
-from backend.app.models.source import ConceptSourceLink, SourceRecord, SourceRevision
+from backend.app.models.source import ConceptSourceLink, SourceChunk, SourceRecord, SourceRevision
 from backend.app.models.trail import Trail
 
 ALLOWED_RELATIONS = {"primary", "reference", "supplementary", "prerequisite_source"}
@@ -18,6 +18,8 @@ async def link_source_to_concept(
     source_id: uuid.UUID,
     concept_id: uuid.UUID,
     relation: str,
+    commit: bool = True,
+    skip_existing: bool = False,
 ) -> ConceptSourceLink:
     """
     Create a ConceptSourceLink between an uploaded source and a concept.
@@ -39,10 +41,14 @@ async def link_source_to_concept(
         )
     )
     if existing is not None:
+        if skip_existing:
+            return existing
         raise ValueError("link already exists")
 
     link = ConceptSourceLink(source_id=source_id, concept_id=concept_id, relation=relation)
     session.add(link)
+    if not commit:
+        return link
     try:
         await session.commit()
     except IntegrityError as exc:
@@ -50,6 +56,52 @@ async def link_source_to_concept(
         raise ValueError("link already exists") from exc
     await session.refresh(link)
     return link
+
+
+async def auto_link_source_to_trail(
+    session: AsyncSession,
+    source_revision_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> None:
+    revision = await session.get(SourceRevision, source_revision_id)
+    if revision is None or revision.workspace_id != workspace_id:
+        raise LookupError(f"Source revision {source_revision_id} not found")
+
+    chunk_texts = list(
+        await session.scalars(
+            select(SourceChunk.text).where(
+                SourceChunk.source_revision_id == source_revision_id,
+                SourceChunk.workspace_id == workspace_id,
+            )
+        )
+    )
+    if not chunk_texts:
+        return
+
+    concepts = list(
+        await session.scalars(
+            select(ConceptNode)
+            .join(Trail, Trail.id == ConceptNode.trail_id)
+            .where(
+                ConceptNode.trail_id == trail_id,
+                Trail.workspace_id == workspace_id,
+            )
+            .order_by(ConceptNode.title, ConceptNode.id)
+        )
+    )
+    full_text = "\n".join(chunk_texts).lower()
+    for concept in concepts:
+        if concept.title.lower() in full_text:
+            await link_source_to_concept(
+                session,
+                workspace_id=workspace_id,
+                source_id=revision.source_id,
+                concept_id=concept.id,
+                relation="supplementary",
+                commit=False,
+                skip_existing=True,
+            )
 
 
 async def list_source_links(

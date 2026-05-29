@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     # Budget = clamp(max_nodes * this, 4096, 16000).
     llm_generation_tokens_per_node: int = 300
 
+    # Embedding provider — disabled by default; ILIKE search is used as fallback.
+    embedding_provider: str = "disabled"  # disabled | openai | gemini | ollama | openrouter | openai_compatible
+    embedding_model: str = "text-embedding-3-small"
+    embedding_api_key: str = ""
+    embedding_api_base: str = ""
+    embedding_dim: int = 1536
+
+    # Reranker — no-op by default. Interface stub ready for future providers.
+    reranker_provider: str = "none"  # none | cohere | flashrank
+    reranker_api_key: str = ""
+
     # Reasoning token visibility by provider:
     #   anthropic   — visible via native SDK thinking blocks (requires llm_thinking_enabled=true)
     #   openrouter  — visible with DeepSeek-R1 or similar reasoning-capable models.

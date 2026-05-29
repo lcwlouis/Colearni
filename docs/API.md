@@ -304,7 +304,7 @@ Internal persistence record. Stored in the database; not returned directly by le
 }
 ```
 
-The current Phase 10 slice creates one immutable revision per upload with `parser_name: "none"`, `parser_version: "upload-only-v1"`, and `status: "pending_parse"`. It stores uploaded bytes in local private storage and records provenance only; canonical parsed text, chunks, embeddings, and retrieval indexes are still deferred. `object_key` and `content_hash` are internal storage/provenance fields and must never appear in public Trail Pack export or learner-facing source metadata responses.
+The Phase 10 parser pipeline is implemented. Uploading a supported file type (`text/plain`, `text/markdown`, `application/pdf`) synchronously parses, chunks, and optionally embeds the content. The revision's `status` is set to `"parsed"` on success or `"failed"` on parse error. `parser_name` reflects the format-specific parser used (`"plaintext"`, `"pdfplumber"`, etc.). `object_key` and `content_hash` are internal storage/provenance fields and must never appear in public Trail Pack export or learner-facing source metadata responses.
 
 ### SourceRevisionSummary
 
@@ -751,9 +751,21 @@ the existing compatibility shape.
 ```json
 {
   "message": "string",
-  "conversation_id": "uuid | null"
+  "conversation_id": "uuid | null",
+  "regenerate": "bool (default false)",
+  "replace_latest_user": "bool (default false)"
 }
 ```
+
+When `regenerate` is `true`, the backend reuses the latest visible user turn and
+deletes generated assistant/tool turns after it before streaming the replacement
+assistant response. It must not append a duplicate user turn.
+
+When `replace_latest_user` is `true`, the backend replaces the latest visible
+user turn with `message` and deletes generated assistant/tool turns after it
+before streaming the replacement assistant response. This is intended for editing
+the latest user message only. `regenerate` and `replace_latest_user` must not both
+be `true`.
 
 **Response headers:**
 
@@ -874,14 +886,14 @@ Planned source listing endpoint. It is not implemented in the current backend sl
 
 Upload a source file. Stored as a private source. Defaults: `origin: user_upload`, `access: private`, `include_on_public_export: false`.
 
-The current Phase 10 slice stores the uploaded bytes under `SOURCE_STORAGE_ROOT`, creates a private `SourceRecord`, creates one immutable `SourceRevision`, and leaves parsing/chunking/indexing in `pending_parse` for later phases. No raw private file text, storage object key, or content hash is returned by this endpoint.
+Supported content types are parsed synchronously: `text/plain`, `text/markdown`, and `application/pdf` (via pdfplumber). The file is chunked into `SourceChunk` rows. If `EMBEDDING_PROVIDER` is configured (not `"disabled"`), chunk embeddings are computed and stored. If `trail_id` is provided, the source is automatically linked to matching concepts in the trail via keyword matching. Unsupported content types set `status: "failed"` on the revision. No raw private file text, storage object key, or content hash is returned by this endpoint.
 
 **Request:** `multipart/form-data`
 
 | Field | Type | Required | Description |
-|---|---|---|---|
 | `file` | binary | yes | File to upload |
 | `title` | string | no | Defaults to filename |
+| `trail_id` | uuid | no | When provided, auto-links parsed chunks to matching concepts in the trail |
 
 **Response 201:** `SourceUploadResponse`
 

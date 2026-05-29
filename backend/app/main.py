@@ -1,7 +1,9 @@
+import importlib.util
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from .api.concepts import concept_sources_router
 from .api.concepts import router as concepts_router
@@ -23,6 +25,10 @@ configure_logging(settings.log_level)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Startup ───────────────────────────────────────────────────────────────
+    # Validate pgvector adapter and database extension for source chunk embeddings.
+    # Remove only if embedding storage no longer uses PostgreSQL vector columns.
+    await _ensure_pgvector_available()
+
     # Ensure a default workspace exists for local-ready single-user mode.
     # Replace with user-scoped workspace provisioning when auth is added.
     async with AsyncSessionLocal() as session:
@@ -35,6 +41,28 @@ async def lifespan(app: FastAPI):
     # as abruptly dropped. Add teardown for any new resources (HTTP clients,
     # caches, background workers) directly below this line.
     await engine.dispose()
+
+
+async def _ensure_pgvector_available() -> None:
+    if not settings.database_url.startswith("postgresql"):
+        return
+
+    if importlib.util.find_spec("pgvector") is None:
+        raise RuntimeError(
+            "Python package 'pgvector' is required when using PostgreSQL vector columns. "
+            "Install backend dependencies with `uv sync --extra dev` or `pip install -e .`."
+        )
+
+    async with engine.begin() as conn:
+        extension_available = await conn.scalar(
+            text("select exists(select 1 from pg_available_extensions where name = 'vector')")
+        )
+        if not extension_available:
+            raise RuntimeError(
+                "PostgreSQL extension 'vector' is not available. Install pgvector in the "
+                "database server, then rerun migrations."
+            )
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 
 app = FastAPI(

@@ -1,17 +1,30 @@
+import asyncio
 import hashlib
+import logging
 import uuid
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.source import SourceRecord, SourceRevision
+from backend.app.agents.embedding_client import EmbeddingClient
+from backend.app.models.source import (  # noqa: F401 (SourceChunk: mapper registration)
+    SourceChunk,
+    SourceRecord,
+    SourceRevision,
+)
 from backend.app.models.workspace import Workspace
 from backend.app.schemas.source import SourceRecordRead, SourceRevisionSummary, SourceUploadResponse
+from backend.app.services.chunker import chunk_elements
+from backend.app.services.concept_source_links import auto_link_source_to_trail
+from backend.app.services.parser import parse_source
+from backend.app.settings import settings
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 PARSER_NAME = "none"
-PARSER_VERSION = "upload-only-v1"
+PARSER_VERSION = "parser-pipeline-v1"
+
+logger = logging.getLogger(__name__)
 
 
 class SourceUploadError(ValueError):
@@ -29,6 +42,7 @@ async def upload_private_source(
     storage_root: str,
     title: str | None = None,
     content_type: str | None = None,
+    trail_id: uuid.UUID | None = None,
 ) -> SourceUploadResponse:
     if await session.get(Workspace, workspace_id) is None:
         raise LookupError(f"Workspace {workspace_id} not found")
@@ -92,15 +106,71 @@ async def upload_private_source(
         parser_version=PARSER_VERSION,
         status="pending_parse",
         error_message=None,
+        raw_text=None,
         metadata_json={
             "original_filename": filename,
             "stored_private_object": True,
-            "parsing": "deferred",
+            "parsing": "pending",
             "chunks_created": 0,
             "embeddings_created": 0,
         },
     )
     session.add(revision)
+    await session.flush()
+
+    doc = None
+    chunks_created = 0
+    embeddings_created = 0
+    try:
+        doc = await asyncio.to_thread(parse_source, content, content_type or "", filename)
+        revision.raw_text = doc.text
+        revision.parser_name = doc.parser_name
+        revision.status = "parsed"
+        revision.error_message = None
+    except Exception as exc:
+        revision.status = "failed"
+        revision.error_message = str(exc)
+
+    if doc is not None:
+        chunks = chunk_elements(doc.elements, revision.id, workspace_id, doc.text)
+        session.add_all(chunks)
+        await session.flush()
+        chunks_created = len(chunks)
+
+        if settings.embedding_provider.lower() != "disabled" and chunks:
+            # Embeddings are best-effort: a provider/network failure must not
+            # discard the parsed source. Retrieval still works via the ILIKE
+            # fallback when chunks have no embedding.
+            try:
+                embedding_client = EmbeddingClient.from_settings(settings)
+                vectors = await embedding_client.embed([chunk.text for chunk in chunks])
+            except Exception as exc:
+                logger.warning(
+                    "Embedding generation failed for source %s; storing chunks without "
+                    "embeddings (ILIKE fallback still applies): %s",
+                    source.id,
+                    exc,
+                )
+                vectors = None
+            if vectors is not None:
+                for chunk, vector in zip(chunks, vectors, strict=False):
+                    chunk.embedding = vector
+                embeddings_created = len(vectors)
+
+    if trail_id is not None and doc is not None:
+        await auto_link_source_to_trail(session, revision.id, trail_id, workspace_id)
+
+    source.metadata_json = {
+        **source.metadata_json,
+        "ingestion_status": revision.status,
+    }
+    revision.metadata_json = {
+        **revision.metadata_json,
+        "parsing": revision.status,
+        "chunks_created": chunks_created,
+        "embeddings_created": embeddings_created,
+        "canonical_text_stored": doc is not None,
+    }
 
     try:
         await session.commit()

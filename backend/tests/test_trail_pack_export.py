@@ -12,7 +12,7 @@ from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.conversation import Conversation, ConversationTurn
 from backend.app.models.mastery import MasteryRecord, QuizAttempt, QuizDraft
-from backend.app.models.source import ConceptSourceLink, SourceRecord, SourceRevision
+from backend.app.models.source import ConceptSourceLink, SourceChunk, SourceRecord, SourceRevision
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 
@@ -281,7 +281,7 @@ async def test_export_excludes_uploaded_source_revisions(api_client, db_engine):
     sessionmaker = _sessionmaker(db_engine)
     async with sessionmaker() as session:
         session.add(
-            SourceRevision(
+            revision := SourceRevision(
                 workspace_id=workspace_id,
                 source_id=source_id,
                 revision_number=1,
@@ -292,7 +292,23 @@ async def test_export_excludes_uploaded_source_revisions(api_client, db_engine):
                 parser_name="none",
                 parser_version="upload-only-v1",
                 status="pending_parse",
+                raw_text=content.decode(),
                 metadata_json={"raw_text": content.decode()},
+            )
+        )
+        await session.flush()
+        session.add(
+            SourceChunk(
+                source_revision_id=revision.id,
+                workspace_id=workspace_id,
+                chunk_index=0,
+                text="PRIVATE CHUNK CONTENT",
+                char_start=0,
+                char_end=len("PRIVATE CHUNK CONTENT"),
+                line_start=1,
+                line_end=1,
+                section_heading=None,
+                embedding=[0.1] * 1536,
             )
         )
         await session.commit()
@@ -303,9 +319,15 @@ async def test_export_excludes_uploaded_source_revisions(api_client, db_engine):
     data = resp.json()
     assert data["pack"]["sources"] == []
     assert "PRIVATE UPLOADED CONTENT" not in resp.text
+    assert "PRIVATE CHUNK CONTENT" not in resp.text
     assert "source_revisions" not in json.dumps(data["pack"])
+    export_json = json.dumps(data["pack"])
+    assert "source_chunks" not in export_json
+    assert "embedding" not in export_json
     assert data["report"]["excluded"]["uploaded_files"] == 1
     assert data["report"]["excluded"]["source_revisions"] == 1
+    assert data["report"]["excluded"]["chunks"] == 1
+    assert data["report"]["excluded"]["embeddings"] == 1
 
 
 async def test_export_excludes_public_research_source_without_export_flag(api_client, db_engine):

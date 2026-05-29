@@ -1,14 +1,15 @@
 from typing import Any, overload
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import insert, select
+from sqlalchemy.dialects.postgresql import asyncpg
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.mastery import MasteryRecord, QuizAttempt
-from backend.app.models.source import ConceptSourceLink, SourceRecord
+from backend.app.models.source import ConceptSourceLink, SourceChunk, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 
@@ -224,6 +225,16 @@ async def test_concept_source_link(session):
     row = await session.scalar(select(ConceptSourceLink).where(ConceptSourceLink.id == link.id))
     assert row.source_id == source.id
     assert row.relation == "reference"
+
+
+def test_source_chunk_embedding_insert_does_not_bind_null_as_varchar():
+    stmt = insert(SourceChunk).values(embedding=None)
+
+    compiled = str(stmt.compile(dialect=asyncpg.dialect()))
+
+    embedding_bind = compiled.rsplit(", ", 1)[-1]
+
+    assert "::VARCHAR" not in embedding_bind
 
 
 @pytest.mark.asyncio

@@ -48,6 +48,7 @@ Database
   - concept_edges
   - source_records
   - source_revisions
+  - source_chunks         (text chunks with line_start/line_end/section_heading/embedding)
   - concept_source_links
   - mastery_records
   - quiz_attempts
@@ -189,6 +190,19 @@ concept_source_links
 - concept_id
 - source_id
 - relation
+
+source_chunks
+- id
+- source_revision_id
+- workspace_id
+- chunk_index
+- text
+- char_start
+- char_end
+- line_start            (1-indexed line in SourceRevision.raw_text)
+- line_end              (1-indexed line in SourceRevision.raw_text)
+- section_heading       (nullable — nearest ancestor heading text)
+- embedding             (nullable vector(EMBEDDING_DIM) — pgvector; NULL when disabled)
 
 mastery_records
 - id
@@ -332,14 +346,45 @@ Retrieval should stay scoped and budgeted:
 - Use hybrid vector + full-text search where available.
 - Avoid unbounded loops and whole-workspace searches by default.
 
-Planned controlled tools:
+### Dual-Retrieval Pattern
 
-- `search_sources(query, concept_id?)`.
-- `open_source_chunk(chunk_id)`.
-- `get_concept_sources(concept_id)`.
-- `get_graph_neighbourhood(concept_id)`.
+The tutor uses a two-tier retrieval design:
 
-These tools should be registered through the provider tool abstraction, enforce workspace/Trail/concept/source budgets, and return citation-ready source metadata rather than dumping large source text into every prompt.
+**Tier 1 — Chunk search** (`search_sources` tool): fast keyword or vector search returning
+`ChunkSearchResult` objects with `section_heading`, `line_start`, `line_end`, and
+`source_revision_id`. Gives the LLM a map of where relevant content lives.
+
+**Tier 2 — Section reading** (`read_document_section` tool): the LLM uses `line_start` from
+a Tier 1 result to call `read_document_section(source_revision_id, line_start, window_lines=50)`,
+which reads that many lines from `SourceRevision.raw_text` (stored as markdown). Returns the
+full structured section with heading context — without dumping all chunks into every prompt.
+
+This keeps average context size small while allowing deep dives on demand. The LLM decides
+when to drill into a section; the two-call pattern is intentional.
+
+### Retrieval Pipeline
+
+```
+search_sources_by_text(query, workspace_id)
+  → vector search (when EMBEDDING_PROVIDER != disabled) or ILIKE fallback
+  → RerankerClient.rerank(query, candidates)  [no-op by default]
+  → limit → list[ChunkSearchResult]
+```
+
+`ChunkSearchResult` carries: `source_id`, `source_revision_id`, `source_title`,
+`chunk_text` (snippet), `section_heading`, `line_start`, `line_end`, `similarity`.
+
+### Controlled retrieval tools (registered via provider tool abstraction)
+
+- `search_sources(query, concept_id?)` — chunk-text search, returns line navigation metadata.
+- `read_document_section(source_revision_id, line_start, window_lines?)` — reads lines from
+  `raw_text` (markdown). Scoped to workspace.
+- `get_concept_sources(concept_id)` — lists sources linked to a concept (metadata only).
+- `get_graph_neighbourhood(concept_id)` — returns nearby graph nodes.
+
+These tools enforce workspace scope, are budgeted at `TOOL_CALL_BUDGET=3` executions per
+turn, and return sanitized data. Raw file content, object keys, embeddings, and content hashes
+are never exposed through tools.
 
 ## Source Ingestion Pattern
 
@@ -350,25 +395,31 @@ Current Phase 10 foundation:
 - `POST /api/workspaces/{workspace_id}/sources/upload` stores uploaded bytes in local private storage under `SOURCE_STORAGE_ROOT`.
 - Uploads create `SourceRecord(origin="user_upload", access="private", include_on_public_export=false)`.
 - Uploads create immutable `SourceRevision` rows with object key, SHA-256 content hash, file size/content type, parser metadata, and status.
-- Parser metadata is intentionally `parser_name="none"`, `parser_version="upload-only-v1"`, and `status="pending_parse"` until a real parser pipeline lands.
+- Parser pipeline (Consolidation Item 2): parse → chunk → embed → auto-link on every upload.
+- `raw_text` is stored as **markdown** (headings serialized as `#`/`##`/`###`). This is what
+  `read_document_section` reads from — preserving structure for the LLM.
 - Source metadata APIs return sanitized revision summaries and do not expose object keys or content hashes.
-- Public export excludes user uploads and source revisions; import rejects revision/object/hash fields.
+- Public export excludes user uploads, source revisions, chunks, and embeddings; import rejects revision/object/hash fields.
 
-Preferred V1 flow:
+Ingestion pipeline:
 
 ```text
 Uploaded file
 -> private object storage
--> parser
--> markdown-like canonical text
--> source revision
--> chunks
--> embeddings / full-text index
--> concept-source links
+-> parser (pdfplumber for PDF, regex for Markdown, split for plain text)
+-> CanonicalDocument (typed elements: heading_1/2/3, paragraph, list_item, code)
+-> CanonicalDocument.text (markdown representation → SourceRevision.raw_text)
+-> structure-aware chunker (heading-flush → paragraph overflow → sentence fallback)
+-> SourceChunk rows (text, char_start, char_end, line_start, line_end, section_heading, embedding)
+-> EmbeddingClient.embed() → pgvector embedding column (NULL if EMBEDDING_PROVIDER=disabled)
+-> auto-linker (keyword match against concept titles → ConceptSourceLink rows, when trail_id provided)
 -> controlled retrieval/open tools
 ```
 
-Priority formats are PDF, DOCX, and PPTX. CSV/Excel, arbitrary file types, and broad filesystem browsing are deferred.
+Priority formats: PDF (pdfplumber, MIT), Markdown, plain text. DOCX/PPTX deferred to second pass.
+
+**Why pdfplumber**: exposes font metadata and image bounding boxes for future heading detection
+and image placeholder insertion (Phase 16). MIT-licensed. Avoids AGPL concerns of PyMuPDF.
 
 Do not use git internally for user source tracking in V1. Use content hashes, parser versions, source revision records, object keys, and database/object-storage versioning. Uploaded files, parsed text, chunks, embeddings, and derived summaries remain private by default and must be excluded by the Trail Pack sanitizer.
 
@@ -401,6 +452,54 @@ Rules:
 - Hidden/internal tool turns may be persisted for replay, but public APIs only expose sanitized previews.
 - Invalid tool arguments fail safely without unbounded retries.
 - The existing tutor SSE stream, reasoning trace UI, and conversation replay behavior must remain compatible.
+
+## Embedding Client Pattern
+
+CoLearni generates chunk embeddings for vector search via `backend/app/agents/embedding_client.py`.
+Like `LLMClient`, it uses the OpenAI SDK with `base_url` overrides — no additional HTTP
+client libraries are needed.
+
+### Why embeddings now (not Phase 16)
+
+Adding the nullable `embedding` column and `EmbeddingClient` interface at Item 2 time costs
+~100 LOC but avoids a schema migration on an already-populated `source_chunks` table later.
+With `EMBEDDING_PROVIDER=disabled` as the default, there is zero runtime cost for deployments
+that don't configure an embedding provider. ILIKE fallback is used when disabled.
+
+### Supported providers
+
+| `EMBEDDING_PROVIDER` | Routing | Recommended model |
+|---|---|---|
+| `disabled` | no-op, returns None | — |
+| `openai` | openai SDK (default endpoint) | `text-embedding-3-small` (1536 dims) |
+| `gemini` | openai SDK + Google OAI-compat base URL | `text-embedding-004` (768 dims) |
+| `ollama` | openai SDK + `http://localhost:11434/v1` | `nomic-embed-text`, `mxbai-embed-large` |
+| `openai_compatible` | openai SDK + `EMBEDDING_API_BASE` | any OAI-compatible embedding model |
+
+All providers use `openai.AsyncOpenAI(base_url=..., api_key=...).embeddings.create(...)`.
+This is the same pattern as `LLMClient` — no new HTTP dependencies.
+
+### Configuration
+
+| Variable | Purpose |
+|---|---|
+| `EMBEDDING_PROVIDER` | Provider: `disabled` (default), `openai`, `gemini`, `ollama`, `openai_compatible` |
+| `EMBEDDING_MODEL` | Model name (default: `text-embedding-3-small`) |
+| `EMBEDDING_API_KEY` | API key (optional: falls back to `LLM_API_KEY` if same provider) |
+| `EMBEDDING_API_BASE` | Base URL override (required for `openai_compatible`; used for `ollama`) |
+| `EMBEDDING_DIM` | Vector dimension, must match model output (default: `1536`). Changing after initial migration requires a new Alembic migration. |
+
+### Reranker
+
+A no-op `RerankerClient` stub lives in `backend/app/services/reranker.py`. The retrieval
+pipeline shape is `search → [rerank] → limit` even with a no-op, so Cohere Rerank or
+FlashRank (MIT local) can be plugged in without changing the pipeline:
+
+| `RERANKER_PROVIDER` | Notes |
+|---|---|
+| `none` (default) | No-op — returns candidates in search order |
+| `cohere` | Cohere Rerank API (~$1/1000 queries) |
+| `flashrank` | MIT local model, ~30ms, no API key |
 
 ## LLM Client Pattern
 
