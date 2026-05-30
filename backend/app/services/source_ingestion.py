@@ -78,6 +78,7 @@ async def upload_private_source(
 
     digest = hashlib.sha256(content).hexdigest()
     object_key = _build_object_key(workspace_id, source.id, digest, filename)
+    destination: Path | None = None
     try:
         destination = _safe_storage_path(storage_root, object_key)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -88,7 +89,7 @@ async def upload_private_source(
     except OSError as exc:
         await session.rollback()
         try:
-            if "destination" in locals():
+            if destination is not None:
                 destination.unlink(missing_ok=True)
         except OSError:
             pass
@@ -179,7 +180,8 @@ async def upload_private_source(
     except Exception:
         await session.rollback()
         try:
-            destination.unlink(missing_ok=True)
+            if destination is not None:
+                destination.unlink(missing_ok=True)
         except OSError:
             pass
         raise

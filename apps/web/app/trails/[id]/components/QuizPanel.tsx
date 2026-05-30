@@ -8,9 +8,40 @@ import {
   gradeLevelUpQuiz,
   gradePracticeQuiz,
 } from "@/lib/api";
-import type { GradeResult, LevelUpCard, MasteryStatus, QuizAnswer } from "@/lib/types";
+import type {
+  GradeResult,
+  LevelUpCard,
+  MasteryStatus,
+  QuizAnswer,
+} from "@/lib/types";
 
 type QuizState = "loading" | "answering" | "grading" | "result";
+
+type QuizPanelState = {
+  key: string;
+  quizState: QuizState;
+  card: LevelUpCard | null;
+  answers: Record<string, string>;
+  result: GradeResult | null;
+  generateError: string;
+  gradeError: string;
+};
+
+function loadingQuizPanelState(key: string): QuizPanelState {
+  return {
+    key,
+    quizState: "loading",
+    card: null,
+    answers: {},
+    result: null,
+    generateError: "",
+    gradeError: "",
+  };
+}
+
+function initialQuizAnswers(card: LevelUpCard): Record<string, string> {
+  return Object.fromEntries(card.questions.map((q) => [q.id, ""]));
+}
 
 const quizGenerationRequests = new Map<string, Promise<LevelUpCard>>();
 
@@ -20,7 +51,10 @@ interface QuizPanelProps {
   conceptId: string;
   mode: "level_up" | "practice";
   onBack: () => void;
-  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
+  onMasteryUpdated?: (
+    conceptId: string,
+    update: { status: MasteryStatus; score: number },
+  ) => void;
 }
 
 export function QuizPanel({
@@ -31,22 +65,20 @@ export function QuizPanel({
   onBack,
   onMasteryUpdated,
 }: QuizPanelProps) {
-  const [quizState, setQuizState] = useState<QuizState>("loading");
-  const [card, setCard] = useState<LevelUpCard | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<GradeResult | null>(null);
-  const [generateError, setGenerateError] = useState("");
-  const [gradeError, setGradeError] = useState("");
   const [retryTrigger, setRetryTrigger] = useState(0);
+  const quizKey = [workspaceId, trailId, conceptId, mode, retryTrigger].join(
+    ":",
+  );
+  const [quizData, setQuizData] = useState<QuizPanelState>(() =>
+    loadingQuizPanelState(quizKey),
+  );
+  const currentQuizData =
+    quizData.key === quizKey ? quizData : loadingQuizPanelState(quizKey);
+  const { quizState, card, answers, result, generateError, gradeError } =
+    currentQuizData;
 
   useEffect(() => {
     let cancelled = false;
-    setQuizState("loading");
-    setGenerateError("");
-    setCard(null);
-    setAnswers({});
-    setResult(null);
-    setGradeError("");
 
     async function generate() {
       try {
@@ -59,16 +91,22 @@ export function QuizPanel({
           retryTrigger,
         });
         if (cancelled) return;
-        const initialAnswers: Record<string, string> = {};
-        for (const q of newCard.questions) {
-          initialAnswers[q.id] = "";
-        }
-        setCard(newCard);
-        setAnswers(initialAnswers);
-        setQuizState("answering");
+        setQuizData({
+          key: quizKey,
+          quizState: "answering",
+          card: newCard,
+          answers: initialQuizAnswers(newCard),
+          result: null,
+          generateError: "",
+          gradeError: "",
+        });
       } catch (exc) {
         if (cancelled) return;
-        setGenerateError(exc instanceof Error ? exc.message : "Could not generate quiz");
+        setQuizData({
+          ...loadingQuizPanelState(quizKey),
+          generateError:
+            exc instanceof Error ? exc.message : "Could not generate quiz",
+        });
       }
     }
 
@@ -76,7 +114,7 @@ export function QuizPanel({
     return () => {
       cancelled = true;
     };
-  }, [conceptId, mode, retryTrigger, workspaceId, trailId]);
+  }, [conceptId, mode, retryTrigger, workspaceId, trailId, quizKey]);
 
   function handleRetry() {
     if (mode === "level_up") {
@@ -84,16 +122,20 @@ export function QuizPanel({
       setRetryTrigger((prev) => prev + 1);
     } else {
       // Practice: reuse the same card, just reset answers back to blank.
-      if (card) {
-        const resetAnswers: Record<string, string> = {};
-        for (const q of card.questions) {
-          resetAnswers[q.id] = "";
+      setQuizData((current) => {
+        if (current.key !== quizKey) {
+          return current;
         }
-        setAnswers(resetAnswers);
-      }
-      setResult(null);
-      setGradeError("");
-      setQuizState("answering");
+        return {
+          ...current,
+          answers: current.card
+            ? initialQuizAnswers(current.card)
+            : current.answers,
+          result: null,
+          gradeError: "",
+          quizState: "answering",
+        };
+      });
     }
   }
 
@@ -101,8 +143,11 @@ export function QuizPanel({
     if (!card) {
       return;
     }
-    setQuizState("grading");
-    setGradeError("");
+    setQuizData((current) =>
+      current.key === quizKey
+        ? { ...current, quizState: "grading", gradeError: "" }
+        : current,
+    );
 
     const quizAnswers: QuizAnswer[] = card.questions.map((q) => ({
       question_id: q.id,
@@ -112,25 +157,65 @@ export function QuizPanel({
     try {
       const gradeResult =
         mode === "level_up"
-          ? await gradeLevelUpQuiz(workspaceId, trailId, conceptId, card.questions, quizAnswers)
-          : await gradePracticeQuiz(workspaceId, trailId, conceptId, card.questions, quizAnswers);
-      setResult(gradeResult);
-      setQuizState("result");
+          ? await gradeLevelUpQuiz(
+              workspaceId,
+              trailId,
+              conceptId,
+              card.questions,
+              quizAnswers,
+            )
+          : await gradePracticeQuiz(
+              workspaceId,
+              trailId,
+              conceptId,
+              card.questions,
+              quizAnswers,
+            );
+      setQuizData((current) =>
+        current.key === quizKey
+          ? { ...current, result: gradeResult, quizState: "result" }
+          : current,
+      );
       if (mode === "level_up") {
-        onMasteryUpdated?.(conceptId, { status: gradeResult.mastery_status, score: gradeResult.score });
+        onMasteryUpdated?.(conceptId, {
+          status: gradeResult.mastery_status,
+          score: gradeResult.score,
+        });
       }
     } catch (exc) {
-      setGradeError(exc instanceof Error ? exc.message : "Could not grade quiz");
-      setQuizState("answering");
+      setQuizData((current) =>
+        current.key === quizKey
+          ? {
+              ...current,
+              gradeError:
+                exc instanceof Error ? exc.message : "Could not grade quiz",
+              quizState: "answering",
+            }
+          : current,
+      );
     }
   }
 
+  function handleAnswerChange(questionId: string, answer: string) {
+    setQuizData((current) =>
+      current.key === quizKey
+        ? {
+            ...current,
+            answers: { ...current.answers, [questionId]: answer },
+          }
+        : current,
+    );
+  }
+
   const allAnswered =
-    card !== null && card.questions.every((q) => (answers[q.id] ?? "").trim().length > 0);
+    card !== null &&
+    card.questions.every((q) => (answers[q.id] ?? "").trim().length > 0);
 
   if (quizState === "loading" && !generateError) {
     return (
-      <div className="py-8 text-center text-sm text-slate-500">Generating quiz...</div>
+      <div className="py-8 text-center text-sm text-slate-500">
+        Generating quiz...
+      </div>
     );
   }
 
@@ -161,7 +246,9 @@ export function QuizPanel({
   }
 
   if (quizState === "result" && result) {
-    const questionByid = Object.fromEntries((card?.questions ?? []).map((q) => [q.id, q]));
+    const questionByid = Object.fromEntries(
+      (card?.questions ?? []).map((q) => [q.id, q]),
+    );
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -261,10 +348,15 @@ export function QuizPanel({
               {index + 1}. {question.prompt}
             </p>
             <p className="text-xs uppercase tracking-wide text-slate-500">
-              {formatQuestionType(question.type)} · {question.difficulty ?? "standard"}
+              {formatQuestionType(question.type)} ·{" "}
+              {question.difficulty ?? "standard"}
             </p>
             {question.type === "multiple_choice" ? (
-              <div className="space-y-2" role="radiogroup" aria-label={`Answer to question ${index + 1}`}>
+              <div
+                className="space-y-2"
+                role="radiogroup"
+                aria-label={`Answer to question ${index + 1}`}
+              >
                 {(question.options ?? []).map((option) => (
                   <label
                     key={option}
@@ -276,10 +368,7 @@ export function QuizPanel({
                       value={option}
                       checked={(answers[question.id] ?? "") === option}
                       onChange={(event) =>
-                        setAnswers((current) => ({
-                          ...current,
-                          [question.id]: event.target.value,
-                        }))
+                        handleAnswerChange(question.id, event.target.value)
                       }
                       disabled={quizState === "grading"}
                       className="mt-1"
@@ -293,10 +382,7 @@ export function QuizPanel({
                 aria-label={`Answer to question ${index + 1}`}
                 value={answers[question.id] ?? ""}
                 onChange={(event) =>
-                  setAnswers((current) => ({
-                    ...current,
-                    [question.id]: event.target.value,
-                  }))
+                  handleAnswerChange(question.id, event.target.value)
                 }
                 placeholder="Type a short answer..."
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-slate-50"
@@ -307,10 +393,7 @@ export function QuizPanel({
                 aria-label={`Answer to question ${index + 1}`}
                 value={answers[question.id] ?? ""}
                 onChange={(event) =>
-                  setAnswers((current) => ({
-                    ...current,
-                    [question.id]: event.target.value,
-                  }))
+                  handleAnswerChange(question.id, event.target.value)
                 }
                 placeholder="Type your answer..."
                 rows={4}
@@ -348,7 +431,13 @@ function getOrCreateQuizGenerationRequest({
   forceNew: boolean;
   retryTrigger: number;
 }): Promise<LevelUpCard> {
-  const key = [workspaceId, trailId, conceptId, mode, forceNew ? `fresh-${retryTrigger}` : "reuse"].join(":");
+  const key = [
+    workspaceId,
+    trailId,
+    conceptId,
+    mode,
+    forceNew ? `fresh-${retryTrigger}` : "reuse",
+  ].join(":");
   const existing = quizGenerationRequests.get(key);
   if (existing) {
     return existing;
@@ -356,7 +445,9 @@ function getOrCreateQuizGenerationRequest({
 
   const request = (
     mode === "level_up"
-      ? generateLevelUpQuiz(workspaceId, trailId, conceptId, { force_new: forceNew })
+      ? generateLevelUpQuiz(workspaceId, trailId, conceptId, {
+          force_new: forceNew,
+        })
       : generatePracticeQuiz(workspaceId, trailId, conceptId)
   ).finally(() => {
     if (quizGenerationRequests.get(key) === request) {
@@ -367,7 +458,9 @@ function getOrCreateQuizGenerationRequest({
   return request;
 }
 
-function formatQuestionType(type: LevelUpCard["questions"][number]["type"]): string {
+function formatQuestionType(
+  type: LevelUpCard["questions"][number]["type"],
+): string {
   switch (type) {
     case "multiple_choice":
       return "multiple choice";

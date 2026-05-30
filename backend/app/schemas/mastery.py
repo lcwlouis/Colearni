@@ -10,6 +10,11 @@ from .types import BloomLevel, MasteryStatus, QuizType
 
 QuizQuestionType = Literal["multiple_choice", "short_answer", "long_answer"]
 QuizQuestionDifficulty = Literal["light", "standard", "challenge"]
+_LEGACY_QUESTION_TYPES: dict[str, QuizQuestionType] = {
+    "explain": "long_answer",
+    "apply": "long_answer",
+    "compare": "long_answer",
+}
 
 
 class MasteryRecordRead(BaseModel):
@@ -38,11 +43,9 @@ class QuizQuestion(BaseModel):
     @classmethod
     def normalize_legacy_question_type(cls, value: object) -> object:
         # Existing persisted drafts/attempt snapshots may still use the old labels.
-        return {
-            "explain": "long_answer",
-            "apply": "long_answer",
-            "compare": "long_answer",
-        }.get(value, value)
+        if isinstance(value, str):
+            return _LEGACY_QUESTION_TYPES.get(value, value)
+        return value
 
     @field_validator("id", "prompt", "mastery_label", mode="before")
     @classmethod

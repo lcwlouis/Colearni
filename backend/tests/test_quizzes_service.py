@@ -1,14 +1,22 @@
+from typing import cast
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from backend.app.agents.llm_client import LLMClient
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptNode
 from backend.app.models.mastery import MasteryRecord, QuizAttempt, QuizDraft
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
-from backend.app.schemas.mastery import QuizAnswer, QuizEvaluation, QuizQuestion
+from backend.app.schemas.mastery import (
+    PerQuestionEvaluation,
+    QuizAnswer,
+    QuizEvaluation,
+    QuizQuestion,
+)
 from backend.app.services.quizzes import (
     LLMQuizGenerator,
     LLMQuizGrader,
@@ -69,11 +77,11 @@ class FakeQuizGrader:
             score=self.score,
             passed=self.score >= 0.7,
             per_question=[
-                {
-                    "question_id": question.id,
-                    "score": self.score,
-                    "feedback": f"Feedback for {question.id}",
-                }
+                PerQuestionEvaluation(
+                    question_id=question.id,
+                    score=self.score,
+                    feedback=f"Feedback for {question.id}",
+                )
                 for question in questions
             ],
             overall_feedback=self.feedback,
@@ -245,7 +253,7 @@ async def test_duplicate_draft_recovery_does_not_access_expired_concept(monkeypa
     fake_session = FakeSession()
 
     card = await generate_quiz_card(
-        fake_session,
+        cast(AsyncSession, fake_session),
         FakeQuizGenerator([question, second_question]),
         workspace_id=__import__("uuid").uuid4(),
         trail_id=__import__("uuid").uuid4(),
@@ -470,7 +478,7 @@ async def test_llm_quiz_generator_renders_prompt_and_parses_questions(session):
             """
         ]
     )
-    generator = LLMQuizGenerator(client=client)
+    generator = LLMQuizGenerator(client=cast(LLMClient, client))
 
     questions = await generator.generate(concept=concept, quiz_type="level_up")
 
@@ -510,7 +518,7 @@ async def test_llm_quiz_generator_repairs_invalid_json_once(session):
             """
         ]
     )
-    generator = LLMQuizGenerator(client=client)
+    generator = LLMQuizGenerator(client=cast(LLMClient, client))
 
     questions = await generator.generate(concept=concept, quiz_type="practice")
 
@@ -544,7 +552,7 @@ async def test_llm_quiz_grader_renders_prompt_and_parses_feedback(session):
             """
         ]
     )
-    grader = LLMQuizGrader(client=client)
+    grader = LLMQuizGrader(client=cast(LLMClient, client))
     questions = FakeQuizGenerator().questions
     answers = [
         QuizAnswer(question_id="q1", answer="A derivative measures change."),
@@ -586,7 +594,7 @@ async def test_llm_quiz_grader_repairs_invalid_json_once(session):
             """
         ]
     )
-    grader = LLMQuizGrader(client=client)
+    grader = LLMQuizGrader(client=cast(LLMClient, client))
     questions = FakeQuizGenerator().questions
     answers = [
         QuizAnswer(question_id="q1", answer="A derivative measures change."),

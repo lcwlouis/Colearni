@@ -1,14 +1,17 @@
 import asyncio
 import json
+from collections.abc import AsyncGenerator
+from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.app.agents.llm_client import LLMClient
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
-from backend.app.schemas.concept import ConceptPrimerOutput
+from backend.app.schemas.concept import ConceptPrimerOutput, PrimerKeyTerm
 from backend.app.services.concept_primers import (
     LLMPrimerGenerator,
     PrimerGenerationError,
@@ -35,9 +38,9 @@ class FakePrimerGenerator:
         self.output = output or ConceptPrimerOutput(
             overview="Derivatives measure how a quantity changes.",
             key_terms=[
-                {"term": "Slope", "definition": "The rate of change at a point."},
-                {"term": "Limit", "definition": "The value a function approaches."},
-                {"term": "Tangent", "definition": "A line touching a curve at one point."},
+                PrimerKeyTerm(term="Slope", definition="The rate of change at a point."),
+                PrimerKeyTerm(term="Limit", definition="The value a function approaches."),
+                PrimerKeyTerm(term="Tangent", definition="A line touching a curve at one point."),
             ],
             sample_questions=[
                 "Walk me through what a derivative is.",
@@ -290,7 +293,7 @@ async def test_llm_primer_generator_renders_prompt_and_parses_output(session):
             """
         ]
     )
-    generator = LLMPrimerGenerator(client=client)
+    generator = LLMPrimerGenerator(client=cast(LLMClient, client))
 
     output = await generator.generate(concept=concept, trail=trail, neighbour_context={})
 
@@ -313,7 +316,7 @@ async def test_llm_primer_generator_renders_prompt_and_parses_output(session):
 
 async def test_llm_primer_generator_rejects_invalid_json(session):
     _, trail, concept = await _seed_concept(session)
-    generator = LLMPrimerGenerator(client=FakeLLMClient(["not json"]))
+    generator = LLMPrimerGenerator(client=cast(LLMClient, FakeLLMClient(["not json"])))
 
     with pytest.raises(PrimerGenerationError):
         await generator.generate(concept=concept, trail=trail, neighbour_context={})
@@ -333,7 +336,7 @@ async def test_llm_primer_generator_rejects_too_few_key_terms(session):
             """
         ]
     )
-    generator = LLMPrimerGenerator(client=client)
+    generator = LLMPrimerGenerator(client=cast(LLMClient, client))
 
     with pytest.raises(PrimerGenerationError):
         await generator.generate(concept=concept, trail=trail, neighbour_context={})
@@ -549,14 +552,17 @@ async def test_stream_primer_persists_when_consumer_disconnects(session, session
     manager = PrimerGenerationManager()
     generator = _GatedPrimerGenerator()
 
-    stream = stream_concept_primer(
-        session,
-        generator,
-        workspace_id=workspace.id,
-        trail_id=trail.id,
-        concept_id=concept_id,
-        session_factory=session_factory,
-        manager=manager,
+    stream = cast(
+        AsyncGenerator[str, None],
+        stream_concept_primer(
+            session,
+            generator,
+            workspace_id=workspace.id,
+            trail_id=trail.id,
+            concept_id=concept_id,
+            session_factory=session_factory,
+            manager=manager,
+        ),
     )
     # Consume up to the first preview token, then "disconnect" by closing the
     # SSE generator mid-flight (this is what a client refresh/navigate does).

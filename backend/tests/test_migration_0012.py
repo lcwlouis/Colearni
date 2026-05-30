@@ -17,9 +17,11 @@ def _load_migration():
         / "0012_trail_prior_knowledge.py"
     )
     spec = importlib.util.spec_from_file_location("migration_0012", path)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    loader = spec.loader
+    assert loader is not None
+    loader.exec_module(module)
     return module
 
 
@@ -38,7 +40,7 @@ def test_migration_0012_adds_and_drops_prior_knowledge():
         ctx = MigrationContext.configure(conn)
         # The migration module references the global `op` proxy; bind it to a
         # concrete Operations instance for this isolated connection.
-        migration.op = Operations(ctx)
+        setattr(migration, "op", Operations(ctx))
 
         migration.upgrade()
         columns = {col["name"] for col in inspect(conn).get_columns("trails")}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import {
   useLocalRuntime,
   type ChatModelAdapter,
@@ -58,11 +58,6 @@ export function useTutorRuntime({
   onError,
   onMasteryUpdated,
 }: TutorRuntimeOptions) {
-  const conversationIdRef = useRef(conversationId);
-  conversationIdRef.current = conversationId;
-
-  const getConversationId = useCallback(() => conversationIdRef.current, []);
-
   const adapter = useMemo(
     () =>
       createTutorModelAdapter({
@@ -70,7 +65,6 @@ export function useTutorRuntime({
         trailId,
         conceptId,
         conversationId,
-        getConversationId,
         onConversationId,
         onMode,
         onStatus,
@@ -82,7 +76,6 @@ export function useTutorRuntime({
       trailId,
       conceptId,
       conversationId,
-      getConversationId,
       onConversationId,
       onMode,
       onStatus,
@@ -109,6 +102,8 @@ export function createTutorModelAdapter({
   onError,
   onMasteryUpdated,
 }: CreateTutorModelAdapterOptions): ChatModelAdapter {
+  let activeConversationId = conversationId;
+
   return {
     async *run({ messages, abortSignal, runConfig }) {
       const latest = latestUserMessageText(messages);
@@ -128,7 +123,7 @@ export function createTutorModelAdapter({
         trailId,
         conceptId,
         message: latest,
-        conversationId: getConversationId?.() ?? conversationId,
+        conversationId: getConversationId?.() ?? activeConversationId,
         regenerate,
         replaceLatestUser,
         signal: abortSignal,
@@ -161,6 +156,7 @@ export function createTutorModelAdapter({
           queue.push(assistantRunUpdate(text, parts));
         },
         onDone(nextConversationId) {
+          activeConversationId = nextConversationId;
           onConversationId(nextConversationId);
           queue.push(assistantRunResult(text, parts));
           queue.close();

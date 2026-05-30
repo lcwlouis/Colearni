@@ -240,7 +240,10 @@ async def _vector_search_rows(
         rows = await session.execute(stmt)
     except SQLAlchemyError:
         return None
-    return list(rows.all())
+    return [
+        (source, revision, chunk, distance)
+        for source, revision, chunk, distance in rows.all()
+    ]
 
 
 async def _ilike_search_rows(
@@ -267,7 +270,7 @@ async def _ilike_search_rows(
             .distinct()
             .limit(limit)
         )
-        return list(rows.all())
+        return [(source, revision, chunk) for source, revision, chunk in rows.all()]
 
     rows = await session.execute(
         select(SourceRecord, SourceRevision, SourceChunk)
@@ -283,7 +286,7 @@ async def _ilike_search_rows(
         .distinct()
         .limit(limit)
     )
-    return list(rows.all())
+    return [(source, revision, chunk) for source, revision, chunk in rows.all()]
 
 
 async def read_document_section(

@@ -1073,6 +1073,22 @@ function StreamingProse({ text }: { text: string }) {
   );
 }
 
+type ConceptSourcesState = {
+  key: string;
+  sources: ConceptSourceListItem[];
+  loading: boolean;
+  loadError: string | null;
+};
+
+function loadingConceptSourcesState(key: string): ConceptSourcesState {
+  return {
+    key,
+    sources: [],
+    loading: true,
+    loadError: null,
+  };
+}
+
 function SourcesSection({
   workspaceId,
   conceptId,
@@ -1080,9 +1096,15 @@ function SourcesSection({
   workspaceId: string;
   conceptId: string;
 }) {
-  const [sources, setSources] = useState<ConceptSourceListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const sourcesKey = `${workspaceId}:${conceptId}`;
+  const [sourceState, setSourceState] = useState<ConceptSourcesState>(() =>
+    loadingConceptSourcesState(sourcesKey),
+  );
+  const currentSourceState =
+    sourceState.key === sourcesKey
+      ? sourceState
+      : loadingConceptSourcesState(sourcesKey);
+  const { sources, loading, loadError } = currentSourceState;
   const [formOpen, setFormOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
@@ -1091,28 +1113,30 @@ function SourcesSection({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
     getConceptSources(workspaceId, conceptId)
       .then((response) => {
         if (!cancelled) {
-          setSources(response.sources);
+          setSourceState({
+            key: sourcesKey,
+            sources: response.sources,
+            loading: false,
+            loadError: null,
+          });
         }
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setLoadError(errorMessage(error));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
+          setSourceState({
+            ...loadingConceptSourcesState(sourcesKey),
+            loading: false,
+            loadError: errorMessage(error),
+          });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, conceptId]);
+  }, [workspaceId, conceptId, sourcesKey]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1126,7 +1150,16 @@ function SourcesSection({
       const uploaded = await uploadSource(workspaceId, file, title);
       await linkSourceToConcept(workspaceId, uploaded.id, conceptId, "primary");
       const refreshed = await getConceptSources(workspaceId, conceptId);
-      setSources(refreshed.sources);
+      setSourceState((current) =>
+        current.key === sourcesKey
+          ? {
+              ...current,
+              sources: refreshed.sources,
+              loading: false,
+              loadError: null,
+            }
+          : current,
+      );
       setFormOpen(false);
       setFile(null);
       setTitle("");

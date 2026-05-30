@@ -280,8 +280,8 @@ describe("tutor runtime adapter", () => {
     if (!(Symbol.asyncIterator in stream)) {
       throw new Error("Expected streaming adapter result");
     }
-    for await (const _chunk of stream) {
-      // drain stream
+    for await (const chunk of stream) {
+      void chunk;
     }
 
     expect(streamTutorChat).toHaveBeenCalledWith(
@@ -311,8 +311,8 @@ describe("tutor runtime adapter", () => {
     if (!(Symbol.asyncIterator in stream)) {
       throw new Error("Expected streaming adapter result");
     }
-    for await (const _chunk of stream) {
-      // drain stream
+    for await (const chunk of stream) {
+      void chunk;
     }
 
     expect(streamTutorChat).toHaveBeenCalledWith(

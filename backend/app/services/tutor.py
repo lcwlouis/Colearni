@@ -24,7 +24,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -613,10 +613,18 @@ class LLMTutorAgent:
         max_tokens: int,
         thinking: bool | None = None,
     ) -> AsyncIterator[TutorStreamChunk]:
-        kwargs: dict[str, object] = {"temperature": temperature, "max_tokens": max_tokens}
-        if thinking is not None:
-            kwargs["thinking"] = thinking
-        return self._client.chat_stream_tagged(messages, **kwargs)
+        if thinking is None:
+            return self._client.chat_stream_tagged(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        return self._client.chat_stream_tagged(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            thinking=thinking,
+        )
 
     def _final_response_prompt(self, mode: str, context: TutorContext) -> str:
         variables = _context_to_base_prompt_vars(context)
@@ -1120,7 +1128,7 @@ async def stream_chat_response(
             if hasattr(agent, "prepare_mode_stream"):
                 async for kind, payload in agent.prepare_mode_stream(context):  # type: ignore[union-attr]
                     if kind == "__prep__":
-                        prep = payload  # type: ignore[assignment]
+                        prep = cast(_ModePreparation, payload)
                         break
                     kind, chunk = _sanitize_stream_event(
                         kind, str(payload), control_prefix_stripper
@@ -1130,6 +1138,8 @@ async def stream_chat_response(
                         yield sse
             if prep is None:
                 prep = await agent.prepare_mode(context)  # type: ignore[union-attr]
+            if prep is None:
+                raise RuntimeError("Tutor mode preparation failed")
 
             # Emit buffered events from phase 1 (status, tool_call, tool_result, mode)
             for kind, chunk in prep.buffered_events:

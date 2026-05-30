@@ -27,9 +27,12 @@ export function ReasoningRoot({
   const lockScroll = useScrollLock(ref, ANIMATION_DURATION);
 
   useEffect(() => {
-    if (defaultOpen) {
-      setOpen(true);
+    if (!defaultOpen) {
+      return;
     }
+
+    const handle = window.setTimeout(() => setOpen(true), 0);
+    return () => window.clearTimeout(handle);
   }, [defaultOpen]);
 
   const onOpenChange = useCallback(

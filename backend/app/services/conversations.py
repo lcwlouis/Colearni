@@ -594,7 +594,9 @@ def _truncate_tool_result(content: str) -> str:
 
 def _is_directed_retrieval_result(result: NormalizedToolResult) -> bool:
     return (
-        result.name in _DIRECTED_RETRIEVAL_TOOLS and not result.is_error and result.content.strip()
+        result.name in _DIRECTED_RETRIEVAL_TOOLS
+        and not result.is_error
+        and bool(result.content.strip())
     )
 
 

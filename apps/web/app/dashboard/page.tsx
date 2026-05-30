@@ -500,7 +500,7 @@ function OlderTrailsSection({
                   )}
                 </div>
               </Link>
-              <div className="flex w-[7.5rem] shrink-0 items-center justify-end border-l border-slate-100 pl-3">
+              <div className="flex w-30 shrink-0 items-center justify-end border-l border-slate-100 pl-3">
                 {confirmingDeleteId === trail.id ? (
                   <div className="flex items-center gap-2 text-xs">
                     <button

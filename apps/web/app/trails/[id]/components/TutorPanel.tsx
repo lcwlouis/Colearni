@@ -55,6 +55,37 @@ import type {
 
 type ReasoningView = "summary" | "full";
 
+type TutorHistoryState = {
+  key: string;
+  status: "loading" | "ready" | "error";
+  history: ConversationHistoryResponse | null;
+  conversationId: string | null;
+  mode: TutorMode | null;
+  historyError: string;
+  chatError: string;
+};
+
+function tutorHistoryKey(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  loadKey: number,
+) {
+  return `${workspaceId}:${trailId}:${conceptId}:${loadKey}`;
+}
+
+function loadingTutorHistoryState(key: string): TutorHistoryState {
+  return {
+    key,
+    status: "loading",
+    history: null,
+    conversationId: null,
+    mode: null,
+    historyError: "",
+    chatError: "",
+  };
+}
+
 interface TutorPanelProps {
   workspaceId: string;
   trailId: string;
@@ -77,24 +108,21 @@ export function TutorPanel({
   onBack,
   onMasteryUpdated,
 }: TutorPanelProps) {
-  const [history, setHistory] = useState<ConversationHistoryResponse | null>(
-    null,
-  );
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [mode, setMode] = useState<TutorMode | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [historyError, setHistoryError] = useState("");
-  const [chatError, setChatError] = useState("");
   const [loadKey, setLoadKey] = useState(0);
+  const historyKey = tutorHistoryKey(workspaceId, trailId, concept.id, loadKey);
+  const [historyState, setHistoryState] = useState<TutorHistoryState>(() =>
+    loadingTutorHistoryState(historyKey),
+  );
+  const currentHistoryState =
+    historyState.key === historyKey
+      ? historyState
+      : loadingTutorHistoryState(historyKey);
+  const { history, conversationId, mode, historyError, chatError } =
+    currentHistoryState;
+  const loading = currentHistoryState.status === "loading";
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setHistoryError("");
-    setChatError("");
-    setHistory(null);
-    setConversationId(null);
-    setMode(null);
 
     async function loadHistory() {
       try {
@@ -106,27 +134,34 @@ export function TutorPanel({
         if (cancelled) {
           return;
         }
-        setHistory(nextHistory);
-        setConversationId(nextHistory.conversation_id);
-        setMode(lastAssistantMode(nextHistory));
+        setHistoryState({
+          key: historyKey,
+          status: "ready",
+          history: nextHistory,
+          conversationId: nextHistory.conversation_id,
+          mode: lastAssistantMode(nextHistory),
+          historyError: "",
+          chatError: "",
+        });
       } catch (exc) {
         if (!cancelled) {
-          setHistoryError(
-            exc instanceof Error ? exc.message : "Could not load conversation",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
+          setHistoryState({
+            ...loadingTutorHistoryState(historyKey),
+            status: "error",
+            historyError:
+              exc instanceof Error
+                ? exc.message
+                : "Could not load conversation",
+          });
         }
       }
     }
 
-    loadHistory();
+    void loadHistory();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, trailId, concept.id, loadKey]);
+  }, [workspaceId, trailId, concept.id, historyKey]);
 
   if (loading) {
     return (
@@ -180,12 +215,27 @@ export function TutorPanel({
       mode={mode}
       chatError={chatError}
       onBack={onBack}
-      onConversationId={setConversationId}
-      onMode={(nextMode) => {
-        setMode(nextMode);
-        setChatError("");
+      onConversationId={(nextConversationId) => {
+        setHistoryState((current) =>
+          current.key === historyKey
+            ? { ...current, conversationId: nextConversationId }
+            : current,
+        );
       }}
-      onError={setChatError}
+      onMode={(nextMode) => {
+        setHistoryState((current) =>
+          current.key === historyKey
+            ? { ...current, mode: nextMode, chatError: "" }
+            : current,
+        );
+      }}
+      onError={(message) => {
+        setHistoryState((current) =>
+          current.key === historyKey
+            ? { ...current, chatError: message }
+            : current,
+        );
+      }}
       onMasteryUpdated={onMasteryUpdated}
     />
   );
@@ -380,7 +430,7 @@ function TutorThread({
   );
 
   return (
-    <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col bg-gradient-to-b from-white to-slate-50/80">
+    <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col bg-linear-to-b from-white to-slate-50/80">
       <ThreadPrimitive.Viewport
         autoScroll
         scrollToBottomOnRunStart
@@ -405,7 +455,7 @@ function TutorThread({
           <ArrowDownIcon className="size-4" />
         </ThreadPrimitive.ScrollToBottom>
         <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto pt-4">
-          <div className="bg-gradient-to-t from-slate-50 via-slate-50 to-transparent pb-3 pt-6">
+          <div className="bg-linear-to-t from-slate-50 via-slate-50 to-transparent pb-3 pt-6">
             <ComposerPrimitive.Root className="rounded-3xl border border-slate-200 bg-white p-2 shadow-lg shadow-slate-200/70">
               <ComposerPrimitive.Input
                 aria-label="Message tutor"

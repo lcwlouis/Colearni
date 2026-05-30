@@ -98,13 +98,14 @@ async def link_source_to_concept_route(
     session: AsyncSession = Depends(get_session),
 ) -> ConceptSourceLinkRead | JSONResponse:
     try:
-        return await link_source_to_concept(
+        link = await link_source_to_concept(
             session,
             workspace_id=workspace_id,
             source_id=source_id,
             concept_id=body.concept_id,
             relation=body.relation,
         )
+        return ConceptSourceLinkRead.model_validate(link)
     except LookupError as exc:
         await session.rollback()
         return _not_found(str(exc))

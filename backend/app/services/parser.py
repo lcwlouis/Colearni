@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 ElementType = Literal["heading_1", "heading_2", "heading_3", "paragraph", "list_item", "code"]
+_HEADING_TYPES: dict[int, ElementType] = {1: "heading_1", 2: "heading_2", 3: "heading_3"}
 
 
 @dataclass
@@ -120,7 +121,9 @@ def _parse_markdown(data: bytes) -> CanonicalDocument:
         if heading:
             flush_paragraph()
             level = len(heading.group(1))
-            elements.append(DocumentElement(type=f"heading_{level}", text=heading.group(2).strip()))
+            elements.append(
+                DocumentElement(type=_HEADING_TYPES[level], text=heading.group(2).strip())
+            )
         elif line.strip():
             paragraph_lines.append(line.strip())
         else:

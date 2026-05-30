@@ -22,7 +22,7 @@ from .base import Base, TimestampMixin, UUIDType, uuid_pk
 try:
     from pgvector.sqlalchemy import Vector as _Vector
 
-    def _embedding_column(dim: int) -> sa.Column:
+    def _embedding_column(dim: int) -> Mapped[list[float] | None]:
         return mapped_column(_Vector(dim), nullable=True)
 
 except ImportError:
@@ -42,7 +42,7 @@ except ImportError:
                 return "VECTOR"
             return f"VECTOR({self.dim})"
 
-        def bind_processor(self, _dialect):
+        def bind_processor(self, dialect):
             def process(value):
                 return self._to_db(value)
 
@@ -50,13 +50,15 @@ except ImportError:
 
         def literal_processor(self, dialect):
             string_literal_processor = self._string._cached_literal_processor(dialect)
+            if string_literal_processor is None:
+                return None
 
             def process(value):
                 return string_literal_processor(self._to_db(value))
 
             return process
 
-        def result_processor(self, _dialect, _coltype):
+        def result_processor(self, dialect, coltype):
             def process(value):
                 if value is None or isinstance(value, list):
                     return value
@@ -89,7 +91,7 @@ except ImportError:
             def l1_distance(self, other):
                 return self.op("<+>", return_type=sa.Float)(other)
 
-    def _embedding_column(dim: int) -> sa.Column:
+    def _embedding_column(dim: int) -> Mapped[list[float] | None]:
         return mapped_column(_FallbackVector(dim), nullable=True)
 
 

@@ -235,9 +235,10 @@ vi.mock("@assistant-ui/react", () => ({
       children: ReactNode;
       className?: string;
     }) => <form className={className}>{children}</form>,
-    Input: ({ submitMode: _submitMode, ...props }: Record<string, unknown>) => (
-      <textarea {...props} />
-    ),
+    Input: ({ submitMode, ...props }: Record<string, unknown>) => {
+      void submitMode;
+      return <textarea {...props} />;
+    },
     Send: ({
       children,
       className,
@@ -938,23 +939,6 @@ function readNodeText(node: ReactNode): string {
   }
 
   return "";
-}
-
-function formatMockStatus(status: string): string {
-  switch (status) {
-    case "thinking":
-      return "Thinking";
-    case "calling_tool":
-      return "Calling tool";
-    case "tool_called":
-      return "Tool requested";
-    case "tool_complete":
-      return "Tool result ready";
-    case "responding":
-      return "Responding";
-    default:
-      return status;
-  }
 }
 
 const emptyHistory: ConversationHistoryResponse = {

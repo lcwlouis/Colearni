@@ -52,10 +52,15 @@ class EmbeddingClient:
         if not texts:
             return []
         client = self._client or self._openai_client()
-        params: dict[str, object] = {"model": self._model, "input": texts}
-        if self._should_request_dimensions():
-            params["dimensions"] = self._dimensions
-        response = await client.embeddings.create(**params)
+        dimensions = self._dimensions
+        if self._should_request_dimensions() and dimensions is not None:
+            response = await client.embeddings.create(
+                model=self._model,
+                input=texts,
+                dimensions=dimensions,
+            )
+        else:
+            response = await client.embeddings.create(model=self._model, input=texts)
         vectors = [item.embedding for item in response.data]
         self._validate_dimensions(vectors)
         return vectors
@@ -82,11 +87,10 @@ class EmbeddingClient:
     def _openai_client(self):  # type: ignore[return]
         from openai import AsyncOpenAI
 
-        kwargs: dict[str, str] = {"api_key": self._api_key}
         base_url = self._base_url()
         if base_url:
-            kwargs["base_url"] = base_url
-        return AsyncOpenAI(**kwargs)
+            return AsyncOpenAI(api_key=self._api_key, base_url=base_url)
+        return AsyncOpenAI(api_key=self._api_key)
 
     def _base_url(self) -> str:
         if self._provider == "openai":

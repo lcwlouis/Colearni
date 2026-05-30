@@ -562,7 +562,7 @@ export default function TrailsPage() {
                   ? conceptTitles.map((title, i) => (
                       <span
                         key={title}
-                        className="inline-flex max-w-[14rem] items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        className="inline-flex max-w-56 items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                         style={{
                           opacity: 0,
                           animation: "stream-char-in 260ms ease-out both",

@@ -4,7 +4,7 @@ import json
 import re
 import uuid
 from hashlib import blake2b
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +20,7 @@ from backend.app.schemas.mastery import (
     QuizGenerationOutput,
     QuizQuestion,
 )
-from backend.app.schemas.types import QuizType
+from backend.app.schemas.types import MasteryStatus, QuizType
 from backend.app.services.conversations import validate_concept_scope
 from backend.app.services.mastery import (
     PASS_THRESHOLD,
@@ -327,7 +327,7 @@ async def grade_quiz_submission(
         score=evaluation.score,
         feedback=feedback,
         per_question=evaluation.per_question,
-        mastery_status=mastery_state.status,
+        mastery_status=cast(MasteryStatus, mastery_state.status),
         attempt_id=attempt.id,
     )
 

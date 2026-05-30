@@ -14,15 +14,15 @@ export default function HowItWorksPage() {
   return (
     <div className="mx-auto w-full max-w-5xl px-5 py-16 sm:px-8 md:py-24">
       <header className="max-w-2xl">
-        <p className="font-[family-name:var(--font-geist-mono)] text-xs font-medium uppercase tracking-[0.2em] text-[var(--mk-accent)]">
+        <p className="font-mono text-xs font-medium uppercase tracking-[0.2em] text-(--mk-accent)">
           How it works
         </p>
-        <h1 className="mt-4 font-display text-4xl font-semibold leading-tight tracking-tight text-[var(--mk-fg)] sm:text-5xl">
+        <h1 className="mt-4 font-display text-4xl font-semibold leading-tight tracking-tight text-(--mk-fg) sm:text-5xl">
           One loop, repeated until it sticks.
         </h1>
-        <p className="mt-4 text-lg leading-7 text-[var(--mk-muted)]">
-          Colearni runs the same tight loop for every concept in your Trail. Each
-          pass moves you from recognising an idea to genuinely using it.
+        <p className="mt-4 text-lg leading-7 text-(--mk-muted)">
+          Colearni runs the same tight loop for every concept in your Trail.
+          Each pass moves you from recognising an idea to genuinely using it.
         </p>
       </header>
 
@@ -34,15 +34,15 @@ export default function HowItWorksPage() {
         {HOW_IT_WORKS_STEPS.map((step, i) => (
           <li key={step.n}>
             <SectionReveal delayMs={i * 60}>
-              <div className="flex gap-5 rounded-xl border border-[var(--mk-border)] bg-[var(--mk-card)] p-6">
-                <span className="font-display text-3xl font-semibold text-[var(--mk-accent)]">
+              <div className="flex gap-5 rounded-xl border border-(--mk-border) bg-(--mk-card) p-6">
+                <span className="font-display text-3xl font-semibold text-(--mk-accent)">
                   {step.n}
                 </span>
                 <div>
-                  <h2 className="font-display text-xl font-semibold text-[var(--mk-fg)]">
+                  <h2 className="font-display text-xl font-semibold text-(--mk-fg)">
                     {step.title}
                   </h2>
-                  <p className="mt-2 text-base leading-7 text-[var(--mk-muted)]">
+                  <p className="mt-2 text-base leading-7 text-(--mk-muted)">
                     {step.body}
                   </p>
                 </div>
@@ -55,7 +55,7 @@ export default function HowItWorksPage() {
       <div className="mt-16 flex justify-center">
         <Link
           href="/pedagogy"
-          className="inline-flex h-11 items-center justify-center rounded-full border border-[var(--mk-border)] px-6 text-base font-medium text-[var(--mk-fg)] transition-colors hover:bg-[var(--mk-bg-soft)]"
+          className="inline-flex h-11 items-center justify-center rounded-full border border-(--mk-border) px-6 text-base font-medium text-(--mk-fg) transition-colors hover:bg-(--mk-bg-soft)"
         >
           Why this works →
         </Link>

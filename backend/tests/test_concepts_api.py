@@ -20,8 +20,8 @@ from backend.app.models.mastery import MasteryRecord, QuizAttempt
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
-from backend.app.schemas.concept import ConceptPrimerOutput
-from backend.app.schemas.mastery import QuizEvaluation, QuizQuestion
+from backend.app.schemas.concept import ConceptPrimerOutput, PrimerKeyTerm
+from backend.app.schemas.mastery import PerQuestionEvaluation, QuizEvaluation, QuizQuestion
 
 
 class _FakeQuizGenerator:
@@ -54,11 +54,11 @@ class _FakeQuizGrader:
             score=self.score,
             passed=self.score >= 0.7,
             per_question=[
-                {
-                    "question_id": question.id,
-                    "score": self.score,
-                    "feedback": f"Feedback for {question.id}",
-                }
+                PerQuestionEvaluation(
+                    question_id=question.id,
+                    score=self.score,
+                    feedback=f"Feedback for {question.id}",
+                )
                 for question in questions
             ],
             overall_feedback=f"Overall feedback for {concept.title}",
@@ -73,9 +73,9 @@ class _FakePrimerGenerator:
         return ConceptPrimerOutput(
             overview=f"Orientation for {concept.title}.",
             key_terms=[
-                {"term": "Term A", "definition": "Definition A."},
-                {"term": "Term B", "definition": "Definition B."},
-                {"term": "Term C", "definition": "Definition C."},
+                PrimerKeyTerm(term="Term A", definition="Definition A."),
+                PrimerKeyTerm(term="Term B", definition="Definition B."),
+                PrimerKeyTerm(term="Term C", definition="Definition C."),
             ],
             sample_questions=[
                 "Walk me through this concept.",

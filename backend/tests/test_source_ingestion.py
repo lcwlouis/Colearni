@@ -126,6 +126,7 @@ async def test_upload_persists_revision_provenance_and_private_object(
 
     async with _sessionmaker(db_engine)() as session:
         persisted_revision = await session.get(SourceRevision, uuid.UUID(response_revision["id"]))
+    assert persisted_revision is not None
     assert persisted_revision.content_hash == expected_hash
     assert persisted_revision.object_key.startswith(f"workspaces/{workspace_id}/sources/")
     assert persisted_revision.raw_text == content.decode()
@@ -157,6 +158,7 @@ async def test_upload_private_source_with_pdf_sets_parsed_and_raw_text(db_engine
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, revision_id)
         chunks = list(await session.scalars(select(SourceChunk)))
+    assert revision is not None
     assert revision.raw_text == "Parsed PDF text"
     assert len(chunks) == 1
 
@@ -175,6 +177,7 @@ async def test_upload_private_source_with_unsupported_type_sets_failed(db_engine
         )
 
     assert response.revision.status == "failed"
+    assert response.revision.error_message is not None
     assert "Unsupported source format" in response.revision.error_message
 
 
@@ -204,6 +207,7 @@ async def test_upload_private_source_with_trail_id_calls_auto_linker(db_engine, 
             )
 
     assert auto_link.await_count == 1
+    assert auto_link.await_args is not None
     _, revision_id, called_trail_id, called_workspace_id = auto_link.await_args.args
     assert revision_id == response.revision.id
     assert called_trail_id == trail_id
@@ -301,6 +305,7 @@ async def test_source_revision_append_only_keys_are_unique(db_engine, tmp_path):
             storage_root=str(tmp_path / "source-storage"),
         )
         original = await session.get(SourceRevision, created.revision.id)
+        assert original is not None
         original_hash = original.content_hash
         session.add(
             SourceRevision(
@@ -322,6 +327,7 @@ async def test_source_revision_append_only_keys_are_unique(db_engine, tmp_path):
 
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         assert revision.content_hash == original_hash
         assert revision.status == "parsed"
 
@@ -340,6 +346,7 @@ async def test_creating_new_revision_does_not_mutate_prior_revision(db_engine, t
         first_revision_id = created.revision.id
         source_id = created.id
         first_revision = await session.get(SourceRevision, first_revision_id)
+        assert first_revision is not None
         first_revision_hash = first_revision.content_hash
         second_content = b"second revision"
         session.add(
@@ -377,11 +384,13 @@ async def test_source_revision_status_update_does_not_raise(db_engine, tmp_path)
     created = await _upload_for_revision_guard(db_engine, tmp_path)
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         revision.status = "parsed"
         await session.commit()
 
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         assert revision.status == "parsed"
 
 
@@ -389,12 +398,14 @@ async def test_source_revision_error_message_update_does_not_raise(db_engine, tm
     created = await _upload_for_revision_guard(db_engine, tmp_path)
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         revision.status = "failed"
         revision.error_message = "Parser failed"
         await session.commit()
 
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         assert revision.error_message == "Parser failed"
 
 
@@ -402,6 +413,7 @@ async def test_source_revision_object_key_update_raises(db_engine, tmp_path):
     created = await _upload_for_revision_guard(db_engine, tmp_path)
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         revision.object_key = "workspaces/changed/object.txt"
         with pytest.raises(ValueError, match="object_key"):
             await session.commit()
@@ -411,6 +423,7 @@ async def test_source_revision_content_hash_update_raises(db_engine, tmp_path):
     created = await _upload_for_revision_guard(db_engine, tmp_path)
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         revision.content_hash = "sha256:" + hashlib.sha256(b"changed").hexdigest()
         with pytest.raises(ValueError, match="content_hash"):
             await session.commit()
@@ -420,6 +433,7 @@ async def test_source_revision_revision_number_update_raises(db_engine, tmp_path
     created = await _upload_for_revision_guard(db_engine, tmp_path)
     async with _sessionmaker(db_engine)() as session:
         revision = await session.get(SourceRevision, created.revision.id)
+        assert revision is not None
         revision.revision_number = 2
         with pytest.raises(ValueError, match="revision_number"):
             await session.commit()

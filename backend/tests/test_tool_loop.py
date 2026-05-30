@@ -156,7 +156,7 @@ async def test_tool_loop_parallel_calls(db_session: AsyncSession):
         side_effect=fake_execute,
     ):
         messages = [{"role": "user", "content": "hello"}]
-        _final_msgs, all_results = await _run_retrieval_loop(
+        retrieval_loop = await _run_retrieval_loop(
             messages,
             RETRIEVAL_TOOLS,
             session=db_session,
@@ -164,6 +164,7 @@ async def test_tool_loop_parallel_calls(db_session: AsyncSession):
             concept_id=concept_id,
             llm_client=fake_llm,
         )
+        all_results = retrieval_loop.tool_results
 
     assert len(executed_calls) == 2
     assert "call_1" in executed_calls
@@ -203,7 +204,7 @@ async def test_tool_loop_budget_cap(db_session: AsyncSession):
         side_effect=fake_execute,
     ):
         messages = [{"role": "user", "content": "hello"}]
-        _final_msgs, all_results = await _run_retrieval_loop(
+        retrieval_loop = await _run_retrieval_loop(
             messages,
             RETRIEVAL_TOOLS,
             session=db_session,
@@ -211,6 +212,7 @@ async def test_tool_loop_budget_cap(db_session: AsyncSession):
             concept_id=concept_id,
             llm_client=fake_llm,
         )
+        all_results = retrieval_loop.tool_results
 
     # Budget = 3, so only 3 of 4 calls should be executed
     assert len(executed_calls) == settings.tutor_tool_call_budget
@@ -253,7 +255,7 @@ async def test_tool_loop_dedup(db_session: AsyncSession):
         side_effect=fake_execute,
     ):
         messages = [{"role": "user", "content": "hello"}]
-        _final_msgs, all_results = await _run_retrieval_loop(
+        retrieval_loop = await _run_retrieval_loop(
             messages,
             RETRIEVAL_TOOLS,
             session=db_session,
@@ -261,6 +263,7 @@ async def test_tool_loop_dedup(db_session: AsyncSession):
             concept_id=concept_id,
             llm_client=fake_llm,
         )
+        all_results = retrieval_loop.tool_results
 
     # Only one unique execution — the second was a cache hit
     assert execution_count == 1
@@ -299,11 +302,11 @@ async def test_tool_loop_no_calls(db_session: AsyncSession):
             concept_id=concept_id,
             llm_client=fake_llm,
         )
-        _final_msgs, all_results = retrieval_loop
+        all_results = retrieval_loop.tool_results
 
     assert execution_count == 0
     assert all_results == []
-    assert _final_msgs == messages
+    assert retrieval_loop.messages == messages
     assert retrieval_loop.text == "Just text."
 
 
@@ -397,7 +400,7 @@ async def test_tool_loop_stops_after_successful_document_read(db_session: AsyncS
         side_effect=fake_execute,
     ):
         messages = [{"role": "user", "content": "hello"}]
-        _final_msgs, all_results = await _run_retrieval_loop(
+        retrieval_loop = await _run_retrieval_loop(
             messages,
             RETRIEVAL_TOOLS,
             session=db_session,
@@ -405,6 +408,7 @@ async def test_tool_loop_stops_after_successful_document_read(db_session: AsyncS
             concept_id=concept_id,
             llm_client=fake_llm,
         )
+        all_results = retrieval_loop.tool_results
 
     assert fake_llm._call_count == 1
     assert [result.name for result in all_results] == ["read_document_section"]
@@ -481,7 +485,7 @@ async def test_tool_loop_bad_args(db_session: AsyncSession):
     )
 
     messages = [{"role": "user", "content": "hello"}]
-    _final_msgs, all_results = await _run_retrieval_loop(
+    retrieval_loop = await _run_retrieval_loop(
         messages,
         RETRIEVAL_TOOLS,
         session=db_session,
@@ -489,6 +493,7 @@ async def test_tool_loop_bad_args(db_session: AsyncSession):
         concept_id=concept_id,
         llm_client=fake_llm,
     )
+    all_results = retrieval_loop.tool_results
 
     # The loop must not raise; we get an error result
     assert len(all_results) == 1

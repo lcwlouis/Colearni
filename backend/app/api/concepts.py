@@ -1,4 +1,5 @@
 import uuid
+from typing import cast
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -19,6 +20,7 @@ from backend.app.schemas.mastery import (
     QuizGradeRequest,
 )
 from backend.app.schemas.source import ConceptSourceListItem, ConceptSourcesResponse
+from backend.app.schemas.types import QuizType, SourceAccess, SourceOrigin
 from backend.app.services.concept_primers import (
     LLMPrimerGenerator,
     PrimerGenerationError,
@@ -155,8 +157,8 @@ async def get_concept_sources_route(
             ConceptSourceListItem(
                 source_id=source.id,
                 title=source.title,
-                origin=source.origin,
-                access=source.access,
+                origin=cast(SourceOrigin, source.origin),
+                access=cast(SourceAccess, source.access),
                 url=source.url,
                 relation=link.relation,
                 ingestion_status=ingestion_status,
@@ -266,7 +268,7 @@ async def _grade_route(
     workspace_id: uuid.UUID,
     trail_id: uuid.UUID,
     concept_id: uuid.UUID,
-    quiz_type: str,
+    quiz_type: QuizType,
     body: QuizGradeRequest,
 ) -> GradeResult | JSONResponse:
     try:

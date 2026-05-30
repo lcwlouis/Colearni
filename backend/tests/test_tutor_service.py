@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.app.agents.llm_client import LLMClient
 from backend.app.agents.prompts import prompt_registry
 from backend.app.agents.prompts.registry import PromptRegistry
 from backend.app.agents.provider_tools import (
@@ -47,6 +48,7 @@ from backend.app.services.tutor import (
     _context_to_base_prompt_vars,
     _context_to_prompt_vars,
     _infer_mode_from_message,
+    _ModePreparation,
     _normalize_tutor_instruction_request,
     _parse_control_from_buffer,
     _parse_mode_json,
@@ -59,6 +61,11 @@ from backend.app.services.tutor import (
     stream_chat_response,
 )
 from backend.app.settings import settings
+
+
+def _llm_client(client: object) -> LLMClient:
+    return cast(LLMClient, client)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -640,7 +647,7 @@ async def test_first_pass_prose_resolves_stuck_learner_to_repair():
         # Second (final) call produces the visible answer.
         [("text", "Here is what the Network Layer does...")],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
 
     events = [
         (kind, chunk)
@@ -659,7 +666,7 @@ async def test_first_pass_prose_keeps_socratic_for_engaged_learner():
         [("text", "Great question! Let's think about it.\n")],
         [("text", "What do you already know about this?")],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
 
     events = [
         (kind, chunk)
@@ -911,7 +918,7 @@ async def test_gated_direct_teaches_instead_of_coercing_a_question():
         [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
         [("text", teaching)],
     )
-    agent = LLMTutorAgent(client, max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), max_tokens=512)
     ctx = _make_context("Walk me through the process of imbibition.")
     ctx.mastery_status = "learning"
     ctx.concept = cast(
@@ -940,7 +947,7 @@ def test_gated_direct_final_prompt_carries_guided_teaching_and_guardrail():
     request (e.g. "make me a cheatsheet") is redirected rather than satisfied."""
     ctx = _make_context("Just give me all the answers / make me a cheatsheet for the exam.")
     ctx.mastery_status = "learning"
-    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(_StubTaggedLLMClient()), max_tokens=512)
 
     prompt = agent._final_response_prompt("direct", ctx)
 
@@ -958,7 +965,9 @@ def test_gated_direct_prep_does_not_coerce_to_socratic():
     flag any locked-socratic buffering (the old refuse-and-ask path is gone)."""
     ctx = _make_context("Explain the Calvin cycle to me.")
     ctx.mastery_status = "learning"
-    agent = LLMTutorAgent(_StubTaggedLLMClient(), registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(
+        _llm_client(_StubTaggedLLMClient()), registry=_StaticPromptRegistry(), max_tokens=512
+    )
 
     prep = agent._make_mode_prep("direct", ctx, [{"role": "system", "content": "x"}], [])
 
@@ -975,13 +984,13 @@ async def test_prepare_mode_stream_emits_first_pass_thinking_live():
             ("text", '<mode name="socratic" />'),
         ],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
 
     events: list[tuple[str, object]] = []
-    prep = None
+    prep: _ModePreparation | None = None
     async for kind, payload in agent.prepare_mode_stream(_make_context("Help me")):
         if kind == "__prep__":
-            prep = payload
+            prep = cast(_ModePreparation, payload)
             break
         events.append((kind, payload))
 
@@ -1005,7 +1014,7 @@ async def test_mode_selection_thinking_off_by_default(monkeypatch):
         [("thinking", "mode-selection reasoning"), ("text", '<mode name="socratic" />')],
         [("text", "Visible answer")],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
 
     events = [(kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Help me"))]
 
@@ -1023,7 +1032,7 @@ async def test_mode_selection_thinking_enabled_via_settings(monkeypatch):
         [("thinking", "mode-selection reasoning"), ("text", '<mode name="socratic" />')],
         [("text", "Visible answer")],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
 
     events = [(kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Help me"))]
 
@@ -1040,7 +1049,7 @@ async def test_explicit_mode_selection_thinking_overrides_settings(monkeypatch):
         [("text", "Visible answer")],
     )
     agent = LLMTutorAgent(
-        client,
+        _llm_client(client),
         registry=_StaticPromptRegistry(),
         max_tokens=512,
         mode_selection_thinking=False,
@@ -1059,7 +1068,7 @@ async def test_mode_selection_uses_small_token_cap(monkeypatch):
         [("text", "Visible answer")],
     )
     # Construct after monkeypatch so __init__ reads the patched cap.
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=4096)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=4096)
 
     [_ async for _ in agent.respond_stream(_make_context("Help me"))]
 
@@ -1077,7 +1086,7 @@ async def test_first_pass_is_pure_classifier_and_discards_trailing_text():
         [("text", '<mode name="socratic" />\nLEAKED discarded reply that must not surface.')],
         [("text", "What do you already understand here?")],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
 
     events = [(kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Help"))]
 
@@ -1158,7 +1167,7 @@ async def test_non_tool_mode_final_call_uses_final_response_prompt():
         [("text", '<mode name="socratic" />')],
         [("text", "What do you already understand about this concept?")],
     )
-    agent = LLMTutorAgent(client, max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), max_tokens=512)
 
     events = [
         (kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Check me"))
@@ -1179,7 +1188,7 @@ async def test_mastered_direct_request_keeps_direct_mode_and_prompt():
         [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
         [("text", "feelslikeimfallinginlove is the only lead single.")],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
     ctx = _make_context("Which are the lead singles?")
     ctx.mastery_status = "mastered"
 
@@ -1206,7 +1215,7 @@ async def test_retrieval_planner_text_is_reused_when_no_tool_called(db_session):
             ]
         ],
     )
-    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
     ctx = _make_context("What is the answer?")
     ctx.mastery_status = "mastered"
     ctx.sources = [
@@ -1287,7 +1296,7 @@ async def test_retrieval_tool_call_preview_includes_search_query(db_session):
 def test_direct_prompt_tells_mastered_mode_not_to_append_socratic_followup():
     ctx = _make_context("Which are the lead singles?")
     ctx.mastery_status = "mastered"
-    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(_StubTaggedLLMClient()), max_tokens=512)
 
     prompt = agent._final_response_prompt("direct", ctx)
 
@@ -1298,7 +1307,7 @@ def test_direct_prompt_tells_mastered_mode_not_to_append_socratic_followup():
 def test_final_response_contract_allows_markdown_hierarchy_and_concise_default():
     """The shared final-response contract is concise-by-default and allows markdown headers."""
     ctx = _make_context("Explain this")
-    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(_StubTaggedLLMClient()), max_tokens=512)
 
     prompt = agent._final_response_prompt("direct", ctx)
 
@@ -1311,7 +1320,7 @@ def test_final_response_contract_allows_markdown_hierarchy_and_concise_default()
 def test_final_mode_prompts_drop_hard_word_caps():
     """Relaxed length guidance must reach the rendered socratic/repair/explore prompts."""
     ctx = _make_context("Tell me more")
-    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
+    agent = LLMTutorAgent(_llm_client(_StubTaggedLLMClient()), max_tokens=512)
 
     for mode in ("socratic", "repair", "explore"):
         prompt = agent._final_response_prompt(mode, ctx)
@@ -1593,6 +1602,13 @@ class _GatingTwoPhaseAgent:
 
     async def stream_text(self, context, prep, *, messages=None):
         yield ("text", "A guiding question?")
+
+    async def respond_stream(self, context):
+        prep = await self.prepare_mode(context)
+        for event in prep.buffered_events:
+            yield event
+        async for event in self.stream_text(context, prep):
+            yield event
 
 
 async def _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id):
