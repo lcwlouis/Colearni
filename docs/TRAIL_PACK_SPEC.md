@@ -6,7 +6,7 @@ A Trail Pack is a shareable/exportable package containing the safe public struct
 
 Trail Packs are content-light by default. They may include graph structure, concept metadata, learning objectives, mastery check labels, source metadata, and research trace. They must not include private workspace content or raw source-derived content.
 
-Trail Pack export/import is part of CoLearni's MVP identity. Source ingestion, retrieval tooling, dashboard polish, provider-native tools, and future visualisers must preserve this safety boundary rather than moving sharing later or weakening the sanitizer.
+Trail Pack export/import is a core part of CoLearni's product identity. Source ingestion, retrieval tooling, dashboard polish, provider-native tools, and future visualisers must preserve this safety boundary rather than moving sharing later or weakening the sanitizer.
 
 ## File Structure
 
@@ -49,7 +49,7 @@ Required fields:
 - `content_included`
 - `hydration_supported`
 
-`pack_type` should be `structure` for the MVP.
+`pack_type` should be `structure` for public packs.
 
 `topic`, `goal`, and `target_depth` are additive JSON export fields used for clean same-server round-trip imports. Older content-light packs may omit them; import then uses documented conservative defaults and reports warnings.
 
@@ -86,7 +86,7 @@ Rules:
 - Valid concept levels are `umbrella`, `topic`, `subtopic`, and `granular`.
 - Edge endpoints must reference known node ids.
 - Prerequisite edges should be acyclic unless the pack explicitly allows cycles.
-- Graph size should stay within MVP import limits.
+- Graph size should stay within the documented import limits.
 
 ## concepts/eigenvectors.yaml
 
@@ -174,7 +174,7 @@ Rules:
 - `user_upload` sources must not be included in public export except as excluded-source report entries.
 - `research_agent` public sources may include links and metadata only.
 - `unknown` license means no content redistribution.
-- `content_included` must be `false` for MVP public packs.
+- `content_included` must be `false` for public packs.
 
 ## research_trace.yaml
 

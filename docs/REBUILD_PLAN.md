@@ -27,9 +27,9 @@ CoLearni = personal learning workspace
          + safe community Trail sharing
 ```
 
-The MVP is not a generic RAG chatbot. The graph, mastery model, and source provenance model are product primitives.
+CoLearni is not a generic RAG chatbot. The graph, mastery model, and source provenance model are product primitives.
 
-MVP spine:
+Product spine:
 
 ```text
 Create Trail
@@ -41,7 +41,7 @@ Create Trail
 -> Optional research trace/hydration
 ```
 
-Dashboard, Learn/Inspect graph UX, source ingestion, retrieval tools, provider-native tools, and future visualisers improve this Trail experience. They must not replace or outrank safe Trail sharing/import in the MVP.
+Dashboard, Learn/Inspect graph UX, source ingestion, retrieval tools, provider-native tools, and future visualisers improve this Trail experience. They must not replace or outrank safe Trail sharing/import.
 
 ## Build Order
 
@@ -54,10 +54,10 @@ Dashboard, Learn/Inspect graph UX, source ingestion, retrieval tools, provider-n
 7. Tutor chat frontend with assistant-ui
 8. Mastery + level-up quiz
 9. Source provenance + safe Trail Pack export
-10. Trail Pack import + research trace/hydration MVP
+10. Trail Pack import + research trace/hydration
 11. Provider tool abstraction foundation
 12. Learning dashboard + Learn/Inspect graph UX
-13. Source ingestion MVP
+13. Source ingestion
 14. Retrieval + context tooling
 15. Guided graph navigation / recommended next concept
 16. Conversation summaries + learner state
@@ -447,7 +447,7 @@ Acceptance criteria:
 
 ## Phase 5: Mastery + Level-Up Quiz
 
-Status: implemented for the current MVP slice, including tutor-side mastery updates, mixed-format quizzes, backend quiz drafts with `force_new`, duplicate-request hardening, per-question grading feedback, practice retry behavior, and mastery-gated tutor direct/free-explore modes.
+Status: implemented, including tutor-side mastery updates, mixed-format quizzes, backend quiz drafts with `force_new`, duplicate-request hardening, per-question grading feedback, practice retry behavior, and mastery-gated tutor direct/free-explore modes.
 
 Goal: make mastery a motivating product loop.
 
@@ -491,7 +491,7 @@ Acceptance criteria:
 
 ## Phase 6: Source Provenance + Safe Export
 
-Goal: make safe Trail sharing a core MVP capability, not a later polish item.
+Goal: make safe Trail sharing a core product capability, not a later polish item.
 
 Implementation scope:
 
@@ -547,7 +547,7 @@ Non-goals:
 - No public marketplace or moderation workflow yet.
 - No redistribution of uploaded, hydrated, or copied source content.
 
-## Phase 7: Trail Pack Import + Research Trace/Hydration MVP
+## Phase 7: Trail Pack Import + Research Trace/Hydration
 
 Goal: let learners fork shared Trails and optionally make them locally useful without sharing copyrighted or private content.
 
@@ -558,7 +558,7 @@ Implementation scope:
 - Validate manifest, graph, concepts, sources, and research trace before persistence.
 - Current slice adds `GET /api/workspaces/{workspace_id}/trails/{trail_id}/research` for imported trace retrieval. Automated `POST /research` is deferred until real search/provider-tool support exists.
 - Store search queries, selected public links, source types, license/access status, selection reasons, and excluded source notes.
-- Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/hydrate` as a narrow MVP that creates private hydration placeholder records from allowed public links and/or model-knowledge intent. It does not fetch, chunk, embed, or index content yet.
+- Add `POST /api/workspaces/{workspace_id}/trails/{trail_id}/hydrate` as a Phase 7 implementation that creates private hydration placeholder records from allowed public links and/or model-knowledge intent. It does not fetch, chunk, embed, or index content yet.
 
 Requirements:
 
@@ -577,7 +577,7 @@ PR-sized breakdown:
 - Import validator and fork persistence.
 - Import API and basic UI.
 - Research trace model/API.
-- Hydration MVP and export-regression tests.
+- Hydration and export-regression tests.
 
 Tests:
 
@@ -602,7 +602,7 @@ Acceptance criteria:
 Non-goals:
 
 - No marketplace ranking, moderation, account identity, or creator analytics.
-- No broad file ingestion beyond the hydration MVP.
+- No broad file ingestion beyond the current hydration scope.
 
 Current implementation note:
 
@@ -746,7 +746,7 @@ Current implementation note:
 - Home computes per-Trail progress and Continue Learning selection from Trail detail records, while recommended-next concept UI is populated from the backend `/next` endpoint.
 - Learn Mode is the default graph surface with simplified controls and selected-neighbourhood focus; Inspect Mode preserves filters/layout/legend plus the edge-label toggle, and `?concept=<id>` opens the concept sheet directly.
 
-## Phase 10: Source Ingestion MVP
+## Phase 10: Source Ingestion
 
 Status: foundation slice, concept-source linking, and the parser pipeline (PDF/markdown/plaintext parsing, heading-aware chunking, best-effort embeddings, and `trail_id` auto-linking) are implemented (see `docs/CONSOLIDATION_PLAN.md` Item 2). Durable background ingestion jobs remain deferred.
 
@@ -939,6 +939,8 @@ Non-goals:
 - No unbounded graph traversal.
 
 ## Phase 13: Conversation Summaries + Learner State
+
+Status: LLM conversation summarizer prompt/service, quiz attempt summaries, mutable learner state, tutor learner-state/active-quiz context, prior-attempt quiz generation context, prior-attempt API, and quiz result/history UI implemented. Multi-thread conversations remain planned/deferred.
 
 Goal: keep tutor context useful over time without permanently over-weighting old failed attempts after the learner improves.
 

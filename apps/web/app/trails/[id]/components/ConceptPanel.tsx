@@ -34,6 +34,7 @@ import type {
 } from "@/lib/types";
 import { titleCase } from "@/lib/display";
 
+import { QuizHistoryPanel } from "./QuizHistoryPanel";
 import { QuizPanel } from "./QuizPanel";
 import { TutorPanel } from "./TutorPanel";
 
@@ -216,9 +217,9 @@ function ConceptPanelBody({
 }) {
   const concept = detail.concept;
   const [tutorOpen, setTutorOpen] = useState(false);
-  const [quizMode, setQuizMode] = useState<"level_up" | "practice" | null>(
-    null,
-  );
+  const [quizMode, setQuizMode] = useState<
+    "level_up" | "practice" | "history" | null
+  >(null);
   // Seed welcome suggestions from a cached primer; PrimerSection reports the
   // freshly streamed primer up so the tutor can use its sample questions.
   const [sampleQuestions, setSampleQuestions] = useState<string[]>(
@@ -253,6 +254,16 @@ function ConceptPanelBody({
             }}
             onMasteryUpdated={onMasteryUpdated}
           />
+        ) : quizMode === "history" ? (
+          <QuizHistoryPanel
+            workspaceId={workspaceId}
+            trailId={trailId}
+            conceptId={concept.id}
+            onBack={() => {
+              setQuizMode(null);
+              setPanelWide(false);
+            }}
+          />
         ) : quizMode ? (
           <QuizPanel
             workspaceId={workspaceId}
@@ -263,6 +274,7 @@ function ConceptPanelBody({
               setQuizMode(null);
               setPanelWide(false);
             }}
+            onViewHistory={() => setQuizMode("history")}
             onMasteryUpdated={onMasteryUpdated}
           />
         ) : (
@@ -344,6 +356,11 @@ function ConceptPanelBody({
               setPanelWide(false);
               setMobileExpanded(true);
             }}
+            onOpenHistory={() => {
+              setQuizMode("history");
+              setPanelWide(false);
+              setMobileExpanded(true);
+            }}
           />
         </div>
       ) : null}
@@ -356,11 +373,13 @@ function ConceptActions({
   onOpenTutor,
   onOpenLevelUp,
   onOpenPractice,
+  onOpenHistory,
 }: {
   status: MasteryStatus;
   onOpenTutor: () => void;
   onOpenLevelUp: () => void;
   onOpenPractice: () => void;
+  onOpenHistory: () => void;
 }) {
   // CTA hierarchy by mastery state (see docs/FRONTEND.md):
   //   not_started   -> Start Learning      (tutor)
@@ -398,24 +417,23 @@ function ConceptActions({
         {primaryLabel}
       </button>
       <p className="mt-2 text-xs text-slate-500">{helper}</p>
+      {/* Stable toolbar: Tutor, Practice, Level Up always keep the same slots so
+          buttons never swap position as mastery changes. */}
       <div className="mt-3 flex gap-2">
-        {status === "mastered" ? (
-          <button
-            type="button"
-            onClick={onOpenTutor}
-            className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Open Tutor
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={onOpenPractice}
-            className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Practice
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onOpenTutor}
+          className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Open Tutor
+        </button>
+        <button
+          type="button"
+          onClick={onOpenPractice}
+          className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Practice
+        </button>
         <button
           type="button"
           onClick={onOpenLevelUp}
@@ -424,6 +442,13 @@ function ConceptActions({
           Level Up
         </button>
       </div>
+      <button
+        type="button"
+        onClick={onOpenHistory}
+        className="mt-2 w-full rounded-md border border-dashed border-slate-300 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+      >
+        View past attempts
+      </button>
     </div>
   );
 }

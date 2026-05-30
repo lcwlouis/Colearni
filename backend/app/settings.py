@@ -37,8 +37,15 @@ class Settings(BaseSettings):
     tutor_tool_call_budget: int = 3
     # Per-tool-result character cap before truncation.
     tutor_max_tool_result_chars: int = 2000
-    # Number of recent visible turns included in the prompt context window.
+    # Number of recent visible turns included in the prompt context window (verbatim).
     tutor_recent_visible_turns_limit: int = 10
+    # Total character budget for all visible turns before summarization is triggered.
+    # Roughly 60 k chars ≈ 15 k tokens (4 chars/token).  Short conversations never
+    # pay the summarization cost; long ones are compressed before the window fills.
+    tutor_history_char_budget: int = 60_000
+    # Minimum number of new un-covered turns required before issuing a fresh LLM
+    # summary call.  Prevents one-turn-at-a-time re-summarization.
+    tutor_summary_batch_size: int = 5
     # Tokens allocated per node when calculating the graph generation token budget.
     # Budget = clamp(max_nodes * this, 4096, 16000).
     llm_generation_tokens_per_node: int = 300

@@ -4,9 +4,8 @@ Handles get-or-create conversation, scope validation, context assembly, and
 conversation history retrieval.
 
 Known limitations:
-- Automatic conversation summarisation is deferred; the conversation_summaries
-  table is created and the model is wired, but no summary is generated yet.
-  Context always falls back to the last N raw turns.
+- Conversation summaries are LLM-generated through the owned summary service.
+  If the summary job fails, the successful tutor turn remains persisted.
 - On LLM generation failure, the user turn is NOT persisted (the whole
   transaction is rolled back). This differs from the API spec note that "user
   turn may remain persisted"; we prefer clean state. Documented here as a known
@@ -35,10 +34,13 @@ from backend.app.models.conversation import (
     ConversationSummary,
     ConversationTurn,
 )
+from backend.app.models.mastery import QuizDraft
 from backend.app.models.source import ConceptSourceLink, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.schemas.concept import ConceptPrimerRead
+from backend.app.services.conversation_summaries import delete_stale_conversation_summaries
+from backend.app.services.learner_state import get_learner_state
 from backend.app.services.mastery import get_mastery_state
 from backend.app.services.reranker import ChunkSearchResult  # noqa: F401
 from backend.app.services.retrieval import (
@@ -87,6 +89,13 @@ class TutorContext:
     application_nodes: list[ConceptNode] = field(default_factory=list)
 
     mastery_status: str = "not_started"
+    learner_state_summary: str | None = None
+    active_quiz_context: str = ""
+    active_quiz_question_match: bool = False
+    # Backend-only: raw active quiz prompts for the semantic answer-seeking guard.
+    # Never rendered into tutor/classifier prompt variables, so they cannot leak
+    # through provider reasoning surfaced in the UI.
+    active_quiz_prompts: list[str] = field(default_factory=list)
 
     # Optional learner-supplied prior knowledge captured at Trail creation
     # (Phase 13.5d). Read-only signal that helps the tutor calibrate how quickly
@@ -238,8 +247,9 @@ async def build_tutor_context(
       4. Related / application nodes.
       5. Trail topic and goal.
       6. Public and private-access linked source metadata for the current concept.
-      7. Recent conversation turns (last RECENT_TURNS_LIMIT).
-      8. Conversation summary (if present).
+      7. Learner state and active-quiz guardrails.
+      8. Recent conversation turns (last RECENT_TURNS_LIMIT).
+      9. Conversation summary (if present).
 
     Deliberately does NOT search the whole workspace or include sources from
     other workspaces. Private sources from the current workspace are included
@@ -309,6 +319,11 @@ async def build_tutor_context(
         workspace_id=trail.workspace_id,
         concept=concept,
     )
+    learner_state = await get_learner_state(
+        session,
+        workspace_id=trail.workspace_id,
+        concept_id=concept.id,
+    )
 
     # Opening-turn detection (Phase 13.5b): deterministically true when this concept's
     # conversation has no prior visible assistant turn and mastery is still early. Passed
@@ -338,6 +353,12 @@ async def build_tutor_context(
         related=neighbourhood["related"],
         application_nodes=neighbourhood["application_nodes"],
         mastery_status=mastery_state.status,
+        learner_state_summary=learner_state.summary_text if learner_state else None,
+        **await _load_active_quiz_context(
+            session,
+            concept_id=concept.id,
+            learner_message=learner_message,
+        ),
         prior_knowledge=trail.prior_knowledge,
         is_opening_turn=is_opening_turn,
         primer=primer,
@@ -462,6 +483,11 @@ async def prepare_regenerated_user_turn(
             ConversationTurn.turn_index > user_turn.turn_index,
         )
     )
+    await delete_stale_conversation_summaries(
+        session,
+        conversation_id=conversation_id,
+        from_turn_index=user_turn.turn_index + 1,
+    )
     await session.flush()
     return user_turn
 
@@ -491,6 +517,11 @@ async def replace_latest_user_turn(
             ConversationTurn.conversation_id == conversation_id,
             ConversationTurn.turn_index > user_turn.turn_index,
         )
+    )
+    await delete_stale_conversation_summaries(
+        session,
+        conversation_id=conversation_id,
+        from_turn_index=user_turn.turn_index,
     )
     await session.flush()
     return user_turn
@@ -557,6 +588,78 @@ async def persist_tool_turn(
     return turn
 
 
+async def _load_active_quiz_context(
+    session: AsyncSession,
+    *,
+    concept_id: uuid.UUID,
+    learner_message: str,
+) -> dict[str, str | bool | list[str]]:
+    """Render sanitized active-quiz guardrail state.
+
+    Never send active quiz prompts to tutor/classifier prompts: provider reasoning
+    may be surfaced in the UI, and copied quiz prompts would leak assessment
+    context. Exact-prompt matching is done deterministically in Python instead.
+    """
+    drafts = list(
+        await session.scalars(
+            select(QuizDraft)
+            .where(QuizDraft.concept_id == concept_id)
+            .order_by(QuizDraft.quiz_type.asc())
+        )
+    )
+    if not drafts:
+        return {
+            "active_quiz_context": "No active quiz draft for this concept.",
+            "active_quiz_question_match": False,
+            "active_quiz_prompts": [],
+        }
+
+    question_count = sum(len(draft.questions_json) for draft in drafts)
+    quiz_types = ", ".join(sorted({str(draft.quiz_type).replace("_", " ") for draft in drafts}))
+    matched = any(
+        _is_same_quiz_prompt(learner_message, str(raw_question.get("prompt", "")))
+        for draft in drafts
+        for raw_question in draft.questions_json
+    )
+    prompts = [
+        str(raw_question.get("prompt", "")).strip()
+        for draft in drafts
+        for raw_question in draft.questions_json
+        if str(raw_question.get("prompt", "")).strip()
+    ]
+    match_text = (
+        "The learner's latest message matches an active quiz question."
+        if matched
+        else "The learner's latest message does not exactly match an active quiz question."
+    )
+    return {
+        "active_quiz_context": (
+            f"Active quiz draft open ({quiz_types}; {question_count} questions). {match_text} "
+            "Do not reveal, quote, solve, or hint at active quiz answers."
+        ),
+        "active_quiz_question_match": matched,
+        "active_quiz_prompts": prompts,
+    }
+
+
+def _is_same_quiz_prompt(message: str, prompt: str) -> bool:
+    normalized_message = _normalize_quiz_text(message)
+    normalized_prompt = _normalize_quiz_text(prompt)
+    return bool(normalized_message and normalized_message == normalized_prompt)
+
+
+def _normalize_quiz_text(text: str) -> str:
+    return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in text).split())
+
+
+def _excerpt(text: str, *, max_chars: int) -> str:
+    cleaned = " ".join(text.split())
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return f"{cleaned[: max_chars - 1].rstrip()}…"
+
+
+# Retrieval/tool helpers
 # ---------------------------------------------------------------------------
 # Safe source metadata loader
 # ---------------------------------------------------------------------------

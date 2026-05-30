@@ -125,7 +125,7 @@ learning    --[passed quiz]------> mastered
 learning    --[failed quiz]------> needs_review
 needs_review --[retry started]---> learning
 needs_review --[passed quiz]-----> mastered
-mastered    --[explicit reset]---> needs_review   (future feature, not MVP)
+mastered    --[explicit reset]---> needs_review   (deferred feature)
 ```
 
 Rules:
@@ -181,7 +181,7 @@ Mastery gating should feel motivating, not punitive. The learner should experien
 
 ## Tutor Mode Gates
 
-For the current MVP tutor flow:
+For the current tutor flow:
 
 - `socratic`, `repair`, `quiz_prompt`, and bounded `explore` do not require mastery.
 - `direct` is mastery-gated to `mastered`.

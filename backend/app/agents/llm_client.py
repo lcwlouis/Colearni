@@ -230,13 +230,27 @@ class LLMClient:
         temperature: float = 0.4,
         max_tokens: int = 4096,
         tools: Sequence[ProviderToolDefinition] | None = None,
+        response_format: dict | None = None,
+        thinking: bool | None = None,
     ) -> str:
-        """Send a chat-completion request and return the assistant text."""
+        """Send a chat-completion request and return the assistant text.
+
+        ``response_format`` and ``thinking`` are honoured on the OpenAI-compatible
+        path (used by OpenRouter). They are ignored by the Anthropic and OpenAI
+        Responses paths, which fall back to prompt-driven JSON plus robust parsing.
+        """
         if self._provider in _NATIVE_SDK_PROVIDERS:
             return await self._anthropic_chat(messages, temperature, max_tokens, tools=tools)
         if self._provider in _RESPONSES_API_PROVIDERS:
             return await self._openai_responses_chat(messages, temperature, max_tokens, tools=tools)
-        return await self._openai_compatible_chat(messages, temperature, max_tokens, tools=tools)
+        return await self._openai_compatible_chat(
+            messages,
+            temperature,
+            max_tokens,
+            tools=tools,
+            response_format=response_format,
+            thinking=thinking,
+        )
 
     async def chat_stream(
         self,
@@ -518,6 +532,7 @@ class LLMClient:
         thinking: bool,
         max_tokens: int = 4096,
         tools: Sequence[ProviderToolDefinition] | None = None,
+        response_format: dict | None = None,
     ) -> dict:
         """Build the kwargs dict for an OpenAI-compatible completions call.
 
@@ -546,6 +561,9 @@ class LLMClient:
         if tools:
             kwargs["tools"] = openai_chat_tool_definitions(tools)
 
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+
         if self._provider == "openrouter":
             # OpenRouter normalises reasoning across all its models via extra_body.
             # Always send an explicit effort level so the model's default reasoning
@@ -570,20 +588,24 @@ class LLMClient:
         max_tokens: int = 4096,
         *,
         tools: Sequence[ProviderToolDefinition] | None = None,
+        response_format: dict | None = None,
+        thinking: bool | None = None,
     ) -> str:
         client = self._openai_client()
+        effective_thinking = self._thinking_enabled if thinking is None else thinking
         kwargs = self._build_openai_kwargs(
             messages,
             temperature,
-            thinking=self._thinking_enabled,
+            thinking=effective_thinking,
             max_tokens=max_tokens,
             tools=tools,
+            response_format=response_format,
         )
         try:
             response = await client.chat.completions.create(**kwargs)
             return response.choices[0].message.content or ""
         except Exception as exc:
-            if self._thinking_enabled and _is_thinking_error(exc):
+            if effective_thinking and _is_thinking_error(exc):
                 logger.warning(
                     "Thinking not supported by model %r; retrying without. Error: %s",
                     self._model,
@@ -595,6 +617,7 @@ class LLMClient:
                     thinking=False,
                     max_tokens=max_tokens,
                     tools=tools,
+                    response_format=response_format,
                 )
                 response = await client.chat.completions.create(**kwargs)
                 return response.choices[0].message.content or ""
@@ -744,7 +767,7 @@ class LLMClient:
                     for item in tool_call_parts.values():
                         yield NormalizedStreamEvent.tool_call_event(
                             normalize_openai_chat_tool_call(item, tools or ())
-                    )
+                        )
                     tool_call_parts.clear()
             yield NormalizedStreamEvent.done_event()
         except Exception as exc:

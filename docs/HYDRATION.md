@@ -32,7 +32,7 @@ Hydration output must remain private by default.
 
 Hydration belongs after safe Trail Pack export/import foundations. It should make content-light Trail Packs locally useful without moving Trail sharing behind broad ingestion or retrieval work.
 
-Current Phase 7 MVP: hydration records private intent only. `POST /hydrate` creates private `SourceRecord` placeholders from selected imported public research sources and/or model-knowledge intent. It does not fetch remote content, parse files, create chunks, create embeddings, generate explanations, or build retrieval indexes.
+Current Phase 7 implementation: hydration records private intent only. `POST /hydrate` creates private `SourceRecord` placeholders from selected imported public research sources and/or model-knowledge intent. It does not fetch remote content, parse files, create chunks, create embeddings, generate explanations, or build retrieval indexes.
 
 ## Flow
 

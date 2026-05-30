@@ -16,7 +16,11 @@ Output exactly one control line and STOP. Emit NOTHING else: no greeting, no exp
 - **Mastery status**: {{ mastery_status }}
 - **Trail goal**: {{ learning_goal }}
 - **Learner's stated prior knowledge**: {{ learner_prior_knowledge }}
+- **Learner state summary**: {{ learner_state_summary }}
 - **Conversation summary**: {{ conversation_summary }}
+- **Active quiz context**: {{ active_quiz_context }}
+
+If active quiz context says the latest message matches an active quiz question, the service may block the answer before tutoring. For other active-quiz answer-seeking requests, classify as `direct` so the final tutor prompt can enforce the assessment guardrail; do not help solve active quiz questions.
 
 The conversation history appears as prior messages. The learner's latest message is the last user message in the thread. Base the decision primarily on that latest message.
 

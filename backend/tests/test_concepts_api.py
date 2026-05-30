@@ -25,7 +25,13 @@ from backend.app.schemas.mastery import PerQuestionEvaluation, QuizEvaluation, Q
 
 
 class _FakeQuizGenerator:
-    async def generate(self, *, concept: ConceptNode, quiz_type: str):
+    async def generate(
+        self,
+        *,
+        concept: ConceptNode,
+        quiz_type: str,
+        prior_quiz_context: str = "",
+    ):
         return [
             QuizQuestion(
                 id="q1",

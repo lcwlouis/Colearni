@@ -31,7 +31,8 @@ from backend.app.agents.provider_tools import (
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptEdge, ConceptNode
 from backend.app.models.conversation import Conversation, ConversationTurn  # noqa: F401
-from backend.app.models.mastery import MasteryRecord
+from backend.app.models.learner_state import LearnerState
+from backend.app.models.mastery import MasteryRecord, QuizDraft
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
@@ -58,6 +59,7 @@ from backend.app.services.tutor import (
     _retrieval_planning_messages,
     _should_replay_retrieval_result,
     _strip_control_prefix,
+    _TurnDecision,
     stream_chat_response,
 )
 from backend.app.settings import settings
@@ -397,6 +399,371 @@ async def test_context_sources_are_empty_when_none_linked(db_engine, db_session)
     vars_ = _context_to_prompt_vars("socratic", ctx)
     assert vars_["sources"] == "none available"
     assert vars_["concept_id"] == str(concept_id)
+
+
+async def test_context_includes_learner_state_and_active_quiz_guardrail(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    db_session.add(
+        LearnerState(
+            workspace_id=ws_id,
+            concept_id=concept_id,
+            summary_text="Learner understands protocols but reverses layer order.",
+            strengths_json=[],
+            misconceptions_json=[],
+            next_repair_targets_json=[],
+        )
+    )
+    db_session.add(
+        QuizDraft(
+            concept_id=concept_id,
+            quiz_type="level_up",
+            questions_json=[
+                {
+                    "id": "q1",
+                    "type": "short_answer",
+                    "prompt": "List the TCP/IP layers from top to bottom.",
+                    "mastery_label": "layers",
+                    "difficulty": "standard",
+                }
+            ],
+        )
+    )
+    await db_session.flush()
+
+    ctx, _ = await _make_db_context(
+        db_session,
+        ws_id,
+        trail_id,
+        concept_id,
+        message="List the TCP/IP layers from top to bottom.",
+    )
+    vars_ = _context_to_base_prompt_vars(ctx)
+
+    assert "reverses layer order" in vars_["learner_state_summary"]
+    assert "Active quiz draft open" in vars_["active_quiz_context"]
+    assert "matches an active quiz question" in vars_["active_quiz_context"]
+    assert "List the TCP/IP layers" not in vars_["active_quiz_context"]
+    assert ctx.active_quiz_question_match is True
+
+
+async def test_exact_active_quiz_question_is_blocked_without_calling_agent(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    quiz_prompt = "List the TCP/IP layers from top to bottom."
+    db_session.add(
+        QuizDraft(
+            concept_id=concept_id,
+            quiz_type="level_up",
+            questions_json=[
+                {
+                    "id": "q1",
+                    "type": "short_answer",
+                    "prompt": quiz_prompt,
+                    "mastery_label": "layers",
+                    "difficulty": "standard",
+                }
+            ],
+        )
+    )
+    await db_session.flush()
+
+    class FailingAgent:
+        async def respond_stream(self, _context):
+            raise AssertionError("agent should not be called for exact active quiz prompts")
+
+    events = [
+        event
+        async for event in stream_chat_response(
+            db_session,
+            FailingAgent(),
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message=quiz_prompt,
+            conversation_id=None,
+        )
+    ]
+
+    assert any("active quiz question directly" in event for event in events)
+    assert not any(quiz_prompt in event for event in events)
+    assistant_turn = await db_session.scalar(
+        select(ConversationTurn).where(
+            ConversationTurn.conversation_id.in_(select(Conversation.id)),
+            ConversationTurn.role == "assistant",
+        )
+    )
+    assert assistant_turn is not None
+    assert "active quiz question directly" in assistant_turn.content
+    assert assistant_turn.reasoning is None
+
+
+async def test_paraphrased_active_quiz_question_is_blocked_by_semantic_guard(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    db_session.add(
+        QuizDraft(
+            concept_id=concept_id,
+            quiz_type="practice",
+            questions_json=[
+                {
+                    "id": "q1",
+                    "type": "short_answer",
+                    "prompt": "Describe one way the TCP/IP Network Access layer differs from "
+                    "the combination of the OSI Physical and Data Link layers.",
+                    "mastery_label": "compare",
+                    "difficulty": "standard",
+                }
+            ],
+        )
+    )
+    await db_session.flush()
+
+    class _GuardClient:
+        def __init__(self):
+            self.calls: list[list[dict]] = []
+
+        async def chat(self, messages, **_):
+            self.calls.append(messages)
+            return '{"matches_quiz_question": true}'
+
+    guard_client = _GuardClient()
+
+    class GuardedFailingAgent:
+        llm_client = guard_client
+
+        async def respond_stream(self, _context):
+            raise AssertionError("agent must not run when the guard blocks the message")
+
+    paraphrase = (
+        "How does the TCP/IP Network Access layer differ from Physical and Data Link in OSI?"
+    )
+    events = [
+        event
+        async for event in stream_chat_response(
+            db_session,
+            GuardedFailingAgent(),
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message=paraphrase,
+            conversation_id=None,
+        )
+    ]
+
+    assert guard_client.calls, "semantic guard should have been consulted"
+    assert any("active quiz question directly" in event for event in events)
+
+
+async def test_non_quiz_question_is_not_blocked_when_guard_returns_false(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    db_session.add(
+        QuizDraft(
+            concept_id=concept_id,
+            quiz_type="practice",
+            questions_json=[
+                {
+                    "id": "q1",
+                    "type": "short_answer",
+                    "prompt": "What is the main function of the Transport layer?",
+                    "mastery_label": "functions",
+                    "difficulty": "standard",
+                }
+            ],
+        )
+    )
+    await db_session.flush()
+
+    class _GuardClient:
+        async def chat(self, messages, **_):
+            return '{"matches_quiz_question": false}'
+
+    class GuardedAgent:
+        llm_client = _GuardClient()
+
+        async def respond_stream(self, _context):
+            yield ("mode", "socratic")
+            yield ("text", "Here is a guiding question about a different idea.")
+
+    events = [
+        event
+        async for event in stream_chat_response(
+            db_session,
+            GuardedAgent(),
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="Can you remind me what encapsulation means?",
+            conversation_id=None,
+        )
+    ]
+
+    assert not any("active quiz question directly" in event for event in events)
+    assert any("guiding question" in event for event in events)
+
+
+# ---------------------------------------------------------------------------
+# Unified structured-JSON classifier (mode + quiz-answer guard in one call)
+# ---------------------------------------------------------------------------
+
+
+class _StubChatClient:
+    """Records chat() kwargs and returns a canned completion."""
+
+    def __init__(self, response: str) -> None:
+        self.response = response
+        self.calls: list[dict] = []
+
+    async def chat(self, messages, **kwargs):
+        self.calls.append({"messages": messages, "kwargs": kwargs})
+        return self.response
+
+
+async def test_classify_turn_parses_mode_and_block_and_uses_structured_output():
+    client = _StubChatClient('{"mode": "repair", "blocks_active_quiz_answer": true}')
+    agent = LLMTutorAgent(_llm_client(client), max_tokens=512)
+    ctx = _make_context("Which protocol is reliable and connection-oriented?")
+    ctx.active_quiz_prompts = ["Which protocol provides reliable, connection-oriented delivery?"]
+
+    decision = await agent.classify_turn(ctx)
+
+    assert decision.mode == "repair"
+    assert decision.blocks_quiz_answer is True
+    sent = client.calls[0]
+    # Enforced JSON + reasoning disabled so confidential quiz text never leaks.
+    assert sent["kwargs"]["response_format"] == {"type": "json_object"}
+    assert sent["kwargs"]["thinking"] is False
+    # The classifier system prompt carries the active quiz questions.
+    assert "reliable, connection-oriented delivery" in sent["messages"][0]["content"]
+
+
+async def test_classify_turn_does_not_block_without_active_quiz():
+    client = _StubChatClient('{"mode": "direct", "blocks_active_quiz_answer": true}')
+    agent = LLMTutorAgent(_llm_client(client), max_tokens=512)
+    ctx = _make_context("Just tell me the answer.")
+    # No active quiz prompts → block flag is ignored.
+    assert ctx.active_quiz_prompts == []
+
+    decision = await agent.classify_turn(ctx)
+
+    assert decision.mode == "direct"
+    assert decision.blocks_quiz_answer is False
+
+
+async def test_classify_turn_falls_back_to_keyword_mode_on_invalid_json():
+    client = _StubChatClient("not json at all")
+    agent = LLMTutorAgent(_llm_client(client), max_tokens=512)
+    ctx = _make_context("I don't know, I'm completely lost.")
+    ctx.active_quiz_prompts = ["Some quiz question."]
+
+    decision = await agent.classify_turn(ctx)
+
+    # Garbage output → infer mode from message and fail open (do not block).
+    assert decision.mode == "repair"
+    assert decision.blocks_quiz_answer is False
+
+
+class _ClassifyingAgent:
+    """Two-phase agent that uses the unified classifier path of stream_chat_response."""
+
+    def __init__(self, decision: _TurnDecision) -> None:
+        self._decision = decision
+        self.build_prep_called = False
+        self.stream_text_called = False
+        self.llm_client = _StubChatClient("unused")
+
+    async def classify_turn(self, _context) -> _TurnDecision:
+        return self._decision
+
+    def build_prep(self, mode, context):
+        self.build_prep_called = True
+        return _ModePreparation(
+            mode=mode,
+            messages_after_mode=[
+                {"role": "system", "content": "final"},
+                {"role": "user", "content": context.learner_message},
+            ],
+            buffered_events=(("mode", mode),),
+        )
+
+    async def stream_text(self, _context, _prep, *, messages=None):
+        self.stream_text_called = True
+        yield ("text", "Here is a guiding question.")
+
+
+async def test_unified_classifier_blocks_quiz_followup_in_stream(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    db_session.add(
+        QuizDraft(
+            concept_id=concept_id,
+            quiz_type="practice",
+            questions_json=[
+                {
+                    "id": "q1",
+                    "type": "short_answer",
+                    "prompt": "Which protocol provides reliable, connection-oriented delivery?",
+                    "mastery_label": "protocols",
+                    "difficulty": "standard",
+                }
+            ],
+        )
+    )
+    await db_session.flush()
+
+    agent = _ClassifyingAgent(_TurnDecision(mode="socratic", blocks_quiz_answer=True))
+
+    events = [
+        event
+        async for event in stream_chat_response(
+            db_session,
+            agent,
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="but how does that relate to the data layer",
+            conversation_id=None,
+        )
+    ]
+
+    assert any("active quiz question directly" in event for event in events)
+    assert agent.build_prep_called is False
+    assert agent.stream_text_called is False
+
+
+async def test_unified_classifier_proceeds_when_not_blocked(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    db_session.add(
+        QuizDraft(
+            concept_id=concept_id,
+            quiz_type="practice",
+            questions_json=[
+                {
+                    "id": "q1",
+                    "type": "short_answer",
+                    "prompt": "Which protocol provides reliable, connection-oriented delivery?",
+                    "mastery_label": "protocols",
+                    "difficulty": "standard",
+                }
+            ],
+        )
+    )
+    await db_session.flush()
+
+    agent = _ClassifyingAgent(_TurnDecision(mode="socratic", blocks_quiz_answer=False))
+
+    events = [
+        event
+        async for event in stream_chat_response(
+            db_session,
+            agent,
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="What is encapsulation?",
+            conversation_id=None,
+        )
+    ]
+
+    assert not any("active quiz question directly" in event for event in events)
+    assert agent.stream_text_called is True
+    assert any("guiding question" in event for event in events)
 
 
 # ---------------------------------------------------------------------------
@@ -976,7 +1343,7 @@ def test_gated_direct_prep_does_not_coerce_to_socratic():
 
 
 async def test_prepare_mode_stream_emits_first_pass_thinking_live():
-    """First-call reasoning must stream as live thinking events, not be buffered."""
+    """First-call reasoning must stream live when explicitly enabled."""
     client = _StubTaggedLLMClient(
         [
             ("thinking", "Considering the learner's question..."),
@@ -984,7 +1351,12 @@ async def test_prepare_mode_stream_emits_first_pass_thinking_live():
             ("text", '<mode name="socratic" />'),
         ],
     )
-    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
+    agent = LLMTutorAgent(
+        _llm_client(client),
+        registry=_StaticPromptRegistry(),
+        max_tokens=512,
+        mode_selection_thinking=True,
+    )
 
     events: list[tuple[str, object]] = []
     prep: _ModePreparation | None = None
@@ -1004,6 +1376,24 @@ async def test_prepare_mode_stream_emits_first_pass_thinking_live():
     ]
     # Live-streamed reasoning must NOT be duplicated in the buffered events.
     assert all(kind != "thinking" for kind, _ in prep.buffered_events)
+
+
+async def test_mode_selection_drops_provider_thinking_when_disabled(monkeypatch):
+    """Some providers may emit reasoning despite thinking=False; never surface it."""
+    monkeypatch.setattr(settings, "tutor_mode_selection_thinking", False)
+    client = _StubTaggedLLMClient(
+        [
+            ("thinking", "provider leaked classifier reasoning"),
+            ("text", '<mode name="socratic" />'),
+        ],
+        [("text", "Visible answer")],
+    )
+    agent = LLMTutorAgent(_llm_client(client), registry=_StaticPromptRegistry(), max_tokens=512)
+
+    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Help me"))]
+
+    assert ("thinking", "provider leaked classifier reasoning") not in events
+    assert [chunk for kind, chunk in events if kind == "text"] == ["Visible answer"]
 
 
 async def test_mode_selection_thinking_off_by_default(monkeypatch):

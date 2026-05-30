@@ -37,7 +37,9 @@ backend/app/agents/prompts/
   tutor_direct_instructions.v1.md
   tutor_free_explore_instructions.v1.md
   tutor_locked_mode.v1.md
+  conversation_summary.v1.md
   quiz_generation.v1.md
+  quiz_generation.v2.md
   quiz_grader.v1.md
   research_query.v1.md
   research_select.v1.md
@@ -52,7 +54,10 @@ backend/app/agents/prompts/
 | `tutor_direct_instructions` | `tutor_direct_instructions.v1.md` | Mastery-gated direct explanation instructions |
 | `tutor_free_explore_instructions` | `tutor_free_explore_instructions.v1.md` | Mastery-gated broader exploration instructions |
 | `tutor_locked_mode` | `tutor_locked_mode.v1.md` | Fallback instructions when a gated tutor mode is still locked |
-| `quiz_generation` | `quiz_generation.v1.md` | Generate a level-up or practice quiz from mastery_check_labels |
+| `conversation_summary` | `conversation_summary.v1.md` | Summarize older visible tutor turns for bounded Phase 13 tutor context |
+| `tutor_turn_classifier` | `tutor_turn_classifier.v1.md` | Unified enforced-JSON turn classifier: returns `{mode, blocks_active_quiz_answer}` in one call (replaces the tagged classifier + quiz_answer_guard for production turns) |
+| `quiz_answer_guard` | `quiz_answer_guard.v1.md` | Standalone paraphrase guard used only by legacy agents without the unified classifier |
+| `quiz_generation` | `quiz_generation.v2.md` | Generate a level-up or practice quiz from mastery_check_labels plus bounded prior quiz context |
 | `quiz_grader` | `quiz_grader.v1.md` | Grade a mixed-format quiz response and return score plus feedback |
 | `research_query` | `research_query.v1.md` | Generate search queries for a topic/concept |
 | `research_select` | `research_select.v1.md` | Evaluate and rank candidate sources for inclusion in research trace |
@@ -194,13 +199,24 @@ Uses the same concept/context variables plus `requested_mode` and `fallback_mode
 
 ---
 
-### `quiz_generation.v1.md`
+### `conversation_summary.v1.md`
+
+**Template variables:**
+- `previous_summary` — latest stored summary text, or an explicit no-summary placeholder
+- `new_turns` — formatted visible user/assistant turns newly covered by this summary batch
+
+**Expected output:** Plain-text summary for future tutor context. The summary should capture durable learner understanding, misconceptions, prior tutor explanations, preferences/goals, and next repair targets. Hidden tool turns/provider reasoning are never provided to the prompt.
+
+---
+
+### `quiz_generation.v2.md`
 
 **Template variables:**
 - `concept` — ConceptNode JSON
 - `mastery_check_labels` — list of abstract check labels from the concept
 - `bloom_target` — target Bloom level
 - `quiz_type` — `level_up` or `practice`
+- `prior_quiz_context` — bounded prior attempt summaries/fingerprints used to avoid repeated prompts without exposing answers
 
 **Expected output:**
 

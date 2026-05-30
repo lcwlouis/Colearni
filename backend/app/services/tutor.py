@@ -37,6 +37,10 @@ from backend.app.agents.provider_tools import (
 )
 from backend.app.agents.retrieval_tools import select_retrieval_tools
 from backend.app.schemas.tutor import ConversationMessage, TutorMode
+from backend.app.services.conversation_summaries import (
+    LLMConversationSummarizer,
+    maybe_generate_conversation_summary,
+)
 from backend.app.services.conversations import (
     TutorContext,
     TutorSourceMetadata,
@@ -52,6 +56,7 @@ from backend.app.services.conversations import (
     validate_concept_scope,
 )
 from backend.app.services.mastery import mark_learning_from_tutor_turn
+from backend.app.services.quiz_guard import detect_quiz_answer_seeking
 from backend.app.settings import settings
 
 if TYPE_CHECKING:
@@ -256,6 +261,18 @@ class _ModePreparation:
     buffered_events: tuple[TutorStreamChunk, ...]
 
 
+@dataclass(frozen=True)
+class _TurnDecision:
+    """Unified classifier result: the answering mode plus the assessment-integrity flag.
+
+    A single structured-JSON classifier call replaces the old tagged mode classifier
+    AND the separate quiz-answer guard call.
+    """
+
+    mode: TutorMode
+    blocks_quiz_answer: bool
+
+
 class _ControlPrefixStripper:
     """Strip a leaked leading control tag even when it arrives across chunks."""
 
@@ -325,6 +342,9 @@ class LLMTutorAgent:
         # line and stops, so it gets a small dedicated cap and never spends the full
         # answer budget on text that the second call regenerates anyway.
         self._mode_selection_max_tokens = max(16, settings.tutor_mode_selection_max_tokens)
+        # The unified structured-JSON classifier needs a little more room than the
+        # tagged classifier because it returns a small JSON object, not one tag.
+        self._classifier_max_tokens = max(120, self._mode_selection_max_tokens * 3)
         # Whether the first (mode-selection) LLM call requests provider reasoning.
         # Off by default; surfacing raw mode-selection reasoning duplicates the
         # visible-answer thinking in the trace. Configurable via settings.
@@ -346,6 +366,42 @@ class LLMTutorAgent:
             yield event
         async for event in self.stream_text(context, prep):
             yield event
+
+    async def classify_turn(self, context: TutorContext) -> _TurnDecision:
+        """Single enforced-JSON classifier call: pick the mode AND flag quiz-answer extraction.
+
+        This replaces both the tagged mode classifier and the separate quiz-answer
+        guard call. Structured output (``response_format=json_object`` on supported
+        providers, plus a JSON-only prompt) prevents the model from accidentally
+        answering the learner's question in the classifier completion. Reasoning is
+        disabled so the confidential active quiz questions never surface as a trace.
+        """
+        system_prompt = self._registry.render(
+            "tutor_turn_classifier", _context_to_classifier_vars(context)
+        )
+        messages = _build_chat_messages(
+            system_prompt,
+            context.recent_turns,
+            context.learner_message,
+        )
+        raw = await self._client.chat(
+            messages,
+            temperature=0.0,
+            max_tokens=self._classifier_max_tokens,
+            response_format={"type": "json_object"},
+            thinking=False,
+        )
+        return _parse_turn_decision(raw, context)
+
+    def build_prep(self, mode: str, context: TutorContext) -> _ModePreparation:
+        """Build the second-pass preparation for an already-decided mode.
+
+        Used after ``classify_turn`` so mode resolution does not need a tagged
+        first-pass stream. The base system prompt is a placeholder; ``_make_mode_prep``
+        replaces it with the mode-specific final-response prompt.
+        """
+        messages = _build_chat_messages("", context.recent_turns, context.learner_message)
+        return self._make_mode_prep(mode, context, messages, [])
 
     async def prepare_mode(self, context: TutorContext) -> _ModePreparation:
         """Run the first LLM call (mode selection only) and return a preparation object.
@@ -408,6 +464,8 @@ class LLMTutorAgent:
 
         async for kind, chunk in raw_stream:
             if kind == "thinking":
+                if thinking is False:
+                    continue
                 if not emitted_thinking_status:
                     yield ("status", "thinking")
                     emitted_thinking_status = True
@@ -472,6 +530,8 @@ class LLMTutorAgent:
 
         async for kind, chunk in raw_stream:
             if kind == "thinking":
+                if thinking is False:
+                    continue
                 if not emitted_thinking_status:
                     pre_events.append(("status", "thinking"))
                     emitted_thinking_status = True
@@ -652,8 +712,20 @@ class LLMTutorAgent:
             if gated_direct
             else ""
         )
+        learner_state = context.learner_state_summary or "No learner-state summary recorded yet."
+        phase13_context = (
+            "## Learner state summary\n"
+            f"{learner_state}\n\n"
+            "## Active quiz guardrail\n"
+            "Use this hidden assessment context only to avoid helping the learner solve an "
+            "active quiz. Do not quote, reveal, solve, complete, or hint at active quiz "
+            "answers. If the learner asks for an active quiz answer, do not name the "
+            "answer, layer, protocol, option, or a distinctive clue that identifies it; "
+            "redirect them to submit their own attempt first.\n"
+            f"{context.active_quiz_context}"
+        )
         return (
-            f"{prompt}\n\n"
+            f"{prompt}\n\n{phase13_context}\n\n"
             "## Final response contract\n"
             "The response mode has already been selected by the system. Do NOT choose a mode. "
             "Do NOT output XML/control tags such as `<mode .../>` or `<tool .../>`. "
@@ -822,6 +894,14 @@ class LLMTutorAgent:
 def _sse(event_type: str, data: dict) -> str:
     """Format a single Server-Sent Event string."""
     return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+
+def _active_quiz_redirect_text() -> str:
+    return (
+        "I can’t answer or walk through an active quiz question directly. "
+        "Try answering from your current understanding first; after you submit, "
+        "I can review the result with you and help repair any weak spots."
+    )
 
 
 def _replace_system_prompt(messages: list[dict], system_prompt: str) -> list[dict]:
@@ -1013,6 +1093,62 @@ async def stream_chat_response(
         user_turn_index=user_turn_index,
     )
 
+    async def _emit_quiz_redirect() -> AsyncIterator[str]:
+        """Deterministically refuse to answer an active quiz question."""
+        redirect_mode: TutorMode = "direct"
+        redirect_text = _active_quiz_redirect_text()
+        yield _sse("mode", {"type": "mode", "mode": redirect_mode})
+        yield _sse("status", {"type": "status", "status": "responding"})
+        yield _sse("token", {"type": "token", "content": redirect_text})
+        redirect_turn = await persist_assistant_turn(
+            session,
+            conversation.id,
+            redirect_text,
+            redirect_mode,
+            user_turn_index + 1,
+            reasoning=None,
+            reasoning_parts=None,
+        )
+        redirect_schema = ConversationMessage.model_validate(redirect_turn)
+        yield _sse(
+            "done",
+            {
+                "type": "done",
+                "conversation_id": str(conversation.id),
+                "message": redirect_schema.model_dump(mode="json"),
+                "mastery_update": {
+                    "concept_id": str(mastery_state.concept_id),
+                    "status": mastery_state.status,
+                    "score": mastery_state.score,
+                },
+            },
+        )
+
+    # Free, deterministic short-circuit: verbatim copy of an active quiz question.
+    if context.active_quiz_question_match:
+        async for event in _emit_quiz_redirect():
+            yield event
+        return
+
+    # Legacy semantic guard, only for agents WITHOUT the unified classifier.
+    # Agents with `classify_turn` fold this decision into the single classifier call.
+    if context.active_quiz_prompts and not hasattr(agent, "classify_turn"):
+        guard_client = getattr(agent, "llm_client", None)
+        if guard_client is not None and hasattr(guard_client, "chat"):
+            try:
+                blocked = await detect_quiz_answer_seeking(
+                    guard_client,
+                    learner_message=message,
+                    quiz_prompts=context.active_quiz_prompts,
+                )
+            except Exception as exc:
+                logger.warning("Quiz answer guard failed: %s", exc)
+                blocked = False
+            if blocked:
+                async for event in _emit_quiz_redirect():
+                    yield event
+                return
+
     mode: TutorMode | None = None
     full_text = ""
     full_reasoning = ""
@@ -1105,7 +1241,9 @@ async def stream_chat_response(
                 yield _sse("token", {"type": "token", "content": visible_chunk})
 
     try:
-        if hasattr(agent, "prepare_mode") and hasattr(agent, "stream_text"):
+        if hasattr(agent, "stream_text") and (
+            hasattr(agent, "classify_turn") or hasattr(agent, "prepare_mode")
+        ):
             # ---------------------------------------------------------------
             # Two-phase path: mode selection → retrieval → text generation
             # ---------------------------------------------------------------
@@ -1120,24 +1258,32 @@ async def stream_chat_response(
             async for sse in _emit_event("status", "selecting_mode"):
                 yield sse
 
-            # When the agent supports prepare_mode_stream, first-call reasoning is
-            # streamed live (status/thinking) instead of being buffered until the
-            # first LLM call completes; the prep then carries only the post-mode
-            # tool/mode events to emit below.
             prep: _ModePreparation | None = None
-            if hasattr(agent, "prepare_mode_stream"):
-                async for kind, payload in agent.prepare_mode_stream(context):  # type: ignore[union-attr]
-                    if kind == "__prep__":
-                        prep = cast(_ModePreparation, payload)
-                        break
-                    kind, chunk = _sanitize_stream_event(
-                        kind, str(payload), control_prefix_stripper
-                    )
-                    _process_event(kind, chunk)
-                    async for sse in _emit_event(kind, chunk):
-                        yield sse
-            if prep is None:
-                prep = await agent.prepare_mode(context)  # type: ignore[union-attr]
+            if hasattr(agent, "classify_turn") and hasattr(agent, "build_prep"):
+                # Unified, enforced-JSON classifier: one call decides the mode AND
+                # whether the learner is extracting an active quiz answer.
+                decision = await agent.classify_turn(context)  # type: ignore[union-attr]
+                if decision.blocks_quiz_answer and context.active_quiz_prompts:
+                    async for event in _emit_quiz_redirect():
+                        yield event
+                    return
+                prep = agent.build_prep(decision.mode, context)  # type: ignore[union-attr]
+            else:
+                # Legacy tagged classifier path. When the agent supports
+                # prepare_mode_stream, first-call reasoning is streamed live.
+                if hasattr(agent, "prepare_mode_stream"):
+                    async for kind, payload in agent.prepare_mode_stream(context):  # type: ignore[union-attr]
+                        if kind == "__prep__":
+                            prep = cast(_ModePreparation, payload)
+                            break
+                        kind, chunk = _sanitize_stream_event(
+                            kind, str(payload), control_prefix_stripper
+                        )
+                        _process_event(kind, chunk)
+                        async for sse in _emit_event(kind, chunk):
+                            yield sse
+                if prep is None:
+                    prep = await agent.prepare_mode(context)  # type: ignore[union-attr]
             if prep is None:
                 raise RuntimeError("Tutor mode preparation failed")
 
@@ -1330,6 +1476,9 @@ async def stream_chat_response(
         reasoning_parts=reasoning_parts or None,
     )
 
+    # Emit `done` before the conversation summary so the learner sees the finished
+    # answer immediately; the summary is a background-style refinement that must
+    # not add latency to the visible turn.
     msg_schema = ConversationMessage.model_validate(assistant_turn)
     yield _sse(
         "done",
@@ -1344,6 +1493,23 @@ async def stream_chat_response(
             },
         },
     )
+
+    summary_client = getattr(agent, "llm_client", None)
+    if summary_client is not None and hasattr(summary_client, "chat"):
+        try:
+            await maybe_generate_conversation_summary(
+                session,
+                LLMConversationSummarizer(summary_client),
+                conversation_id=conversation.id,
+                through_turn_index=assistant_turn.turn_index,
+                recent_visible_turns_limit=settings.tutor_recent_visible_turns_limit,
+                history_char_budget=settings.tutor_history_char_budget,
+                batch_size=settings.tutor_summary_batch_size,
+            )
+            await session.commit()
+        except Exception as exc:
+            logger.warning("Conversation summary generation failed: %s", exc)
+            await session.rollback()
 
 
 def _parse_control_from_buffer(buffer: str) -> _ParsedControl | None:
@@ -1529,6 +1695,8 @@ def _context_to_base_prompt_vars(context: TutorContext) -> dict[str, str]:
         else ""
     )
 
+    learner_state_text = context.learner_state_summary or "No learner-state summary recorded yet."
+
     return {
         "concept": f"{context.concept.title} ({context.concept.concept_level})",
         "concept_id": str(context.concept.id),
@@ -1542,6 +1710,8 @@ def _context_to_base_prompt_vars(context: TutorContext) -> dict[str, str]:
         "bloom_target": context.concept.bloom_level,
         "learning_goal": context.trail.goal,
         "learner_prior_knowledge": context.prior_knowledge or "none",
+        "learner_state_summary": learner_state_text,
+        "active_quiz_context": context.active_quiz_context,
         "sources": _format_sources(context.sources),
         "conversation_summary": summary_text,
         "recent_turns": recent_turns_text,
@@ -1549,6 +1719,58 @@ def _context_to_base_prompt_vars(context: TutorContext) -> dict[str, str]:
         "opening_turn": "yes" if context.is_opening_turn else "no",
         "opening_guidance": _render_opening_guidance(context),
     }
+
+
+def _context_to_classifier_vars(context: TutorContext) -> dict[str, str]:
+    learner_state = context.learner_state_summary or "No learner-state summary recorded yet."
+    summary = (
+        context.conversation_summary.summary_text
+        if context.conversation_summary is not None
+        else ""
+    )
+    quiz_questions = (
+        "\n".join(f"- {prompt}" for prompt in context.active_quiz_prompts)
+        or "none (no active quiz)"
+    )
+    return {
+        "concept": f"{context.concept.title} ({context.concept.concept_level})",
+        "concept_level": context.concept.concept_level,
+        "mastery_status": context.mastery_status,
+        "learning_goal": context.trail.goal,
+        "learner_prior_knowledge": context.prior_knowledge or "none",
+        "learner_state_summary": learner_state,
+        "conversation_summary": summary,
+        "active_quiz_questions": quiz_questions,
+        "learner_message": context.learner_message,
+    }
+
+
+def _parse_turn_decision(raw: str, context: TutorContext) -> _TurnDecision:
+    """Parse the structured classifier output, with safe fallbacks.
+
+    On any parse failure, fall back to keyword-based mode inference and do not
+    block (exact-prompt matching still covers verbatim copies). ``blocks`` is only
+    honoured when an active quiz draft actually exists.
+    """
+    mode: str = _infer_mode_from_message(context.learner_message)
+    blocks = False
+    data = _safe_load_json(raw)
+    if isinstance(data, dict):
+        raw_mode = data.get("mode")
+        if isinstance(raw_mode, str) and raw_mode in _VALID_MODES:
+            mode = raw_mode
+        blocks = data.get("blocks_active_quiz_answer") is True
+    if not context.active_quiz_prompts:
+        blocks = False
+    return _TurnDecision(mode=cast(TutorMode, mode), blocks_quiz_answer=blocks)
+
+
+def _safe_load_json(raw: str) -> object:
+    cleaned = re.sub(r"```(?:json)?", "", raw).strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        return None
 
 
 def _context_to_prompt_vars(mode: TutorMode, context: TutorContext) -> dict[str, str]:

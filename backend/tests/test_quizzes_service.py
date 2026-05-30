@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from backend.app.agents.llm_client import LLMClient
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptNode
+from backend.app.models.learner_state import LearnerState, QuizAttemptSummary
 from backend.app.models.mastery import MasteryRecord, QuizAttempt, QuizDraft
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
@@ -23,6 +25,7 @@ from backend.app.services.quizzes import (
     QuizValidationError,
     generate_quiz_card,
     grade_quiz_submission,
+    list_quiz_attempts,
 )
 
 
@@ -54,10 +57,16 @@ class FakeQuizGenerator:
                 difficulty="challenge",
             ),
         ]
-        self.calls: list[tuple[str, str]] = []
+        self.calls: list[tuple[str, str, str]] = []
 
-    async def generate(self, *, concept: ConceptNode, quiz_type: str) -> list[QuizQuestion]:
-        self.calls.append((concept.title, quiz_type))
+    async def generate(
+        self,
+        *,
+        concept: ConceptNode,
+        quiz_type: str,
+        prior_quiz_context: str = "",
+    ) -> list[QuizQuestion]:
+        self.calls.append((concept.title, quiz_type, prior_quiz_context))
         return self.questions
 
 
@@ -146,7 +155,9 @@ async def test_generate_quiz_card_uses_mastery_labels(session):
         "explain_derivative",
         "apply_derivative",
     ]
-    assert generator.calls == [("Derivatives", "level_up")]
+    assert generator.calls == [
+        ("Derivatives", "level_up", "No prior quiz attempts for this concept.")
+    ]
 
 
 async def test_generate_quiz_card_reuses_existing_draft(session):
@@ -171,7 +182,9 @@ async def test_generate_quiz_card_reuses_existing_draft(session):
     )
 
     assert second.questions == first.questions
-    assert generator.calls == [("Derivatives", "level_up")]
+    assert generator.calls == [
+        ("Derivatives", "level_up", "No prior quiz attempts for this concept.")
+    ]
 
 
 async def test_duplicate_draft_recovery_does_not_access_expired_concept(monkeypatch):
@@ -233,6 +246,9 @@ async def test_duplicate_draft_recovery_does_not_access_expired_concept(monkeypa
                     ]
                 },
             )()
+
+        async def scalars(self, _statement):
+            return []
 
         def add(self, _value):
             return None
@@ -308,8 +324,12 @@ async def test_force_new_quiz_card_replaces_draft(session):
     )
 
     assert [question.id for question in fresh.questions] == ["q3", "q4"]
-    assert first_generator.calls == [("Derivatives", "level_up")]
-    assert second_generator.calls == [("Derivatives", "level_up")]
+    assert first_generator.calls == [
+        ("Derivatives", "level_up", "No prior quiz attempts for this concept.")
+    ]
+    assert second_generator.calls == [
+        ("Derivatives", "level_up", "No prior quiz attempts for this concept.")
+    ]
 
 
 async def test_legacy_question_types_are_normalized():
@@ -323,6 +343,79 @@ async def test_legacy_question_types_are_normalized():
     )
 
     assert question.type == "long_answer"
+
+
+async def test_multi_select_question_requires_options():
+    with pytest.raises(ValueError):
+        QuizQuestion.model_validate(
+            {
+                "id": "q1",
+                "type": "multi_select",
+                "prompt": "Select all prime numbers.",
+                "mastery_label": "identify_primes",
+            }
+        )
+
+
+async def test_ordering_question_requires_options():
+    with pytest.raises(ValueError):
+        QuizQuestion.model_validate(
+            {
+                "id": "q1",
+                "type": "ordering",
+                "prompt": "Order these steps from top to bottom.",
+                "mastery_label": "order_steps",
+            }
+        )
+
+
+async def test_cloze_question_rejects_options():
+    with pytest.raises(ValueError):
+        QuizQuestion.model_validate(
+            {
+                "id": "q1",
+                "type": "cloze",
+                "prompt": "The capital of France is ____.",
+                "mastery_label": "recall_capital",
+                "options": ["Paris", "Lyon"],
+            }
+        )
+
+
+async def test_new_question_types_parse_successfully():
+    multi_select = QuizQuestion.model_validate(
+        {
+            "id": "q1",
+            "type": "multi_select",
+            "prompt": "Select all prime numbers.",
+            "mastery_label": "identify_primes",
+            "options": ["2", "3", "4", "9"],
+        }
+    )
+    ordering = QuizQuestion.model_validate(
+        {
+            "id": "q2",
+            "type": "ordering",
+            "prompt": "Order these steps from top to bottom.",
+            "mastery_label": "order_steps",
+            "options": ["Compile", "Plan", "Run"],
+        }
+    )
+    cloze = QuizQuestion.model_validate(
+        {
+            "id": "q3",
+            "type": "cloze",
+            "prompt": "The capital of France is ____.",
+            "mastery_label": "recall_capital",
+        }
+    )
+
+    assert multi_select.type == "multi_select"
+    assert multi_select.options == ["2", "3", "4", "9"]
+    assert ordering.type == "ordering"
+    assert ordering.options == ["Compile", "Plan", "Run"]
+    assert cloze.type == "cloze"
+    assert cloze.options is None
 
 
 async def test_level_up_pass_updates_mastered_and_stores_attempt(session):
@@ -352,6 +445,7 @@ async def test_level_up_pass_updates_mastered_and_stores_attempt(session):
 
     assert result.passed is True
     assert result.mastery_status == "mastered"
+    assert result.feedback == "Overall feedback"
     record = await session.scalar(
         select(MasteryRecord).where(MasteryRecord.concept_id == concept.id)
     )
@@ -360,6 +454,18 @@ async def test_level_up_pass_updates_mastered_and_stores_attempt(session):
     attempt = await session.scalar(select(QuizAttempt).where(QuizAttempt.id == result.attempt_id))
     assert attempt is not None
     assert attempt.quiz_type == "level_up"
+    assert "explain_derivative: Feedback for q1" in attempt.evaluator_feedback
+    attempt_summary = await session.scalar(
+        select(QuizAttemptSummary).where(QuizAttemptSummary.quiz_attempt_id == attempt.id)
+    )
+    assert attempt_summary is not None
+    assert "answered strongly" in str(attempt_summary.question_fingerprints_json)
+    learner_state = await session.scalar(
+        select(LearnerState).where(LearnerState.concept_id == concept.id)
+    )
+    assert learner_state is not None
+    assert learner_state.next_repair_targets_json == []
+    assert "latest level-up passed" in learner_state.summary_text
     draft = await session.scalar(select(QuizDraft).where(QuizDraft.concept_id == concept.id))
     assert draft is None
 
@@ -388,6 +494,204 @@ async def test_level_up_fail_updates_needs_review(session):
     )
     assert record is not None
     assert record.status == "needs_review"
+    learner_state = await session.scalar(
+        select(LearnerState).where(LearnerState.concept_id == concept.id)
+    )
+    assert learner_state is not None
+    assert [item["mastery_label"] for item in learner_state.next_repair_targets_json] == [
+        "explain_derivative",
+        "apply_derivative",
+    ]
+
+
+async def test_later_pass_supersedes_old_failed_quiz_bias(session):
+    workspace, trail, concept = await _seed_concept(session)
+    questions = FakeQuizGenerator().questions
+
+    await grade_quiz_submission(
+        session,
+        FakeQuizGrader(0.45),
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+        questions=questions,
+        answers=[
+            QuizAnswer(question_id="q1", answer="Unsure."),
+            QuizAnswer(question_id="q2", answer="Not sure."),
+        ],
+    )
+    failed_state = await session.scalar(
+        select(LearnerState).where(LearnerState.concept_id == concept.id)
+    )
+    assert failed_state is not None
+    assert failed_state.next_repair_targets_json
+
+    await grade_quiz_submission(
+        session,
+        FakeQuizGrader(0.95),
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+        questions=questions,
+        answers=[
+            QuizAnswer(question_id="q1", answer="A derivative measures change."),
+            QuizAnswer(question_id="q2", answer="Use the derivative to find the rate."),
+        ],
+    )
+
+    passed_state = await session.scalar(
+        select(LearnerState).where(LearnerState.concept_id == concept.id)
+    )
+    assert passed_state is not None
+    assert passed_state.next_repair_targets_json == []
+    assert "latest level-up passed" in passed_state.summary_text
+
+
+class PartialQuizGrader:
+    """Grader that omits a per-question entry, simulating an under-returning model."""
+
+    def __init__(self, score: float, graded_only: set[str]):
+        self.score = score
+        self.graded_only = graded_only
+
+    async def grade(self, *, concept, questions, answers):
+        return QuizEvaluation(
+            score=self.score,
+            passed=self.score >= 0.7,
+            per_question=[
+                PerQuestionEvaluation(
+                    question_id=question.id,
+                    score=self.score,
+                    feedback=f"Feedback for {question.id}",
+                )
+                for question in questions
+                if question.id in self.graded_only
+            ],
+            overall_feedback="Partial feedback",
+        )
+
+
+async def test_missing_per_question_grade_is_not_counted_as_strength(session):
+    workspace, trail, concept = await _seed_concept(session)
+    questions = FakeQuizGenerator().questions  # q1 explain, q2 apply
+
+    # q1 is graded strongly; q2 has no per-question entry at all.
+    await grade_quiz_submission(
+        session,
+        PartialQuizGrader(0.95, graded_only={"q1"}),
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="practice",
+        questions=questions,
+        answers=[
+            QuizAnswer(question_id="q1", answer="A derivative measures change."),
+            QuizAnswer(question_id="q2", answer="Some attempt."),
+        ],
+    )
+
+    summary = await session.scalar(select(QuizAttemptSummary))
+    assert summary is not None
+    strength_labels = [item["mastery_label"] for item in summary.strengths_json]
+    # Only the graded question counts as a strength; the ungraded one is skipped,
+    # never silently treated as a passing 1.0.
+    assert strength_labels == ["explain_derivative"]
+    gap_labels = [item["mastery_label"] for item in summary.gaps_json]
+    assert "apply_derivative" not in gap_labels
+
+
+async def test_prior_quiz_context_is_passed_to_generation_without_answers_or_feedback(session):
+    workspace, trail, concept = await _seed_concept(session)
+    questions = FakeQuizGenerator().questions
+    await grade_quiz_submission(
+        session,
+        FakeQuizGrader(0.9, feedback="Detailed grading feedback"),
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+        questions=questions,
+        answers=[
+            QuizAnswer(question_id="q1", answer="A derivative measures change."),
+            QuizAnswer(question_id="q2", answer="The derivative of x^2 is 2x."),
+        ],
+    )
+
+    generator = FakeQuizGenerator()
+    await generate_quiz_card(
+        session,
+        generator,
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+    )
+
+    prior_context = generator.calls[0][2]
+    assert "explain_derivative" in prior_context
+    assert "answered strongly" in prior_context
+    assert "Explain derivatives in your own words" in prior_context
+    assert "A derivative measures change" not in prior_context
+    assert "Detailed grading feedback" not in prior_context
+
+
+async def test_list_quiz_attempts_returns_newest_first_and_filters_type(session):
+    workspace, trail, concept = await _seed_concept(session)
+    questions = FakeQuizGenerator().questions
+    first = await grade_quiz_submission(
+        session,
+        FakeQuizGrader(0.9),
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="practice",
+        questions=questions,
+        answers=[
+            QuizAnswer(question_id="q1", answer="Practice answer 1"),
+            QuizAnswer(question_id="q2", answer="Practice answer 2"),
+        ],
+    )
+    second = await grade_quiz_submission(
+        session,
+        FakeQuizGrader(0.8),
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+        questions=questions,
+        answers=[
+            QuizAnswer(question_id="q1", answer="Level answer 1"),
+            QuizAnswer(question_id="q2", answer="Level answer 2"),
+        ],
+    )
+    first_record = await session.get(QuizAttempt, first.attempt_id)
+    second_record = await session.get(QuizAttempt, second.attempt_id)
+    assert first_record is not None
+    assert second_record is not None
+    first_record.created_at = datetime.now(UTC) - timedelta(minutes=5)
+    second_record.created_at = datetime.now(UTC)
+    await session.commit()
+
+    attempts = await list_quiz_attempts(
+        session,
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+    )
+    level_attempts = await list_quiz_attempts(
+        session,
+        workspace_id=workspace.id,
+        trail_id=trail.id,
+        concept_id=concept.id,
+        quiz_type="level_up",
+    )
+
+    assert [attempt.id for attempt in attempts] == [second.attempt_id, first.attempt_id]
+    assert [attempt.quiz_type for attempt in level_attempts] == ["level_up"]
+    assert level_attempts[0].questions[0].prompt == questions[0].prompt
+    assert level_attempts[0].answers[0].answer == "Level answer 1"
 
 
 async def test_practice_grade_does_not_update_mastery(session):
@@ -480,7 +784,11 @@ async def test_llm_quiz_generator_renders_prompt_and_parses_questions(session):
     )
     generator = LLMQuizGenerator(client=cast(LLMClient, client))
 
-    questions = await generator.generate(concept=concept, quiz_type="level_up")
+    questions = await generator.generate(
+        concept=concept,
+        quiz_type="level_up",
+        prior_quiz_context="Avoid repeating q1.",
+    )
 
     assert [question.id for question in questions] == ["q1", "q2"]
     prompt = client.calls[0][0]["content"]
@@ -488,6 +796,7 @@ async def test_llm_quiz_generator_renders_prompt_and_parses_questions(session):
     assert "explain_derivative" in prompt
     assert "apply_derivative" in prompt
     assert "level_up" in prompt
+    assert "Avoid repeating q1." in prompt
 
 
 async def test_llm_quiz_generator_repairs_invalid_json_once(session):
@@ -515,7 +824,7 @@ async def test_llm_quiz_generator_repairs_invalid_json_once(session):
                 }
               ]
             }
-            """
+            """,
         ]
     )
     generator = LLMQuizGenerator(client=cast(LLMClient, client))
@@ -591,7 +900,7 @@ async def test_llm_quiz_grader_repairs_invalid_json_once(session):
               ],
               "overall_feedback": "You passed."
             }
-            """
+            """,
         ]
     )
     grader = LLMQuizGrader(client=cast(LLMClient, client))

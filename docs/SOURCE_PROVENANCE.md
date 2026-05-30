@@ -68,7 +68,7 @@ Public export must exclude:
 - Generated quizzes from private/user-uploaded content.
 - Artifact payloads derived from private/user-uploaded content unless a future explicit open-license policy allows them.
 
-Trail Pack sharing/import is part of the MVP product identity. Source ingestion, retrieval, and visual artifacts must preserve this public/private boundary rather than moving Trail sharing later or weakening the sanitizer.
+Trail Pack sharing/import is a core part of the product identity. Source ingestion, retrieval, and visual artifacts must preserve this public/private boundary rather than moving Trail sharing later or weakening the sanitizer.
 
 ## Sanitizer Pseudocode
 

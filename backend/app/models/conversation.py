@@ -2,11 +2,11 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -78,7 +78,8 @@ class ConversationTurn(Base):
             name="ck_conversation_turns_kind",
         ),
         CheckConstraint(
-            "mode IS NULL OR mode in ('socratic', 'direct', 'repair', 'quiz_prompt', 'explore', 'free_explore')",
+            "mode IS NULL OR mode in "
+            "('socratic', 'direct', 'repair', 'quiz_prompt', 'explore', 'free_explore')",
             name="ck_conversation_turns_mode",
         ),
     )
@@ -90,7 +91,9 @@ class ConversationTurn(Base):
         nullable=False,
     )
     role: Mapped[str] = mapped_column(String, nullable=False)
-    kind: Mapped[str] = mapped_column(String, nullable=False, default="visible", server_default="visible")
+    kind: Mapped[str] = mapped_column(
+        String, nullable=False, default="visible", server_default="visible"
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # Optional provider-exposed thinking text used to rehydrate reasoning traces.
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -109,6 +112,13 @@ class ConversationSummary(Base):
     """A rolling summary produced after a batch of turns to keep context windows bounded."""
 
     __tablename__ = "conversation_summaries"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "turns_covered_to",
+            name="uq_conversation_summaries_conversation_turns_covered",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     conversation_id: Mapped[uuid.UUID] = mapped_column(

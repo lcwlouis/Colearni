@@ -10,6 +10,7 @@ import type {
   MasteryStatus,
   NextConceptResponse,
   QuizAnswer,
+  QuizAttemptListResponse,
   QuizGenerateRequest,
   QuizQuestion,
   SourceUploadResponse,
@@ -234,6 +235,26 @@ export async function gradePracticeQuiz(
       method: "POST",
       body: JSON.stringify({ questions, answers }),
     },
+  );
+}
+
+export async function listQuizAttempts(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  options: { quizType?: "level_up" | "practice"; limit?: number } = {},
+): Promise<QuizAttemptListResponse> {
+  const query = new URLSearchParams();
+  if (options.quizType) {
+    query.set("quiz_type", options.quizType);
+  }
+  if (options.limit) {
+    query.set("limit", String(options.limit));
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<QuizAttemptListResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/quiz-attempts${suffix}`,
+    { method: "GET" },
   );
 }
 

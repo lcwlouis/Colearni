@@ -1,6 +1,7 @@
 from .base import Base
 from .concept import ConceptEdge, ConceptNode
 from .conversation import Conversation, ConversationSummary, ConversationTurn
+from .learner_state import LearnerState, QuizAttemptSummary
 from .mastery import MasteryRecord, QuizAttempt, QuizDraft
 from .research import TrailResearchTrace
 from .source import ConceptSourceLink, SourceChunk, SourceRecord, SourceRevision
@@ -16,8 +17,10 @@ __all__ = [
     "Conversation",
     "ConversationSummary",
     "ConversationTurn",
+    "LearnerState",
     "MasteryRecord",
     "QuizAttempt",
+    "QuizAttemptSummary",
     "QuizDraft",
     "SourceRecord",
     "SourceRevision",

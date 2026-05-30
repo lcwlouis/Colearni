@@ -11,17 +11,22 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app.agents.prompts import prompt_registry
 from backend.app.models.concept import ConceptNode
-from backend.app.models.mastery import QuizDraft
+from backend.app.models.mastery import QuizAttempt, QuizDraft
 from backend.app.schemas.mastery import (
     GradeResult,
     LevelUpCard,
     QuizAnswer,
+    QuizAttemptRead,
     QuizEvaluation,
     QuizGenerationOutput,
     QuizQuestion,
 )
 from backend.app.schemas.types import MasteryStatus, QuizType
 from backend.app.services.conversations import validate_concept_scope
+from backend.app.services.learner_state import (
+    format_prior_quiz_context,
+    record_quiz_learning_evidence,
+)
 from backend.app.services.mastery import (
     PASS_THRESHOLD,
     apply_level_up_result,
@@ -51,7 +56,11 @@ class QuizValidationError(Exception):
 @runtime_checkable
 class QuizGenerator(Protocol):
     async def generate(
-        self, *, concept: ConceptNode, quiz_type: QuizType
+        self,
+        *,
+        concept: ConceptNode,
+        quiz_type: QuizType,
+        prior_quiz_context: str = "",
     ) -> list[QuizQuestion]: ...
 
 
@@ -75,7 +84,13 @@ class LLMQuizGenerator:
         self._client = client
         self._registry = registry
 
-    async def generate(self, *, concept: ConceptNode, quiz_type: QuizType) -> list[QuizQuestion]:
+    async def generate(
+        self,
+        *,
+        concept: ConceptNode,
+        quiz_type: QuizType,
+        prior_quiz_context: str = "",
+    ) -> list[QuizQuestion]:
         prompt = self._registry.render(
             "quiz_generation",
             {
@@ -89,8 +104,9 @@ class LLMQuizGenerator:
                 "mastery_check_labels": json.dumps(concept.mastery_check_labels, indent=2),
                 "bloom_target": concept.bloom_level,
                 "quiz_type": quiz_type,
+                "prior_quiz_context": prior_quiz_context,
             },
-            version=1,
+            version=2,
         )
         raw = await self._client.chat(
             [{"role": "user", "content": prompt}],
@@ -243,7 +259,16 @@ async def generate_quiz_card(
         questions = [QuizQuestion.model_validate(question) for question in draft.questions_json]
         return LevelUpCard(concept_id=concept_uuid, quiz_type=quiz_type, questions=questions)
 
-    questions = await generator.generate(concept=concept, quiz_type=quiz_type)
+    prior_quiz_context = await format_prior_quiz_context(
+        session,
+        workspace_id=workspace_id,
+        concept_id=concept_uuid,
+    )
+    questions = await generator.generate(
+        concept=concept,
+        quiz_type=quiz_type,
+        prior_quiz_context=prior_quiz_context,
+    )
     try:
         session.add(
             QuizDraft(
@@ -287,7 +312,8 @@ async def grade_quiz_submission(
     ordered_answers = _validate_submission(questions=questions, answers=answers)
     evaluation = await grader.grade(concept=concept, questions=questions, answers=ordered_answers)
     passed = evaluation.score >= PASS_THRESHOLD
-    feedback = _format_feedback(questions=questions, evaluation=evaluation)
+    visible_feedback = evaluation.overall_feedback.strip()
+    attempt_feedback = _format_feedback(questions=questions, evaluation=evaluation)
 
     attempt = await store_quiz_attempt(
         session,
@@ -295,9 +321,19 @@ async def grade_quiz_submission(
         quiz_type=quiz_type,
         questions=questions,
         answers=ordered_answers,
-        evaluator_feedback=feedback,
+        evaluator_feedback=attempt_feedback,
         passed=passed,
         score=evaluation.score,
+    )
+    await record_quiz_learning_evidence(
+        session,
+        workspace_id=workspace_id,
+        concept=concept,
+        attempt=attempt,
+        quiz_type=quiz_type,
+        questions=questions,
+        evaluation=evaluation,
+        passed=passed,
     )
     await session.execute(
         delete(QuizDraft).where(
@@ -325,11 +361,39 @@ async def grade_quiz_submission(
     return GradeResult(
         passed=passed,
         score=evaluation.score,
-        feedback=feedback,
+        feedback=visible_feedback,
         per_question=evaluation.per_question,
         mastery_status=cast(MasteryStatus, mastery_state.status),
         attempt_id=attempt.id,
     )
+
+
+async def list_quiz_attempts(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    quiz_type: QuizType | None = None,
+    limit: int = 10,
+) -> list[QuizAttemptRead]:
+    _, concept = await validate_concept_scope(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+    limit = max(1, min(limit, 50))
+    statement = (
+        select(QuizAttempt)
+        .where(QuizAttempt.concept_id == concept.id)
+        .order_by(QuizAttempt.created_at.desc())
+        .limit(limit)
+    )
+    if quiz_type is not None:
+        statement = statement.where(QuizAttempt.quiz_type == quiz_type)
+    attempts = list(await session.scalars(statement))
+    return [_attempt_to_read(attempt) for attempt in attempts]
 
 
 async def _lock_quiz_draft_generation(
@@ -351,6 +415,20 @@ async def _lock_quiz_draft_generation(
 def _quiz_draft_lock_key(concept_id: uuid.UUID, quiz_type: QuizType) -> int:
     digest = blake2b(f"{concept_id}:{quiz_type}".encode("ascii"), digest_size=8).digest()
     return int.from_bytes(digest, "big") & 0x7FFFFFFFFFFFFFFF
+
+
+def _attempt_to_read(attempt: QuizAttempt) -> QuizAttemptRead:
+    return QuizAttemptRead(
+        id=attempt.id,
+        concept_id=attempt.concept_id,
+        quiz_type=cast(QuizType, attempt.quiz_type),
+        questions=[QuizQuestion.model_validate(question) for question in attempt.questions_json],
+        answers=[QuizAnswer.model_validate(answer) for answer in attempt.answers_json],
+        evaluator_feedback=attempt.evaluator_feedback,
+        passed=attempt.passed,
+        score=attempt.score,
+        created_at=attempt.created_at,
+    )
 
 
 def _parse_generation_output(raw: str) -> list[QuizQuestion]:
@@ -406,8 +484,11 @@ def _format_feedback(*, questions: list[QuizQuestion], evaluation: QuizEvaluatio
     sections = [evaluation.overall_feedback.strip()]
     per_question_by_id = {item.question_id: item for item in evaluation.per_question}
     for question in questions:
-        item = per_question_by_id[question.id]
-        sections.append(
-            f"{question_by_id[question.id].mastery_label}: {item.feedback.strip()}"
-        )
+        item = per_question_by_id.get(question.id)
+        if item is None:
+            # Defensive: the real grader path guarantees full coverage via
+            # _parse_evaluation_output, but skip rather than crash if a custom
+            # grader returns an incomplete evaluation.
+            continue
+        sections.append(f"{question_by_id[question.id].mastery_label}: {item.feedback.strip()}")
     return "\n\n".join(section for section in sections if section)

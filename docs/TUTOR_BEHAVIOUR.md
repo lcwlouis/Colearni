@@ -44,7 +44,7 @@ Used when the learner explicitly asks for a direct explanation, summary, or exam
 
 Even in direct mode, the tutor should check understanding afterward with a short question or prompt.
 
-For the current MVP, `direct` is mastery-gated:
+Currently, `direct` is mastery-gated:
 
 - When mastery is `mastered`, the tutor gives a crisp, direct answer (no Socratic follow-up unless the learner asks to refresh or practise).
 - When mastery is `learning` or `needs_review`, the tutor must NOT refuse and must NOT bounce a bare Socratic question back at the learner. Instead it switches to **guided teaching**: a brief, supportive, plain-language explanation or walkthrough grounded in the current concept (a few sentences, optionally one short worked example or a couple of steps), optionally ending with ONE gentle, optional guiding/check question. This mirrors the opening-turn "teach briefly, then check" and stuck-learner behaviour. The turn is still labelled `direct` because the tutor is teaching what the learner asked for. The guided-teaching prompt is `tutor_direct_locked`.
@@ -90,7 +90,7 @@ Explore mode may reference containing/contained nodes and application nodes, but
 
 Used for broader curiosity after the learner has already demonstrated mastery. This mode can range further than the bounded `explore` mode, but it should still stay educational and coherent rather than drifting into arbitrary trivia.
 
-For the current MVP, `free_explore` is mastery-gated to `mastered`.
+Currently, `free_explore` is mastery-gated to `mastered`.
 
 ## Prompt Context
 

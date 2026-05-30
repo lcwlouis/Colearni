@@ -1,7 +1,7 @@
 import uuid
 from typing import cast
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -16,6 +16,7 @@ from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
 from backend.app.schemas.mastery import (
     GradeResult,
     LevelUpCard,
+    QuizAttemptListResponse,
     QuizGenerateRequest,
     QuizGradeRequest,
 )
@@ -40,6 +41,7 @@ from backend.app.services.quizzes import (
     QuizValidationError,
     generate_quiz_card,
     grade_quiz_submission,
+    list_quiz_attempts,
 )
 from backend.app.settings import settings
 
@@ -165,6 +167,29 @@ async def get_concept_sources_route(
             )
         )
     return ConceptSourcesResponse(sources=sources)
+
+
+@router.get("/{concept_id}/quiz-attempts", response_model=QuizAttemptListResponse)
+async def list_quiz_attempts_route(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    quiz_type: QuizType | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+) -> QuizAttemptListResponse | JSONResponse:
+    try:
+        attempts = await list_quiz_attempts(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            quiz_type=quiz_type,
+            limit=limit,
+        )
+    except LookupError as exc:
+        return _not_found(str(exc))
+    return QuizAttemptListResponse(attempts=attempts)
 
 
 @router.post("/{concept_id}/level-up", response_model=LevelUpCard)

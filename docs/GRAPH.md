@@ -37,7 +37,7 @@ related
 
 Use `contains` for hierarchy edges when useful, but do not infer level purely from parent/child position. A node must carry its own `concept_level`.
 
-For the MVP, prerequisite edges should be acyclic unless a feature explicitly allows and explains cycles.
+Prerequisite edges should be acyclic unless a feature explicitly allows and explains cycles.
 
 ## Required Node Fields
 

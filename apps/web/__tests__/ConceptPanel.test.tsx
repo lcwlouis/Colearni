@@ -25,11 +25,35 @@ vi.mock("@/app/trails/[id]/components/TutorPanel", () => ({
 }));
 
 vi.mock("@/app/trails/[id]/components/QuizPanel", () => ({
-  QuizPanel: ({ mode, onBack }: { mode: string; onBack: () => void }) => (
+  QuizPanel: ({
+    mode,
+    onBack,
+    onViewHistory,
+  }: {
+    mode: string;
+    onBack: () => void;
+    onViewHistory?: () => void;
+  }) => (
     <div data-testid="quiz-panel">
       Quiz Panel: {mode}
       <button type="button" onClick={onBack}>
         Quiz Back
+      </button>
+      {onViewHistory ? (
+        <button type="button" onClick={onViewHistory}>
+          Quiz View History
+        </button>
+      ) : null}
+    </div>
+  ),
+}));
+
+vi.mock("@/app/trails/[id]/components/QuizHistoryPanel", () => ({
+  QuizHistoryPanel: ({ onBack }: { onBack: () => void }) => (
+    <div data-testid="quiz-history-panel">
+      Quiz History
+      <button type="button" onClick={onBack}>
+        History Back
       </button>
     </div>
   ),
@@ -227,6 +251,28 @@ describe("ConceptPanel", () => {
     expect(screen.getByTestId("quiz-panel")).toHaveTextContent(
       "Quiz Panel: practice",
     );
+  });
+
+  test("View past attempts opens the history panel without generating a quiz", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "View past attempts" }),
+    );
+    expect(screen.getByTestId("quiz-history-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("quiz-panel")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(
+      screen.getByRole("button", { name: "View past attempts" }),
+    ).toBeInTheDocument();
   });
 
   test("quiz buttons are hidden when tutor is open", async () => {

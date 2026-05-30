@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file is required reading when touching `apps/web/`. The current project was reset for the new MVP, so old frontend component inventories should not be treated as current implementation.
+This file is required reading when touching `apps/web/`. The project was rebuilt from scratch, so old frontend component inventories should not be treated as current implementation.
 
 ## Product Surface
 
@@ -18,7 +18,7 @@ create Trail
 -> export/import safe Trail Pack
 ```
 
-Do not build a marketing landing page as the main experience. The first screen should become a learning dashboard that helps the learner continue progress, understand recent Trail mastery, follow a recommended next action, search older Trails, and create a new Trail. Trail sharing/import remains part of the core MVP identity, not a later nice-to-have.
+Do not build a marketing landing page as the main experience. The first screen should become a learning dashboard that helps the learner continue progress, understand recent Trail mastery, follow a recommended next action, search older Trails, and create a new Trail. Trail sharing/import is a core product identity, not a later nice-to-have.
 
 ## Planned Stack
 
@@ -89,7 +89,7 @@ For a responsive Socratic experience, `POST /api/workspaces/{workspace_id}/trail
 The components in `apps/web/components/assistant-ui/` and `apps/web/app/trails/[id]/components/TutorPanel.tsx` are plain React/Tailwind files we fully own. CoLearni-specific customisations include:
 
 - **Tutor mode badge**: display the active mode (`socratic`, `direct`, `repair`, `quiz_prompt`, `explore`) on assistant messages.
-- `free_explore` is also a valid tutor mode, but it is mastery-gated and may be rare in the current MVP.
+- `free_explore` is also a valid tutor mode, but it is mastery-gated and will be rare until learners have mastered concepts.
 - **Concept context header**: show the concept title and level above the thread.
 - **Markdown/math/code renderer**: `MarkdownText` uses assistant-ui markdown primitives with `remark-gfm`, `remark-math`, `rehype-katex`, fenced `mermaid` rendering, copyable code blocks, and preprocessing for both `$...$` and TeX `\(...\)`/`\[...\]` math delimiters.
 - **Concept-level source chips**: render available source links in the tutor header. True per-message `Sources` parts are deferred until the backend emits answer-level citation parts.
@@ -118,13 +118,13 @@ Later, once tutor/tool flows are more agentic:
 
 AssistantModal evaluation:
 
-- Keep the current concept side panel for the MVP. `AssistantModal` is a floating global popover pattern, while CoLearni's tutor is concept-scoped, shares state with the concept sheet, and needs the graph-side context header. Revisit `AssistantModal` only if a global cross-Trail assistant is added later.
+- Keep the current concept side panel. `AssistantModal` is a floating global popover pattern, while CoLearni's tutor is concept-scoped, shares state with the concept sheet, and needs the graph-side context header. Revisit `AssistantModal` only if a global cross-Trail assistant is added later.
 
 Artifact roadmap:
 
 - Start with structured artifact payloads such as JSON or CSV rendered by a frontend component registry.
 - Flashcard sets, worked examples, mini graphs, and other trusted templates should arrive through that artifact path after the current mastery and Trail sharing loop is stable.
-- Raw React or JavaScript artifacts are a much-later option, not part of the current MVP phases.
+- Raw React or JavaScript artifacts are a much-later option, not part of the current phases.
 
 ### Installation
 
@@ -289,7 +289,7 @@ Dark mode is a Phase 16 demo polish requirement. It should be implemented before
 
 The frontend should read `NEXT_PUBLIC_API_BASE_URL` and call the backend API documented in `docs/API.md`.
 
-For the local-ready MVP, store the active `workspace_id` locally and include it in workspace-scoped API paths.
+In the local-ready design, store the active `workspace_id` locally and include it in workspace-scoped API paths.
 
 ## Verification
 

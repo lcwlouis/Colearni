@@ -8,7 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .types import BloomLevel, MasteryStatus, QuizType
 
-QuizQuestionType = Literal["multiple_choice", "short_answer", "long_answer"]
+QuizQuestionType = Literal[
+    "multiple_choice",
+    "short_answer",
+    "long_answer",
+    "code",
+    "multi_select",
+    "ordering",
+    "cloze",
+]
+_OPTION_QUESTION_TYPES: frozenset[str] = frozenset({"multiple_choice", "multi_select", "ordering"})
 QuizQuestionDifficulty = Literal["light", "standard", "challenge"]
 _LEGACY_QUESTION_TYPES: dict[str, QuizQuestionType] = {
     "explain": "long_answer",
@@ -37,7 +46,7 @@ class QuizQuestion(BaseModel):
     prompt: str = Field(min_length=1, max_length=2000)
     mastery_label: str = Field(min_length=1, max_length=200)
     difficulty: QuizQuestionDifficulty = "standard"
-    options: list[str] | None = Field(default=None, min_length=2, max_length=5)
+    options: list[str] | None = Field(default=None, min_length=2, max_length=6)
 
     @field_validator("type", mode="before")
     @classmethod
@@ -69,13 +78,15 @@ class QuizQuestion(BaseModel):
 
     @model_validator(mode="after")
     def validate_options_for_type(self) -> QuizQuestion:
-        if self.type == "multiple_choice":
+        if self.type in _OPTION_QUESTION_TYPES:
             if not self.options or len(self.options) < 2:
-                raise ValueError("multiple_choice questions require at least two options")
+                raise ValueError(f"{self.type} questions require at least two options")
             if len(set(self.options)) != len(self.options):
-                raise ValueError("multiple_choice options must be unique")
+                raise ValueError(f"{self.type} options must be unique")
         elif self.options:
-            raise ValueError("options are only allowed for multiple_choice questions")
+            raise ValueError(
+                "options are only allowed for multiple_choice, multi_select, and ordering questions"
+            )
         return self
 
 
@@ -150,6 +161,22 @@ class GradeResult(BaseModel):
     per_question: list[PerQuestionEvaluation] = Field(default_factory=list)
     mastery_status: MasteryStatus
     attempt_id: uuid.UUID
+
+
+class QuizAttemptRead(BaseModel):
+    id: uuid.UUID
+    concept_id: uuid.UUID
+    quiz_type: QuizType
+    questions: list[QuizQuestion]
+    answers: list[QuizAnswer]
+    evaluator_feedback: str
+    passed: bool
+    score: float = Field(ge=0.0, le=1.0)
+    created_at: datetime
+
+
+class QuizAttemptListResponse(BaseModel):
+    attempts: list[QuizAttemptRead]
 
 
 class QuizGenerationOutput(BaseModel):

@@ -14,6 +14,9 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
 import { MermaidDiagram } from "@/components/assistant-ui/mermaid-diagram";
+import { preprocessTutorMarkdown } from "@/lib/markdown";
+
+export { preprocessTutorMarkdown };
 
 const MARKDOWN_REHYPE_PLUGINS = [rehypeKatex];
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkMath];
@@ -22,50 +25,101 @@ export function MarkdownText() {
   const components = useMemo(
     () => ({
       h1: ({ className, ...props }: React.ComponentProps<"h1">) => (
-        <h1 className={join("mb-2 text-base font-semibold first:mt-0", className)} {...props} />
+        <h1
+          className={join("mb-2 text-base font-semibold first:mt-0", className)}
+          {...props}
+        />
       ),
       h2: ({ className, ...props }: React.ComponentProps<"h2">) => (
-        <h2 className={join("mb-1.5 mt-3 text-sm font-semibold first:mt-0", className)} {...props} />
+        <h2
+          className={join(
+            "mb-1.5 mt-3 text-sm font-semibold first:mt-0",
+            className,
+          )}
+          {...props}
+        />
       ),
       h3: ({ className, ...props }: React.ComponentProps<"h3">) => (
-        <h3 className={join("mb-1 mt-2.5 text-sm font-semibold first:mt-0", className)} {...props} />
+        <h3
+          className={join(
+            "mb-1 mt-2.5 text-sm font-semibold first:mt-0",
+            className,
+          )}
+          {...props}
+        />
       ),
       p: ({ className, ...props }: React.ComponentProps<"p">) => (
-        <p className={join("my-2 leading-6 first:mt-0 last:mb-0", className)} {...props} />
+        <p
+          className={join("my-2 leading-6 first:mt-0 last:mb-0", className)}
+          {...props}
+        />
       ),
       a: ({ className, ...props }: React.ComponentProps<"a">) => (
         <a
-          className={join("text-blue-700 underline underline-offset-2 hover:text-blue-800", className)}
+          className={join(
+            "text-blue-700 underline underline-offset-2 hover:text-blue-800",
+            className,
+          )}
           target="_blank"
           rel="noreferrer"
           {...props}
         />
       ),
-      blockquote: ({ className, ...props }: React.ComponentProps<"blockquote">) => (
+      blockquote: ({
+        className,
+        ...props
+      }: React.ComponentProps<"blockquote">) => (
         <blockquote
-          className={join("my-2 border-l-2 border-slate-300 pl-3 italic text-slate-600", className)}
+          className={join(
+            "my-2 border-l-2 border-slate-300 pl-3 italic text-slate-600",
+            className,
+          )}
           {...props}
         />
       ),
       ul: ({ className, ...props }: React.ComponentProps<"ul">) => (
-        <ul className={join("my-2 ml-5 list-disc [&>li]:mt-1", className)} {...props} />
+        <ul
+          className={join("my-2 ml-5 list-disc [&>li]:mt-1", className)}
+          {...props}
+        />
       ),
       ol: ({ className, ...props }: React.ComponentProps<"ol">) => (
-        <ol className={join("my-2 ml-5 list-decimal [&>li]:mt-1", className)} {...props} />
+        <ol
+          className={join("my-2 ml-5 list-decimal [&>li]:mt-1", className)}
+          {...props}
+        />
       ),
       li: ({ className, ...props }: React.ComponentProps<"li">) => (
         <li className={join("leading-6", className)} {...props} />
       ),
       table: ({ className, ...props }: React.ComponentProps<"table">) => (
         <div className="my-2 overflow-x-auto">
-          <table className={join("w-full border-separate border-spacing-0 text-sm", className)} {...props} />
+          <table
+            className={join(
+              "w-full border-separate border-spacing-0 text-sm",
+              className,
+            )}
+            {...props}
+          />
         </div>
       ),
       th: ({ className, ...props }: React.ComponentProps<"th">) => (
-        <th className={join("bg-slate-100 px-2 py-1 text-left font-medium", className)} {...props} />
+        <th
+          className={join(
+            "bg-slate-100 px-2 py-1 text-left font-medium",
+            className,
+          )}
+          {...props}
+        />
       ),
       td: ({ className, ...props }: React.ComponentProps<"td">) => (
-        <td className={join("border border-slate-200 px-2 py-1 align-top", className)} {...props} />
+        <td
+          className={join(
+            "border border-slate-200 px-2 py-1 align-top",
+            className,
+          )}
+          {...props}
+        />
       ),
       pre: ({ className, ...props }: React.ComponentProps<"pre">) => (
         <pre
@@ -114,21 +168,10 @@ export function MarkdownText() {
   );
 }
 
-export function preprocessTutorMarkdown(text: string): string {
-  const chunks = text.split(/(```[\s\S]*?```|`[^`\n]*`)/g);
-  return chunks
-    .map((chunk) => {
-      if (chunk.startsWith("`")) {
-        return chunk;
-      }
-      return chunk
-        .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => `$$${math}$$`)
-        .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$${math}$`);
-    })
-    .join("");
-}
-
-const CodeBlockContent: FC<SyntaxHighlighterProps> = ({ code, components: { Pre } }) => (
+const CodeBlockContent: FC<SyntaxHighlighterProps> = ({
+  code,
+  components: { Pre },
+}) => (
   <Pre>
     <code className="block whitespace-pre font-mono text-[0.95em] text-slate-100">
       {code.replace(/\n$/, "")}
@@ -141,14 +184,20 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
 
   return (
     <div className="mt-2.5 flex items-center justify-between rounded-t-lg border border-b-0 border-slate-200 bg-slate-100 px-3 py-1.5 text-xs">
-      <span className="font-medium lowercase text-slate-500">{language ?? "text"}</span>
+      <span className="font-medium lowercase text-slate-500">
+        {language ?? "text"}
+      </span>
       <button
         type="button"
         aria-label="Copy code"
         onClick={() => copyToClipboard(code)}
         className="rounded p-1 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-900"
       >
-        {isCopied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+        {isCopied ? (
+          <CheckIcon className="size-3.5" />
+        ) : (
+          <CopyIcon className="size-3.5" />
+        )}
       </button>
     </div>
   );
@@ -160,7 +209,12 @@ function useCopyToClipboard(copiedDuration = 3000) {
   return {
     isCopied,
     copyToClipboard(value: string) {
-      if (!value || typeof navigator === "undefined" || !navigator.clipboard || isCopied) {
+      if (
+        !value ||
+        typeof navigator === "undefined" ||
+        !navigator.clipboard ||
+        isCopied
+      ) {
         return;
       }
 

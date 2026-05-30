@@ -4,7 +4,7 @@
 
 This plan defines the tests needed for the local-ready CoLearni rebuild. Tests should protect the core product loop and the public/private safety boundary.
 
-Recommended MVP build order:
+Build order:
 
 ```text
 1. Foundation cleanup
@@ -16,10 +16,10 @@ Recommended MVP build order:
 7. Tutor chat frontend with assistant-ui
 8. Mastery + level-up quiz
 9. Source provenance + safe Trail Pack export
-10. Trail Pack import + research trace/hydration MVP
+10. Trail Pack import + research trace/hydration
 11. Provider tool abstraction foundation
 12. Learning dashboard + Learn/Inspect graph UX
-13. Source ingestion MVP
+13. Source ingestion
 14. Retrieval + context tooling
 15. Guided graph navigation / recommended next concept
 16. Conversation summaries + learner state

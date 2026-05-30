@@ -33,7 +33,7 @@ Research Trace: a record of what the research agent searched and selected. It st
 
 Hydration: enriching an imported Trail locally using public web sources, open-licensed sources, user-uploaded sources, or model knowledge.
 
-## MVP Goal
+## Product Goal
 
 A user can create or import a Trail, learn through a Socratic tutor, see progress on a concept graph, and export/share the safe structure of that Trail.
 
@@ -49,7 +49,7 @@ Create Trail
 -> Optional research trace/hydration
 ```
 
-Trail sharing is part of the MVP product identity. Dashboard, graph UX, ingestion, retrieval, provider-native tools, and future visualisers should improve this Trail experience, not replace safe export/import as the product spine.
+Trail sharing is part of the core product identity. Dashboard, graph UX, ingestion, retrieval, provider-native tools, and future visualisers should improve this Trail experience, not replace safe export/import as the product spine.
 
 ## User Story: Create a Trail
 
@@ -122,7 +122,7 @@ Expected behavior:
 
 - The tutor defaults to Socratic mode.
 - The tutor asks one useful question at a time.
-- The tutor can switch to direct explanation when the learner explicitly asks, but direct explanation is mastery-gated until the concept is `mastered` in the current MVP.
+- The tutor can switch to direct explanation when the learner explicitly asks, but direct explanation is mastery-gated until the concept is `mastered`.
 - The tutor repairs confusion when the learner is stuck or incorrect.
 - The tutor can explore applications in a bounded way before mastery and can unlock broader free exploration after mastery.
 - The tutor uses only safe scoped context: current concept, nearby graph nodes, mastery state, learning goal, and allowed sources.
@@ -193,7 +193,7 @@ Expected behavior:
 - The backend-owned quiz draft system generates or reuses the card.
 - The tutor cannot mark mastery directly.
 
-## MVP Non-Goals
+## Non-Goals
 
 - No full SaaS marketplace yet.
 - No billing yet.
@@ -202,10 +202,10 @@ Expected behavior:
 - No PDF ingestion as the first milestone.
 - No public sharing of uploaded/source-derived content.
 - No raw filesystem-browsing agent as the primary retrieval architecture.
-- No arbitrary LLM-generated JavaScript visualisers in the MVP.
+- No arbitrary LLM-generated JavaScript visualisers.
 - No LiteLLM or large provider abstraction rewrite.
 - No public pack moderation workflow until SaaS prep.
-- No multi-organization permissions model in the local-ready MVP.
+- No multi-organization permissions model in the local-ready design.
 
 ## Acceptance Criteria
 

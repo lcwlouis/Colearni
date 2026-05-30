@@ -6,7 +6,7 @@ Application routes are prefixed with `/api`. The health endpoint is the only pla
 
 ## Workspace Scoping
 
-For the local-ready MVP there is no auth. The active workspace is identified by `workspace_id` in the URL path. A default workspace is auto-created on first run. Clients should store the workspace id locally (e.g. in localStorage) and include it in all requests.
+In the local-ready design there is no auth. The active workspace is identified by `workspace_id` in the URL path. A default workspace is auto-created on first run. Clients should store the workspace id locally (e.g. in localStorage) and include it in all requests.
 
 Every endpoint that operates on workspace data uses the pattern:
 
@@ -14,7 +14,7 @@ Every endpoint that operates on workspace data uses the pattern:
 /api/workspaces/{workspace_id}/...
 ```
 
-This keeps the API SaaS-compatible without requiring auth in the MVP.
+This keeps the API SaaS-compatible without requiring auth in the local-ready design.
 
 ## Common Types
 
@@ -192,7 +192,7 @@ When no DB row exists yet, the API synthesizes a default `MasteryRecord` with `s
 ```json
 {
   "id": "string (stable within a card)",
-  "type": "multiple_choice | short_answer | long_answer",
+  "type": "multiple_choice | multi_select | ordering | cloze | short_answer | long_answer | code",
   "prompt": "string",
   "mastery_label": "string",
   "difficulty": "QuizQuestionDifficulty",
@@ -200,7 +200,7 @@ When no DB row exists yet, the API synthesizes a default `MasteryRecord` with `s
 }
 ```
 
-`options` is only present for `multiple_choice` questions. New API responses emit only the current question types above; older persisted `explain` / `apply` / `compare` snapshots are normalized to `long_answer` when read back through the API.
+`options` is present for `multiple_choice`, `multi_select`, and `ordering` questions (2-6 entries). New API responses emit `multiple_choice`, `multi_select`, `ordering`, `cloze`, `short_answer`, `long_answer`, and `code`; older persisted `explain` / `apply` / `compare` snapshots are normalized to `long_answer` when read back through the API. Prompts may contain Markdown and LaTeX. The submitted `QuizAnswer.answer` is always a single string: `multi_select`/`ordering` are newline-separated option/item lists, `cloze` is newline-separated fill-ins (one per `____` blank in the prompt), and `code` is a code/pseudocode snippet.
 
 ### LevelUpCard
 
@@ -254,6 +254,14 @@ Quiz generation reuses the existing backend draft for the same `(concept_id, qui
   "passed": "bool",
   "score": "float (0.0–1.0)",
   "created_at": "ISO 8601 datetime"
+}
+```
+
+### QuizAttemptListResponse
+
+```json
+{
+  "attempts": ["QuizAttempt"]
 }
 ```
 
@@ -804,6 +812,21 @@ Grade a practice quiz attempt. Stores the attempt and returns feedback but **nev
 
 ---
 
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/quiz-attempts`
+
+List prior graded quiz attempts for a concept in newest-first order. Attempts are immutable snapshots and are read-only; ungraded drafts are not included.
+
+**Query params:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `quiz_type` | `level_up | practice` | optional | Filter to one quiz type. |
+| `limit` | int | 10 | Max attempts to return (1-50). |
+
+**Response 200:** `QuizAttemptListResponse`
+
+---
+
 ### Tutor Chat
 
 #### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/chat`
@@ -1019,7 +1042,7 @@ Get the stored research trace for a Trail. Returns `{ "trace": {} }` when no tra
 
 #### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/hydrate`
 
-Record private hydration intent for a Trail. The current Phase 7 MVP does not fetch, chunk, embed, or index remote content. It creates private workspace-scoped `SourceRecord` placeholders from selected imported public research sources and/or model-knowledge intent. These records are `include_on_public_export=false` and are excluded by the public export sanitizer.
+Record private hydration intent for a Trail. The current Phase 7 implementation does not fetch, chunk, embed, or index remote content. It creates private workspace-scoped `SourceRecord` placeholders from selected imported public research sources and/or model-knowledge intent. These records are `include_on_public_export=false` and are excluded by the public export sanitizer.
 
 **Request body:**
 

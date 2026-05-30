@@ -35,7 +35,8 @@ const mockPracticeCard: LevelUpCard = {
 const mockPassedResult: GradeResult = {
   passed: true,
   score: 0.85,
-  feedback: "Great work! Your explanation was clear and the example was correct.",
+  feedback:
+    "Great work! Your explanation was clear and the example was correct.",
   mastery_status: "mastered",
   attempt_id: "attempt-1",
 };
@@ -94,19 +95,29 @@ describe("QuizPanel", () => {
 
   test("shows loading state initially", () => {
     renderLevelUpPanel();
-    expect(screen.getByText("Generating quiz...")).toBeInTheDocument();
+    expect(
+      screen.getByText("Preparing your level-up quiz..."),
+    ).toBeInTheDocument();
   });
 
   test("renders questions correctly from a LevelUpCard", async () => {
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getByText(/Explain what a vector is in your own words/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Explain what a vector is in your own words/),
+      ).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Apply vectors to compute a dot product/)).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Magnitude and direction" })).toBeInTheDocument();
-    expect(screen.getAllByPlaceholderText("Type your answer...")).toHaveLength(1);
+    expect(
+      screen.getByText(/Apply vectors to compute a dot product/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: "Magnitude and direction" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByPlaceholderText("Type your answer...")).toHaveLength(
+      1,
+    );
   });
 
   test("dedupes duplicate generation requests for the same quiz open", async () => {
@@ -124,7 +135,9 @@ describe("QuizPanel", () => {
     resolveQuiz(mockLevelUpCard);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Explain what a vector is in your own words/)).toHaveLength(2);
+      expect(
+        screen.getAllByText(/Explain what a vector is in your own words/),
+      ).toHaveLength(2);
     });
 
     first.unmount();
@@ -145,11 +158,104 @@ describe("QuizPanel", () => {
     });
   });
 
+  test("renders a multi_select question with checkboxes", async () => {
+    vi.mocked(api.generateLevelUpQuiz).mockResolvedValue({
+      concept_id: "concept-1",
+      quiz_type: "level_up",
+      questions: [
+        {
+          id: "q1",
+          type: "multi_select",
+          prompt: "Select all transport-layer protocols.",
+          mastery_label: "protocols",
+          difficulty: "standard",
+          options: ["TCP", "UDP", "HTTP"],
+        },
+      ],
+    });
+    renderLevelUpPanel();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Select all transport-layer protocols/),
+      ).toBeInTheDocument();
+    });
+    const tcp = screen.getByRole("checkbox", { name: "TCP" });
+    expect(tcp).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+    await userEvent.click(tcp);
+    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+  });
+
+  test("renders an ordering question with move controls", async () => {
+    vi.mocked(api.generateLevelUpQuiz).mockResolvedValue({
+      concept_id: "concept-1",
+      quiz_type: "level_up",
+      questions: [
+        {
+          id: "q1",
+          type: "ordering",
+          prompt: "Order the layers top to bottom.",
+          mastery_label: "layers",
+          difficulty: "standard",
+          options: ["Transport", "Application", "Network"],
+        },
+      ],
+    });
+    renderLevelUpPanel();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Order the layers top to bottom/),
+      ).toBeInTheDocument();
+    });
+    // Ordering is pre-filled with the presented order, so it can be submitted.
+    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: 'Move "Application" up' }),
+    ).toBeInTheDocument();
+  });
+
+  test("renders a cloze question with one input per blank", async () => {
+    vi.mocked(api.generateLevelUpQuiz).mockResolvedValue({
+      concept_id: "concept-1",
+      quiz_type: "level_up",
+      questions: [
+        {
+          id: "q1",
+          type: "cloze",
+          prompt: "TCP is ____ while UDP is ____.",
+          mastery_label: "protocols",
+          difficulty: "standard",
+        },
+      ],
+    });
+    renderLevelUpPanel();
+
+    await waitFor(() => {
+      expect(screen.getByText("Blank 1")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Blank 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText("Blank 1 for question 1"),
+      "reliable",
+    );
+    expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
+    await userEvent.type(
+      screen.getByLabelText("Blank 2 for question 1"),
+      "connectionless",
+    );
+    expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
+  });
+
   test("disables submit when all answers are empty", async () => {
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Submit" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Submit" }),
+      ).toBeInTheDocument();
     });
 
     expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
@@ -159,10 +265,14 @@ describe("QuizPanel", () => {
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByRole("radio", { name: "Magnitude and direction" }));
+    await userEvent.click(
+      screen.getByRole("radio", { name: "Magnitude and direction" }),
+    );
 
     expect(screen.getByRole("button", { name: "Submit" })).toBeDisabled();
   });
@@ -171,12 +281,19 @@ describe("QuizPanel", () => {
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByRole("radio", { name: "Magnitude and direction" }));
+    await userEvent.click(
+      screen.getByRole("radio", { name: "Magnitude and direction" }),
+    );
     const textareas = screen.getAllByPlaceholderText("Type your answer...");
-    await userEvent.type(textareas[0], "The dot product is computed by summing element-wise products.");
+    await userEvent.type(
+      textareas[0],
+      "The dot product is computed by summing element-wise products.",
+    );
 
     expect(screen.getByRole("button", { name: "Submit" })).toBeEnabled();
   });
@@ -185,12 +302,19 @@ describe("QuizPanel", () => {
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByRole("radio", { name: "Magnitude and direction" }));
+    await userEvent.click(
+      screen.getByRole("radio", { name: "Magnitude and direction" }),
+    );
     const textareas = screen.getAllByPlaceholderText("Type your answer...");
-    await userEvent.type(textareas[0], "Dot product sums element-wise products.");
+    await userEvent.type(
+      textareas[0],
+      "Dot product sums element-wise products.",
+    );
 
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
@@ -202,7 +326,10 @@ describe("QuizPanel", () => {
         mockLevelUpCard.questions,
         [
           { question_id: "q1", answer: "Magnitude and direction" },
-          { question_id: "q2", answer: "Dot product sums element-wise products." },
+          {
+            question_id: "q2",
+            answer: "Dot product sums element-wise products.",
+          },
         ],
       );
     });
@@ -212,12 +339,19 @@ describe("QuizPanel", () => {
     renderPracticePanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
-    await userEvent.click(screen.getByRole("radio", { name: "Magnitude and direction" }));
+    await userEvent.click(
+      screen.getByRole("radio", { name: "Magnitude and direction" }),
+    );
     const textareas = screen.getAllByPlaceholderText("Type your answer...");
-    await userEvent.type(textareas[0], "Dot product sums element-wise products.");
+    await userEvent.type(
+      textareas[0],
+      "Dot product sums element-wise products.",
+    );
 
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
@@ -232,42 +366,73 @@ describe("QuizPanel", () => {
     });
   });
 
-  test("passed grade result displays Passed and score", async () => {
+  test("passed grade result displays mastery confirmation and score", async () => {
     vi.mocked(api.gradeLevelUpQuiz).mockResolvedValue(mockPassedResult);
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Passed")).toBeInTheDocument();
+      expect(screen.getByText("Mastery confirmed")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Score: 85%")).toBeInTheDocument();
+    expect(
+      screen.getByText("Score: 85%", { selector: ".sr-only" }),
+    ).toBeInTheDocument();
     expect(screen.getByText(mockPassedResult.feedback)).toBeInTheDocument();
   });
 
-  test("failed grade result displays Failed and feedback", async () => {
+  test("failed grade result displays review recommendation and feedback", async () => {
     vi.mocked(api.gradeLevelUpQuiz).mockResolvedValue(mockFailedResult);
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("Review recommended")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Score: 45%")).toBeInTheDocument();
+    expect(
+      screen.getByText("Score: 45%", { selector: ".sr-only" }),
+    ).toBeInTheDocument();
     expect(screen.getByText(mockFailedResult.feedback)).toBeInTheDocument();
+  });
+
+  test("overall feedback hides legacy appended per-question sections", async () => {
+    vi.mocked(api.gradeLevelUpQuiz).mockResolvedValue({
+      ...mockPassedResult,
+      feedback:
+        "Overall feedback only.\n\nexplain_vectors: Repeated detail that belongs in question review.",
+    });
+    renderLevelUpPanel();
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
+    });
+
+    await answerAllQuestions();
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Overall feedback only.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Repeated detail/)).not.toBeInTheDocument();
   });
 
   test("retry button generates a new quiz and shows fresh questions", async () => {
@@ -288,14 +453,16 @@ describe("QuizPanel", () => {
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Passed")).toBeInTheDocument();
+      expect(screen.getByText("Mastery confirmed")).toBeInTheDocument();
     });
 
     // Set up the new quiz for retry
@@ -303,7 +470,9 @@ describe("QuizPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Compare vectors and scalars/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Compare vectors and scalars/),
+      ).toBeInTheDocument();
     });
 
     expect(api.generateLevelUpQuiz).toHaveBeenCalledTimes(2);
@@ -314,7 +483,9 @@ describe("QuizPanel", () => {
     renderPracticePanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
@@ -328,7 +499,9 @@ describe("QuizPanel", () => {
 
     // Should be back in answering state with the same questions — no second generate call.
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")).toHaveLength(1);
+      expect(
+        screen.getAllByPlaceholderText("Type your answer..."),
+      ).toHaveLength(1);
     });
 
     expect(api.generatePracticeQuiz).toHaveBeenCalledTimes(1);
@@ -340,14 +513,16 @@ describe("QuizPanel", () => {
     renderPracticePanel(onMasteryUpdated);
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Passed")).toBeInTheDocument();
+      expect(screen.getByText("Mastery confirmed")).toBeInTheDocument();
     });
 
     expect(onMasteryUpdated).not.toHaveBeenCalled();
@@ -359,18 +534,23 @@ describe("QuizPanel", () => {
     renderLevelUpPanel(onMasteryUpdated);
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Passed")).toBeInTheDocument();
+      expect(screen.getByText("Mastery confirmed")).toBeInTheDocument();
     });
 
     expect(onMasteryUpdated).toHaveBeenCalledTimes(1);
-    expect(onMasteryUpdated).toHaveBeenCalledWith("concept-1", { status: "mastered", score: 0.85 });
+    expect(onMasteryUpdated).toHaveBeenCalledWith("concept-1", {
+      status: "mastered",
+      score: 0.85,
+    });
   });
 
   test("level-up failed grade calls onMasteryUpdated with needs_review", async () => {
@@ -379,17 +559,22 @@ describe("QuizPanel", () => {
     renderLevelUpPanel(onMasteryUpdated);
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("Review recommended")).toBeInTheDocument();
     });
 
-    expect(onMasteryUpdated).toHaveBeenCalledWith("concept-1", { status: "needs_review", score: 0.45 });
+    expect(onMasteryUpdated).toHaveBeenCalledWith("concept-1", {
+      status: "needs_review",
+      score: 0.45,
+    });
   });
 
   test("back button on question screen calls onBack", async () => {
@@ -410,14 +595,16 @@ describe("QuizPanel", () => {
     renderLevelUpPanel(vi.fn(), onBack);
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Passed")).toBeInTheDocument();
+      expect(screen.getByText("Mastery confirmed")).toBeInTheDocument();
     });
 
     await userEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -425,7 +612,9 @@ describe("QuizPanel", () => {
   });
 
   test("shows generation error and retry on API failure", async () => {
-    vi.mocked(api.generateLevelUpQuiz).mockRejectedValue(new Error("Network error"));
+    vi.mocked(api.generateLevelUpQuiz).mockRejectedValue(
+      new Error("Network error"),
+    );
     renderLevelUpPanel();
 
     await waitFor(() => {
@@ -437,11 +626,15 @@ describe("QuizPanel", () => {
   });
 
   test("shows grading error and allows retry on grade API failure", async () => {
-    vi.mocked(api.gradeLevelUpQuiz).mockRejectedValue(new Error("Grading failed"));
+    vi.mocked(api.gradeLevelUpQuiz).mockRejectedValue(
+      new Error("Grading failed"),
+    );
     renderLevelUpPanel();
 
     await waitFor(() => {
-      expect(screen.getAllByPlaceholderText("Type your answer...")[0]).toBeInTheDocument();
+      expect(
+        screen.getAllByPlaceholderText("Type your answer...")[0],
+      ).toBeInTheDocument();
     });
 
     await answerAllQuestions();
@@ -452,11 +645,18 @@ describe("QuizPanel", () => {
     });
 
     // Should be back in answering state with questions still visible
-    expect(screen.getAllByPlaceholderText("Type your answer...")).toHaveLength(1);
+    expect(screen.getAllByPlaceholderText("Type your answer...")).toHaveLength(
+      1,
+    );
   });
 });
 
 async function answerAllQuestions() {
-  await userEvent.click(screen.getByRole("radio", { name: "Magnitude and direction" }));
-  await userEvent.type(screen.getAllByPlaceholderText("Type your answer...")[0], "Answer two.");
+  await userEvent.click(
+    screen.getByRole("radio", { name: "Magnitude and direction" }),
+  );
+  await userEvent.type(
+    screen.getAllByPlaceholderText("Type your answer...")[0],
+    "Answer two.",
+  );
 }

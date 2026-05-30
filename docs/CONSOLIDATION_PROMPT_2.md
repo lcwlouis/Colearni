@@ -96,7 +96,7 @@ Support the following `content_type` values:
   `DocumentElement(type="paragraph", text=...)` objects. Strip leading/trailing whitespace
   from each; skip empty strings. Set `parser_name="pdfplumber"`.
   If pdfplumber raises, raise a descriptive `ValueError`.
-  Heading detection via font size heuristics is deferred — all PDF elements are `"paragraph"` at MVP.
+  Heading detection via font size heuristics is deferred — all PDF elements are `"paragraph"` currently.
 
 - `"text/markdown"`: decode bytes as UTF-8. Parse heading lines (`^#{1,3}\s+(.+)`) into
   `"heading_1"/"heading_2"/"heading_3"` elements. Remaining non-blank runs between headings

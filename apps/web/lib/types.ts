@@ -145,7 +145,14 @@ export interface ConceptDetail {
 
 export interface QuizQuestion {
   id: string;
-  type: "multiple_choice" | "short_answer" | "long_answer";
+  type:
+    | "multiple_choice"
+    | "multi_select"
+    | "ordering"
+    | "cloze"
+    | "short_answer"
+    | "long_answer"
+    | "code";
   prompt: string;
   mastery_label: string;
   difficulty?: "light" | "standard" | "challenge";
@@ -176,6 +183,22 @@ export interface GradeResult {
   per_question?: PerQuestionEvaluation[];
   mastery_status: MasteryStatus;
   attempt_id: string;
+}
+
+export interface QuizAttempt {
+  id: string;
+  concept_id: string;
+  quiz_type: "level_up" | "practice";
+  questions: QuizQuestion[];
+  answers: QuizAnswer[];
+  evaluator_feedback: string;
+  passed: boolean;
+  score: number;
+  created_at: string;
+}
+
+export interface QuizAttemptListResponse {
+  attempts: QuizAttempt[];
 }
 
 export interface SourceRecord {
