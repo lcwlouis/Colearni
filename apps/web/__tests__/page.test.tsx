@@ -29,29 +29,46 @@ vi.mock("@/app/trails/[id]/components/TrailGraph", () => ({
     onMasteryUpdated,
   }: {
     masterySummary: TrailDetail["mastery_summary"];
-    onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
+    onMasteryUpdated?: (
+      conceptId: string,
+      update: { status: MasteryStatus; score: number },
+    ) => void;
   }) => (
     <div>
       <div data-testid="summary-total">{masterySummary.total}</div>
       <div data-testid="summary-not-started">{masterySummary.not_started}</div>
       <div data-testid="summary-learning">{masterySummary.learning}</div>
-      <div data-testid="summary-needs-review">{masterySummary.needs_review}</div>
+      <div data-testid="summary-needs-review">
+        {masterySummary.needs_review}
+      </div>
       <div data-testid="summary-mastered">{masterySummary.mastered}</div>
       <button
         type="button"
-        onClick={() => onMasteryUpdated?.("concept-id-1", { status: "mastered", score: 0.85 })}
+        onClick={() =>
+          onMasteryUpdated?.("concept-id-1", {
+            status: "mastered",
+            score: 0.85,
+          })
+        }
       >
         Trigger mastered
       </button>
       <button
         type="button"
-        onClick={() => onMasteryUpdated?.("concept-id-2", { status: "needs_review", score: 0.3 })}
+        onClick={() =>
+          onMasteryUpdated?.("concept-id-2", {
+            status: "needs_review",
+            score: 0.3,
+          })
+        }
       >
         Trigger needs_review
       </button>
       <button
         type="button"
-        onClick={() => onMasteryUpdated?.("concept-id-2", { status: "mastered", score: 0.9 })}
+        onClick={() =>
+          onMasteryUpdated?.("concept-id-2", { status: "mastered", score: 0.9 })
+        }
       >
         Trigger concept2 mastered
       </button>
@@ -153,6 +170,95 @@ const mockTrailDetail: TrailDetail = {
   },
 };
 
+const freshTrailDetail: TrailDetail = {
+  ...mockTrailDetail,
+  graph: {
+    ...mockTrailDetail.graph,
+    mastery: {
+      "concept-id-1": {
+        id: null,
+        workspace_id: "workspace-1",
+        concept_id: "concept-id-1",
+        status: "not_started",
+        bloom_level: "understand",
+        score: 0,
+        updated_at: null,
+      },
+      "concept-id-2": {
+        id: null,
+        workspace_id: "workspace-1",
+        concept_id: "concept-id-2",
+        status: "not_started",
+        bloom_level: "understand",
+        score: 0,
+        updated_at: null,
+      },
+      "concept-id-3": {
+        id: null,
+        workspace_id: "workspace-1",
+        concept_id: "concept-id-3",
+        status: "not_started",
+        bloom_level: "apply",
+        score: 0,
+        updated_at: null,
+      },
+    },
+  },
+  mastery_summary: {
+    total: 3,
+    not_started: 3,
+    learning: 0,
+    needs_review: 0,
+    mastered: 0,
+  },
+};
+
+describe("TrailPage suggested starting point (fresh Trail)", () => {
+  test("shows a dismissible suggested-start affordance without blocking navigation", async () => {
+    vi.mocked(api.getTrail).mockResolvedValue(freshTrailDetail);
+    vi.mocked(api.getTrailNext).mockResolvedValue({
+      concept_id: "concept-id-1",
+      concept_title: "Vectors",
+      reason: "Good starting point - no prerequisites, beginner level.",
+      all_mastered: false,
+      mastery_status: null,
+      concept_level: "topic",
+    });
+
+    render(<TrailPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("suggested-start-banner")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Suggested starting point:")).toBeInTheDocument();
+    expect(screen.getByText("Vectors")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Good starting point - no prerequisites, beginner level.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Just a suggestion/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Start Here" }),
+    ).toBeInTheDocument();
+
+    // The suggestion coexists with free navigation: the graph is still rendered.
+    expect(screen.getByTestId("summary-total")).toHaveTextContent("3");
+
+    // Dismissing the suggestion never blocks the graph.
+    await userEvent.click(
+      screen.getByRole("button", { name: "Dismiss recommendation" }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("suggested-start-banner"),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("summary-total")).toHaveTextContent("3");
+  });
+});
+
 describe("TrailPage mastery update", () => {
   test("renders initial mastery summary from getTrail", async () => {
     vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
@@ -177,8 +283,12 @@ describe("TrailPage mastery update", () => {
     expect(screen.getByTestId("summary-mastered")).toHaveTextContent("0");
     expect(screen.getByText("Recommended next:")).toBeInTheDocument();
     expect(screen.getByText("Matrices")).toBeInTheDocument();
-    expect(screen.getByText("Backend says to repair this next.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Start Learning" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Backend says to repair this next."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Start Learning" }),
+    ).toBeInTheDocument();
   });
 
   test("renders all-mastered recommendation state without concept link", async () => {
@@ -195,16 +305,24 @@ describe("TrailPage mastery update", () => {
     render(<TrailPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("All concepts mastered — well done.")).toBeInTheDocument();
+      expect(
+        screen.getByText("All concepts mastered — well done."),
+      ).toBeInTheDocument();
     });
-    expect(screen.getByText("Review the Trail or extend it.")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Focus concept" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Review the Trail or extend it."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Focus concept" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("next-banner-cta")).not.toBeInTheDocument();
   });
 
   test("hides recommendation banner when getTrailNext fails", async () => {
     vi.mocked(api.getTrail).mockResolvedValue(mockTrailDetail);
-    vi.mocked(api.getTrailNext).mockRejectedValue(new Error("Recommendation unavailable"));
+    vi.mocked(api.getTrailNext).mockRejectedValue(
+      new Error("Recommendation unavailable"),
+    );
 
     render(<TrailPage />);
 
@@ -233,7 +351,9 @@ describe("TrailPage mastery update", () => {
     });
 
     // concept-id-1 was "learning", now transitions to "mastered"
-    await userEvent.click(screen.getByRole("button", { name: "Trigger mastered" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Trigger mastered" }),
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("summary-mastered")).toHaveTextContent("1");
@@ -265,11 +385,13 @@ describe("TrailPage mastery update", () => {
     });
 
     // concept-id-2 was "needs_review" and stays "needs_review" — no net change for needs_review
-    // but we can test that concept-id-1 (learning) -> needs_review via Trigger needs_review? 
+    // but we can test that concept-id-1 (learning) -> needs_review via Trigger needs_review?
     // Actually the mock triggers concept-id-2 -> needs_review, which was already needs_review
     // Let's use Trigger mastered on concept-id-1, then trigger needs_review on concept-id-2
     // to verify the counts remain stable for concept-id-2
-    await userEvent.click(screen.getByRole("button", { name: "Trigger needs_review" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Trigger needs_review" }),
+    );
 
     // concept-id-2 was already needs_review → stays needs_review = 1
     // no change expected
@@ -299,7 +421,9 @@ describe("TrailPage mastery update", () => {
     });
 
     // First update: concept-id-1 learning -> mastered
-    await userEvent.click(screen.getByRole("button", { name: "Trigger mastered" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Trigger mastered" }),
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("summary-mastered")).toHaveTextContent("1");
@@ -308,7 +432,9 @@ describe("TrailPage mastery update", () => {
     expect(screen.getByTestId("summary-learning")).toHaveTextContent("0");
 
     // Second update: concept-id-2 needs_review -> mastered
-    await userEvent.click(screen.getByRole("button", { name: "Trigger concept2 mastered" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Trigger concept2 mastered" }),
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("summary-mastered")).toHaveTextContent("2");

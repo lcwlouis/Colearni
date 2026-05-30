@@ -7,38 +7,63 @@ import type { ConceptEdge, ConceptNode, Trail } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
   getConceptSources: vi.fn(async () => ({ sources: [] })),
-  getConcept: vi.fn(async (_workspaceId: string, _trailId: string, conceptId: string) => ({
-    concept: {
-      id: conceptId,
-      trail_id: "trail-1",
-      slug: conceptId,
-      title: conceptId,
-      node_type: "concept",
-      concept_level: "topic",
-      difficulty: "beginner",
-      bloom_level: "understand",
-      mastery_check_labels: [],
-      metadata_json: {},
+  streamConceptPrimer: vi.fn(
+    async (
+      _workspaceId: string,
+      _trailId: string,
+      _conceptId: string,
+      callbacks: {
+        onDone: (primer: {
+          overview: string;
+          key_terms: never[];
+          sample_questions: never[];
+          version: number;
+        }) => void;
+      },
+    ) => {
+      callbacks.onDone({
+        overview: "",
+        key_terms: [],
+        sample_questions: [],
+        version: 1,
+      });
     },
-    prerequisites: [],
-    contained_nodes: [],
-    containing_nodes: [],
-    related: [],
-    mastery: {
-      id: null,
-      workspace_id: "workspace-1",
-      concept_id: conceptId,
-      status: "not_started",
-      bloom_level: "understand",
-      score: 0,
-      updated_at: null,
-    },
-    sources: [],
-  })),
+  ),
+  getConcept: vi.fn(
+    async (_workspaceId: string, _trailId: string, conceptId: string) => ({
+      concept: {
+        id: conceptId,
+        trail_id: "trail-1",
+        slug: conceptId,
+        title: conceptId,
+        node_type: "concept",
+        concept_level: "topic",
+        difficulty: "beginner",
+        bloom_level: "understand",
+        mastery_check_labels: [],
+        metadata_json: {},
+      },
+      prerequisites: [],
+      contained_nodes: [],
+      containing_nodes: [],
+      related: [],
+      mastery: {
+        id: null,
+        workspace_id: "workspace-1",
+        concept_id: conceptId,
+        status: "not_started",
+        bloom_level: "understand",
+        score: 0,
+        updated_at: null,
+      },
+      sources: [],
+    }),
+  ),
 }));
 
 vi.mock("@xyflow/react", async () => {
-  const actual = await vi.importActual<typeof import("@xyflow/react")>("@xyflow/react");
+  const actual =
+    await vi.importActual<typeof import("@xyflow/react")>("@xyflow/react");
   return {
     ...actual,
     ReactFlow: ({
@@ -52,7 +77,10 @@ vi.mock("@xyflow/react", async () => {
     }: {
       nodes: Array<{ id: string; data: { label: React.ReactNode } }>;
       edges: Array<{ id: string; label?: React.ReactNode }>;
-      onMove?: (_event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
+      onMove?: (
+        _event: unknown,
+        viewport: { x: number; y: number; zoom: number },
+      ) => void;
       onNodeClick?: (event: unknown, node: { id: string }) => void;
       onNodeDoubleClick?: (event: unknown, node: { id: string }) => void;
       onPaneClick?: () => void;
@@ -72,10 +100,16 @@ vi.mock("@xyflow/react", async () => {
         <button type="button" onClick={() => onPaneClick?.()}>
           Pane
         </button>
-        <button type="button" onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 0.35 })}>
+        <button
+          type="button"
+          onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 0.35 })}
+        >
           Zoom overview
         </button>
-        <button type="button" onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 1 })}>
+        <button
+          type="button"
+          onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 1 })}
+        >
           Zoom detail
         </button>
         {edges.map((edge) =>
@@ -87,7 +121,9 @@ vi.mock("@xyflow/react", async () => {
     Background: () => null,
     Controls: () => null,
     MiniMap: () => null,
-    Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    Panel: ({ children }: { children: React.ReactNode }) => (
+      <div>{children}</div>
+    ),
   };
 });
 
@@ -169,16 +205,25 @@ describe("TrailGraph", () => {
   test("renders layout controls and neighbor toggle", () => {
     renderGraph();
 
-    expect(screen.getByRole("button", { name: "Freeform" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Hierarchy" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Freeform" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Hierarchy" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Radial" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Neighbors only" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Neighbors only" }),
+    ).toBeInTheDocument();
   });
 
   test("search focuses a matching concept", async () => {
     renderGraph();
 
-    await userEvent.type(screen.getByPlaceholderText("Search concepts"), "basis");
+    await userEvent.type(
+      screen.getByPlaceholderText("Search concepts"),
+      "basis",
+    );
 
     expect(screen.getByText("Basis")).toBeInTheDocument();
     expect(screen.getByText("Selected: Basis")).toBeInTheDocument();
@@ -203,7 +248,9 @@ describe("TrailGraph", () => {
     expect(screen.getByText("Selected: Vectors")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Pane" }));
-    expect(screen.getByText("Select a node to highlight its connections.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Select a node to highlight its connections."),
+    ).toBeInTheDocument();
   });
 
   test("uses graph mastery records for summary metrics", () => {
@@ -217,13 +264,17 @@ describe("TrailGraph", () => {
   test("edge labels are on by default but only render when zoomed in", async () => {
     renderGraph();
 
-    expect(screen.getByText("Edge labels appear when you zoom in closer.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Edge labels appear when you zoom in closer."),
+    ).toBeInTheDocument();
     expect(screen.queryByText("prerequisite")).not.toBeInTheDocument();
     expect(screen.queryByText("contains")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Zoom detail" }));
 
-    expect(screen.queryByText("Edge labels appear when you zoom in closer.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Edge labels appear when you zoom in closer."),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("prerequisite")).toBeInTheDocument();
     expect(screen.getByText("contains")).toBeInTheDocument();
   });
@@ -277,11 +328,21 @@ describe("TrailGraph", () => {
     );
 
     // Power-user controls are hidden in Learn Mode.
-    expect(screen.queryByRole("button", { name: "Tools" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Legend" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Hierarchy" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Neighbors only" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Edge labels" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Tools" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Legend" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Hierarchy" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Neighbors only" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edge labels" }),
+    ).not.toBeInTheDocument();
   });
 
   test("opens initial concept when initialConceptId is provided", async () => {
@@ -327,7 +388,11 @@ function renderGraph() {
   });
 }
 
-function node(id: string, title: string, concept_level: ConceptNode["concept_level"]): ConceptNode {
+function node(
+  id: string,
+  title: string,
+  concept_level: ConceptNode["concept_level"],
+): ConceptNode {
   return {
     id,
     trail_id: "trail-1",

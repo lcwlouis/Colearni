@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { Play, Trash2 } from "lucide-react";
 
 import { deleteTrail, getTrail, getTrailNext, listTrails } from "@/lib/api";
 import {
@@ -18,13 +19,19 @@ const RECENT_LIMIT = 4;
 export default function Home() {
   const [workspaceId, setWorkspaceId] = useState<string>("");
   const [trails, setTrails] = useState<Trail[]>([]);
-  const [progressByTrail, setProgressByTrail] = useState<Record<string, TrailProgress>>({});
-  const [nextByTrail, setNextByTrail] = useState<Record<string, NextConceptResponse>>({});
+  const [progressByTrail, setProgressByTrail] = useState<
+    Record<string, TrailProgress>
+  >({});
+  const [nextByTrail, setNextByTrail] = useState<
+    Record<string, NextConceptResponse>
+  >({});
   const [error, setError] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [progressLoading, setProgressLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
+    null,
+  );
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string>("");
 
@@ -74,7 +81,9 @@ export default function Home() {
         setNextByTrail(nextMap);
       } catch (exc) {
         if (!cancelled) {
-          setError(exc instanceof Error ? exc.message : "Could not load workspace");
+          setError(
+            exc instanceof Error ? exc.message : "Could not load workspace",
+          );
           setLoading(false);
         }
       } finally {
@@ -89,15 +98,26 @@ export default function Home() {
     };
   }, []);
 
-  const progresses = useMemo(() => Object.values(progressByTrail), [progressByTrail]);
-  const continueTrail = useMemo(() => pickContinueTrail(progresses), [progresses]);
+  const progresses = useMemo(
+    () => Object.values(progressByTrail),
+    [progressByTrail],
+  );
+  const continueTrail = useMemo(
+    () => pickContinueTrail(progresses),
+    [progresses],
+  );
   const sortedTrails = useMemo(
-    () =>
-      [...trails].sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    () => [...trails].sort((a, b) => b.created_at.localeCompare(a.created_at)),
     [trails],
   );
-  const recentTrails = useMemo(() => sortedTrails.slice(0, RECENT_LIMIT), [sortedTrails]);
-  const olderTrails = useMemo(() => sortedTrails.slice(RECENT_LIMIT), [sortedTrails]);
+  const recentTrails = useMemo(
+    () => sortedTrails.slice(0, RECENT_LIMIT),
+    [sortedTrails],
+  );
+  const olderTrails = useMemo(
+    () => sortedTrails.slice(RECENT_LIMIT),
+    [sortedTrails],
+  );
   const filteredOlder = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) {
@@ -143,7 +163,8 @@ export default function Home() {
             CoLearni
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Continue a Trail, see your progress, and learn one concept at a time.
+            Continue a Trail, see your progress, and learn one concept at a
+            time.
           </p>
         </div>
         <Link
@@ -171,15 +192,17 @@ export default function Home() {
         <p className="text-sm text-slate-500">Loading your dashboard...</p>
       ) : null}
 
-      {!loading && trails.length === 0 ? (
-        <EmptyState />
-      ) : null}
+      {!loading && trails.length === 0 ? <EmptyState /> : null}
 
       {!loading && trails.length > 0 ? (
         <>
           <ContinueLearningSection
             progress={continueTrail}
-            next={continueTrail ? nextByTrail[continueTrail.detail.trail.id] : undefined}
+            next={
+              continueTrail
+                ? nextByTrail[continueTrail.detail.trail.id]
+                : undefined
+            }
             loadingProgress={progressLoading && progresses.length === 0}
           />
 
@@ -201,6 +224,11 @@ export default function Home() {
               progressByTrail={progressByTrail}
               search={search}
               onSearch={setSearch}
+              confirmingDeleteId={confirmingDeleteId}
+              deletingId={deletingId}
+              onAskDelete={setConfirmingDeleteId}
+              onCancelDelete={() => setConfirmingDeleteId(null)}
+              onConfirmDelete={handleDelete}
             />
           ) : null}
         </>
@@ -245,7 +273,9 @@ function ContinueLearningSection({
 
   return (
     <section data-testid="continue-learning" className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold text-slate-950">Continue Learning</h2>
+      <h2 className="text-lg font-semibold text-slate-950">
+        Continue Learning
+      </h2>
       {loadingProgress ? (
         <p className="text-sm text-slate-500">Loading progress...</p>
       ) : null}
@@ -303,7 +333,9 @@ function ContinueLearningSection({
               <h3 className="mt-1 truncate text-base font-semibold text-slate-950">
                 {progress.detail.trail.title}
               </h3>
-              <p className="mt-1 text-sm text-slate-600">{progress.detail.trail.goal}</p>
+              <p className="mt-1 text-sm text-slate-600">
+                {progress.detail.trail.goal}
+              </p>
             </div>
             <div className="shrink-0">
               <ProgressBadge progress={progress} />
@@ -329,7 +361,9 @@ function ContinueLearningSection({
               }
               className="inline-flex h-9 items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700"
             >
-              {next?.concept_id ? primaryCtaLabelFor(next.mastery_status) : "Open Trail"}
+              {next?.concept_id
+                ? primaryCtaLabelFor(next.mastery_status)
+                : "Open Trail"}
             </Link>
             <Link
               href={`/trails/${progress.detail.trail.id}`}
@@ -404,11 +438,21 @@ function OlderTrailsSection({
   progressByTrail,
   search,
   onSearch,
+  confirmingDeleteId,
+  deletingId,
+  onAskDelete,
+  onCancelDelete,
+  onConfirmDelete,
 }: {
   trails: Trail[];
   progressByTrail: Record<string, TrailProgress>;
   search: string;
   onSearch: (value: string) => void;
+  confirmingDeleteId: string | null;
+  deletingId: string | null;
+  onAskDelete: (id: string) => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: (id: string) => void;
 }) {
   return (
     <section className="flex flex-col gap-3">
@@ -427,20 +471,28 @@ function OlderTrailsSection({
       ) : (
         <ul className="grid gap-2">
           {trails.map((trail) => (
-            <li key={trail.id}>
+            <li
+              key={trail.id}
+              className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 hover:border-slate-300"
+            >
               <Link
                 href={`/trails/${trail.id}`}
-                className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-4 py-3 hover:border-slate-300"
+                className="flex min-w-0 flex-1 items-center justify-between gap-3"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-slate-950">
                     {trail.title}
                   </p>
-                  <p className="truncate text-xs text-slate-500">{trail.goal}</p>
+                  <p className="truncate text-xs text-slate-500">
+                    {trail.goal}
+                  </p>
                 </div>
                 <div className="shrink-0 text-right">
                   {progressByTrail[trail.id] ? (
-                    <ProgressBadge progress={progressByTrail[trail.id]} compact />
+                    <ProgressBadge
+                      progress={progressByTrail[trail.id]}
+                      compact
+                    />
                   ) : (
                     <span className="text-xs text-slate-500">
                       {trail.node_count} concepts
@@ -448,6 +500,38 @@ function OlderTrailsSection({
                   )}
                 </div>
               </Link>
+              <div className="flex w-[7.5rem] shrink-0 items-center justify-end border-l border-slate-100 pl-3">
+                {confirmingDeleteId === trail.id ? (
+                  <div className="flex items-center gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => onConfirmDelete(trail.id)}
+                      disabled={deletingId === trail.id}
+                      className="font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                    >
+                      {deletingId === trail.id ? "Deleting..." : "Confirm"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onCancelDelete}
+                      disabled={deletingId === trail.id}
+                      className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onAskDelete(trail.id)}
+                    aria-label={`Delete ${trail.title}`}
+                    title="Delete Trail"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-100"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             </li>
           ))}
         </ul>
@@ -492,13 +576,15 @@ function TrailCard({
           )}
         </div>
       </Link>
-      <div className="flex shrink-0 flex-row items-center justify-between gap-3 border-t border-slate-100 pt-3 sm:w-52 sm:flex-col sm:items-stretch sm:justify-between sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+      <div className="flex shrink-0 flex-row items-center justify-between gap-3 border-t border-slate-100 pt-3 sm:w-40 sm:flex-col sm:items-stretch sm:justify-between sm:gap-2 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
         {next?.concept_id && !next.all_mastered ? (
           <Link
             href={`/trails/${trail.id}?concept=${next.concept_id}`}
-            className="inline-flex h-8 items-center justify-center rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-800 hover:bg-blue-100"
+            title="Start recommended concept"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700"
           >
-            Start Recommended
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+            Start
           </Link>
         ) : next?.all_mastered ? (
           <Link
@@ -512,35 +598,38 @@ function TrailCard({
             No suggestion
           </span>
         )}
-        {confirming ? (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-500">Delete?</span>
+        <div className="flex h-8 items-center justify-end">
+          {confirming ? (
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={onConfirmDelete}
+                disabled={deleting}
+                className="font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Confirm"}
+              </button>
+              <button
+                type="button"
+                onClick={onCancelDelete}
+                disabled={deleting}
+                className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={onConfirmDelete}
-              disabled={deleting}
-              className="font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+              onClick={onAskDelete}
+              aria-label={`Delete ${trail.title}`}
+              title="Delete Trail"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-100"
             >
-              {deleting ? "Deleting..." : "Confirm"}
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
             </button>
-            <button
-              type="button"
-              onClick={onCancelDelete}
-              disabled={deleting}
-              className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={onAskDelete}
-            className="self-end text-xs text-slate-400 hover:text-red-600"
-          >
-            Delete
-          </button>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -566,10 +655,14 @@ function ProgressBadge({
 
 function primaryCtaLabelFor(status: string | null | undefined): string {
   switch (status) {
-    case "learning":     return "Continue Tutor";
-    case "needs_review": return "Review Weak Points";
-    case "mastered":     return "Practice / Explore Further";
-    default:             return "Start Learning";
+    case "learning":
+      return "Continue Tutor";
+    case "needs_review":
+      return "Review Weak Points";
+    case "mastered":
+      return "Practice / Explore Further";
+    default:
+      return "Start Learning";
   }
 }
 
