@@ -1,12 +1,16 @@
 import uuid
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.agents.llm_client import LLMClient
-from backend.app.db import get_session
-from backend.app.schemas.concept import ConceptDetailResponse
+from backend.app.db import AsyncSessionLocal, get_session
+from backend.app.schemas.concept import (
+    ConceptDetailResponse,
+    ConceptPrimerRead,
+    PrimerGenerateRequest,
+)
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
 from backend.app.schemas.mastery import (
     GradeResult,
@@ -15,6 +19,13 @@ from backend.app.schemas.mastery import (
     QuizGradeRequest,
 )
 from backend.app.schemas.source import ConceptSourceListItem, ConceptSourcesResponse
+from backend.app.services.concept_primers import (
+    LLMPrimerGenerator,
+    PrimerGenerationError,
+    PrimerGenerator,
+    generate_concept_primer,
+    stream_concept_primer,
+)
 from backend.app.services.concept_source_links import list_concept_sources
 from backend.app.services.graph_view import get_concept_detail
 from backend.app.services.quizzes import (
@@ -42,6 +53,17 @@ def get_quiz_grader() -> QuizGrader:
     return LLMQuizGrader(client=LLMClient.from_settings(settings))
 
 
+def get_primer_generator() -> PrimerGenerator:
+    return LLMPrimerGenerator(client=LLMClient.from_settings(settings))
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    # Sessionmaker handed to detached primer generation so the background task
+    # owns a session that outlives the request. Tests override this to bind the
+    # background task to their in-memory engine.
+    return AsyncSessionLocal
+
+
 @router.get("/{concept_id}", response_model=ConceptDetailResponse)
 async def get_concept_detail_route(
     workspace_id: uuid.UUID,
@@ -59,6 +81,54 @@ async def get_concept_detail_route(
     except LookupError as exc:
         return _not_found(str(exc))
     return ConceptDetailResponse.model_validate(detail)
+
+
+@router.post("/{concept_id}/primer", response_model=ConceptPrimerRead)
+async def generate_primer_route(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    body: PrimerGenerateRequest | None = None,
+    session: AsyncSession = Depends(get_session),
+    generator: PrimerGenerator = Depends(get_primer_generator),
+) -> ConceptPrimerRead | JSONResponse:
+    try:
+        return await generate_concept_primer(
+            session,
+            generator,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            force_new=body.force_new if body else False,
+        )
+    except LookupError as exc:
+        await session.rollback()
+        return _not_found(str(exc))
+    except PrimerGenerationError as exc:
+        await session.rollback()
+        return _llm_error(str(exc))
+
+
+@router.post("/{concept_id}/primer/stream", response_model=None)
+async def stream_primer_route(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    generator: PrimerGenerator = Depends(get_primer_generator),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
+) -> StreamingResponse:
+    return StreamingResponse(
+        stream_concept_primer(
+            session,
+            generator,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            session_factory=session_factory,
+        ),
+        media_type="text/event-stream",
+    )
 
 
 @concept_sources_router.get(

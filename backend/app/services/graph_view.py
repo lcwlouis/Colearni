@@ -11,6 +11,7 @@ from backend.app.models.workspace import Workspace
 from backend.app.schemas.mastery import MasteryRecordRead
 from backend.app.schemas.source import SourceRecordRead
 from backend.app.schemas.trail import MasterySummary
+from backend.app.services.concept_primers import read_cached_primer
 from backend.app.services.mastery import list_mastery_states
 
 
@@ -162,6 +163,7 @@ async def get_concept_detail(
         "related": related,
         "mastery": MasteryRecordRead.model_validate(mastery_state),
         "sources": sources,
+        "primer": read_cached_primer(concept),
     }
 
 

@@ -1,4 +1,5 @@
 import uuid
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,6 +23,43 @@ class ConceptNodeRead(BaseModel):
     metadata_json: dict
 
 
+class PrimerKeyTerm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    term: str = Field(min_length=1, max_length=200)
+    definition: str = Field(min_length=1, max_length=500)
+
+
+class ConceptPrimerOutput(BaseModel):
+    """Strict shape parsed from the concept_primer LLM generation pass."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    overview: str = Field(min_length=1, max_length=2000)
+    key_terms: list[PrimerKeyTerm] = Field(min_length=3, max_length=6)
+    # Short learner-facing starter prompts that power dynamic suggestion chips
+    # on the chat welcome screen. Tailored to this concept.
+    sample_questions: list[Annotated[str, Field(min_length=1, max_length=90)]] = Field(
+        min_length=3, max_length=4
+    )
+
+
+class ConceptPrimerRead(BaseModel):
+    """Primer read shape: the cached output plus the cache schema version."""
+
+    overview: str
+    key_terms: list[PrimerKeyTerm]
+    # Default empty so primers cached before sample_questions existed still validate.
+    sample_questions: list[str] = Field(default_factory=list)
+    version: int = 1
+
+
+class PrimerGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force_new: bool = False
+
+
 class ConceptEdgeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,3 +78,4 @@ class ConceptDetailResponse(BaseModel):
     related: list[ConceptNodeRead]
     mastery: MasteryRecordRead
     sources: list[SourceRecordRead] = Field(default_factory=list)
+    primer: ConceptPrimerRead | None = None

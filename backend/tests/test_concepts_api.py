@@ -1,3 +1,4 @@
+import json
 import uuid
 
 import pytest
@@ -5,7 +6,12 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from backend.app.api.concepts import get_quiz_generator, get_quiz_grader
+from backend.app.api.concepts import (
+    get_primer_generator,
+    get_quiz_generator,
+    get_quiz_grader,
+    get_session_factory,
+)
 from backend.app.db import get_session
 from backend.app.main import app
 from backend.app.models.base import Base
@@ -14,6 +20,7 @@ from backend.app.models.mastery import MasteryRecord, QuizAttempt
 from backend.app.models.source import ConceptSourceLink, SourceRecord  # noqa: F401
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
+from backend.app.schemas.concept import ConceptPrimerOutput
 from backend.app.schemas.mastery import QuizEvaluation, QuizQuestion
 
 
@@ -58,9 +65,46 @@ class _FakeQuizGrader:
         )
 
 
+class _FakePrimerGenerator:
+    def __init__(self):
+        self.calls = 0
+
+    def _output(self, concept):
+        return ConceptPrimerOutput(
+            overview=f"Orientation for {concept.title}.",
+            key_terms=[
+                {"term": "Term A", "definition": "Definition A."},
+                {"term": "Term B", "definition": "Definition B."},
+                {"term": "Term C", "definition": "Definition C."},
+            ],
+            sample_questions=[
+                "Walk me through this concept.",
+                "Give me one hint to start.",
+                "Check my understanding.",
+            ],
+        )
+
+    async def generate(self, *, concept: ConceptNode, trail: Trail, neighbour_context: dict):
+        self.calls += 1
+        return self._output(concept)
+
+    async def generate_stream(self, *, concept: ConceptNode, trail: Trail, neighbour_context: dict):
+        self.calls += 1
+        payload = json.dumps(self._output(concept).model_dump(mode="json"))
+        # Reasoning streams ahead of the output, as reasoning models do.
+        yield ("thinking", "Considering the concept's neighbours...")
+        mid = len(payload) // 2
+        yield ("token", payload[:mid])
+        yield ("token", payload[mid:])
+
+
 @pytest.fixture
-async def db_engine():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+async def db_engine(tmp_path):
+    # File-backed SQLite so the detached primer background task can open its own
+    # connection concurrently with the request session (a single shared
+    # in-memory connection cannot serialize the two). Production uses Postgres
+    # with separate pooled connections.
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'concepts.db'}", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
@@ -76,6 +120,9 @@ async def api_client(db_engine):
             yield session
 
     app.dependency_overrides[get_session] = override_session
+    # Detached primer generation builds its own session from this factory; bind
+    # it to the in-memory test engine so the background task and reads agree.
+    app.dependency_overrides[get_session_factory] = lambda: async_session
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
@@ -384,3 +431,134 @@ async def test_get_concept_wrong_workspace_returns_404(api_client, db_engine):
 
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "not_found"
+
+
+async def test_concept_detail_omits_primer_until_generated(api_client, db_engine):
+    workspace_id, trail_id, ids = await _seed_concept_graph(db_engine)
+
+    resp = await api_client.get(
+        f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}"
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["primer"] is None
+
+
+async def test_primer_route_generates_and_surfaces_in_detail(api_client, db_engine):
+    workspace_id, trail_id, ids = await _seed_concept_graph(db_engine)
+    generator = _FakePrimerGenerator()
+    app.dependency_overrides[get_primer_generator] = lambda: generator
+
+    try:
+        first = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/primer"
+        )
+        # Second call must be served from cache without re-invoking the generator.
+        second = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/primer"
+        )
+        detail = await api_client.get(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}"
+        )
+    finally:
+        app.dependency_overrides.pop(get_primer_generator, None)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    body = first.json()
+    assert body["overview"] == "Orientation for Routing."
+    assert [term["term"] for term in body["key_terms"]] == ["Term A", "Term B", "Term C"]
+    assert second.json() == body
+    assert generator.calls == 1
+
+    assert detail.status_code == 200
+    primer = detail.json()["primer"]
+    assert primer is not None
+    assert primer["overview"] == "Orientation for Routing."
+
+
+async def test_primer_route_force_new_regenerates(api_client, db_engine):
+    workspace_id, trail_id, ids = await _seed_concept_graph(db_engine)
+    generator = _FakePrimerGenerator()
+    app.dependency_overrides[get_primer_generator] = lambda: generator
+
+    try:
+        await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/primer"
+        )
+        forced = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/primer",
+            json={"force_new": True},
+        )
+    finally:
+        app.dependency_overrides.pop(get_primer_generator, None)
+
+    assert forced.status_code == 200
+    assert generator.calls == 2
+
+
+async def test_primer_route_missing_concept_returns_404(api_client, db_engine):
+    workspace_id, trail_id, _ = await _seed_concept_graph(db_engine)
+    app.dependency_overrides[get_primer_generator] = lambda: _FakePrimerGenerator()
+
+    try:
+        resp = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{uuid.uuid4()}/primer"
+        )
+    finally:
+        app.dependency_overrides.pop(get_primer_generator, None)
+
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "not_found"
+
+
+async def test_primer_stream_route_emits_status_token_done(api_client, db_engine):
+    workspace_id, trail_id, ids = await _seed_concept_graph(db_engine)
+    generator = _FakePrimerGenerator()
+    app.dependency_overrides[get_primer_generator] = lambda: generator
+
+    try:
+        resp = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}"
+            f"/concepts/{ids['routing']}/primer/stream"
+        )
+    finally:
+        app.dependency_overrides.pop(get_primer_generator, None)
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    body = resp.text
+    assert "event: status" in body
+    assert "event: thinking" in body
+    assert "event: token" in body
+    assert "event: done" in body
+    assert body.index("event: status") < body.index("event: thinking")
+    assert body.index("event: thinking") < body.index("event: token") < body.index("event: done")
+    assert generator.calls == 1
+
+
+async def test_primer_stream_route_cache_hit_emits_only_done(api_client, db_engine):
+    workspace_id, trail_id, ids = await _seed_concept_graph(db_engine)
+    generator = _FakePrimerGenerator()
+    app.dependency_overrides[get_primer_generator] = lambda: generator
+
+    try:
+        # Prime the cache via the non-stream route.
+        await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{ids['routing']}/primer"
+        )
+        calls_before = generator.calls
+        resp = await api_client.post(
+            f"/api/workspaces/{workspace_id}/trails/{trail_id}"
+            f"/concepts/{ids['routing']}/primer/stream"
+        )
+    finally:
+        app.dependency_overrides.pop(get_primer_generator, None)
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert "event: done" in body
+    assert "event: status" not in body
+    assert "event: token" not in body
+    # Cache hit => no extra model call.
+    assert generator.calls == calls_before
