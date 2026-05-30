@@ -25,3 +25,6 @@ class Trail(TimestampMixin, Base):
     topic: Mapped[str] = mapped_column(String, nullable=False)
     goal: Mapped[str] = mapped_column(String, nullable=False)
     target_depth: Mapped[str] = mapped_column(String, nullable=False)
+    # Optional learner-supplied prior knowledge captured at Trail creation.
+    # Read-only tutor context for now; adaptive write-back belongs to Phase 13.
+    prior_knowledge: Mapped[str | None] = mapped_column(String, nullable=True)

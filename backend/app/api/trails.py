@@ -55,6 +55,7 @@ async def generate_trail(
             goal=body.goal,
             target_depth=body.target_depth,
             max_nodes=body.max_nodes,
+            prior_knowledge=body.prior_knowledge,
         )
     except LookupError as exc:
         return JSONResponse(
@@ -93,6 +94,7 @@ async def generate_trail_stream(
             goal=body.goal,
             target_depth=body.target_depth,
             max_nodes=body.max_nodes,
+            prior_knowledge=body.prior_knowledge,
         ),
         media_type="text/event-stream",
     )

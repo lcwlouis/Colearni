@@ -218,6 +218,31 @@ async def test_create_trail_returns_nodes_and_edges(api_client, workspace_id):
     assert len(data["graph"]["edges"]) == 9
 
 
+async def test_generate_accepts_and_reads_back_prior_knowledge(api_client, workspace_id):
+    ac, _, _ = api_client
+    resp = await ac.post(
+        f"/api/workspaces/{workspace_id}/trails/generate",
+        json={
+            "topic": "Math",
+            "goal": "Learn basics",
+            "target_depth": "understand",
+            "prior_knowledge": "Comfortable with arithmetic, new to algebra.",
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["trail"]["prior_knowledge"] == "Comfortable with arithmetic, new to algebra."
+
+
+async def test_generate_without_prior_knowledge_defaults_to_none(api_client, workspace_id):
+    ac, _, _ = api_client
+    resp = await ac.post(
+        f"/api/workspaces/{workspace_id}/trails/generate",
+        json={"topic": "Math", "goal": "Learn basics", "target_depth": "understand"},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["trail"]["prior_knowledge"] is None
+
+
 async def test_generate_accepts_max_nodes(api_client, workspace_id):
     ac, fake_gen, _ = api_client
     fake_gen._json = _graph_json(45)

@@ -15,7 +15,7 @@ def test_trail_generate_request_matches_api_contract():
 
     request = TrailGenerateRequest.model_validate(payload)
 
-    assert request.model_dump() == {**payload, "max_nodes": 40}
+    assert request.model_dump() == {**payload, "max_nodes": 40, "prior_knowledge": None}
 
 
 def test_trail_generate_request_rejects_workspace_id_and_title():

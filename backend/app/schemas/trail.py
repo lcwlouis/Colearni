@@ -20,6 +20,9 @@ class TrailGenerateRequest(BaseModel):
     goal: str
     target_depth: TargetDepth
     max_nodes: int = Field(default=40, ge=10, le=100)
+    # Optional free-text description of what the learner already knows about the
+    # topic, captured at creation and fed read-only into the tutor (Phase 13.5d).
+    prior_knowledge: str | None = Field(default=None, max_length=2000)
 
 
 class TrailInsert(BaseModel):
@@ -30,6 +33,7 @@ class TrailInsert(BaseModel):
     topic: str
     goal: str
     target_depth: TargetDepth
+    prior_knowledge: str | None = None
 
 
 class TrailRead(BaseModel):
@@ -41,6 +45,7 @@ class TrailRead(BaseModel):
     topic: str
     goal: str
     target_depth: TargetDepth
+    prior_knowledge: str | None = None
     created_at: datetime
     node_count: int = 0
     edge_count: int = 0

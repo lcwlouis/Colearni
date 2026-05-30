@@ -169,6 +169,7 @@ async def _persist_trail(
     goal: str,
     target_depth: TargetDepth,
     graph: RawGraph,
+    prior_knowledge: str | None = None,
 ) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
     """Persist the Trail, ConceptNodes and ConceptEdges in a single transaction."""
     try:
@@ -179,6 +180,7 @@ async def _persist_trail(
             topic=topic,
             goal=goal,
             target_depth=target_depth,
+            prior_knowledge=prior_knowledge,
         )
 
         trail = Trail(
@@ -187,6 +189,7 @@ async def _persist_trail(
             topic=insert.topic,
             goal=insert.goal,
             target_depth=insert.target_depth,
+            prior_knowledge=insert.prior_knowledge,
         )
         session.add(trail)
         await session.flush()  # get trail.id without committing
@@ -244,6 +247,7 @@ async def generate_and_store_trail(
     goal: str,
     target_depth: TargetDepth,
     max_nodes: int = 40,
+    prior_knowledge: str | None = None,
 ) -> tuple[Trail, list[ConceptNode], list[ConceptEdge]]:
     """Generate a trail + concept graph and persist everything in one transaction.
 
@@ -259,7 +263,9 @@ async def generate_and_store_trail(
         raise GenerationError(f"LLM call failed: {exc}") from exc
 
     graph = await _validate_with_repair(raw, max_nodes=max_nodes, generator=generator)
-    return await _persist_trail(session, workspace_id, topic, goal, target_depth, graph)
+    return await _persist_trail(
+        session, workspace_id, topic, goal, target_depth, graph, prior_knowledge
+    )
 
 
 async def stream_generate_trail_events(
@@ -271,6 +277,7 @@ async def stream_generate_trail_events(
     goal: str,
     target_depth: TargetDepth,
     max_nodes: int = 40,
+    prior_knowledge: str | None = None,
 ) -> AsyncIterator[str]:
     """Yield SSE events for trail generation, streaming LLM tokens as delta events."""
 
@@ -350,7 +357,7 @@ async def stream_generate_trail_events(
     yield _sse("progress", {"message": f"Saving Trail with {len(graph.nodes)} concepts..."})
     try:
         trail, nodes, edges = await _persist_trail(
-            session, workspace_id, topic, goal, target_depth, graph
+            session, workspace_id, topic, goal, target_depth, graph, prior_knowledge
         )
     except Exception as exc:
         yield _sse(

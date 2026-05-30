@@ -132,6 +132,74 @@ def test_beginner_beats_advanced_for_same_level_and_status():
     assert result.concept == beginner
 
 
+def test_fresh_trail_picks_entry_point_with_no_unmet_prerequisites():
+    # A brand-new Trail: everything not_started. The recommender should suggest a
+    # sensible entry point (no unmet prerequisites) rather than a downstream concept.
+    entry = _node("vectors", "Vectors", concept_level="topic", difficulty="beginner")
+    downstream = _node("eigenvectors", "Eigenvectors", concept_level="topic", difficulty="beginner")
+    edges = [_edge(entry, downstream, "prerequisite")]
+    mastery_map = {
+        entry.id: _state(entry, "not_started"),
+        downstream.id: _state(downstream, "not_started"),
+    }
+
+    result = recommend_next_concept(
+        concepts=[downstream, entry],
+        edges=edges,
+        mastery_map=mastery_map,
+    )
+
+    assert result.concept == entry
+    assert result.all_mastered is False
+    assert "starting point" in result.reason.lower()
+
+
+def test_fresh_trail_prefers_topic_then_lower_difficulty_among_entry_points():
+    # Multiple eligible entry points (all not_started, no prerequisites). Ordering
+    # should follow GRAPH.md: topic/subtopic over umbrella, then lower difficulty.
+    umbrella = _node("linear-algebra", "Linear Algebra", concept_level="umbrella")
+    advanced_topic = _node("eigen", "Eigen Theory", concept_level="topic", difficulty="advanced")
+    beginner_topic = _node("vectors", "Vectors", concept_level="topic", difficulty="beginner")
+    mastery_map = {
+        umbrella.id: _state(umbrella, "not_started"),
+        advanced_topic.id: _state(advanced_topic, "not_started"),
+        beginner_topic.id: _state(beginner_topic, "not_started"),
+    }
+
+    result = recommend_next_concept(
+        concepts=[umbrella, advanced_topic, beginner_topic],
+        edges=[],
+        mastery_map=mastery_map,
+    )
+
+    assert result.concept == beginner_topic
+    assert result.concept_level == "topic"
+
+
+async def test_fresh_trail_route_suggests_entry_point(
+    db_session: AsyncSession,
+    api_client: AsyncClient,
+):
+    # End-to-end: a fresh Trail (no mastery records) returns an entry-point suggestion.
+    workspace, trail, nodes = await _seed_trail(
+        db_session,
+        concept_specs=[
+            ("vectors", "Vectors", "topic", "beginner"),
+            ("eigenvectors", "Eigenvectors", "topic", "advanced"),
+        ],
+    )
+    db_session.add(_edge(nodes["vectors"], nodes["eigenvectors"], "prerequisite"))
+    await db_session.commit()
+
+    response = await api_client.get(f"/api/workspaces/{workspace.id}/trails/{trail.id}/next")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["concept_id"] == str(nodes["vectors"].id)
+    assert body["all_mastered"] is False
+    assert body["reason"]
+
+
 def test_all_mastered_returns_no_concept_and_review_reason():
     concept = _node("vectors", "Vectors")
 
@@ -216,9 +284,7 @@ async def test_next_concept_route_other_workspace_trail_returns_404(
     db_session.add(other_workspace)
     await db_session.commit()
 
-    response = await api_client.get(
-        f"/api/workspaces/{other_workspace.id}/trails/{trail.id}/next"
-    )
+    response = await api_client.get(f"/api/workspaces/{other_workspace.id}/trails/{trail.id}/next")
 
     assert response.status_code == 404
 
@@ -240,9 +306,11 @@ async def _seed_trail(
     )
     session.add(trail)
     await session.flush()
-    specs = concept_specs if concept_specs is not None else [
-        ("vectors", "Vectors", "topic", "beginner")
-    ]
+    specs = (
+        concept_specs
+        if concept_specs is not None
+        else [("vectors", "Vectors", "topic", "beginner")]
+    )
     nodes = {
         slug: ConceptNode(
             trail_id=trail.id,

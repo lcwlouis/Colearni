@@ -4,6 +4,7 @@ import json
 import uuid
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.models.base import Base
@@ -154,6 +155,70 @@ class FakeGenerator:
         if self._repair is not None:
             return self._repair
         return self._json
+
+
+async def test_persists_prior_knowledge_when_provided(db_session: AsyncSession):
+    ws = Workspace(name="Prior Knowledge WS")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    generator = FakeGenerator(_minimal_graph_json())
+    trail, _, _ = await generate_and_store_trail(
+        session=db_session,
+        generator=generator,
+        workspace_id=ws.id,
+        topic="Math",
+        goal="Learn basics",
+        target_depth="understand",
+        prior_knowledge="I know arithmetic but not algebra.",
+    )
+
+    assert trail.prior_knowledge == "I know arithmetic but not algebra."
+
+
+async def test_prior_knowledge_defaults_to_none(db_session: AsyncSession):
+    ws = Workspace(name="No Prior Knowledge WS")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    generator = FakeGenerator(_minimal_graph_json())
+    trail, _, _ = await generate_and_store_trail(
+        session=db_session,
+        generator=generator,
+        workspace_id=ws.id,
+        topic="Math",
+        goal="Learn basics",
+        target_depth="understand",
+    )
+
+    assert trail.prior_knowledge is None
+
+
+async def test_stream_persists_prior_knowledge(db_session: AsyncSession):
+    ws = Workspace(name="Stream Prior Knowledge WS")
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+
+    generator = FakeGenerator(_minimal_graph_json())
+    events: list[str] = []
+    async for event in stream_generate_trail_events(
+        session=db_session,
+        generator=generator,
+        workspace_id=ws.id,
+        topic="Math",
+        goal="Learn basics",
+        target_depth="understand",
+        prior_knowledge="Some background in geometry.",
+    ):
+        events.append(event)
+
+    assert "event: done" in "".join(events)
+    stored = await db_session.scalar(select(Trail).where(Trail.workspace_id == ws.id))
+    assert stored is not None
+    assert stored.prior_knowledge == "Some background in geometry."
 
 
 async def test_stores_trail_and_graph(db_session: AsyncSession):
