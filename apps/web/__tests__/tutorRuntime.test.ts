@@ -1,28 +1,49 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { createTutorModelAdapter, latestUserMessageText, toThreadMessages } from "@/lib/tutor-runtime";
-import type { ConversationHistoryResponse, ConversationMessage } from "@/lib/types";
+import {
+  createTutorModelAdapter,
+  latestUserMessageText,
+  toThreadMessages,
+} from "@/lib/tutor-runtime";
+import type {
+  ConversationHistoryResponse,
+  ConversationMessage,
+} from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
-  streamTutorChat: vi.fn(async ({ onMode, onStatus, onThinking, onToolCall, onToolResult, onToken, onDone }) => {
-    onMode("socratic");
-    onStatus?.("thinking");
-    onThinking?.("First, inspect the relationship.\n");
-    onToolCall?.({ name: "get_tutor_instructions", mode: "direct" });
-    onToolResult?.({ name: "get_tutor_instructions", mode: "direct", result: "Use direct mode." });
-    onThinking?.("Now answer visibly.\n");
-    onToken("Think");
-    onToken(" about it.");
-    onDone("conversation-1", {
-      id: "assistant-1",
-      role: "assistant",
-      content: "Think about it.",
-      reasoning: "First, inspect the relationship.\n",
-      reasoning_parts: [],
-      mode: "socratic",
-      created_at: "2026-01-01T00:00:00Z",
-    } satisfies ConversationMessage);
-  }),
+  streamTutorChat: vi.fn(
+    async ({
+      onMode,
+      onStatus,
+      onThinking,
+      onToolCall,
+      onToolResult,
+      onToken,
+      onDone,
+    }) => {
+      onMode("socratic");
+      onStatus?.("thinking");
+      onThinking?.("First, inspect the relationship.\n");
+      onToolCall?.({ name: "get_tutor_instructions", mode: "direct" });
+      onToolResult?.({
+        name: "get_tutor_instructions",
+        mode: "direct",
+        result: "Use direct mode.",
+      });
+      onThinking?.("Now answer visibly.\n");
+      onToken("Think");
+      onToken(" about it.");
+      onDone("conversation-1", {
+        id: "assistant-1",
+        role: "assistant",
+        content: "Think about it.",
+        reasoning: "First, inspect the relationship.\n",
+        reasoning_parts: [],
+        mode: "socratic",
+        created_at: "2026-01-01T00:00:00Z",
+      } satisfies ConversationMessage);
+    },
+  ),
 }));
 
 describe("tutor runtime adapter", () => {
@@ -174,7 +195,11 @@ describe("tutor runtime adapter", () => {
           reasoning: "Trace",
           reasoning_parts: [
             { kind: "thinking", text: "Trace before tool." },
-            { kind: "tool_call", name: "get_tutor_instructions", mode: "direct" },
+            {
+              kind: "tool_call",
+              name: "get_tutor_instructions",
+              mode: "direct",
+            },
             {
               kind: "tool_result",
               name: "get_tutor_instructions",
@@ -195,18 +220,36 @@ describe("tutor runtime adapter", () => {
         id: "assistant-1",
         role: "assistant",
         content: [
-          { type: "data", name: "tutor-thinking", data: { text: "Trace before tool." } },
+          {
+            type: "data",
+            name: "tutor-thinking",
+            data: { text: "Trace before tool." },
+          },
           {
             type: "data",
             name: "tutor-tool-call",
-            data: { name: "get_tutor_instructions", mode: "direct", query: undefined, result: undefined },
+            data: {
+              name: "get_tutor_instructions",
+              mode: "direct",
+              query: undefined,
+              result: undefined,
+            },
           },
           {
             type: "data",
             name: "tutor-tool-result",
-            data: { name: "get_tutor_instructions", mode: "direct", query: undefined, result: "Use direct mode." },
+            data: {
+              name: "get_tutor_instructions",
+              mode: "direct",
+              query: undefined,
+              result: "Use direct mode.",
+            },
           },
-          { type: "data", name: "tutor-thinking", data: { text: "Trace after tool." } },
+          {
+            type: "data",
+            name: "tutor-thinking",
+            data: { text: "Trace after tool." },
+          },
           { type: "text", text: "Hi" },
         ],
         status: { type: "complete", reason: "stop" },
@@ -277,10 +320,12 @@ describe("tutor runtime adapter", () => {
     );
   });
 
-  test("handled stream errors do not reject the adapter loop", async () => {
+  test("stream errors commit a terminal errored result instead of a phantom complete", async () => {
     const { streamTutorChat } = await import("@/lib/api");
     vi.mocked(streamTutorChat).mockImplementationOnce(async () => {
-      throw new Error("Generation ended before a visible tutor response was produced");
+      throw new Error(
+        "Generation ended before a visible tutor response was produced",
+      );
     });
 
     const onError = vi.fn();
@@ -307,12 +352,27 @@ describe("tutor runtime adapter", () => {
     }
 
     const chunks = [];
+    // The adapter loop must resolve (not reject) so the composer's un-awaited
+    // append() never produces an unhandled rejection.
     for await (const chunk of stream) {
       chunks.push(chunk);
     }
 
-    expect(chunks).toEqual([]);
-    expect(onError).toHaveBeenCalledWith("Generation ended before a visible tutor response was produced");
+    expect(onError).toHaveBeenCalledWith(
+      "Generation ended before a visible tutor response was produced",
+    );
+    // A single terminal result is yielded, marked errored/incomplete so
+    // assistant-ui finalizes the run as errored (and regenerate-able) rather
+    // than committing a phantom "complete" message.
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.status).toEqual({
+      type: "incomplete",
+      reason: "error",
+      error: "Generation ended before a visible tutor response was produced",
+    });
+    // No partial/visible answer text leaked into the errored bubble.
+    const text = chunks[0]?.content?.find((part) => part.type === "text");
+    expect(text && "text" in text ? text.text : "").toBe("");
   });
 });
 

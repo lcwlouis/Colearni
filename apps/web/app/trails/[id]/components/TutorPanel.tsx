@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ActionBarPrimitive,
   AssistantRuntimeProvider,
@@ -13,11 +19,17 @@ import {
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
+  ArrowLeft,
   ArrowUpIcon,
   CopyIcon,
+  GaugeIcon,
+  LayersIcon,
+  LinkIcon,
   MoreHorizontalIcon,
   PencilIcon,
   RotateCcwIcon,
+  TargetIcon,
+  type LucideIcon,
 } from "lucide-react";
 
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
@@ -29,6 +41,7 @@ import {
 } from "@/components/assistant-ui/reasoning";
 import { SourceChip } from "@/components/assistant-ui/sources";
 import { getConversation } from "@/lib/api";
+import { formatBloomLevel, titleCase } from "@/lib/display";
 import { useTutorRuntime } from "@/lib/tutor-runtime";
 import type {
   ConceptNode,
@@ -47,6 +60,7 @@ interface TutorPanelProps {
   trailId: string;
   concept: ConceptNode;
   sources?: SourceRecord[];
+  sampleQuestions?: string[];
   onBack?: () => void;
   onMasteryUpdated?: (
     conceptId: string,
@@ -59,6 +73,7 @@ export function TutorPanel({
   trailId,
   concept,
   sources = [],
+  sampleQuestions,
   onBack,
   onMasteryUpdated,
 }: TutorPanelProps) {
@@ -67,9 +82,6 @@ export function TutorPanel({
   );
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [mode, setMode] = useState<TutorMode | null>(null);
-  const [streamStatus, setStreamStatus] = useState<TutorStreamStatus | null>(
-    null,
-  );
   const [loading, setLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
   const [chatError, setChatError] = useState("");
@@ -83,7 +95,6 @@ export function TutorPanel({
     setHistory(null);
     setConversationId(null);
     setMode(null);
-    setStreamStatus(null);
 
     async function loadHistory() {
       try {
@@ -123,7 +134,6 @@ export function TutorPanel({
         concept={concept}
         sources={sources ?? []}
         mode={mode}
-        streamStatus={streamStatus}
         onBack={onBack}
       >
         <div className="p-4 text-sm text-slate-500">
@@ -139,7 +149,6 @@ export function TutorPanel({
         concept={concept}
         sources={sources ?? []}
         mode={mode}
-        streamStatus={streamStatus}
         onBack={onBack}
       >
         <div className="m-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -165,10 +174,10 @@ export function TutorPanel({
       trailId={trailId}
       concept={concept}
       sources={sources}
+      sampleQuestions={sampleQuestions}
       history={history}
       conversationId={conversationId}
       mode={mode}
-      streamStatus={streamStatus}
       chatError={chatError}
       onBack={onBack}
       onConversationId={setConversationId}
@@ -176,7 +185,6 @@ export function TutorPanel({
         setMode(nextMode);
         setChatError("");
       }}
-      onStatus={setStreamStatus}
       onError={setChatError}
       onMasteryUpdated={onMasteryUpdated}
     />
@@ -188,26 +196,23 @@ function TutorRuntimePanel({
   trailId,
   concept,
   sources,
+  sampleQuestions,
   history,
   conversationId,
   mode,
-  streamStatus,
   chatError,
   onBack,
   onConversationId,
   onMode,
-  onStatus,
   onError,
   onMasteryUpdated,
 }: TutorPanelProps & {
   history: ConversationHistoryResponse;
   conversationId: string | null;
   mode: TutorMode | null;
-  streamStatus: TutorStreamStatus | null;
   chatError: string;
   onConversationId: (conversationId: string) => void;
   onMode: (mode: TutorMode) => void;
-  onStatus: (status: TutorStreamStatus | null) => void;
   onError: (message: string) => void;
 }) {
   const [reasoningView, setReasoningView] = useState<ReasoningView>(() => {
@@ -226,7 +231,6 @@ function TutorRuntimePanel({
     history,
     onConversationId,
     onMode,
-    onStatus,
     onError,
     onMasteryUpdated,
   });
@@ -241,7 +245,6 @@ function TutorRuntimePanel({
         concept={concept}
         sources={sources ?? []}
         mode={mode}
-        streamStatus={streamStatus}
         onBack={onBack}
         reasoningView={reasoningView}
         onReasoningViewChange={setReasoningView}
@@ -257,7 +260,10 @@ function TutorRuntimePanel({
             Up button.
           </div>
         ) : null}
-        <TutorThread reasoningView={reasoningView} />
+        <TutorThread
+          reasoningView={reasoningView}
+          sampleQuestions={sampleQuestions}
+        />
       </TutorShell>
     </AssistantRuntimeProvider>
   );
@@ -267,7 +273,6 @@ function TutorShell({
   concept,
   sources,
   mode,
-  streamStatus,
   onBack,
   reasoningView,
   onReasoningViewChange,
@@ -276,7 +281,6 @@ function TutorShell({
   concept: ConceptNode;
   sources: SourceRecord[];
   mode: TutorMode | null;
-  streamStatus: TutorStreamStatus | null;
   onBack?: () => void;
   reasoningView?: ReasoningView;
   onReasoningViewChange?: (view: ReasoningView) => void;
@@ -294,9 +298,9 @@ function TutorShell({
                 type="button"
                 aria-label="Back to concept details"
                 onClick={onBack}
-                className="grid size-8 shrink-0 place-items-center rounded-full border border-slate-200 text-base text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                className="grid size-8 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-950"
               >
-                <span aria-hidden="true">←</span>
+                <ArrowLeft className="size-4" aria-hidden="true" />
               </button>
             ) : null}
             <div className="min-w-0">
@@ -309,7 +313,6 @@ function TutorShell({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {streamStatus ? <StatusBadge status={streamStatus} /> : null}
             <ModeBadge mode={mode} />
             <div className="relative">
               <button
@@ -331,15 +334,18 @@ function TutorShell({
                       />
                     ) : null}
                     <div className="flex flex-wrap gap-1.5">
-                      <ContextBadge>
-                        Level: {concept.concept_level}
+                      <ContextBadge icon={LayersIcon}>
+                        Level: {titleCase(concept.concept_level)}
                       </ContextBadge>
-                      <ContextBadge>Bloom: {concept.bloom_level}</ContextBadge>
-                      <ContextBadge>
-                        Difficulty: {concept.difficulty}
+                      <ContextBadge icon={TargetIcon}>
+                        Bloom: {formatBloomLevel(concept.bloom_level)}
+                      </ContextBadge>
+                      <ContextBadge icon={GaugeIcon}>
+                        Difficulty: {titleCase(concept.difficulty)}
                       </ContextBadge>
                     </div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <LinkIcon className="size-3 shrink-0" />
                       {sources.length} source{sources.length === 1 ? "" : "s"}{" "}
                       linked
                     </div>
@@ -358,7 +364,13 @@ function TutorShell({
   );
 }
 
-function TutorThread({ reasoningView }: { reasoningView: ReasoningView }) {
+function TutorThread({
+  reasoningView,
+  sampleQuestions,
+}: {
+  reasoningView: ReasoningView;
+  sampleQuestions?: string[];
+}) {
   const messageCount = useThread((state) => state.messages.length);
   const isRunning = useThread((state) => state.isRunning);
   const latestUserMessageId = useThread(
@@ -375,7 +387,9 @@ function TutorThread({ reasoningView }: { reasoningView: ReasoningView }) {
         scrollToBottomOnInitialize
         className="relative flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5"
       >
-        {messageCount === 0 ? <WelcomeSuggestions /> : null}
+        {messageCount === 0 ? (
+          <WelcomeSuggestions sampleQuestions={sampleQuestions} />
+        ) : null}
         <div className="grid gap-5">
           <ThreadPrimitive.Messages>
             {({ message }) => (
@@ -545,6 +559,11 @@ function ChatMessage({
   );
 }
 
+// Whether the surrounding chain-of-thought group is still streaming. Used by
+// full-view reasoning lines so only live steps pulse and completed steps stay
+// static (Bug 1). Defaults to false so any standalone render settles quietly.
+const ReasoningRunningContext = createContext(false);
+
 function AssistantMessageBody({
   message,
   reasoningView,
@@ -572,7 +591,12 @@ function AssistantMessageBody({
     >
       {({ part, children }) => {
         if (part.type === "group-chain-of-thought") {
-          const running = part.status.type === "running";
+          // The reasoning indicator should only pulse while the tutor is still
+          // reasoning. Once a visible answer has started (or the run settles to
+          // a non-running status) the chain-of-thought is done, so stop the
+          // "streaming" dot instead of letting it flash forever (Bug 1).
+          const running =
+            part.status.type === "running" && !hasVisibleAnswer(message);
           const full = reasoningView === "full";
           return (
             <ReasoningRoot defaultOpen={running}>
@@ -589,7 +613,12 @@ function AssistantMessageBody({
               />
               <ReasoningContent busy={running}>
                 {full ? (
-                  <div className="grid gap-3">{children}</div>
+                  // Tell the per-line status dots whether the chain-of-thought is
+                  // still streaming so completed steps render a static dot
+                  // instead of pulsing forever (Bug 1).
+                  <ReasoningRunningContext.Provider value={running}>
+                    <div className="grid gap-3">{children}</div>
+                  </ReasoningRunningContext.Provider>
                 ) : (
                   <CompactReasoningTrace message={message} running={running} />
                 )}
@@ -639,12 +668,18 @@ function UserMessageBody({ message }: { message: MessageState }) {
   return <UserMarkdownText text={messageText(message)} />;
 }
 
-function WelcomeSuggestions() {
-  const suggestions = [
+function WelcomeSuggestions({
+  sampleQuestions,
+}: {
+  sampleQuestions?: string[];
+}) {
+  const fallback = [
     "Give me one hint to get started.",
     "Ask me a Socratic question about this concept.",
     "Check whether my current understanding is right.",
   ];
+  const suggestions =
+    sampleQuestions && sampleQuestions.length > 0 ? sampleQuestions : fallback;
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col items-center rounded-3xl border border-dashed border-slate-300 bg-white/80 p-5 text-center shadow-sm">
@@ -689,7 +724,7 @@ function ReasoningViewToggle({
           : "Show full reasoning trace"
       }
       onClick={() => onChange(full ? "summary" : "full")}
-      className="inline-flex h-8 w-full items-center justify-center rounded-full border border-amber-200 bg-amber-50 px-2.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+      className="inline-flex h-8 w-full items-center justify-center rounded-full border border-slate-200 bg-slate-50 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
     >
       Reasoning: {full ? "Full trace" : "Summary"}
     </button>
@@ -705,43 +740,47 @@ function CompactReasoningTrace({
 }) {
   const steps = compactReasoningSteps(message);
 
-  return (
-    <div className="rounded-md border border-amber-200 bg-white/70 px-3 py-2 text-sm text-amber-950">
-      <div className="flex items-center gap-2 font-semibold">
-        <span>Reasoning summary</span>
+  if (steps.length === 0) {
+    // Before any concrete thinking/tool step exists, surface the latest live
+    // status (e.g. "Thinking", "Calling tool") so the summary view shows real
+    // progress while the tutor reasons instead of a frozen placeholder (Bug 2).
+    const status = latestReasoningStatus(message);
+    const label = running
+      ? status
+        ? formatStreamStatus(status)
+        : "Choosing a focused question..."
+      : "Reasoning trace available.";
+    return (
+      <div className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
+        {running ? (
+          <span className="size-1.5 animate-pulse rounded-full bg-blue-500" />
+        ) : null}
+        <span>{label}</span>
       </div>
-      {steps.length > 0 ? (
-        <div className="mt-2 grid gap-1.5">
-          {steps.map((step, index) => (
-            <div
-              key={`${step.label}-${index}`}
-              className={`rounded border border-amber-200/80 bg-amber-50/70 px-2 py-1.5 ${
-                running && index === steps.length - 1
-                  ? "shadow-[inset_3px_0_0_rgb(251_191_36)]"
-                  : ""
-              }`}
-            >
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
-                {step.label}
-                {running && index === steps.length - 1 ? (
-                  <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
-                ) : null}
-              </div>
-              {step.detail ? (
-                <div className="mt-0.5 text-amber-950/75">{step.detail}</div>
+    );
+  }
+
+  return (
+    <ol className="grid gap-3">
+      {steps.map((step, index) => {
+        const isActive = running && index === steps.length - 1;
+        return (
+          <li key={`${step.label}-${index}`} className="grid gap-0.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {isActive ? (
+                <span className="size-1.5 animate-pulse rounded-full bg-blue-500" />
               ) : null}
+              <span>{step.label}</span>
             </div>
-          ))}
-        </div>
-      ) : null}
-      {steps.length === 0 ? (
-        <p className="mt-1 text-amber-950/75">
-          {running
-            ? "Choosing a focused question..."
-            : "Reasoning trace available."}
-        </p>
-      ) : null}
-    </div>
+            {step.detail ? (
+              <div className="text-sm text-slate-600 dark:text-slate-300">
+                {step.detail}
+              </div>
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -804,22 +843,23 @@ function UserActionBar({ onEdit }: { onEdit: () => void }) {
 function ModeBadge({ mode }: { mode: TutorMode | null }) {
   return (
     <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800 sm:text-xs">
-      {mode ?? "waiting"}
+      {mode ? titleCase(mode) : "waiting"}
     </span>
   );
 }
 
-function StatusBadge({ status }: { status: TutorStreamStatus }) {
+function ContextBadge({
+  icon: Icon,
+  children,
+}: {
+  icon?: LucideIcon;
+  children: ReactNode;
+}) {
   return (
-    <span className="hidden rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 sm:inline-flex sm:text-xs">
-      {formatStreamStatus(status)}
-    </span>
-  );
-}
-
-function ContextBadge({ children }: { children: ReactNode }) {
-  return (
-    <span className="rounded border border-slate-200 bg-slate-50 px-2 py-1 font-medium text-slate-700">
+    <span className="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-1 font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+      {Icon ? (
+        <Icon className="size-3 shrink-0 text-slate-400 dark:text-slate-500" />
+      ) : null}
       {children}
     </span>
   );
@@ -883,6 +923,27 @@ function messageText(message: MessageState): string {
 
 function UserMarkdownText({ text }: { text: string }) {
   return <div className="whitespace-pre-wrap leading-6 text-white">{text}</div>;
+}
+
+function hasVisibleAnswer(message: MessageState): boolean {
+  return message.content.some(
+    (part) => part.type === "text" && part.text.trim().length > 0,
+  );
+}
+
+function latestReasoningStatus(
+  message: MessageState,
+): TutorStreamStatus | null {
+  let status: TutorStreamStatus | null = null;
+  for (const part of message.content) {
+    if (isTutorDataPart(part, "tutor-status")) {
+      const next = (part.data as { status?: TutorStreamStatus }).status;
+      if (next) {
+        status = next;
+      }
+    }
+  }
+  return status;
 }
 
 function compactReasoningSteps(
@@ -950,6 +1011,9 @@ function toolSummaryLabel(tool: TutorToolEvent): string {
   if (tool.name === "get_concept_sources") {
     return "Checking sources";
   }
+  if (tool.name === "get_concept_primer") {
+    return "Checking primer";
+  }
   if (tool.name === "get_graph_neighbourhood") {
     return "Checking graph";
   }
@@ -970,12 +1034,18 @@ function toolSummaryDetail(tool: TutorToolEvent): string {
 }
 
 function TutorStatusLine({ status }: { status: TutorStreamStatus | null }) {
+  const running = useContext(ReasoningRunningContext);
   if (!status) {
     return null;
   }
 
   return (
-    <div className="mb-2 rounded border border-amber-200 bg-amber-100/60 px-2 py-1 text-xs font-medium text-amber-900">
+    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+      <span
+        className={`size-1.5 rounded-full bg-blue-500${
+          running ? " animate-pulse" : ""
+        }`}
+      />
       {formatStreamStatus(status)}
     </div>
   );
@@ -987,25 +1057,34 @@ function TutorThinkingLine({ text }: { text: string }) {
   }
 
   return (
-    <ReasoningText>
-      <div className="italic text-amber-950/75">{text}</div>
-    </ReasoningText>
+    <div className="grid gap-0.5">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        Thinking
+      </div>
+      <ReasoningText>
+        <div className="italic text-slate-600 dark:text-slate-300">{text}</div>
+      </ReasoningText>
+    </div>
   );
 }
 
 function TutorToolCallLine({ tool }: { tool: TutorToolEvent }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
+    <div className="grid gap-0.5">
       <div className="flex items-center justify-between gap-3">
-        <span className="font-semibold">{toolSummaryLabel(tool)}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {toolSummaryLabel(tool)}
+        </span>
         {tool.mode ? (
-          <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
             {tool.mode}
           </span>
         ) : null}
       </div>
       {tool.query ? (
-        <div className="mt-1 text-slate-600">{tool.query}</div>
+        <div className="text-sm text-slate-600 dark:text-slate-300">
+          {tool.query}
+        </div>
       ) : null}
     </div>
   );
@@ -1013,12 +1092,12 @@ function TutorToolCallLine({ tool }: { tool: TutorToolEvent }) {
 
 function TutorToolResultLine({ tool }: { tool: TutorToolEvent }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white text-sm text-slate-800">
-      <div className="border-b border-slate-200 px-3 py-2 font-semibold">
-        {tool.name} result
+    <div className="grid gap-0.5">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {formatToolName(tool.name)} result
       </div>
       {tool.result ? (
-        <pre className="max-h-44 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-xs leading-5 text-slate-600">
+        <pre className="max-h-44 overflow-y-auto whitespace-pre-wrap border-l border-slate-200 pl-3 text-xs leading-5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
           {tool.result}
         </pre>
       ) : null}
@@ -1028,6 +1107,8 @@ function TutorToolResultLine({ tool }: { tool: TutorToolEvent }) {
 
 function formatStreamStatus(status: TutorStreamStatus): string {
   switch (status) {
+    case "selecting_mode":
+      return "Choosing answering mode";
     case "thinking":
       return "Thinking";
     case "calling_tool":

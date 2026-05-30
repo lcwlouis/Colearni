@@ -8,12 +8,34 @@ export type BloomLevel =
 export type ConceptLevel = "umbrella" | "topic" | "subtopic" | "granular";
 export type Difficulty = "beginner" | "intermediate" | "advanced";
 export type NodeType = "concept" | "skill" | "misconception" | "example";
-export type RelationType = "prerequisite" | "contains" | "application" | "related";
-export type MasteryStatus = "not_started" | "learning" | "needs_review" | "mastered";
-export type TutorMode = "socratic" | "direct" | "repair" | "quiz_prompt" | "explore" | "free_explore";
-export type SourceOrigin = "research_agent" | "user_upload" | "manual" | "system";
+export type RelationType =
+  | "prerequisite"
+  | "contains"
+  | "application"
+  | "related";
+export type MasteryStatus =
+  | "not_started"
+  | "learning"
+  | "needs_review"
+  | "mastered";
+export type TutorMode =
+  | "socratic"
+  | "direct"
+  | "repair"
+  | "quiz_prompt"
+  | "explore"
+  | "free_explore";
+export type SourceOrigin =
+  | "research_agent"
+  | "user_upload"
+  | "manual"
+  | "system";
 export type SourceAccess = "public" | "private" | "restricted" | "unknown";
-export type SourceRevisionStatus = "pending_parse" | "parsed" | "failed" | "skipped";
+export type SourceRevisionStatus =
+  | "pending_parse"
+  | "parsed"
+  | "failed"
+  | "skipped";
 
 export interface Workspace {
   id: string;
@@ -28,6 +50,7 @@ export interface Trail {
   topic: string;
   goal: string;
   target_depth: BloomLevel;
+  prior_knowledge?: string | null;
   created_at: string;
   node_count: number;
   edge_count: number;
@@ -93,6 +116,22 @@ export interface NextConceptResponse {
   concept_level: ConceptLevel | null;
 }
 
+export interface ConceptPrimerKeyTerm {
+  term: string;
+  definition: string;
+}
+
+export interface ConceptPrimerRead {
+  overview: string;
+  key_terms: ConceptPrimerKeyTerm[];
+  // Suggested opening questions for the tutor welcome screen. May be empty for
+  // older cached primers generated before this field existed.
+  sample_questions: string[];
+  version: number;
+}
+
+export type ConceptPrimer = ConceptPrimerRead;
+
 export interface ConceptDetail {
   concept: ConceptNode;
   prerequisites: ConceptNode[];
@@ -101,6 +140,7 @@ export interface ConceptDetail {
   related: ConceptNode[];
   mastery: MasteryRecord;
   sources: SourceRecord[];
+  primer?: ConceptPrimerRead | null;
 }
 
 export interface QuizQuestion {
@@ -199,6 +239,7 @@ export interface QuizGenerateRequest {
 }
 
 export type TutorStreamStatus =
+  | "selecting_mode"
   | "thinking"
   | "calling_tool"
   | "tool_called"
@@ -243,6 +284,7 @@ export interface TrailGenerateRequest {
   goal: string;
   target_depth: BloomLevel;
   max_nodes: number;
+  prior_knowledge?: string | null;
 }
 
 export interface TrailGenerateResponse {

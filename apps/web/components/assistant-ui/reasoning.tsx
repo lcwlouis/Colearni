@@ -46,10 +46,14 @@ export function ReasoningRoot({
     <div
       ref={ref}
       data-open={open ? "true" : "false"}
-      className="mb-2 rounded-lg border border-amber-200 bg-amber-50/70"
-      style={{ ["--reasoning-animation-duration" as string]: `${ANIMATION_DURATION}ms` }}
+      className="mb-3 border-l-2 border-slate-200 pl-3 dark:border-slate-700"
+      style={{
+        ["--reasoning-animation-duration" as string]: `${ANIMATION_DURATION}ms`,
+      }}
     >
-      <ReasoningContext.Provider value={{ open, onOpenChange }}>{children}</ReasoningContext.Provider>
+      <ReasoningContext.Provider value={{ open, onOpenChange }}>
+        {children}
+      </ReasoningContext.Provider>
     </div>
   );
 }
@@ -70,15 +74,20 @@ export function ReasoningTrigger({
     <button
       type="button"
       onClick={() => context.onOpenChange(!context.open)}
-      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-amber-900 transition-colors hover:bg-amber-100/70"
+      className="flex w-full items-center gap-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
     >
-      <BrainIcon className="size-4 shrink-0" />
-      <span className="relative inline-flex items-center gap-2 font-medium">
+      <BrainIcon className="size-3.5 shrink-0" />
+      <span className="inline-flex items-center gap-1.5">
         <span>{triggerLabel}</span>
-        {active ? <span className="text-xs text-amber-700">streaming</span> : null}
+        {active ? (
+          <span className="inline-flex items-center gap-1 text-slate-400 dark:text-slate-500">
+            <span className="size-1.5 animate-pulse rounded-full bg-blue-500" />
+            streaming
+          </span>
+        ) : null}
       </span>
       <ChevronDownIcon
-        className={`ml-auto size-4 shrink-0 transition-transform duration-200 ${
+        className={`ml-auto size-3.5 shrink-0 transition-transform duration-200 ${
           context.open ? "rotate-0" : "-rotate-90"
         }`}
       />
@@ -86,7 +95,13 @@ export function ReasoningTrigger({
   );
 }
 
-export function ReasoningContent({ children, busy = false }: { children: ReactNode; busy?: boolean }) {
+export function ReasoningContent({
+  children,
+  busy = false,
+}: {
+  children: ReactNode;
+  busy?: boolean;
+}) {
   const context = useReasoningContext();
 
   if (!context.open) {
@@ -94,14 +109,18 @@ export function ReasoningContent({ children, busy = false }: { children: ReactNo
   }
 
   return (
-    <div aria-busy={busy} className="border-t border-amber-200 px-3 pb-3 pt-2">
+    <div aria-busy={busy} className="pb-1 pt-2">
       {children}
     </div>
   );
 }
 
 export function ReasoningText({ children }: { children: ReactNode }) {
-  return <div className="max-h-64 overflow-y-auto pl-5 text-sm text-amber-950">{children}</div>;
+  return (
+    <div className="max-h-64 overflow-y-auto text-sm text-slate-600 dark:text-slate-300">
+      {children}
+    </div>
+  );
 }
 
 type ReasoningContextValue = {

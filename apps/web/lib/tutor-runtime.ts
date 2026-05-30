@@ -33,11 +33,16 @@ interface TutorRuntimeOptions {
   onMode: (mode: TutorMode) => void;
   onStatus?: (status: TutorStreamStatus) => void;
   onError?: (message: string) => void;
-  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
+  onMasteryUpdated?: (
+    conceptId: string,
+    update: { status: MasteryStatus; score: number },
+  ) => void;
 }
 
-interface CreateTutorModelAdapterOptions
-  extends Omit<TutorRuntimeOptions, "history"> {
+interface CreateTutorModelAdapterOptions extends Omit<
+  TutorRuntimeOptions,
+  "history"
+> {
   getConversationId?: () => string | null;
 }
 
@@ -163,8 +168,15 @@ export function createTutorModelAdapter({
       })
         .then(() => queue.close())
         .catch((exc) => {
-          const message = exc instanceof Error ? exc.message : "Tutor chat failed";
+          const message =
+            exc instanceof Error ? exc.message : "Tutor chat failed";
           onError?.(message);
+          // On a stream error the backend rolled back, so we must NOT let
+          // assistant-ui finalize this run as a successful "complete" message
+          // from the last partial snapshot. Yield a terminal result with an
+          // incomplete/error status so the run settles as errored (and stays
+          // regenerate-able) instead of committing a phantom answer (Bug 2 / B1).
+          queue.push(assistantRunError(text, parts, message));
           queue.close();
         });
 
@@ -179,12 +191,18 @@ export function createTutorModelAdapter({
   };
 }
 
-export function latestUserMessageText(messages: ChatModelAdapterRunMessages): string {
-  const latest = [...messages].reverse().find((message) => message.role === "user");
+export function latestUserMessageText(
+  messages: ChatModelAdapterRunMessages,
+): string {
+  const latest = [...messages]
+    .reverse()
+    .find((message) => message.role === "user");
   return latest ? messageText(latest.content).trim() : "";
 }
 
-export function toThreadMessages(history: ConversationHistoryResponse): ThreadMessageLike[] {
+export function toThreadMessages(
+  history: ConversationHistoryResponse,
+): ThreadMessageLike[] {
   return history.messages.map((message) => ({
     id: message.id,
     role: message.role,
@@ -203,7 +221,9 @@ export function toThreadMessages(history: ConversationHistoryResponse): ThreadMe
   }));
 }
 
-function toThreadMessageContent(message: ConversationHistoryResponse["messages"][number]) {
+function toThreadMessageContent(
+  message: ConversationHistoryResponse["messages"][number],
+) {
   if (message.role !== "assistant") {
     return message.content;
   }
@@ -227,6 +247,17 @@ function assistantRunResult(
   return {
     content: assistantMessageContent(text, parts),
     status: { type: "complete", reason: "stop" },
+  };
+}
+
+function assistantRunError(
+  text: string,
+  parts: TutorRuntimePart[],
+  error: string,
+): ChatModelRunResult {
+  return {
+    content: assistantMessageContent(text, parts),
+    status: { type: "incomplete", reason: "error", error },
   };
 }
 
@@ -266,14 +297,20 @@ function assistantMessageContent(
   return content;
 }
 
-function reasoningParts(message: ConversationHistoryResponse["messages"][number]): TutorRuntimePart[] {
+function reasoningParts(
+  message: ConversationHistoryResponse["messages"][number],
+): TutorRuntimePart[] {
   if (message.reasoning_parts?.length) {
     return message.reasoning_parts.flatMap(reasoningPartToRuntimePart);
   }
-  return message.reasoning ? [{ kind: "thinking", text: message.reasoning }] : [];
+  return message.reasoning
+    ? [{ kind: "thinking", text: message.reasoning }]
+    : [];
 }
 
-function reasoningPartToRuntimePart(part: ConversationReasoningPart): TutorRuntimePart[] {
+function reasoningPartToRuntimePart(
+  part: ConversationReasoningPart,
+): TutorRuntimePart[] {
   if (part.kind === "status") {
     return part.status ? [{ kind: "status", status: part.status }] : [];
   }
@@ -293,12 +330,10 @@ function createRunQueue() {
   const items: ChatModelRunResult[] = [];
   let closed = false;
   let failure: unknown;
-  let pending:
-    | {
-        resolve: (value: IteratorResult<ChatModelRunResult>) => void;
-        reject: (reason?: unknown) => void;
-      }
-    | null = null;
+  let pending: {
+    resolve: (value: IteratorResult<ChatModelRunResult>) => void;
+    reject: (reason?: unknown) => void;
+  } | null = null;
 
   return {
     push(item: ChatModelRunResult) {
@@ -353,9 +388,13 @@ function createRunQueue() {
   };
 }
 
-type ChatModelAdapterRunMessages = Parameters<ChatModelAdapter["run"]>[0]["messages"];
+type ChatModelAdapterRunMessages = Parameters<
+  ChatModelAdapter["run"]
+>[0]["messages"];
 
-function messageText(content: ChatModelAdapterRunMessages[number]["content"]): string {
+function messageText(
+  content: ChatModelAdapterRunMessages[number]["content"],
+): string {
   if (typeof content === "string") {
     return content;
   }

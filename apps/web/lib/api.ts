@@ -1,5 +1,6 @@
 import type {
   ConceptDetail,
+  ConceptPrimerRead,
   ConceptSourceLinkRead,
   ConceptSourceListItem,
   ConversationHistoryResponse,
@@ -22,7 +23,8 @@ import type {
   Workspace,
 } from "@/lib/types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 interface WorkspaceListResponse {
   workspaces: Workspace[];
@@ -42,7 +44,15 @@ interface ErrorEnvelope {
 }
 
 interface TutorStreamEvent {
-  type?: "mode" | "status" | "thinking" | "tool_call" | "tool_result" | "token" | "done" | "error";
+  type?:
+    | "mode"
+    | "status"
+    | "thinking"
+    | "tool_call"
+    | "tool_result"
+    | "token"
+    | "done"
+    | "error";
   mode?: TutorMode;
   status?: TutorStreamStatus;
   content?: string;
@@ -73,7 +83,10 @@ export interface StreamTutorChatOptions {
   onToolResult?: (tool: TutorToolEvent) => void;
   onToken: (content: string) => void;
   onDone: (conversationId: string, message: ConversationMessage) => void;
-  onMasteryUpdated?: (conceptId: string, update: { status: MasteryStatus; score: number }) => void;
+  onMasteryUpdated?: (
+    conceptId: string,
+    update: { status: MasteryStatus; score: number },
+  ) => void;
 }
 
 export async function createWorkspace(name: string): Promise<Workspace> {
@@ -84,14 +97,18 @@ export async function createWorkspace(name: string): Promise<Workspace> {
 }
 
 export async function getWorkspace(workspaceId: string): Promise<Workspace> {
-  return request<Workspace>(`/api/workspaces/${workspaceId}`, { method: "GET" });
+  return request<Workspace>(`/api/workspaces/${workspaceId}`, {
+    method: "GET",
+  });
 }
 
 export async function listWorkspaces(): Promise<WorkspaceListResponse> {
   return request<WorkspaceListResponse>("/api/workspaces", { method: "GET" });
 }
 
-export async function listTrails(workspaceId: string): Promise<TrailListResponse> {
+export async function listTrails(
+  workspaceId: string,
+): Promise<TrailListResponse> {
   return request<TrailListResponse>(`/api/workspaces/${workspaceId}/trails`, {
     method: "GET",
   });
@@ -115,32 +132,53 @@ export async function generateTrail(
         },
       );
       if (response.ok && response.body) {
-        return await readTrailGenerationStream(response, onProgress, onDelta, onThinking);
+        return await readTrailGenerationStream(
+          response,
+          onProgress,
+          onDelta,
+          onThinking,
+        );
       }
-      onProgress?.("Streaming progress unavailable; waiting for final response...");
+      onProgress?.(
+        "Streaming progress unavailable; waiting for final response...",
+      );
     } catch {
-      onProgress?.("Streaming progress unavailable; waiting for final response...");
+      onProgress?.(
+        "Streaming progress unavailable; waiting for final response...",
+      );
     }
   }
-  return request<TrailGenerateResponse>(`/api/workspaces/${workspaceId}/trails/generate`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  return request<TrailGenerateResponse>(
+    `/api/workspaces/${workspaceId}/trails/generate`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
-export async function getTrail(workspaceId: string, trailId: string): Promise<TrailDetail> {
-  return request<TrailDetail>(`/api/workspaces/${workspaceId}/trails/${trailId}`, {
-    method: "GET",
-  });
+export async function getTrail(
+  workspaceId: string,
+  trailId: string,
+): Promise<TrailDetail> {
+  return request<TrailDetail>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}`,
+    {
+      method: "GET",
+    },
+  );
 }
 
 export async function getTrailNext(
   workspaceId: string,
   trailId: string,
 ): Promise<NextConceptResponse> {
-  return request<NextConceptResponse>(`/api/workspaces/${workspaceId}/trails/${trailId}/next`, {
-    method: "GET",
-  });
+  return request<NextConceptResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/next`,
+    {
+      method: "GET",
+    },
+  );
 }
 
 export async function generateLevelUpQuiz(
@@ -199,7 +237,10 @@ export async function gradePracticeQuiz(
   );
 }
 
-export async function deleteTrail(workspaceId: string, trailId: string): Promise<void> {
+export async function deleteTrail(
+  workspaceId: string,
+  trailId: string,
+): Promise<void> {
   await request<void>(`/api/workspaces/${workspaceId}/trails/${trailId}`, {
     method: "DELETE",
   });
@@ -216,6 +257,64 @@ export async function getConcept(
   );
 }
 
+export async function generateConceptPrimer(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  forceNew = false,
+): Promise<ConceptPrimerRead> {
+  return request<ConceptPrimerRead>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/primer`,
+    {
+      method: "POST",
+      body: JSON.stringify(forceNew ? { force_new: true } : {}),
+    },
+  );
+}
+
+export interface StreamConceptPrimerCallbacks {
+  onStatus?: (status: string) => void;
+  onThinking?: (chunk: string) => void;
+  onToken?: (content: string) => void;
+  onDone: (primer: ConceptPrimerRead) => void;
+  onError?: (message: string) => void;
+}
+
+// Streams the concept primer over SSE. Mirrors the streamTutorChat /
+// readTutorStream structure: a `done` event carries the authoritative
+// ConceptPrimerRead, while `thinking` (reasoning) and `token` (output) events
+// are a cosmetic live preview only. A cached primer arrives as a single `done`
+// event with no preview events.
+export async function streamConceptPrimer(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  callbacks: StreamConceptPrimerCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/primer/stream`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+      signal,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  if (!response.body) {
+    throw new Error("Primer stream is unavailable");
+  }
+
+  const sawDone = await readConceptPrimerStream(response.body, callbacks);
+  if (!sawDone) {
+    throw new Error("Primer stream ended before completion");
+  }
+}
+
 export async function uploadSource(
   workspaceId: string,
   file: File,
@@ -226,10 +325,13 @@ export async function uploadSource(
   if (title?.trim()) {
     formData.append("title", title.trim());
   }
-  return request<SourceUploadResponse>(`/api/workspaces/${workspaceId}/sources/upload`, {
-    method: "POST",
-    body: formData,
-  });
+  return request<SourceUploadResponse>(
+    `/api/workspaces/${workspaceId}/sources/upload`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
 }
 
 export async function linkSourceToConcept(
@@ -480,7 +582,10 @@ function handleTutorStreamEvent(
     return false;
   }
   if (payload.type === "done") {
-    if (typeof payload.conversation_id === "string" && isConversationMessage(payload.message)) {
+    if (
+      typeof payload.conversation_id === "string" &&
+      isConversationMessage(payload.message)
+    ) {
       callbacks.onDone(payload.conversation_id, payload.message);
       if (payload.mastery_update) {
         callbacks.onMasteryUpdated?.(payload.mastery_update.concept_id, {
@@ -498,7 +603,9 @@ function handleTutorStreamEvent(
   return false;
 }
 
-function isConversationMessage(value: TutorStreamEvent["message"]): value is ConversationMessage {
+function isConversationMessage(
+  value: TutorStreamEvent["message"],
+): value is ConversationMessage {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -508,6 +615,93 @@ function isConversationMessage(value: TutorStreamEvent["message"]): value is Con
     "reasoning" in value &&
     "created_at" in value
   );
+}
+
+interface ConceptPrimerStreamEvent {
+  type?: "status" | "thinking" | "token" | "done" | "error";
+  status?: string;
+  content?: string;
+  primer?: ConceptPrimerRead;
+  code?: string;
+  message?: string;
+  error?: { message?: string };
+  detail?: unknown;
+}
+
+async function readConceptPrimerStream(
+  body: ReadableStream<Uint8Array>,
+  callbacks: StreamConceptPrimerCallbacks,
+): Promise<boolean> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let sawDone = false;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      sawDone = handleConceptPrimerStreamEvent(chunk, callbacks) || sawDone;
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    sawDone = handleConceptPrimerStreamEvent(buffer, callbacks) || sawDone;
+  }
+  return sawDone;
+}
+
+function handleConceptPrimerStreamEvent(
+  chunk: string,
+  callbacks: StreamConceptPrimerCallbacks,
+): boolean {
+  const dataLines = chunk
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  const rawData = dataLines.join("\n");
+  if (!rawData) {
+    return false;
+  }
+
+  const payload = JSON.parse(rawData) as ConceptPrimerStreamEvent;
+  if (payload.type === "status") {
+    if (payload.status) {
+      callbacks.onStatus?.(payload.status);
+    }
+    return false;
+  }
+  if (payload.type === "thinking") {
+    if (typeof payload.content === "string") {
+      callbacks.onThinking?.(payload.content);
+    }
+    return false;
+  }
+  if (payload.type === "token") {
+    if (typeof payload.content === "string") {
+      callbacks.onToken?.(payload.content);
+    }
+    return false;
+  }
+  if (payload.type === "done") {
+    if (payload.primer) {
+      callbacks.onDone(payload.primer);
+      return true;
+    }
+    throw new Error("Primer stream returned a malformed completion event");
+  }
+  if (payload.type === "error") {
+    const message = streamErrorMessage(payload as TutorStreamEvent);
+    callbacks.onError?.(message);
+    throw new Error(message);
+  }
+  return false;
 }
 
 function streamErrorMessage(payload: TutorStreamEvent): string {

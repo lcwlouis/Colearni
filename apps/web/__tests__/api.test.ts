@@ -5,6 +5,7 @@ import {
   getTrailNext,
   linkSourceToConcept,
   listTrails,
+  streamConceptPrimer,
   streamTutorChat,
   uploadSource,
 } from "@/lib/api";
@@ -161,10 +162,20 @@ describe("api client", () => {
       new Response(
         new ReadableStream({
           start(controller) {
-            controller.enqueue(encoder.encode('data: {"type":"mode","mode":"direct"}\n\n'));
-            controller.enqueue(encoder.encode('data: {"type":"thinking","content":"Let me think."}\n\n'));
-            controller.enqueue(encoder.encode('data: {"type":"token","content":"Hello"}\n\n'));
-            controller.enqueue(encoder.encode('data: {"type":"token","content":" there"}\n\n'));
+            controller.enqueue(
+              encoder.encode('data: {"type":"mode","mode":"direct"}\n\n'),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"thinking","content":"Let me think."}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode('data: {"type":"token","content":"Hello"}\n\n'),
+            );
+            controller.enqueue(
+              encoder.encode('data: {"type":"token","content":" there"}\n\n'),
+            );
             controller.enqueue(
               encoder.encode(
                 'data: {"type":"done","conversation_id":"conversation-1","message":{"id":"message-1","role":"assistant","content":"Hello there","reasoning":"Let me think.","mode":"direct","created_at":"2026-01-01T00:00:00Z"}}\n\n',
@@ -198,7 +209,11 @@ describe("api client", () => {
     expect(tokens).toEqual(["Hello", " there"]);
     expect(done).toHaveBeenCalledWith(
       "conversation-1",
-      expect.objectContaining({ content: "Hello there", reasoning: "Let me think.", mode: "direct" }),
+      expect.objectContaining({
+        content: "Hello there",
+        reasoning: "Let me think.",
+        mode: "direct",
+      }),
     );
   });
 
@@ -247,7 +262,11 @@ describe("api client", () => {
 
     expect(calls).toEqual([{ name: "get_tutor_instructions", mode: "direct" }]);
     expect(results).toEqual([
-      { name: "get_tutor_instructions", mode: "direct", result: "Use direct mode." },
+      {
+        name: "get_tutor_instructions",
+        mode: "direct",
+        result: "Use direct mode.",
+      },
     ]);
   });
 
@@ -257,8 +276,14 @@ describe("api client", () => {
       new Response(
         new ReadableStream({
           start(controller) {
-            controller.enqueue(encoder.encode('data: {"type":"status","status":"thinking"}\n\n'));
-            controller.enqueue(encoder.encode('data: {"type":"status","status":"calling_tool"}\n\n'));
+            controller.enqueue(
+              encoder.encode('data: {"type":"status","status":"thinking"}\n\n'),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'data: {"type":"status","status":"calling_tool"}\n\n',
+              ),
+            );
             controller.enqueue(
               encoder.encode(
                 'data: {"type":"done","conversation_id":"conversation-1","message":{"id":"message-1","role":"assistant","content":"Hi","reasoning":null,"mode":"socratic","created_at":"2026-01-01T00:00:00Z"}}\n\n',
@@ -319,7 +344,10 @@ describe("api client", () => {
       onMasteryUpdated,
     });
 
-    expect(onMasteryUpdated).toHaveBeenCalledWith("concept-1", { status: "learning", score: 0.0 });
+    expect(onMasteryUpdated).toHaveBeenCalledWith("concept-1", {
+      status: "learning",
+      score: 0.0,
+    });
   });
 
   test("streamTutorChat does not call onMasteryUpdated when done event lacks mastery_update", async () => {
@@ -364,7 +392,9 @@ describe("api client", () => {
         new ReadableStream({
           start(controller) {
             controller.enqueue(
-              encoder.encode('data: {"type":"error","code":"llm_error","message":"Generation failed"}\n\n'),
+              encoder.encode(
+                'data: {"type":"error","code":"llm_error","message":"Generation failed"}\n\n',
+              ),
             );
             controller.close();
           },
@@ -385,6 +415,62 @@ describe("api client", () => {
         onDone: vi.fn(),
       }),
     ).rejects.toThrow("Generation failed");
+  });
+
+  test("streamConceptPrimer surfaces thinking, token, and done events", async () => {
+    const encoder = new TextEncoder();
+    const primer = {
+      overview: "Vectors have magnitude and direction.",
+      key_terms: [{ term: "Magnitude", definition: "The length of a vector." }],
+      sample_questions: [],
+      version: 2,
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                'event: status\ndata: {"type":"status","status":"preparing"}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'event: thinking\ndata: {"type":"thinking","content":"Reasoning first..."}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                'event: token\ndata: {"type":"token","content":"{\\"over"}\n\n',
+              ),
+            );
+            controller.enqueue(
+              encoder.encode(
+                `event: done\ndata: ${JSON.stringify({ type: "done", primer })}\n\n`,
+              ),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const statuses: string[] = [];
+    const thinking: string[] = [];
+    const tokens: string[] = [];
+    const done = vi.fn();
+
+    await streamConceptPrimer("workspace-1", "trail-1", "concept-1", {
+      onStatus: (status) => statuses.push(status),
+      onThinking: (chunk) => thinking.push(chunk),
+      onToken: (token) => tokens.push(token),
+      onDone: done,
+    });
+
+    expect(statuses).toEqual(["preparing"]);
+    expect(thinking).toEqual(["Reasoning first..."]);
+    expect(tokens).toEqual(['{"over']);
+    expect(done).toHaveBeenCalledWith(primer);
   });
 
   test("uploadSource posts multipart form data without JSON content type", async () => {
@@ -445,7 +531,12 @@ describe("api client", () => {
       ),
     );
 
-    await linkSourceToConcept("workspace-1", "source-1", "concept-1", "primary");
+    await linkSourceToConcept(
+      "workspace-1",
+      "source-1",
+      "concept-1",
+      "primary",
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/workspaces/workspace-1/sources/source-1/links",

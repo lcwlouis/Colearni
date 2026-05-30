@@ -25,7 +25,6 @@ let runtimeOptions: {
       | "explore"
       | "free_explore",
   ) => void;
-  onStatus?: (status: string | null) => void;
   onError?: (message: string) => void;
 } | null = null;
 const sendMock = vi.fn();
@@ -375,8 +374,8 @@ describe("TutorPanel", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "Thread options" }),
     );
-    expect(screen.getByText("Level: topic")).toBeInTheDocument();
-    expect(screen.getByText("Bloom: understand")).toBeInTheDocument();
+    expect(screen.getByText("Level: Topic")).toBeInTheDocument();
+    expect(screen.getByText("Bloom: Understand")).toBeInTheDocument();
   });
 
   test("mode badge updates when runtime reports mode", async () => {
@@ -387,18 +386,7 @@ describe("TutorPanel", () => {
       runtimeOptions?.onMode("direct");
     });
 
-    expect(await screen.findByText("direct")).toBeInTheDocument();
-  });
-
-  test("header status updates when runtime reports status", async () => {
-    renderPanel();
-    await screen.findByText("waiting");
-
-    act(() => {
-      runtimeOptions?.onStatus?.("calling_tool");
-    });
-
-    expect(await screen.findByText("Calling tool")).toBeInTheDocument();
+    expect(await screen.findByText("Direct")).toBeInTheDocument();
   });
 
   test("token chunks appear in chat UI", async () => {
@@ -614,8 +602,7 @@ describe("TutorPanel", () => {
       await screen.findByRole("button", { name: "Show reasoning summary" }),
     );
 
-    expect(await screen.findByText("Reasoning summary")).toBeInTheDocument();
-    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(await screen.findByText("Thinking")).toBeInTheDocument();
     expect(
       screen.getByText("This is the first safe sentence."),
     ).toBeInTheDocument();
@@ -669,6 +656,123 @@ describe("TutorPanel", () => {
     expect(
       screen.queryByText("Found the overview section."),
     ).not.toBeInTheDocument();
+  });
+
+  test("reasoning indicator pulses while reasoning before any answer text", async () => {
+    window.localStorage.setItem("colearni.reasoningView", "full");
+    mockMessages = [
+      {
+        id: "assistant-reasoning-running",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-thinking",
+            data: { text: "Still working it out." },
+          },
+        ],
+        // Run is in progress and no visible answer has started yet.
+        status: { type: "running" },
+      },
+    ];
+
+    renderPanel();
+
+    expect(await screen.findByText("streaming")).toBeInTheDocument();
+  });
+
+  test("reasoning indicator stops once the answer has started or the run is done", async () => {
+    window.localStorage.setItem("colearni.reasoningView", "full");
+    mockMessages = [
+      {
+        id: "assistant-running-with-answer",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-thinking",
+            data: { text: "Done reasoning." },
+          },
+          { type: "text", text: "Here is the answer." },
+        ],
+        // Even while the run is still marked running, a visible answer means the
+        // chain-of-thought is finished and the indicator must not keep pulsing.
+        status: { type: "running" },
+      },
+    ];
+
+    renderPanel();
+
+    expect(await screen.findByText("Here is the answer.")).toBeInTheDocument();
+    expect(screen.queryByText("streaming")).not.toBeInTheDocument();
+  });
+
+  test("completed full-view status steps render a static (non-pulsing) dot", async () => {
+    window.localStorage.setItem("colearni.reasoningView", "full");
+    mockMessages = [
+      {
+        id: "assistant-completed-status",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-status",
+            data: { status: "selecting_mode" },
+          },
+          {
+            type: "data",
+            name: "tutor-status",
+            data: { status: "calling_tool" },
+          },
+          { type: "text", text: "Here is the final answer." },
+        ],
+        // The whole run has finished.
+        status: { type: "complete" },
+      },
+    ];
+
+    renderPanel();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Show reasoning" }),
+    );
+
+    // Each status step still renders its label...
+    const firstStep = await screen.findByText("Choosing answering mode");
+    const secondStep = await screen.findByText("Calling tool");
+
+    // ...but its indicator dot must be static once the run is complete (Bug 1).
+    for (const step of [firstStep, secondStep]) {
+      const dot = step.querySelector("span");
+      expect(dot?.className).toContain("bg-blue-500");
+      expect(dot?.className).not.toContain("animate-pulse");
+    }
+
+    // No group-level streaming/active pulse remains either.
+    expect(screen.queryByText("streaming")).not.toBeInTheDocument();
+  });
+
+  test("summary view surfaces live status progress during reasoning", async () => {
+    mockMessages = [
+      {
+        id: "assistant-status-progress",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-status",
+            data: { status: "calling_tool" },
+          },
+        ],
+        status: { type: "running" },
+      },
+    ];
+
+    renderPanel();
+
+    // A running reasoning group auto-expands, so the live status is visible
+    // without toggling the trigger.
+    expect(await screen.findByText("Calling tool")).toBeInTheDocument();
   });
 
   test("renders LaTeX math in assistant messages", async () => {
@@ -764,7 +868,7 @@ describe("TutorPanel", () => {
         "concept-1",
       );
     });
-    expect(await screen.findByText("repair")).toBeInTheDocument();
+    expect(await screen.findByText("Repair")).toBeInTheDocument();
   });
 
   test("send button is present and wired through assistant-ui composer mock", async () => {
