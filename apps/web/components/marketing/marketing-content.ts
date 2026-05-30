@@ -5,6 +5,11 @@ export const NAV_LINKS = [
   { href: "/contact", label: "Contact" },
 ] as const;
 
+export const LEGAL_LINKS = [
+  { href: "/terms", label: "Terms & Conditions" },
+  { href: "/privacy", label: "Privacy Policy" },
+] as const;
+
 export const CONTACT_EMAIL = "hello@colearni.app";
 export const GITHUB_URL = "https://github.com/colearni";
 
@@ -12,7 +17,7 @@ export const HOW_IT_WORKS_STEPS = [
   {
     n: "01",
     title: "Name what you want to learn",
-    body: "Describe a topic and a goal. CoLearni turns it into a Trail — a learning project scoped to where you are now.",
+    body: "Describe a topic and a goal. Colearni turns it into a Trail — a learning project scoped to where you are now.",
   },
   {
     n: "02",
@@ -40,7 +45,7 @@ export const PEDAGOGY_SECTIONS = [
   {
     eyebrow: "The depth dial",
     title: "Bloom's Taxonomy as your target depth",
-    body: `Every Trail has a target depth — from remembering and understanding up to analysing, evaluating, and creating. CoLearni aims its questions and quizzes at the level you chose, so “learn it” means the right thing for your goal.`,
+    body: `Every Trail has a target depth — from remembering and understanding up to analysing, evaluating, and creating. Colearni aims its questions and quizzes at the level you chose, so “learn it” means the right thing for your goal.`,
   },
   {
     eyebrow: "How the tutor talks",
@@ -67,7 +72,7 @@ export const PEDAGOGY_SECTIONS = [
 export const PRICING_TIERS = [
   {
     name: "Self-host / Open source",
-    pitch: "Run CoLearni on your own machine or server. Bring your own LLM key.",
+    pitch: "Run Colearni on your own machine or server. Bring your own LLM key.",
     points: ["Local-first", "Your data stays yours", "Source-available"],
   },
   {
