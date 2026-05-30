@@ -365,7 +365,7 @@ export default function TrailsPage() {
       <header className="flex items-center justify-between border-b border-slate-200 pb-6">
         <div>
           <Link
-            href="/"
+            href="/dashboard"
             className="text-sm font-medium text-slate-500 hover:text-slate-900"
           >
             CoLearni

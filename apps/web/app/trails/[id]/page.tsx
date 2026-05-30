@@ -134,7 +134,7 @@ export default function TrailPage() {
     return (
       <main className="mx-auto max-w-3xl p-6">
         <Link
-          href="/"
+          href="/dashboard"
           className="text-sm font-medium text-slate-500 hover:text-slate-900"
         >
           CoLearni
@@ -151,7 +151,7 @@ export default function TrailPage() {
       <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
         <div>
           <Link
-            href="/"
+            href="/dashboard"
             className="text-xs font-medium text-slate-500 hover:text-slate-900"
           >
             CoLearni

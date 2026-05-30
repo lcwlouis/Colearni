@@ -90,7 +90,7 @@ function nextConcept(overrides: Partial<NextConceptResponse> = {}): NextConceptR
 }
 
 async function loadPage() {
-  const mod = await import("@/app/page");
+  const mod = await import("@/app/dashboard/page");
   return mod.default;
 }
 
