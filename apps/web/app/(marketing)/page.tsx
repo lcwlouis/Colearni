@@ -34,7 +34,7 @@ export default function MarketingHome() {
               are.
             </h1>
             <p className="mt-5 max-w-md text-lg leading-7 text-[var(--mk-muted)]">
-              CoLearni turns a goal into a concept graph, then coaches you
+              Colearni turns a goal into a concept graph, then coaches you
               through it one idea at a time — Socratic questions, real
               mastery, no busywork.
             </p>

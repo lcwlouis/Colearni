@@ -20,7 +20,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "CoLearni",
+  title: "Colearni",
   description: "Graph-first Socratic learning workspace",
 };
 

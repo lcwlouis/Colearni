@@ -368,7 +368,7 @@ export default function TrailsPage() {
             href="/dashboard"
             className="text-sm font-medium text-slate-500 hover:text-slate-900"
           >
-            CoLearni
+            Colearni
           </Link>
           <h1 className="mt-2 text-2xl font-semibold">Trails</h1>
         </div>

@@ -11,7 +11,7 @@ export function MarketingNav() {
           href="/"
           className="font-display text-xl font-semibold tracking-tight text-[var(--mk-fg)]"
         >
-          CoLearni
+          Colearni
         </Link>
         <div className="hidden items-center gap-7 md:flex">
           {NAV_LINKS.map((link) => (

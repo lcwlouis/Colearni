@@ -137,7 +137,7 @@ export default function TrailPage() {
           href="/dashboard"
           className="text-sm font-medium text-slate-500 hover:text-slate-900"
         >
-          CoLearni
+          Colearni
         </Link>
         <div className="mt-6 rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error || "Trail not found"}
@@ -154,7 +154,7 @@ export default function TrailPage() {
             href="/dashboard"
             className="text-xs font-medium text-slate-500 hover:text-slate-900"
           >
-            CoLearni
+            Colearni
           </Link>
           <h1 className="text-lg font-semibold text-slate-950">
             {detail.trail.title}

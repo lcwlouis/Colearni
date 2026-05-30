@@ -160,7 +160,7 @@ export default function Home() {
       <header className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-normal text-slate-950">
-            CoLearni
+            Colearni
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
             Continue a Trail, see your progress, and learn one concept at a
@@ -245,7 +245,7 @@ function EmptyState() {
     >
       <p className="font-medium text-slate-900">No Trails yet.</p>
       <p className="mt-2">
-        Create your first Trail to start learning. CoLearni will build a concept
+        Create your first Trail to start learning. Colearni will build a concept
         graph and a Socratic tutor for it.
       </p>
       <Link
