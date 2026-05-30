@@ -61,11 +61,14 @@ Dashboard, Learn/Inspect graph UX, source ingestion, retrieval tools, provider-n
 14. Retrieval + context tooling
 15. Guided graph navigation / recommended next concept
 16. Conversation summaries + learner state
-17. Tutor-suggested quiz cards
-18. Deferred visualiser / artifact templates
-19. Demo polish/user testing
-20. Deployment
-21. SaaS prep
+17. Onboarding & cold-start pedagogy
+18. Tutor-suggested quiz cards
+19. Deferred visualiser / artifact templates
+20. Demo polish/user testing
+21. Safety + content guardrails (layered, post-core)
+22. Product / marketing site
+23. Deployment
+24. SaaS prep
 
 Do not start with PDF ingestion, SaaS billing/auth, or a public marketplace.
 
@@ -87,7 +90,7 @@ Implementation overlay:
 
 ## Current Build Snapshot
 
-Last updated: 2026-05-25.
+Last updated: 2026-05-29.
 
 Implemented:
 
@@ -106,14 +109,19 @@ Implemented:
 - Learning dashboard home with Continue Learning, recent/older Trail sections, delete confirmation, per-Trail progress summaries, and backend-backed recommended-next UI.
 - Per-Trail graph Learn/Inspect mode split with `?concept=<id>` deep-link opening, neighbourhood focus in Learn Mode, inspect-only graph controls and edge-label toggle, mastery-aware concept-panel CTAs, and mobile concept sheet refinement.
 - Source ingestion foundation: workspace-scoped private upload API, local private object storage root, source revision records with immutable identity fields and mutable parser status/error metadata, concept-source linking API, minimal concept-panel upload/link UI, and export/import safety regressions for revision artifacts.
+- Parser pipeline (Phase 10 / Consolidation Item 2): PDF (pdfplumber), markdown, and plaintext parsing into canonical markdown with content-type + extension resolution, heading-aware chunking with line-anchored offsets, `SourceChunk` storage, best-effort embeddings (pgvector column sized from `EMBEDDING_DIM`, ILIKE fallback when absent/disabled), and `trail_id`-driven auto-linking of uploaded sources to concepts.
+- Retrieval tooling (Phase 11 / Consolidation Item 3): multi-turn LLM tool-calling loop with per-turn budget, parallel execution, dedupe, and workspace/concept scoping, exposing `search_sources`, `read_document_section`, `get_concept_sources`, and `get_graph_neighbourhood`.
 - Deterministic backend next-concept recommendation service and per-Trail API endpoint.
 
 Not implemented yet:
 
 - True per-message citation/source parts and quote support.
-- Automatic conversation summarisation and full provider-native tool execution loops beyond the current tutor compatibility adapter.
+- Automatic conversation summarisation.
 - Automated research-agent search, real hydration fetching/indexing, durable generation jobs, dark mode, deployment, auth, and SaaS features.
-- Parsing into canonical text, chunks, embeddings/indexes, controlled retrieval tools, guided graph focus controls, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
+- Guided graph focus controls, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
+- Content-safety guardrails: trail-generation topic gate, tutor runtime scope/refusal hardening, runtime input/output moderation, and a child-safe default mode (see Phase 16.5).
+- Onboarding & cold-start pedagogy: concept primers + key-terms glossary, worked-example-first tutor opening, suggested graph entry point, and prior-knowledge capture into learner state (see Phase 13.5).
+- Public product / marketing site with fake login (see Phase 16.6).
 
 ## Phase 0: Foundation Cleanup
 
@@ -740,7 +748,7 @@ Current implementation note:
 
 ## Phase 10: Source Ingestion MVP
 
-Status: foundation slice and concept-source linking implemented. Parser pipeline, chunks, embeddings, and full-text indexes remain deferred.
+Status: foundation slice, concept-source linking, and the parser pipeline (PDF/markdown/plaintext parsing, heading-aware chunking, best-effort embeddings, and `trail_id` auto-linking) are implemented (see `docs/CONSOLIDATION_PLAN.md` Item 2). Durable background ingestion jobs remain deferred.
 
 Goal: ingest common learner documents into private, provenance-aware source records that can later power controlled retrieval.
 
@@ -814,8 +822,7 @@ Non-goals:
 
 ## Phase 11: Retrieval + Context Tooling
 
-Status: retrieval service and tool definitions implemented.
-LLM tool calling loop, open_source_chunk, and full-text/vector search remain deferred.
+Status: retrieval service, tool definitions, and the multi-turn LLM tool-calling loop are implemented (vector search with pgvector plus ILIKE fallback; `search_sources`, `read_document_section`, `get_concept_sources`, `get_graph_neighbourhood`; see `docs/CONSOLIDATION_PLAN.md` Item 3 and `docs/CURRENT_VARIANT.md`). `open_source_chunk` is superseded by `read_document_section` and remains deferred.
 
 Goal: provide scoped, budgeted retrieval tools that support tutor grounding without whole-workspace search by default.
 
@@ -980,6 +987,68 @@ Non-goals:
 - No global cross-workspace memory.
 - No opaque profile updates outside explicit learner-state services.
 
+## Phase 13.5: Onboarding & Cold-Start Pedagogy
+
+Goal: fix the "pure Socratic from a cold start feels painful, and the learner does not know what they do not know" problem by adding orientation before interrogation. Socratic questioning stays the steady-state teaching mode, but the cold-start experience leads with brief teaching. The primary audience is intentional adult and young-adult learners, so the tutor should explain generously as teaching while still not degrading into an answer/cheatsheet machine.
+
+Pedagogy framing: this phase operationalizes "I do -> we do -> you do" (gradual release of responsibility) and scaffolding within the learner's zone of proximal development. Exposition is allowed and encouraged at the start of a concept; Socratic questioning takes over once the learner has the raw material to reason with.
+
+Sub-phases:
+
+13.5a — Concept primers + key-terms glossary (independent; build first):
+
+Status: backend implemented. `concept_primer.v1.md` prompt + `ConceptPrimerOutput`/`ConceptPrimerRead` schemas + idempotent per-concept `generate_concept_primer` service (cached in `ConceptNode.metadata_json["primer"]`, `force_new` to regenerate) + `POST .../concepts/{concept_id}/primer` route + concept-detail wiring (`primer` field) + tests. See `docs/CURRENT_VARIANT.md` → Concept Primer Variant. Background pre-generation loop and frontend remain out of scope.
+- Add a versioned `concept_primer` prompt that, given a concept (title, concept level, Bloom target, mastery labels) plus the Trail topic/goal, returns a short overview paragraph and 3-6 key terms with one-line definitions.
+- Generate primers in a separate pass after graph generation, NOT inlined into `trail_generation`. Keeping graph JSON lean preserves generation reliability on smaller/local models, which struggle with large structured outputs and parallel tool calls.
+- Provide an idempotent per-concept service that generates and caches the primer on the concept (e.g. `metadata_json` or dedicated columns). The same service supports both lazy generation on first concept open and a bounded background pre-generation pass, so the eventual pre-generate-vs-lazy choice is a calling-side decision, not a rewrite.
+- The concept detail API returns the primer/glossary when present.
+- Primers and glossary are abstract concept-level content (not source-derived), so they are eligible for Trail Pack export.
+
+13.5b — Worked-example-first opening move:
+- On a `not_started` or `learning` concept, the tutor's opening turn briefly teaches (frame the concept plus one worked example) before shifting into Socratic questioning.
+- Direct explanation remains allowed as teaching, but full answer-dumping stays mastery-gated. After any exposition the tutor loops back to a short check.
+
+13.5c — Suggested graph entry point (suggestion only):
+- On a fresh Trail with nothing started, surface a recommended starting concept using the existing deterministic recommender (`services/recommendation.py` / the `/next` endpoint), clearly framed as a suggestion.
+- The learner can still start from any node; the suggestion never forces a path.
+
+13.5d — Prior-knowledge capture into learner state:
+- Add an optional prior-knowledge / self-rated familiarity field to the create-Trail input.
+- Store it as part of mutable learner state (Phase 13). The tutor updates it over time through an owned tool, so the exposition-vs-Socratic ramp adapts as the learner demonstrates understanding.
+- Depends on Phase 13 learner state. If Phase 13 is not yet implemented, store the initial value as a simple field and migrate it into learner state when Phase 13 lands.
+
+Requirements:
+
+- Graph generation stays lean; primer generation is a separate, bounded pass with a short token budget and low reasoning effort.
+- Primer generation is idempotent and cached; repeated requests for the same concept do not re-call the model.
+- The suggested entry point is advisory only and never blocks free navigation.
+- Exposition must not become unlimited answer-dumping; mastery gating on full direct mode is preserved.
+
+PR-sized breakdown:
+
+- 13.5a: `concept_primer` prompt + schema + idempotent per-concept generate/cache service + concept-detail wiring + tests.
+- 13.5b: tutor opening-move prompt/behaviour change + tests.
+- 13.5c: fresh-Trail suggested entry point in the recommender/UI.
+- 13.5d: create-Trail prior-knowledge field + learner-state integration.
+
+Tests:
+
+- Primer generation returns a valid overview + key terms and is cached idempotently (fake generator, no live model).
+- Concept detail returns the primer/glossary when present and omits it cleanly when absent.
+- The tutor opens a fresh concept with a brief teach-then-question turn rather than a cold question.
+- A fresh Trail surfaces a suggested entry concept without restricting navigation.
+- Primers and glossary are eligible for export but never leak source-derived content.
+
+Acceptance criteria:
+
+- A learner opening a brand-new Trail gets an orienting starting point, a concept primer/glossary, and a tutor that teaches before it questions, without the experience feeling like an interrogation or a cheatsheet.
+
+Non-goals:
+
+- No inlining of primers into the graph-generation call.
+- No removal of mastery gating on full direct-answer mode.
+- No forced learning path; the entry point stays a suggestion.
+
 ## Phase 14: Tutor-Suggested Quiz Cards
 
 Goal: let the tutor suggest an appropriate quiz card without inline-generating or grading it.
@@ -1137,6 +1206,117 @@ Non-goals:
 
 - No broad SaaS marketplace work in demo polish.
 - No heavy gamification beyond small UX experiments validated by user testing.
+
+## Phase 16.5: Safety + Content Guardrails
+
+Goal: add layered content-safety defenses after the core learning loop works. The primary audience is adults and young adults learning intentionally, but the system must assume an unknown user who may be a minor, so it should be safe by default.
+
+Sequencing note: this phase is deliberately placed after the core loop and demo polish so safety iteration does not inflate LLM token/test cost during earlier product iteration. Within the phase, the cheapest, highest-leverage control (trail-generation topic gating) lands first; per-turn runtime moderation and the child-safe default follow as separate steps. This phase must land before the product is exposed to real external users in Phase 17.
+
+Layered scope (in build order):
+
+1. Trail-generation topic gate (first, cheapest):
+   - Classify the `topic`/`goal` at trail creation, before graph generation.
+   - Refuse to generate Trails whose primary intent is disallowed (e.g. explicit sexual content, self-harm methods, weapons/explosives instructions, illicit drug synthesis).
+   - Allow legitimate sensitive educational topics (e.g. sex education, history of conflict) but tag the Trail with a `sensitivity` flag that tightens downstream tutor behaviour.
+   - One classification call; fail closed to a clear, non-judgmental refusal message.
+   - Rationale: a learner in a C++ or Linear Algebra Trail has no in-scope path to unsafe content, so gating intent at creation removes most risk cheaply.
+
+2. Tutor runtime scope + refusal (cheap; prompt + structural):
+   - Reinforce that the tutor is bound to the current concept; off-topic unsafe requests are redirected back to learning, never fulfilled.
+   - Provide a safe refusal/redirect template that never exposes internal policy.
+   - Sensitivity-flagged Trails use stricter tutor instructions.
+
+3. Runtime input/output moderation gate (deferred sub-step):
+   - Moderate learner input and assistant output around the SSE stream in `backend/app/services/conversations.py`.
+   - Use a provider/hosted moderation classifier kept model-agnostic (OpenRouter-hosted classifier, OpenAI moderation endpoint, or LlamaGuard).
+   - On a hit: stop the stream, emit a safe refusal event, and log the event. No partial unsafe tokens are emitted.
+
+4. Child-safe default mode (deferred sub-step):
+   - Default to a safe profile that assumes a possibly-minor user.
+   - A future adult/account-based mode (post-auth, Phase 18) may relax it.
+
+5. Documentation + red-team tests:
+   - Add `docs/SAFETY.md` capturing the policy, the layered design, and the disallowed/allowed-sensitive matrix.
+   - Add a regression battery of red-team prompts that must refuse, mirroring the rigor of the export-safety tests.
+
+Requirements:
+
+- Safety controls must not depend on prompt instructions alone.
+- Sensitive-but-educational topics are supported, not blanket-banned.
+- Refusals are clear and suggest a safe next action.
+- Moderation and classifier failures fail closed.
+- Internal safety policy and gating logic are never revealed in learner-visible output.
+
+PR-sized breakdown:
+
+- Trail-generation topic gate + sensitivity flag + tests.
+- Tutor scope/refusal prompt hardening + sensitivity plumbing.
+- Runtime moderation gate (separate PR).
+- Child-safe default + `docs/SAFETY.md` + red-team test battery.
+
+Tests:
+
+- A disallowed Trail topic is refused at generation.
+- A legitimate sensitive topic generates but is sensitivity-flagged.
+- The tutor redirects off-topic unsafe requests within an otherwise normal Trail.
+- The moderation gate stops the stream and emits a safe refusal on flagged output.
+- The red-team prompt battery refuses across tutor modes.
+
+Acceptance criteria:
+
+- A learner cannot easily drive the tutor into disallowed content, the system degrades safely under jailbreak attempts, and legitimate sensitive educational Trails still work.
+
+Non-goals:
+
+- No full SaaS moderation workflow or human review queue (Phase 18).
+- No age verification or account-based mode switching before auth exists.
+
+## Phase 16.6: Product / Marketing Site
+
+Goal: a public-facing product/marketing site alongside the app, so prospective users understand what CoLearni is before they enter the workspace.
+
+Implementation scope:
+
+- Marketing routes in the existing Next.js frontend: Home, How it works, Pedagogy, Pricing, Contact.
+- The Pedagogy tab tells the real teaching story: Bloom's Taxonomy as the target-depth dial, plus Socratic questioning, Bloom mastery learning, active recall/retrieval practice, and scaffolding along a prerequisite graph.
+- Fake login: a login entry in the top-right header (and a centered call-to-action on Home, typical of consumer services) that reuses the existing localStorage workspace id. No real authentication yet; real auth lands in Phase 18.
+- Pricing tab is explicitly TBC and marked as such. Anticipated tiers: a self-host / open-source tier, a free hosted tier, and a paid hosted tier. The exact free-vs-self-host boundary is undecided.
+- Demos start as screenshots/GIFs; an embedded interactive demo can come later.
+
+License note:
+
+- The repository license is not finalized and is intentionally NOT MIT. The intended direction is source-available with a commercial starter advantage for the hosted service (e.g. a BSL/FSL-style or similarly restricted license). Do not assume or apply MIT, and do not document a specific license until it is chosen.
+
+Requirements:
+
+- Marketing pages are public and do not require a workspace.
+- The fake login does not introduce real credential handling or secrets.
+- Pricing copy clearly signals TBC rather than committing to numbers.
+- The site is consistent with the app's theming (including dark mode from Phase 16).
+
+PR-sized breakdown:
+
+- Marketing route scaffolding + shared layout/nav.
+- Home + How it works + Pedagogy content.
+- Pricing (TBC) + Contact.
+- Fake login entry wired to the existing localStorage workspace id.
+
+Tests:
+
+- Marketing routes render without a workspace.
+- The fake login entry navigates into the app using the existing workspace id.
+- Pages render in both light and dark themes.
+
+Acceptance criteria:
+
+- A first-time visitor can read what CoLearni is, how it teaches, and rough pricing intent, then enter the app through a familiar-looking login affordance.
+
+Non-goals:
+
+- No real authentication, accounts, or billing (Phase 18).
+- No public pack marketplace.
+- No committed pricing numbers or final license text.
 
 ## Phase 17: Deployment
 

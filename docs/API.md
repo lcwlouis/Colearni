@@ -121,6 +121,21 @@ SourceRevisionStatus = Literal["pending_parse", "parsed", "failed", "skipped"]
 }
 ```
 
+`metadata_json` may carry a cached `primer` object (`{ "overview", "key_terms", "sample_questions", "version" }`); the concept-detail response also surfaces it as the top-level `primer` field (see `ConceptPrimer`).
+
+### ConceptPrimer
+
+```json
+{
+  "overview": "string (one-paragraph concept orientation)",
+  "key_terms": [{ "term": "string", "definition": "string (one line)" }],
+  "sample_questions": ["string (<=90 chars starter prompt)"],
+  "version": "int (current cache schema version: 2)"
+}
+```
+
+Concept-level orientation generated in a separate LLM pass and cached on `ConceptNode.metadata_json["primer"]`. `key_terms` holds 3-6 entries; `sample_questions` holds 3-4 short starter prompts that power the chat welcome chips. `sample_questions` defaults to `[]` for primers cached before the field existed (version 1). Content is abstract and not source-derived, so it is export-safe.
+
 ### ConceptEdge
 
 ```json
@@ -520,9 +535,12 @@ Generate a new Trail from a topic description. Calls the graph generator LLM, va
   "topic": "string",
   "goal": "string",
   "target_depth": "TargetDepth",
-  "max_nodes": "int | optional, default 40, min 10, max 100"
+  "max_nodes": "int | optional, default 40, min 10, max 100",
+  "prior_knowledge": "string | optional, null, max 2000 chars"
 }
 ```
+
+`prior_knowledge` is the learner's stated prior knowledge for this Trail. It is persisted on the Trail and fed read-only into the tutor mode classifier (as `learner_prior_knowledge`) to calibrate pacing. When `null` or empty, the tutor assumes a complete beginner.
 
 `max_nodes` is intentionally supported for local graph-size exploration. Normal generation should usually stay around 10-30 nodes; 100 is the current per-Trail viewer cap.
 
@@ -661,9 +679,62 @@ Get a concept with its graph context and mastery state.
   "containing_nodes": ["ConceptNode"],
   "related": ["ConceptNode"],
   "mastery": "MasteryRecord",
-  "sources": ["SourceRecord"]
+  "sources": ["SourceRecord"],
+  "primer": "ConceptPrimer | null"
 }
 ```
+
+`primer` is the cached concept orientation primer when present, or `null` when no primer has been generated yet. This GET never auto-generates a primer; generation is an explicit calling-side decision (see the primer endpoints below).
+
+---
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/primer`
+
+Generate (or return the cached) concept orientation primer in a separate LLM pass. Idempotent: returns the cached primer without calling the model unless `force_new` is set. Primer content is abstract concept-level orientation, not source-derived, so it is export-safe.
+
+**Request body (optional):**
+
+```json
+{ "force_new": false }
+```
+
+`force_new: true` regenerates and overwrites the cache.
+
+**Response 200:** `ConceptPrimer`
+
+**Errors:**
+- `404 not_found` — workspace/trail/concept not found
+- `500 llm_error` — primer generation failed
+
+---
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/primer/stream`
+
+Stream primer generation over SSE so the client can show a live preview. Mirrors the tutor chat streaming structure: the `done` event carries the authoritative `ConceptPrimer`; `thinking` and `token` events are a cosmetic live preview only.
+
+**Response headers:**
+
+```text
+Content-Type: text/event-stream
+```
+
+**SSE event sequence:**
+- Cache hit: a single `done` event (no model call).
+- Cache miss: `status` (`{ "status": "preparing" }`) → zero or more `thinking` (`{ "content": "string" }`) and `token` (`{ "content": "string" }`) preview events → `done` with the authoritative primer, or `error` on failure.
+
+```json
+{ "type": "done", "primer": "ConceptPrimer" }
+```
+
+```json
+{ "type": "error", "code": "not_found | llm_error", "message": "string" }
+```
+
+Only `token` chunks are accumulated and parsed into the primer JSON; `thinking` chunks are never fed to the parser.
+
+**Resilient, backend-driven generation.** On a cache miss the actual generation is **detached from this request**: the server runs it as a background task that owns its own database session and commits the cached primer independently. This SSE response only subscribes to that task for the live preview. If the client disconnects, refreshes, or navigates away mid-stream, generation still **completes and persists server-side** — nothing is wasted and the next open is a cache hit. Re-issuing the request after a disconnect attaches to the same in-flight generation (or returns the cache once it has completed).
+
+**Single-flight dedup.** At most one detached generation runs per concept at a time. Concurrent `primer/stream` opens for the same concept share that single background generation and therefore a single model call (enforced in-process per `concept_id`, and across processes via a PostgreSQL `pg_advisory_xact_lock` with a post-lock cache re-check). All concurrent subscribers receive the same authoritative `done`. (The plain `POST .../primer` endpoint is unchanged and remains idempotent on the cache.)
 
 ---
 
@@ -783,7 +854,7 @@ X-Accel-Buffering: no
 Emitted before visible `token` events so the client knows which mode produced the visible answer. In mastery-gated flows, `status` and `tool_*` events may appear earlier.
 
 ```json
-{ "type": "status", "status": "thinking | calling_tool | tool_called | tool_complete | responding | retrying_without_thinking" }
+{ "type": "status", "status": "selecting_mode | thinking | calling_tool | tool_called | tool_complete | responding | retrying_without_thinking" }
 ```
 Optional activity milestones for chain-of-thought style UI. These can appear before or between `thinking`, `mode`, and `token` events as the tutor moves through reasoning, retries, and internal tool resolution.
 

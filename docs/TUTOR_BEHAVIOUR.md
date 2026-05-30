@@ -19,6 +19,8 @@ Reveal explanations gradually.
 
 The tutor should usually ask one good question at a time. Long lectures should be reserved for direct mode or explicit learner requests.
 
+**Stuck learners are an exception.** When the learner explicitly says they don't know, are lost, or give up ("I don't know", "no idea", "I'm stuck"), the tutor must TEACH rather than fire back another question. It should give a short, supportive explanation or the answer they were reaching for, then optionally offer a gentle, non-demanding check. Relentlessly re-questioning a stuck learner is the wrong behaviour. The mode classifier routes these utterances to `repair` (and the prose fallback heuristic does the same when the classifier degrades), and both `socratic` and `repair` prompts carry an explicit stuck-learner override that teaches first. Socratic turns also do not have to end with a question every time: when the learner has just answered well, a brief affirmation is fine.
+
 ## Modes
 
 ```text
@@ -42,7 +44,23 @@ Used when the learner explicitly asks for a direct explanation, summary, or exam
 
 Even in direct mode, the tutor should check understanding afterward with a short question or prompt.
 
-For the current MVP, `direct` is mastery-gated. The tutor should try to preserve the learner's intent when the gate is not met, but it must fall back to normal Socratic coaching rather than exposing the direct-mode instructions.
+For the current MVP, `direct` is mastery-gated:
+
+- When mastery is `mastered`, the tutor gives a crisp, direct answer (no Socratic follow-up unless the learner asks to refresh or practise).
+- When mastery is `learning` or `needs_review`, the tutor must NOT refuse and must NOT bounce a bare Socratic question back at the learner. Instead it switches to **guided teaching**: a brief, supportive, plain-language explanation or walkthrough grounded in the current concept (a few sentences, optionally one short worked example or a couple of steps), optionally ending with ONE gentle, optional guiding/check question. This mirrors the opening-turn "teach briefly, then check" and stuck-learner behaviour. The turn is still labelled `direct` because the tutor is teaching what the learner asked for. The guided-teaching prompt is `tutor_direct_locked`.
+
+The old behaviour — buffering the model's reply and replacing it with a single bare Socratic question — has been removed. Refusing to explain a concept the learner is actively trying to learn is the wrong pedagogy and the exact anxiety CoLearni is removing.
+
+### Guardrail: teach, never hand over a cheatsheet or answer key
+
+Guided teaching must build genuine understanding of the single current concept. It must never become an answer/cheatsheet generator. This guardrail is baked into the `tutor_direct_locked` prompt and reinforced by the shared final-response contract.
+
+- ALLOWED: explaining a mechanism, walking through a process, defining the current concept's key terms, ONE concise worked example, building genuine understanding of the single current concept at an appropriate depth.
+- NOT ALLOWED: producing an exhaustive answer key / cheatsheet / exam-cram summary of everything; completing or answering quiz / assessment / recall questions on the learner's behalf; "just give me all the answers / what to memorise for the test" shortcut dumps; or covering many concepts at once to bypass the learning flow.
+- When the learner is clearly trying to EXTRACT answers or a cheatsheet rather than understand (e.g. "just give me all the answers", "make me a cheatsheet for the exam", "what's the answer to the quiz", "list everything I need to memorise"), the tutor does NOT comply. It warmly redirects to learning the concept (offering to teach/walk through it instead), staying supportive rather than preachy or scolding.
+- Teaching stays scoped to the current concept and the Trail goal; it does not free-associate into a broad summary sheet.
+
+`free_explore` remains gated to `mastered`; below that gate it still falls back to bounded `explore` via the `tutor_locked_mode` instructions.
 
 ## Repair
 
@@ -53,6 +71,8 @@ Repair should be specific and constructive:
 - Name the likely misconception.
 - Give a small hint or explanation.
 - Ask the learner to try again.
+
+When the learner has explicitly said they don't know or are stuck (rather than stating a wrong belief), repair should lead with the answer/explanation and skip the "try again" demand — close with at most a gentle, optional check.
 
 ## Quiz Prompt
 
@@ -115,7 +135,7 @@ Retrieval tools are controlled and budgeted:
 - `get_concept_sources(concept_id)` — service function exists; tool dispatch deferred.
 - `get_graph_neighbourhood(concept_id)` — service function exists; tool dispatch deferred.
 
-These tools enforce workspace/Trail/concept scope and return citation-ready metadata. Per-turn budget is `TOOL_CALL_BUDGET = 3` individual tool executions. Tool results are capped at `MAX_TOOL_RESULT_CHARS = 2000` characters before entering context. Retrieval tools are only offered to the LLM when the current concept has at least one linked source.
+These tools enforce workspace/Trail/concept scope and return citation-ready metadata. Per-turn budget is `TOOL_CALL_BUDGET = 3` individual tool executions. Tool results are capped at `MAX_TOOL_RESULT_CHARS = 2000` characters before entering context. The retrieval loop is offered to the LLM when the current concept has at least one linked source OR a cached primer. The offered tool set is scoped: source tools (`search_sources`, `read_document_section`, `get_concept_sources`) are only included when the concept has linked sources, `get_concept_primer` is included whenever a primer is cached, and `get_graph_neighbourhood` is offered whenever the loop runs.
 
 ## Grounding and Citations
 
@@ -149,6 +169,8 @@ Public `tool_result` previews must stay sanitized. They are for learner-safe tra
 The internal `get_tutor_instructions` step is validated through the provider-tool abstraction, but the tutor continues to expose and persist the existing tagged compatibility form. Invalid tool arguments fail closed to a safe Socratic fallback and public previews do not include raw tool arguments or raw internal result content.
 
 If a reasoning-enabled attempt ends with no visible tutor text, the service should retry once without provider thinking and emit `retrying_without_thinking` as a status milestone.
+
+If a turn still ends with no visible tutor text after that retry, the service fails the turn: it rolls back the transaction and emits an `empty_completion` `error` instead of persisting a blank assistant bubble. This applies to ANY empty visible answer — whether or not the model produced reasoning. The service must never persist an empty assistant turn or emit `done` for an empty answer.
 
 If the LLM call fails, emit `error` and close the stream. The service must not emit partial tokens after an error.
 
@@ -199,6 +221,10 @@ The tutor should be calm, precise, and coach-like. It can encourage the learner,
 
 Tutor responses should default to clean, readable Markdown rather than dense text blocks.
 
+- Default to a concise reply (a short paragraph and/or one focused question) so the chat is not flooded. There are no hard word caps; let the topic set the length.
+- Use Markdown headers or other sub-structure to show information hierarchy when it genuinely clarifies a more complex answer.
+- Allow longer responses when the topic genuinely needs it, but avoid dumping walls of text.
+- Socratic mode stays question-led: keep its one focused question concise.
 - Prefer short paragraphs.
 - Use short bullet lists or bold lead-ins only when they make the response easier to scan.
 - Avoid wide tables in chat unless they are clearly the best format.
