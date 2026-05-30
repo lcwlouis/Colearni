@@ -71,3 +71,77 @@ textarea {
         opacity: 0;
     }
 }
+
+/* ---- Phase 16.6 marketing surface ---- */
+.font-display {
+    font-family: var(--font-fraunces), Georgia, "Times New Roman", serif;
+    font-optical-sizing: auto;
+}
+
+.marketing-surface {
+    /* warm paper light theme */
+    --mk-bg: #fbfaf7;
+    --mk-bg-soft: #f3f1ea;
+    --mk-fg: #0f172a;
+    --mk-muted: #475569;
+    --mk-border: #e6e2d8;
+    --mk-card: #ffffff;
+    --mk-accent: #2563eb;
+    background-color: var(--mk-bg);
+    color: var(--mk-fg);
+}
+
+@media (prefers-color-scheme: dark) {
+    .marketing-surface {
+        --mk-bg: #020617;
+        --mk-bg-soft: #0b1222;
+        --mk-fg: #e2e8f0;
+        --mk-muted: #94a3b8;
+        --mk-border: #1e293b;
+        --mk-card: #0b1222;
+        --mk-accent: #60a5fa;
+        background-color: var(--mk-bg);
+        color: var(--mk-fg);
+    }
+}
+
+/* Grain overlay used by the marketing hero */
+.mk-grain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.4;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+}
+
+@keyframes mk-rise {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.mk-reveal {
+    opacity: 0;
+}
+.mk-reveal[data-shown="true"] {
+    animation: mk-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mk-reveal,
+    .mk-reveal[data-shown="true"] {
+        opacity: 1;
+        animation: none;
+    }
+}
+
+@keyframes mk-node-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+}
+
+@keyframes mk-edge-draw {
+    from { stroke-dashoffset: 1; }
+    to { stroke-dashoffset: 0; }
+}
