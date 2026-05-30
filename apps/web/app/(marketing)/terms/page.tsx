@@ -19,7 +19,7 @@ export default function TermsPage() {
       </header>
 
       <div className="mt-8 rounded-xl border border-[var(--mk-border)] bg-[var(--mk-bg-soft)] p-6">
-        <p className="text-sm font-semibold uppercase tracking-wide text-amber-700">
+        <p className="text-sm font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
           Placeholder — not yet finalised
         </p>
         <p className="mt-3 text-base leading-7 text-[var(--mk-muted)]">

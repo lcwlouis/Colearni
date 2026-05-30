@@ -34,7 +34,7 @@ export default function PricingPage() {
                 <h2 className="font-display text-xl font-semibold text-[var(--mk-fg)]">
                   {tier.name}
                 </h2>
-                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-amber-700">
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-400/15 dark:text-amber-300">
                   TBC
                 </span>
               </div>

@@ -18,8 +18,8 @@ export function SectionReveal({
     const el = ref.current;
     if (!el) return;
     if (typeof IntersectionObserver === "undefined") {
-      setShown(true);
-      return;
+      const id = setTimeout(() => setShown(true), 0);
+      return () => clearTimeout(id);
     }
     const observer = new IntersectionObserver(
       (entries) => {

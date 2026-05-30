@@ -42,6 +42,8 @@ export default function ContactPage() {
           </a>
           <a
             href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex items-center gap-4 rounded-xl border border-[var(--mk-border)] bg-[var(--mk-card)] p-5 transition-colors hover:bg-[var(--mk-bg-soft)]"
           >
             <Code2

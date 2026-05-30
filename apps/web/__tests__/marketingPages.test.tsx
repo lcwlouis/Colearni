@@ -52,7 +52,7 @@ describe("marketing pages render without a workspace", () => {
     expect(
       screen.getByRole("heading", { name: /terms & conditions/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/placeholder/i)).toBeInTheDocument();
+    expect(screen.getByText(/not yet finalised/i)).toBeInTheDocument();
   });
 
   test("Privacy is a clearly-marked placeholder", () => {
@@ -60,7 +60,7 @@ describe("marketing pages render without a workspace", () => {
     expect(
       screen.getByRole("heading", { name: /privacy policy/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/placeholder/i)).toBeInTheDocument();
+    expect(screen.getByText(/not yet finalised/i)).toBeInTheDocument();
   });
 });
 

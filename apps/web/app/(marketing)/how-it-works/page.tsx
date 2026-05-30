@@ -32,21 +32,23 @@ export default function HowItWorksPage() {
 
       <ol className="mt-16 flex flex-col gap-5">
         {HOW_IT_WORKS_STEPS.map((step, i) => (
-          <SectionReveal key={step.n} delayMs={i * 60}>
-            <li className="flex gap-5 rounded-xl border border-[var(--mk-border)] bg-[var(--mk-card)] p-6">
-              <span className="font-display text-3xl font-semibold text-[var(--mk-accent)]">
-                {step.n}
-              </span>
-              <div>
-                <h2 className="font-display text-xl font-semibold text-[var(--mk-fg)]">
-                  {step.title}
-                </h2>
-                <p className="mt-2 text-base leading-7 text-[var(--mk-muted)]">
-                  {step.body}
-                </p>
+          <li key={step.n}>
+            <SectionReveal delayMs={i * 60}>
+              <div className="flex gap-5 rounded-xl border border-[var(--mk-border)] bg-[var(--mk-card)] p-6">
+                <span className="font-display text-3xl font-semibold text-[var(--mk-accent)]">
+                  {step.n}
+                </span>
+                <div>
+                  <h2 className="font-display text-xl font-semibold text-[var(--mk-fg)]">
+                    {step.title}
+                  </h2>
+                  <p className="mt-2 text-base leading-7 text-[var(--mk-muted)]">
+                    {step.body}
+                  </p>
+                </div>
               </div>
-            </li>
-          </SectionReveal>
+            </SectionReveal>
+          </li>
         ))}
       </ol>
 

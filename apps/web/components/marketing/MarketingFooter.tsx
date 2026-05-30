@@ -21,7 +21,7 @@ export function MarketingFooter() {
           </p>
         </div>
         <div className="flex flex-wrap gap-x-10 gap-y-3">
-          <nav className="flex flex-col gap-2">
+          <nav aria-label="Site pages" className="flex flex-col gap-2">
             {NAV_LINKS.map((link) => (
               <Link
                 key={link.href}
@@ -32,7 +32,7 @@ export function MarketingFooter() {
               </Link>
             ))}
           </nav>
-          <nav className="flex flex-col gap-2">
+          <nav aria-label="Contact" className="flex flex-col gap-2">
             <a
               href={`mailto:${CONTACT_EMAIL}`}
               className="text-sm text-[var(--mk-muted)] hover:text-[var(--mk-fg)]"
@@ -41,12 +41,14 @@ export function MarketingFooter() {
             </a>
             <a
               href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-sm text-[var(--mk-muted)] hover:text-[var(--mk-fg)]"
             >
               GitHub
             </a>
           </nav>
-          <nav className="flex flex-col gap-2">
+          <nav aria-label="Legal" className="flex flex-col gap-2">
             {LEGAL_LINKS.map((link) => (
               <Link
                 key={link.href}
