@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.app.agents.provider_tools import ProviderToolDefinition
 from backend.app.agents.retrieval_tools import (
+    GET_CONCEPT_PRIMER_TOOL,
     GET_CONCEPT_SOURCES_TOOL,
     GET_GRAPH_NEIGHBOURHOOD_TOOL,
     RETRIEVAL_TOOLS,
@@ -21,8 +22,8 @@ from backend.app.services.conversations import build_tutor_context
 from backend.app.services.retrieval import (
     get_concept_sources_for_tutor,
     get_graph_neighbourhood,
-    search_sources_by_title,
     search_sources_by_text,
+    search_sources_by_title,
 )
 
 
@@ -458,7 +459,9 @@ async def test_search_sources_by_text_falls_back_to_ilike_with_line_metadata(
 
     fake_client = AsyncMock()
     fake_client.embed.return_value = None
-    with patch("backend.app.services.retrieval.EmbeddingClient.from_settings", return_value=fake_client):
+    with patch(
+        "backend.app.services.retrieval.EmbeddingClient.from_settings", return_value=fake_client
+    ):
         matches = await search_sources_by_text(
             "magnitude",
             workspace.id,
@@ -479,7 +482,8 @@ def test_retrieval_tool_definitions_instantiate():
     assert GET_CONCEPT_SOURCES_TOOL.parameters["required"] == []
     assert GET_GRAPH_NEIGHBOURHOOD_TOOL.parameters["required"] == []
     assert SEARCH_SOURCES_TOOL.parameters["required"] == ["query"]
-    assert len(RETRIEVAL_TOOLS) == 4
+    assert GET_CONCEPT_PRIMER_TOOL.parameters["required"] == []
+    assert len(RETRIEVAL_TOOLS) == 5
 
 
 @pytest.mark.parametrize(

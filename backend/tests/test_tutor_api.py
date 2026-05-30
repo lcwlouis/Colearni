@@ -102,6 +102,22 @@ class _FailingAgent:
         yield  # marks this as an async generator
 
 
+class _EmptyAgent:
+    """Agent whose completion is fully empty: a mode but no visible text and no
+    reasoning. The service must treat this as an empty completion and roll back."""
+
+    async def respond_stream(self, context: TutorContext):
+        yield ("mode", "socratic")
+
+
+class _ReasoningOnlyAgent:
+    """Agent that emits reasoning but never any visible text."""
+
+    async def respond_stream(self, context: TutorContext):
+        yield ("mode", "socratic")
+        yield ("thinking", "Thought hard, said nothing.")
+
+
 class _StreamingTwoPhaseAgent:
     """Two-phase agent that streams first-pass reasoning live via prepare_mode_stream."""
 
@@ -110,7 +126,6 @@ class _StreamingTwoPhaseAgent:
 
         return _ModePreparation(
             mode="socratic",
-            locked_socratic=False,
             messages_after_mode=[{"role": "system", "content": "final"}],
             buffered_events=(("mode", "socratic"),),
         )
@@ -364,6 +379,59 @@ async def test_chat_streams_first_pass_reasoning_before_mode(api_client, db_engi
     assert done_event["data"]["message"]["content"] == "Visible answer"
     # The streamed first-pass reasoning is persisted exactly once.
     assert done_event["data"]["message"]["reasoning"] == "first-pass reasoning"
+
+
+class _QuietTwoPhaseAgent:
+    """Two-phase agent whose mode-selection phase emits no raw reasoning.
+
+    Represents the default tutor_mode_selection_thinking=False behavior: the
+    first phase resolves a mode without leaking thinking into the trace.
+    """
+
+    def _prep(self):
+        from backend.app.services.tutor import _ModePreparation
+
+        return _ModePreparation(
+            mode="socratic",
+            messages_after_mode=[{"role": "system", "content": "final"}],
+            buffered_events=(("mode", "socratic"),),
+        )
+
+    async def prepare_mode(self, context: TutorContext):
+        return self._prep()
+
+    async def prepare_mode_stream(self, context: TutorContext):
+        yield ("__prep__", self._prep())
+
+    async def stream_text(self, context: TutorContext, prep, *, messages=None):
+        yield ("text", "Visible answer")
+
+
+async def test_chat_emits_selecting_mode_status_before_mode(api_client, db_engine):
+    """A 'selecting_mode' status announces mode selection before mode resolves; the
+    mode event still fires before the first visible token, and no raw thinking leaks."""
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    app.dependency_overrides[get_tutor_agent] = lambda: _QuietTwoPhaseAgent()
+
+    resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Let's start"},
+    )
+
+    events = _parse_sse(resp.text)
+    statuses = [e["data"]["status"] for e in events if e["data"]["type"] == "status"]
+    assert "selecting_mode" in statuses
+
+    event_types = [e["data"]["type"] for e in events]
+    selecting_idx = next(
+        i
+        for i, e in enumerate(events)
+        if e["data"]["type"] == "status" and e["data"]["status"] == "selecting_mode"
+    )
+    assert selecting_idx < event_types.index("mode")
+    assert event_types.index("mode") < event_types.index("token")
+    # No raw mode-selection thinking in the trace by default.
+    assert "thinking" not in event_types
 
 
 async def test_chat_can_emit_status_events(api_client, db_engine):
@@ -645,6 +713,71 @@ async def test_chat_generator_failure_does_not_persist_partial_assistant_turn(db
 
         turns = list(await session.scalars(select(ConversationTurn)))
         assert turns == [], "no turns should be persisted after generator failure"
+
+
+async def test_chat_fully_empty_completion_errors_and_rolls_back(db_engine):
+    """A completion with no visible text AND no reasoning must surface an
+    `empty_completion` error and persist no blank assistant bubble."""
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async def override_session():
+        async with async_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_tutor_agent] = lambda: _EmptyAgent()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        ws_id, trail_id, concept_id = await _seed(db_engine)
+
+        resp = await ac.post(
+            f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+            json={"message": "Hello"},
+        )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    event_types = [e["data"]["type"] for e in events]
+
+    assert "done" not in event_types
+    error_event = next(e for e in events if e["data"]["type"] == "error")
+    assert error_event["data"]["code"] == "empty_completion"
+
+    async with async_session() as session:
+        from sqlalchemy import select
+
+        turns = list(await session.scalars(select(ConversationTurn)))
+        assert turns == [], "no turns should be persisted after an empty completion"
+
+
+async def test_chat_reasoning_only_completion_errors_and_rolls_back(db_engine):
+    """Reasoning but no visible text is still an empty completion (unchanged behavior)."""
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    async def override_session():
+        async with async_session() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_tutor_agent] = lambda: _ReasoningOnlyAgent()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        ws_id, trail_id, concept_id = await _seed(db_engine)
+
+        resp = await ac.post(
+            f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+            json={"message": "Hello"},
+        )
+
+    app.dependency_overrides.clear()
+
+    events = _parse_sse(resp.text)
+    event_types = [e["data"]["type"] for e in events]
+    assert "done" not in event_types
+    error_event = next(e for e in events if e["data"]["type"] == "error")
+    assert error_event["data"]["code"] == "empty_completion"
 
 
 async def test_tool_turns_do_not_leak_into_public_history(api_client, db_engine):

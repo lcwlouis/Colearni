@@ -640,6 +640,7 @@ class LLMClient:
         )
         kwargs["stream"] = True
         reasoning_so_far = ""
+        reasoning_started = False
         try:
             stream = await client.chat.completions.create(**kwargs)
             async for chunk in stream:
@@ -648,13 +649,17 @@ class LLMClient:
                 delta = chunk.choices[0].delta
                 reasoning = _extract_delta_reasoning(delta)
                 if reasoning:
+                    if not reasoning_started:
+                        logger.debug("Reasoning started")
+                        reasoning_started = True
                     next_reasoning = _delta_suffix(reasoning_so_far, reasoning)
                     if next_reasoning:
-                        logger.debug("Reasoning chunk received (len=%d)", len(next_reasoning))
                         yield ("thinking", next_reasoning)
                     reasoning_so_far = _next_reasoning_so_far(reasoning_so_far, reasoning)
                 if delta.content:
                     yield ("text", delta.content)
+            if reasoning_started:
+                logger.debug("Reasoning ended (total len=%d)", len(reasoning_so_far))
         except Exception as exc:
             if requested_thinking and _is_thinking_error(exc):
                 logger.warning(
@@ -670,6 +675,8 @@ class LLMClient:
                     tools=tools,
                 )
                 kwargs["stream"] = True
+                reasoning_started = False
+                reasoning_so_far = ""
                 stream = await client.chat.completions.create(**kwargs)
                 async for chunk in stream:
                     if not chunk.choices:
@@ -677,13 +684,17 @@ class LLMClient:
                     delta = chunk.choices[0].delta
                     reasoning = _extract_delta_reasoning(delta)
                     if reasoning:
+                        if not reasoning_started:
+                            logger.debug("Reasoning started")
+                            reasoning_started = True
                         next_reasoning = _delta_suffix(reasoning_so_far, reasoning)
                         if next_reasoning:
-                            logger.debug("Reasoning chunk received (len=%d)", len(next_reasoning))
                             yield ("thinking", next_reasoning)
                         reasoning_so_far = _next_reasoning_so_far(reasoning_so_far, reasoning)
                     if delta.content:
                         yield ("text", delta.content)
+                if reasoning_started:
+                    logger.debug("Reasoning ended (total len=%d)", len(reasoning_so_far))
             else:
                 raise
 

@@ -24,12 +24,29 @@ class Settings(BaseSettings):
     llm_thinking_level: str = "medium"
     # Requested tutor answer budget per LLM call.
     llm_tutor_max_tokens: int = 4096
+
+    # Tutor mode-selection (first) call: extended thinking/reasoning. Off by
+    # default — the visible (second) answer call still respects llm_thinking_enabled.
+    # Enabling this surfaces raw mode-selection reasoning in the trace.
+    tutor_mode_selection_thinking: bool = False
+    # Token cap for the first (mode-selection/classifier) LLM call. The first pass
+    # only emits a single control line and stops, so it needs a tiny budget; the
+    # visible answer (second call) still uses llm_tutor_max_tokens.
+    tutor_mode_selection_max_tokens: int = 48
+    # Per-turn retrieval tool-call budget (counts individual calls, incl. cached duplicates).
+    tutor_tool_call_budget: int = 3
+    # Per-tool-result character cap before truncation.
+    tutor_max_tool_result_chars: int = 2000
+    # Number of recent visible turns included in the prompt context window.
+    tutor_recent_visible_turns_limit: int = 10
     # Tokens allocated per node when calculating the graph generation token budget.
     # Budget = clamp(max_nodes * this, 4096, 16000).
     llm_generation_tokens_per_node: int = 300
 
     # Embedding provider — disabled by default; ILIKE search is used as fallback.
-    embedding_provider: str = "disabled"  # disabled | openai | gemini | ollama | openrouter | openai_compatible
+    embedding_provider: str = (
+        "disabled"  # disabled | openai | gemini | ollama | openrouter | openai_compatible
+    )
     embedding_model: str = "text-embedding-3-small"
     embedding_api_key: str = ""
     embedding_api_base: str = ""

@@ -25,16 +25,18 @@ from backend.app.agents.provider_tools import (
     NormalizedToolCall,
     NormalizedToolResult,
 )
-from backend.app.agents.retrieval_tools import RETRIEVAL_TOOLS
+from backend.app.agents.retrieval_tools import RETRIEVAL_TOOLS, select_retrieval_tools
 from backend.app.models.base import Base
+from backend.app.models.concept import ConceptNode
 from backend.app.models.source import SourceRecord, SourceRevision
+from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.services.conversations import (
-    _TOOL_CALL_BUDGET,
     _run_retrieval_loop,
     execute_retrieval_tool,
 )
 from backend.app.services.retrieval import read_document_section
+from backend.app.settings import settings
 
 # ---------------------------------------------------------------------------
 # DB fixtures (in-memory SQLite)
@@ -75,15 +77,14 @@ def _make_tool_call_event(
     arguments: dict,
     call_id: str | None = None,
 ) -> NormalizedStreamEvent:
-    return NormalizedStreamEvent.tool_call_event(
-        _make_tool_call(name, arguments, call_id)
-    )
+    return NormalizedStreamEvent.tool_call_event(_make_tool_call(name, arguments, call_id))
 
 
 def _text_only_stream() -> AsyncIterator[NormalizedStreamEvent]:
     async def _gen():
         yield NormalizedStreamEvent.text_delta("Hello, world!")
         yield NormalizedStreamEvent.done_event()
+
     return _gen()
 
 
@@ -92,6 +93,7 @@ def _tool_call_stream(*tool_calls: NormalizedToolCall) -> AsyncIterator[Normaliz
         for tc in tool_calls:
             yield NormalizedStreamEvent.tool_call_event(tc)
         yield NormalizedStreamEvent.done_event()
+
     return _gen()
 
 
@@ -175,10 +177,7 @@ async def test_tool_loop_budget_cap(db_session: AsyncSession):
     workspace_id = uuid.uuid4()
     concept_id = uuid.uuid4()
 
-    calls = [
-        _make_tool_call("search_sources", {"query": f"q{i}"}, f"call_{i}")
-        for i in range(4)
-    ]
+    calls = [_make_tool_call("search_sources", {"query": f"q{i}"}, f"call_{i}") for i in range(4)]
 
     # Return all 4 tool calls in one LLM response
     fake_llm = _FakeLLMClient(
@@ -214,8 +213,8 @@ async def test_tool_loop_budget_cap(db_session: AsyncSession):
         )
 
     # Budget = 3, so only 3 of 4 calls should be executed
-    assert len(executed_calls) == _TOOL_CALL_BUDGET
-    assert len(all_results) == _TOOL_CALL_BUDGET
+    assert len(executed_calls) == settings.tutor_tool_call_budget
+    assert len(all_results) == settings.tutor_tool_call_budget
 
 
 async def test_tool_loop_dedup(db_session: AsyncSession):
@@ -348,7 +347,7 @@ async def test_tool_loop_cached_duplicates_count_against_budget(db_session: Asyn
             llm_client=fake_llm,
         )
 
-    assert fake_llm._call_count == _TOOL_CALL_BUDGET
+    assert fake_llm._call_count == settings.tutor_tool_call_budget
     assert execution_count == 2
     assert [result.call_id for result in retrieval_loop.tool_results] == [
         "call_first",
@@ -409,6 +408,56 @@ async def test_tool_loop_stops_after_successful_document_read(db_session: AsyncS
 
     assert fake_llm._call_count == 1
     assert [result.name for result in all_results] == ["read_document_section"]
+
+
+@pytest.mark.parametrize("tool_name", ["get_concept_primer", "get_graph_neighbourhood"])
+async def test_tool_loop_stops_after_directed_orientation_tool(
+    db_session: AsyncSession, tool_name: str
+):
+    """Self-contained orientation tools end the loop after one round.
+
+    Regression guard: previously only read_document_section was "directed", so a
+    primer/graph call triggered a second planner call that generated (and then
+    discarded) a full answer before the streamed final response — a wasted 4th
+    LLM call. These tools must now stop the loop after one successful round.
+    """
+    workspace_id = uuid.uuid4()
+    concept_id = uuid.uuid4()
+
+    fake_llm = _FakeLLMClient(
+        responses=[
+            [NormalizedStreamEvent.tool_call_event(_make_tool_call(tool_name, {}, "call_one"))],
+            # Second round would generate a discarded full answer if reached.
+            [NormalizedStreamEvent.text_delta("discarded full answer")],
+        ]
+    )
+
+    async def fake_execute(tc, *, session, workspace_id, concept_id):
+        return NormalizedToolResult(
+            call_id=tc.call_id,
+            name=tc.name,
+            content="Orientation context",
+            public_preview={"preview": "Orientation context"},
+        )
+
+    with patch(
+        "backend.app.services.conversations.execute_retrieval_tool",
+        side_effect=fake_execute,
+    ):
+        retrieval_loop = await _run_retrieval_loop(
+            [{"role": "user", "content": "how do I start?"}],
+            RETRIEVAL_TOOLS,
+            session=db_session,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            llm_client=fake_llm,
+        )
+
+    # Exactly one planner call: no wasted round-2 generation.
+    assert fake_llm._call_count == 1
+    assert [result.name for result in retrieval_loop.tool_results] == [tool_name]
+    # The round-2 text was never produced/reused.
+    assert retrieval_loop.text == ""
 
 
 async def test_tool_loop_bad_args(db_session: AsyncSession):
@@ -609,3 +658,126 @@ async def test_read_document_section_wrong_workspace(db_session: AsyncSession):
             source_revision_id=revision.id,
             line_start=1,
         )
+
+
+# ---------------------------------------------------------------------------
+# get_concept_primer dispatch + tool-set scoping
+# ---------------------------------------------------------------------------
+
+_PRIMER_FIXTURE = {
+    "overview": "A derivative measures an instantaneous rate of change.",
+    "key_terms": [
+        {"term": "slope", "definition": "steepness of a line at a point"},
+        {"term": "tangent", "definition": "line touching a curve at one point"},
+        {"term": "limit", "definition": "value a function approaches"},
+    ],
+    "sample_questions": [
+        "What does a derivative tell you?",
+        "How is slope related to a derivative?",
+        "Where do we use derivatives?",
+    ],
+    "version": 1,
+}
+
+
+async def _seed_concept(
+    db_session: AsyncSession, *, primer: dict | None
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed a workspace/trail/concept and return (workspace_id, concept_id)."""
+    workspace = Workspace(name="Primer WS")
+    db_session.add(workspace)
+    await db_session.flush()
+
+    trail = Trail(
+        workspace_id=workspace.id,
+        title="Calculus",
+        topic="Calculus",
+        goal="Master differential calculus",
+        target_depth="apply",
+    )
+    db_session.add(trail)
+    await db_session.flush()
+
+    concept = ConceptNode(
+        trail_id=trail.id,
+        slug="derivatives",
+        title="Derivatives",
+        node_type="concept",
+        concept_level="topic",
+        difficulty="beginner",
+        bloom_level="understand",
+        mastery_check_labels=["define"],
+        metadata_json={"primer": primer} if primer is not None else {},
+    )
+    db_session.add(concept)
+    await db_session.flush()
+    return workspace.id, concept.id
+
+
+async def test_get_concept_primer_dispatch_cached(db_session: AsyncSession):
+    """A cached primer is returned with overview, key terms, and sample questions."""
+    workspace_id, concept_id = await _seed_concept(db_session, primer=_PRIMER_FIXTURE)
+    tool_call = _make_tool_call("get_concept_primer", {}, "call_primer")
+
+    result = await execute_retrieval_tool(
+        tool_call,
+        session=db_session,
+        workspace_id=workspace_id,
+        concept_id=concept_id,
+    )
+
+    assert result.is_error is False
+    assert "instantaneous rate of change" in result.content
+    assert "slope" in result.content
+    assert "What does a derivative tell you?" in result.content
+    # Capped like other tool results.
+    assert len(result.content) <= settings.tutor_max_tool_result_chars + len(" ... [truncated]")
+
+
+async def test_get_concept_primer_dispatch_missing(db_session: AsyncSession):
+    """No cached primer → a safe, read-only "no primer" message (no generation)."""
+    workspace_id, concept_id = await _seed_concept(db_session, primer=None)
+    tool_call = _make_tool_call("get_concept_primer", {}, "call_primer")
+
+    result = await execute_retrieval_tool(
+        tool_call,
+        session=db_session,
+        workspace_id=workspace_id,
+        concept_id=concept_id,
+    )
+
+    assert result.is_error is False
+    assert "No primer available" in result.content
+
+
+def test_select_retrieval_tools_sources_only():
+    """Sources but no primer: source tools + graph, but no primer tool."""
+    names = [t.name for t in select_retrieval_tools(has_sources=True, has_primer=False)]
+    assert "search_sources" in names
+    assert "read_document_section" in names
+    assert "get_concept_sources" in names
+    assert "get_graph_neighbourhood" in names
+    assert "get_concept_primer" not in names
+
+
+def test_select_retrieval_tools_primer_only_no_sources():
+    """No sources but a primer: primer tool offered, source tools withheld."""
+    names = [t.name for t in select_retrieval_tools(has_sources=False, has_primer=True)]
+    assert "get_concept_primer" in names
+    assert "get_graph_neighbourhood" in names
+    assert "search_sources" not in names
+    assert "read_document_section" not in names
+    assert "get_concept_sources" not in names
+
+
+def test_select_retrieval_tools_sources_and_primer():
+    """Both available: all tools offered."""
+    names = [t.name for t in select_retrieval_tools(has_sources=True, has_primer=True)]
+    for expected in (
+        "search_sources",
+        "read_document_section",
+        "get_concept_sources",
+        "get_graph_neighbourhood",
+        "get_concept_primer",
+    ):
+        assert expected in names

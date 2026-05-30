@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 TutorMode = Literal["socratic", "direct", "repair", "quiz_prompt", "explore", "free_explore"]
 TutorStreamStatus = Literal[
+    "selecting_mode",
     "thinking",
     "calling_tool",
     "tool_called",

@@ -36,7 +36,7 @@ Respond with a focused exploration using short, readable sections when helpful. 
 - `**Question:**` end with one question that brings the learner back to the concept and the Trail goal.
 
 Guidelines:
-1. Keep the total response under 170 words.
+1. Default to a concise exploration so you do not flood the chat. You may use markdown headers or sub-structure (such as the lead-ins above) to show information hierarchy when it genuinely clarifies a richer answer, and go longer only when the topic truly needs it.
 2. Do not repeat information already covered in {{ conversation_summary }}.
 3. Do not force section labels if one short paragraph is clearer, but avoid a dense wall of text.
 4. For math, science, logic, or other symbolic topics, use LaTeX when it improves readability.

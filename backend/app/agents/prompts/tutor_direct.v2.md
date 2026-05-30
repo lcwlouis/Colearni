@@ -35,7 +35,7 @@ Deliver a clear, direct explanation of the concept tailored to the {{ bloom_targ
 
 ## Readability rules
 
-1. Make the response easy to scan on a first read. Prefer short paragraphs. If structure helps, use a short bullet list or brief bold lead-ins such as `**Idea:**` and `**Example:**`.
+1. Make the response easy to scan on a first read. Default to a concise reply with short paragraphs so you do not flood the chat. If structure helps, use a short bullet list, brief bold lead-ins such as `**Idea:**` and `**Example:**`, or markdown headers to show information hierarchy. Go longer only when the topic genuinely needs it.
 2. Do not turn every answer into a template. Use Markdown only when it genuinely improves clarity.
 3. Avoid walls of text, dense tables, and more than one worked example unless the learner asks for more.
 4. For math, science, logic, or other symbolic topics, use LaTeX when it improves readability:

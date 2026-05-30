@@ -38,6 +38,7 @@ from backend.app.models.conversation import (
 from backend.app.models.source import ConceptSourceLink, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
+from backend.app.schemas.concept import ConceptPrimerRead
 from backend.app.services.mastery import get_mastery_state
 from backend.app.services.reranker import ChunkSearchResult  # noqa: F401
 from backend.app.services.retrieval import (
@@ -46,9 +47,7 @@ from backend.app.services.retrieval import (
     read_document_section,
     search_sources_by_text,
 )
-
-# Maximum number of recent visible turns included in the prompt context window.
-_RECENT_VISIBLE_TURNS_LIMIT = 10
+from backend.app.settings import settings
 
 
 @dataclass
@@ -88,6 +87,21 @@ class TutorContext:
     application_nodes: list[ConceptNode] = field(default_factory=list)
 
     mastery_status: str = "not_started"
+
+    # Optional learner-supplied prior knowledge captured at Trail creation
+    # (Phase 13.5d). Read-only signal that helps the tutor calibrate how quickly
+    # it shifts from exposition to Socratic questioning. Composable with the
+    # 13.5b opening move. Adaptive write-back belongs to Phase 13.
+    prior_knowledge: str | None = None
+
+    # True on the learner's first substantive turn for this concept: no prior visible
+    # assistant turn exists and mastery is still early. Drives the worked-example-first
+    # opening move (Phase 13.5b). Composable with future prior-knowledge signals (13.5d).
+    is_opening_turn: bool = False
+
+    # Opportunistically attached cached concept primer (overview + key terms), if one
+    # has already been generated. Never force-generated here.
+    primer: ConceptPrimerRead | None = None
 
     recent_turns: list[ConversationTurn] = field(default_factory=list)
     conversation_summary: ConversationSummary | None = None
@@ -257,7 +271,7 @@ async def build_tutor_context(
                 ConversationTurn.kind == "visible",
             )
             .order_by(ConversationTurn.turn_index.desc())
-            .limit(_RECENT_VISIBLE_TURNS_LIMIT)
+            .limit(settings.tutor_recent_visible_turns_limit)
         )
     )
     recent_turns = list(reversed(visible_rows))
@@ -296,6 +310,22 @@ async def build_tutor_context(
         concept=concept,
     )
 
+    # Opening-turn detection (Phase 13.5b): deterministically true when this concept's
+    # conversation has no prior visible assistant turn and mastery is still early. Passed
+    # explicitly into the prompt context rather than letting the model guess.
+    has_prior_assistant_turn = any(turn.role == "assistant" for turn in recent_turns)
+    is_opening_turn = (not has_prior_assistant_turn) and mastery_state.status in {
+        "not_started",
+        "learning",
+    }
+
+    # Local import avoids a module-level circular import (concept_primers imports
+    # validate_concept_scope from this module). read_cached_primer is a pure read of
+    # concept.metadata_json and never triggers generation.
+    from backend.app.services.concept_primers import read_cached_primer
+
+    primer = read_cached_primer(concept) if is_opening_turn else None
+
     return TutorContext(
         conversation_id=conversation.id,
         concept=concept,
@@ -308,6 +338,9 @@ async def build_tutor_context(
         related=neighbourhood["related"],
         application_nodes=neighbourhood["application_nodes"],
         mastery_status=mastery_state.status,
+        prior_knowledge=trail.prior_knowledge,
+        is_opening_turn=is_opening_turn,
+        primer=primer,
         recent_turns=recent_turns,
         conversation_summary=summary,
         sources=await get_concept_sources_for_tutor(
@@ -528,23 +561,40 @@ async def persist_tool_turn(
 # Safe source metadata loader
 # ---------------------------------------------------------------------------
 
-# Tool call budget and result truncation constants
-_MAX_TOOL_RESULT_CHARS = 2000
-_TOOL_CALL_BUDGET = 3
-_DIRECTED_RETRIEVAL_TOOLS = {"read_document_section"}
+# Tool call result truncation and directed-retrieval tooling constants.
+#
+# A "directed" retrieval tool returns self-contained context that fully grounds
+# the next answer, so once one succeeds we stop the retrieval loop instead of
+# making another planner call. That extra planner call would otherwise generate a
+# complete answer under the planning prompt that we then DISCARD before the clean,
+# streamed final response runs — i.e. a wasted 4th LLM call per turn.
+#
+# - read_document_section: returns the requested document section.
+# - get_concept_primer / get_graph_neighbourhood: each return complete
+#   concept-level orientation that needs no follow-up tool. On a source-less
+#   concept these are the only tools offered, so leaving them out of this set is
+#   what produced the redundant round-2 generation.
+#
+# Source discovery tools (search_sources, get_concept_sources) are intentionally
+# NOT directed: the model may legitimately follow them with read_document_section
+# in a later round.
+_DIRECTED_RETRIEVAL_TOOLS = {
+    "read_document_section",
+    "get_concept_primer",
+    "get_graph_neighbourhood",
+}
 
 
 def _truncate_tool_result(content: str) -> str:
-    if len(content) <= _MAX_TOOL_RESULT_CHARS:
+    cap = settings.tutor_max_tool_result_chars
+    if len(content) <= cap:
         return content
-    return content[:_MAX_TOOL_RESULT_CHARS] + " ... [truncated]"
+    return content[:cap] + " ... [truncated]"
 
 
 def _is_directed_retrieval_result(result: NormalizedToolResult) -> bool:
     return (
-        result.name in _DIRECTED_RETRIEVAL_TOOLS
-        and not result.is_error
-        and result.content.strip()
+        result.name in _DIRECTED_RETRIEVAL_TOOLS and not result.is_error and result.content.strip()
     )
 
 
@@ -566,10 +616,56 @@ def _format_chunk_results(results: list[ChunkSearchResult]) -> str:
 def _format_source_list(sources: list[TutorSourceMetadata]) -> str:
     if not sources:
         return "No sources linked to this concept."
-    return "\n".join(
-        f"- {s.title} [{s.relation}] ({s.origin}, {s.access})"
-        for s in sources
+    return "\n".join(f"- {s.title} [{s.relation}] ({s.origin}, {s.access})" for s in sources)
+
+
+def _format_primer_result(primer: ConceptPrimerRead) -> str:
+    """Render a cached primer as compact, export-safe orientation text.
+
+    Primer content is abstract concept-level orientation (not source-derived), so it
+    is safe to surface in tool results without sanitiser changes.
+    """
+    lines = [f"Overview: {primer.overview}"]
+    if primer.key_terms:
+        lines.append("Key terms:")
+        lines.extend(f"- {term.term}: {term.definition}" for term in primer.key_terms)
+    if primer.sample_questions:
+        lines.append("Sample starter questions:")
+        lines.extend(f"- {question}" for question in primer.sample_questions)
+    return "\n".join(lines)
+
+
+async def _get_primer_for_concept(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    concept_id: uuid.UUID,
+) -> str:
+    """Read the cached primer for a concept and format it, scoped to the workspace.
+
+    Read-only and cheap: never triggers primer generation. Returns a short
+    "no primer available" message when nothing is cached so the loop can continue.
+    """
+    # Local import avoids a module-level circular import (concept_primers imports
+    # validate_concept_scope from this module). read_cached_primer is a pure read.
+    from backend.app.services.concept_primers import read_cached_primer
+
+    concept = await session.scalar(select(ConceptNode).where(ConceptNode.id == concept_id))
+    if concept is None:
+        return f"Concept {concept_id} not found."
+
+    trail = await session.scalar(
+        select(Trail).where(
+            Trail.id == concept.trail_id,
+            Trail.workspace_id == workspace_id,
+        )
     )
+    if trail is None:
+        return f"Concept {concept_id} not found in this workspace."
+
+    primer = read_cached_primer(concept)
+    if primer is None:
+        return "No primer available yet for this concept."
+    return _format_primer_result(primer)
 
 
 async def _get_neighbourhood_for_concept(
@@ -588,9 +684,7 @@ async def _get_neighbourhood_for_concept(
     )
     from backend.app.models.trail import Trail as _Trail
 
-    concept = await session.scalar(
-        _select(_ConceptNode).where(_ConceptNode.id == concept_id)
-    )
+    concept = await session.scalar(_select(_ConceptNode).where(_ConceptNode.id == concept_id))
     if concept is None:
         return f"Concept {concept_id} not found."
 
@@ -604,14 +698,10 @@ async def _get_neighbourhood_for_concept(
         return f"Concept {concept_id} not found in this workspace."
 
     all_nodes = list(
-        await session.scalars(
-            _select(_ConceptNode).where(_ConceptNode.trail_id == trail.id)
-        )
+        await session.scalars(_select(_ConceptNode).where(_ConceptNode.trail_id == trail.id))
     )
     edges = list(
-        await session.scalars(
-            _select(_ConceptEdge).where(_ConceptEdge.trail_id == trail.id)
-        )
+        await session.scalars(_select(_ConceptEdge).where(_ConceptEdge.trail_id == trail.id))
     )
     neighbourhood = get_graph_neighbourhood(
         concept=concept,
@@ -664,6 +754,10 @@ async def execute_retrieval_tool(
         elif tool_call.name == "get_graph_neighbourhood":
             cid = _tool_concept_id(tool_call, concept_id)
             content = await _get_neighbourhood_for_concept(session, workspace_id, cid)
+
+        elif tool_call.name == "get_concept_primer":
+            cid = _tool_concept_id(tool_call, concept_id)
+            content = await _get_primer_for_concept(session, workspace_id, cid)
 
         elif tool_call.name == "read_document_section":
             rev_id = uuid.UUID(tool_call.arguments["source_revision_id"])
@@ -772,7 +866,7 @@ async def _run_retrieval_loop(
     if not tools:
         return RetrievalLoopResult(messages=messages, tool_results=[])
 
-    budget = _TOOL_CALL_BUDGET
+    budget = settings.tutor_tool_call_budget
     all_results: list[NormalizedToolResult] = []
     dedup_cache: dict[tuple[str, str], NormalizedToolResult] = {}
 
@@ -782,9 +876,7 @@ async def _run_retrieval_loop(
             events.append(event)
 
         tool_calls = [
-            e.tool_call
-            for e in events
-            if e.kind == "tool_call" and e.tool_call is not None
+            e.tool_call for e in events if e.kind == "tool_call" and e.tool_call is not None
         ]
         if not tool_calls:
             text = "".join(e.text or "" for e in events if e.kind == "text")
@@ -830,15 +922,17 @@ async def _run_retrieval_loop(
 
         # Execute all calls concurrently
         new_results = list(
-            await asyncio.gather(*[
-                execute_retrieval_tool(
-                    tc,
-                    session=session,
-                    workspace_id=workspace_id,
-                    concept_id=concept_id,
-                )
-                for tc in unique_calls
-            ])
+            await asyncio.gather(
+                *[
+                    execute_retrieval_tool(
+                        tc,
+                        session=session,
+                        workspace_id=workspace_id,
+                        concept_id=concept_id,
+                    )
+                    for tc in unique_calls
+                ]
+            )
         )
 
         for tc, result in zip(unique_calls, new_results):

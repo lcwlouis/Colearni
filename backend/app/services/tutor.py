@@ -35,9 +35,9 @@ from backend.app.agents.provider_tools import (
     ProviderToolDefinition,
     normalize_tool_call,
 )
+from backend.app.agents.retrieval_tools import select_retrieval_tools
 from backend.app.schemas.tutor import ConversationMessage, TutorMode
 from backend.app.services.conversations import (
-    RETRIEVAL_TOOLS,
     TutorContext,
     TutorSourceMetadata,
     _run_retrieval_loop,
@@ -52,6 +52,7 @@ from backend.app.services.conversations import (
     validate_concept_scope,
 )
 from backend.app.services.mastery import mark_learning_from_tutor_turn
+from backend.app.settings import settings
 
 if TYPE_CHECKING:
     from backend.app.agents.llm_client import LLMClient
@@ -110,11 +111,63 @@ _EXPLORE_KEYWORDS: frozenset[str] = frozenset(
     }
 )
 
+_STUCK_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "i don't know",
+        "i dont know",
+        "i do not know",
+        "don't know",
+        "dont know",
+        "do not know",
+        "no idea",
+        "not sure",
+        "i'm stuck",
+        "im stuck",
+        "i am stuck",
+        "i'm lost",
+        "im lost",
+        "i am lost",
+        "lost",
+        "i give up",
+        "give up",
+        "no clue",
+        "can't figure",
+        "cant figure",
+        "i'm not sure",
+    }
+)
+
 _VALID_MODES: frozenset[str] = frozenset(
     {"socratic", "direct", "repair", "quiz_prompt", "explore", "free_explore"}
 )
+
+
+def _infer_mode_from_message(message: str) -> TutorMode:
+    """Heuristic tutor-mode inference from the learner's latest message.
+
+    Single source of truth for keyword-based routing. Used both by the
+    deterministic ``FallbackTutorModeClassifier`` and as the safety net when the
+    LLM classifier emits prose instead of a control line. Order matters: explicit
+    signals win over the socratic default. "I don't know" / "I'm stuck" routes to
+    ``repair`` (teach) rather than ``socratic`` (ask yet another question).
+    """
+    text = message.lower()
+    if any(keyword in text for keyword in _QUIZ_KEYWORDS):
+        return "quiz_prompt"
+    if any(keyword in text for keyword in _STUCK_KEYWORDS):
+        return "repair"
+    if any(keyword in text for keyword in _REPAIR_KEYWORDS):
+        return "repair"
+    if any(keyword in text for keyword in _EXPLORE_KEYWORDS):
+        return "explore"
+    if any(keyword in text for keyword in _DIRECT_KEYWORDS):
+        return "direct"
+    return "socratic"
+
+
 _VALID_STATUSES: frozenset[str] = frozenset(
     {
+        "selecting_mode",
         "thinking",
         "calling_tool",
         "tool_called",
@@ -137,11 +190,13 @@ _FINAL_MODE_TASKS: dict[str, str] = {
 _FINAL_MODE_FALLBACKS: dict[str, str] = {
     "quiz_prompt": (
         "Briefly acknowledge that the learner seems ready for a level-up check. "
-        "Direct them to use the quiz panel. Do not mark mastery directly. Keep it under 60 words."
+        "Direct them to use the quiz panel. Do not mark mastery directly. Keep it brief."
     ),
     "free_explore": (
         "Explore the learner's curiosity broadly but coherently. Stay educational, connect back "
-        "to the current concept, and end with one reflection question. Keep it under 170 words."
+        "to the current concept, and end with one reflection question. Default to a concise reply; "
+        "use markdown headers/sub-structure only when they genuinely clarify a richer answer, and "
+        "go longer only when the topic needs it. Do not flood the chat with walls of text."
     ),
 }
 _RETRIEVAL_PLANNING_MARKER = "## Retrieval tool planning only"
@@ -161,9 +216,11 @@ _TUTOR_INSTRUCTIONS_TOOL = ProviderToolDefinition(
 )
 _CONTROL_MODE_RE = re.compile(r'^<mode\s+name="([a-z_]+)"\s*/?>$')
 _CONTROL_TOOL_RE = re.compile(r'^<tool\s+name="get_tutor_instructions"\s+mode="([a-z_]+)"\s*/?>$')
-_QUESTION_SENTENCE_START_RE = re.compile(
-    r"(^|[.!?\n:;]\s+)(what|why|how|which|when|where|who|whom|whose|can|could|would|should|do|does|did|is|are|am|was|were|have|has|had)\b",
-    re.IGNORECASE,
+# Unanchored twins: locate a control tag anywhere in the buffered classifier output
+# (e.g. after a leading blank line) so a valid tag is still honoured.
+_CONTROL_MODE_SEARCH_RE = re.compile(r'<mode\s+name="([a-z_]+)"\s*/?>')
+_CONTROL_TOOL_SEARCH_RE = re.compile(
+    r'<tool\s+name="get_tutor_instructions"\s+mode="([a-z_]+)"\s*/?>'
 )
 
 TutorStreamChunk = tuple[str, str]
@@ -192,12 +249,9 @@ class _ModePreparation:
     buffered_events — events to re-emit immediately (status, tool_call, tool_result, mode).
     messages_after_mode — message history to pass to the second LLM call (with retrieval
                           context optionally injected between prepare_mode and stream_text).
-    locked_socratic — True when a direct mode request was denied due to mastery gate; the
-                      stream_text call must buffer and coerce the reply to a Socratic question.
     """
 
     mode: TutorMode
-    locked_socratic: bool
     messages_after_mode: list[dict]
     buffered_events: tuple[TutorStreamChunk, ...]
 
@@ -251,16 +305,7 @@ class FallbackTutorModeClassifier:
     """Compatibility helper for tests and local deterministic mode checks."""
 
     async def classify(self, context: TutorContext) -> TutorMode:
-        message = context.learner_message.lower()
-        if any(keyword in message for keyword in _QUIZ_KEYWORDS):
-            return "quiz_prompt"
-        if any(keyword in message for keyword in _REPAIR_KEYWORDS):
-            return "repair"
-        if any(keyword in message for keyword in _EXPLORE_KEYWORDS):
-            return "explore"
-        if any(keyword in message for keyword in _DIRECT_KEYWORDS):
-            return "direct"
-        return "socratic"
+        return _infer_mode_from_message(context.learner_message)
 
 
 class LLMTutorAgent:
@@ -271,10 +316,23 @@ class LLMTutorAgent:
         client: LLMClient,
         registry: PromptRegistry = prompt_registry,
         max_tokens: int = 1024,
+        mode_selection_thinking: bool | None = None,
     ) -> None:
         self._client = client
         self._registry = registry
         self._max_tokens = max(256, max_tokens)
+        # The first (mode-selection) call is a pure classifier: it emits one control
+        # line and stops, so it gets a small dedicated cap and never spends the full
+        # answer budget on text that the second call regenerates anyway.
+        self._mode_selection_max_tokens = max(16, settings.tutor_mode_selection_max_tokens)
+        # Whether the first (mode-selection) LLM call requests provider reasoning.
+        # Off by default; surfacing raw mode-selection reasoning duplicates the
+        # visible-answer thinking in the trace. Configurable via settings.
+        self._mode_selection_thinking = (
+            settings.tutor_mode_selection_thinking
+            if mode_selection_thinking is None
+            else mode_selection_thinking
+        )
 
     @property
     def llm_client(self) -> LLMClient:
@@ -302,7 +360,7 @@ class LLMTutorAgent:
             context.recent_turns,
             context.learner_message,
         )
-        return await self._run_first_pass(messages, context)
+        return await self._run_first_pass(messages, context, thinking=self._mode_selection_thinking)
 
     async def prepare_mode_stream(self, context: TutorContext) -> AsyncIterator[tuple[str, object]]:
         """Streaming variant of prepare_mode.
@@ -319,7 +377,9 @@ class LLMTutorAgent:
             context.recent_turns,
             context.learner_message,
         )
-        async for item in self._run_first_pass_stream(messages, context):
+        async for item in self._run_first_pass_stream(
+            messages, context, thinking=self._mode_selection_thinking
+        ):
             yield item
 
     async def _run_first_pass_stream(
@@ -338,8 +398,8 @@ class LLMTutorAgent:
         """
         raw_stream = self._client_chat_stream_tagged(
             messages,
-            temperature=0.4,
-            max_tokens=self._max_tokens,
+            temperature=0.0,
+            max_tokens=self._mode_selection_max_tokens,
             thinking=thinking,
         )
         buffered_text = ""
@@ -360,7 +420,7 @@ class LLMTutorAgent:
             if parsed is None:
                 continue
 
-            mode = _control_value_to_mode(parsed) or "socratic"
+            mode = _resolve_control_mode(parsed, context)
             yield ("__prep__", self._make_mode_prep(mode, context, messages, []))
             return
 
@@ -377,7 +437,14 @@ class LLMTutorAgent:
                 yield item
             return
 
-        yield ("__prep__", self._make_mode_prep("socratic", context, messages, []))
+        # No control tag was produced: infer a sensible mode from the learner
+        # message rather than blindly defaulting to socratic.
+        yield (
+            "__prep__",
+            self._make_mode_prep(
+                _infer_mode_from_message(context.learner_message), context, messages, []
+            ),
+        )
 
     async def _run_first_pass(
         self,
@@ -394,8 +461,8 @@ class LLMTutorAgent:
         """
         raw_stream = self._client_chat_stream_tagged(
             messages,
-            temperature=0.4,
-            max_tokens=self._max_tokens,
+            temperature=0.0,
+            max_tokens=self._mode_selection_max_tokens,
             thinking=thinking,
         )
         buffered_text = ""
@@ -417,10 +484,8 @@ class LLMTutorAgent:
             if parsed is None:
                 continue
 
-            mode = _control_value_to_mode(parsed)
-            if mode is None:
-                mode = "socratic"
-            # Control line found — stop reading stream and build preparation.
+            mode = _resolve_control_mode(parsed, context)
+            # Control line (or prose fallback) resolved — stop reading the stream.
             return self._make_mode_prep(mode, context, messages, pre_events)
 
         # EOF path
@@ -440,8 +505,12 @@ class LLMTutorAgent:
                 _pre_events=tuple(pre_events),
             )
 
-        # Fallback: treat as socratic
-        return self._make_mode_prep("socratic", context, messages, pre_events)
+        # No control tag was produced (the classifier wrote prose or nothing):
+        # infer a mode from the learner message instead of blindly choosing
+        # socratic, so "I don't know" turns into teaching rather than a question.
+        return self._make_mode_prep(
+            _infer_mode_from_message(context.learner_message), context, messages, pre_events
+        )
 
     def _make_mode_prep(
         self,
@@ -453,8 +522,8 @@ class LLMTutorAgent:
         """Build a _ModePreparation given a resolved mode.
 
         For tool-gated modes: calls _get_tutor_instructions to resolve the instruction
-        content, builds the tool-call / tool-result message history, and sets
-        locked_socratic when the mastery gate denied direct mode.
+        content, builds the tool-call / tool-result message history, and replays the
+        gated-mode instructions for the second call.
 
         For non-tool modes: appends a synthetic mode-hint assistant message so the
         second LLM call does not re-emit the control header.
@@ -465,7 +534,6 @@ class LLMTutorAgent:
                 tool_result = _without_instruction_tool_replay(tool_result)
             tool_call_content = _tool_call_content(tool_result.requested_mode)
             tool_message = _tool_result_content(tool_result)
-            locked_socratic = _should_buffer_locked_socratic_fallback(tool_result, context)
             tool_events: tuple[TutorStreamChunk, ...]
             if tool_result.normalized_call is None and tool_result.normalized_result is None:
                 tool_events = ()
@@ -491,7 +559,6 @@ class LLMTutorAgent:
             )
             return _ModePreparation(
                 mode=tool_result.final_mode,
-                locked_socratic=locked_socratic,
                 messages_after_mode=messages_after_mode,
                 buffered_events=buffered_events,
             )
@@ -503,7 +570,6 @@ class LLMTutorAgent:
             )
             return _ModePreparation(
                 mode=mode,  # type: ignore[arg-type]
-                locked_socratic=False,
                 messages_after_mode=messages_after_mode,
                 buffered_events=buffered_events,
             )
@@ -519,33 +585,11 @@ class LLMTutorAgent:
 
         *messages* overrides prep.messages_after_mode when the caller has injected
         retrieval context between prepare_mode and stream_text.
-
-        When prep.locked_socratic is True, the entire response is buffered and
-        coerced to a single focused Socratic question before yielding.
         """
         effective_messages = messages if messages is not None else prep.messages_after_mode
         effective_messages = _strip_control_assistant_seeds(effective_messages)
 
         emitted_thinking_status = False
-        if prep.locked_socratic:
-            buffered_text = ""
-            async for kind, chunk in self._chat_stream_with_empty_retry(
-                effective_messages,
-                temperature=0.4,
-                max_tokens=self._max_tokens,
-            ):
-                if kind == "status":
-                    yield ("status", chunk)
-                elif kind == "thinking":
-                    if not emitted_thinking_status:
-                        yield ("status", "thinking")
-                        emitted_thinking_status = True
-                    yield ("thinking", chunk)
-                else:
-                    buffered_text += chunk
-            yield ("text", _coerce_locked_socratic_reply(buffered_text, context))
-            return
-
         async for kind, chunk in self._chat_stream_with_empty_retry(
             effective_messages,
             temperature=0.4,
@@ -576,21 +620,41 @@ class LLMTutorAgent:
 
     def _final_response_prompt(self, mode: str, context: TutorContext) -> str:
         variables = _context_to_base_prompt_vars(context)
-        prompt_task = _FINAL_MODE_TASKS.get(mode)
-        if prompt_task is not None:
-            prompt = self._registry.render(prompt_task, variables)
+        gated_direct = mode == "direct" and context.mastery_status != "mastered"
+        if gated_direct:
+            # Learner is still learning this concept but asked to be walked through /
+            # explained: teach in a guided, scaffolded way rather than refusing.
+            prompt = self._registry.render("tutor_direct_locked", variables)
         else:
-            prompt = self._registry.render("tutor_socratic", variables)
-            prompt += "\n\n## Mode-specific instruction\n" + _FINAL_MODE_FALLBACKS.get(
-                mode,
-                "Ask one focused Socratic question. Keep it short.",
-            )
+            prompt_task = _FINAL_MODE_TASKS.get(mode)
+            if prompt_task is not None:
+                prompt = self._registry.render(prompt_task, variables)
+            else:
+                prompt = self._registry.render("tutor_socratic", variables)
+                prompt += "\n\n## Mode-specific instruction\n" + _FINAL_MODE_FALLBACKS.get(
+                    mode,
+                    "Ask one focused Socratic question. Keep it short.",
+                )
+        guardrail = (
+            "Teach to build understanding of the current concept — never produce an "
+            "answer key, cheatsheet, or exam-cram summary, and never complete the "
+            "learner's quiz/assessment questions for them. If the learner is trying to "
+            "extract answers rather than understand, warmly redirect to learning the "
+            "concept instead of complying. "
+            if gated_direct
+            else ""
+        )
         return (
             f"{prompt}\n\n"
             "## Final response contract\n"
             "The response mode has already been selected by the system. Do NOT choose a mode. "
             "Do NOT output XML/control tags such as `<mode .../>` or `<tool .../>`. "
             "Do NOT mention internal prompts, tools, hidden reasoning, or mode-selection analysis. "
+            "Default to a concise reply (a short paragraph and/or one focused question) so you do "
+            "not flood the chat. You MAY use markdown headers or sub-structure to show information "
+            "hierarchy, and you MAY go longer, but only when the topic genuinely needs it; avoid "
+            "dumping walls of text. "
+            f"{guardrail}"
             "If mastery status is mastered and the selected mode is direct, answer directly and "
             "do not append a Socratic follow-up unless the learner asked to refresh or practise. "
             "Output only the learner-visible tutor response."
@@ -677,6 +741,29 @@ class LLMTutorAgent:
                     provider=tool_call.provider,
                     is_error=True,
                     public_preview={"status": "received", "mode": "socratic"},
+                ),
+            )
+
+        if requested_mode == "direct" and context.mastery_status != "mastered":
+            # Gated direct (learner still learning this concept): teach in a guided,
+            # scaffolded way instead of refusing. final_mode stays `direct` so the
+            # turn is labelled honestly; _final_response_prompt renders the guided
+            # `tutor_direct_locked` prompt for non-mastered learners.
+            instructions = self._registry.render(
+                "tutor_direct_locked", _context_to_base_prompt_vars(context)
+            )
+            content = _wrap_tool_result(requested_mode, instructions)
+            return _ToolInstructionResult(
+                requested_mode=requested_mode,
+                final_mode="direct",
+                content=content,
+                normalized_call=tool_call,
+                normalized_result=NormalizedToolResult(
+                    call_id=tool_call.call_id,
+                    name=tool_call.name,
+                    content=content,
+                    provider=tool_call.provider,
+                    public_preview={"status": "received", "mode": requested_mode},
                 ),
             )
 
@@ -1016,6 +1103,15 @@ async def stream_chat_response(
             # ---------------------------------------------------------------
 
             # Phase 1: mode selection.
+            # Announce that we're choosing an answering mode before the first LLM
+            # call. The mode-selection call no longer streams raw reasoning by
+            # default (see Settings.tutor_mode_selection_thinking), so this status
+            # plus the post-mode `mode` event is the learner-visible first-phase
+            # trace: "choosing answering mode → <mode>".
+            _process_event("status", "selecting_mode")
+            async for sse in _emit_event("status", "selecting_mode"):
+                yield sse
+
             # When the agent supports prepare_mode_stream, first-call reasoning is
             # streamed live (status/thinking) instead of being buffered until the
             # first LLM call completes; the prep then carries only the post-mode
@@ -1042,15 +1138,30 @@ async def stream_chat_response(
                 async for sse in _emit_event(kind, chunk):
                     yield sse
 
-            # Retrieval loop — between phases so the LLM sees retrieved content
+            # Retrieval loop — between phases so the LLM sees retrieved content.
+            # The loop runs when there is a usable LLM client AND the concept has
+            # either linked sources or a cached primer. On source-less concepts the
+            # primer tool is still worth offering so the tutor can re-orient a
+            # learner on later turns. The opening-turn primer auto-injection
+            # (build_tutor_context) is unchanged; on later turns the primer only
+            # reaches the model through get_concept_primer.
             llm_client_for_retrieval = getattr(agent, "llm_client", None)
             enriched_messages = prep.messages_after_mode
-            if llm_client_for_retrieval is not None and len(context.sources) > 0:
+            # Local import mirrors build_tutor_context and avoids a circular import.
+            from backend.app.services.concept_primers import read_cached_primer
+
+            has_sources = len(context.sources) > 0
+            primer_available = read_cached_primer(concept) is not None
+            offered_tools = select_retrieval_tools(
+                has_sources=has_sources,
+                has_primer=primer_available,
+            )
+            if llm_client_for_retrieval is not None and (has_sources or primer_available):
                 try:
                     retrieval_messages = _retrieval_planning_messages(prep.messages_after_mode)
                     retrieval_loop = await _run_retrieval_loop(
                         retrieval_messages,
-                        RETRIEVAL_TOOLS,
+                        offered_tools,
                         session=session,
                         workspace_id=workspace_id,
                         concept_id=concept_id,
@@ -1167,8 +1278,11 @@ async def stream_chat_response(
         yield _sse("error", {"type": "error", "code": "llm_error", "message": "Generation failed"})
         return
 
-    if not full_text.strip() and full_reasoning.strip():
-        logger.warning("Tutor generation ended with reasoning but no visible text")
+    if not full_text.strip():
+        # Any completion with no visible tutor text is an error — whether or not the
+        # model produced reasoning. Roll back so we never persist a blank assistant
+        # bubble or emit a `done` for an empty answer.
+        logger.warning("Tutor generation ended without a visible tutor response")
         await session.rollback()
         yield _sse(
             "error",
@@ -1222,90 +1336,30 @@ async def stream_chat_response(
     )
 
 
-def _should_buffer_locked_socratic_fallback(
-    result: _ToolInstructionResult,
-    context: TutorContext,
-) -> bool:
-    return (
-        result.requested_mode == "direct"
-        and result.final_mode == "socratic"
-        and context.mastery_status != "mastered"
-    )
-
-
-def _coerce_locked_socratic_reply(text: str, context: TutorContext) -> str:
-    cleaned = _strip_control_prefix(text).strip()
-    question = _extract_focused_question(cleaned)
-    if question is not None:
-        return question
-    return _default_locked_socratic_question(context)
-
-
-def _extract_focused_question(text: str) -> str | None:
-    normalized = re.sub(r"\s+", " ", text).strip()
-    if not normalized:
-        return None
-
-    question_end = normalized.rfind("?")
-    if question_end == -1:
-        return None
-
-    question_window = normalized[: question_end + 1]
-    matches = list(_QUESTION_SENTENCE_START_RE.finditer(question_window))
-    if matches:
-        start = matches[-1].start(2)
-        candidate = question_window[start : question_end + 1]
-    elif len(question_window.split()) <= 6:
-        candidate = question_window
-    else:
-        return None
-
-    candidate = candidate.strip(" \t\r\n\"'`*-")
-    if not candidate or not candidate.endswith("?"):
-        return None
-    if len(candidate.split()) > 28:
-        return None
-    if candidate[0].islower():
-        candidate = candidate[0].upper() + candidate[1:]
-    return candidate
-
-
-def _default_locked_socratic_question(context: TutorContext) -> str:
-    learner_message = context.learner_message.lower()
-    concept_title = context.concept.title
-
-    if "example" in learner_message:
-        return f"What example of {concept_title} comes to mind first?"
-    if any(
-        keyword in learner_message
-        for keyword in ("summarize", "summarise", "summary", "theme", "themes", "topic", "topics")
-    ):
-        return f"What do you think are the main topics or themes within {concept_title}?"
-    if any(
-        keyword in learner_message
-        for keyword in ("why", "real world", "real-world", "application", "used in", "use case")
-    ):
-        return f"Where do you think {concept_title} shows up in practice?"
-    return f"What do you already understand about {concept_title}?"
-
-
 def _parse_control_from_buffer(buffer: str) -> _ParsedControl | None:
+    # A valid control tag anywhere in the buffer wins, even if the model emitted
+    # leading whitespace or a blank line before it.
+    tool_match = _CONTROL_TOOL_SEARCH_RE.search(buffer)
+    if tool_match:
+        return _ParsedControl(kind="tool", value=tool_match.group(1), remainder="")
+
+    mode_match = _CONTROL_MODE_SEARCH_RE.search(buffer)
+    if mode_match:
+        return _ParsedControl(kind="mode", value=mode_match.group(1), remainder="")
+
     newline = buffer.find("\n")
     if newline == -1:
         return None
 
-    line = buffer[:newline].strip()
-    remainder = buffer[newline + 1 :]
+    # The first complete line is prose and cannot still grow into a control tag:
+    # the classifier ignored the contract and is writing a reply. Signal a
+    # fallback so the caller infers a mode from the learner message instead of
+    # blindly defaulting to socratic.
+    first_line = buffer[:newline].strip()
+    if first_line and not _ControlPrefixStripper._could_be_control_prefix(first_line):
+        return _ParsedControl(kind="fallback", value="socratic", remainder=buffer)
 
-    tool_match = _CONTROL_TOOL_RE.match(line)
-    if tool_match:
-        return _ParsedControl(kind="tool", value=tool_match.group(1), remainder=remainder)
-
-    mode_match = _CONTROL_MODE_RE.match(line)
-    if mode_match:
-        return _ParsedControl(kind="mode", value=mode_match.group(1), remainder=remainder)
-
-    return _ParsedControl(kind="fallback", value="socratic", remainder=buffer)
+    return None
 
 
 def _parse_control_eof(buffer: str) -> _ParsedControl | None:
@@ -1346,6 +1400,20 @@ def _control_value_to_mode(parsed: _ParsedControl) -> TutorMode | None:
         logger.warning("Unknown tutor mode %r; defaulting to socratic", parsed.value)
         return "socratic"
     return parsed.value  # type: ignore[return-value]
+
+
+def _resolve_control_mode(parsed: _ParsedControl, context: TutorContext) -> TutorMode:
+    """Map a parsed control result to a concrete mode for the turn.
+
+    A real ``<mode>``/``<tool>`` tag is authoritative. When the classifier emitted
+    prose instead (``kind == "fallback"``), infer the mode from the learner's
+    latest message so a "I don't know" turn becomes teaching (repair) rather than
+    yet another Socratic question.
+    """
+    if parsed.kind == "fallback":
+        return _infer_mode_from_message(context.learner_message)
+    mode = _control_value_to_mode(parsed)
+    return mode if mode is not None else "socratic"
 
 
 def _parse_mode_json(raw: str) -> TutorMode:
@@ -1410,6 +1478,37 @@ def _format_sources(sources: list[TutorSourceMetadata]) -> str:
     return "\n".join(lines)
 
 
+def _format_primer(primer) -> str:
+    """Render a cached concept primer as opening-turn context, or "" when absent.
+
+    Only used opportunistically on the opening turn so the tutor's framing aligns
+    with the concept glossary. Never triggers primer generation.
+    """
+    if primer is None:
+        return ""
+    key_terms = "\n".join(f"- {term.term}: {term.definition}" for term in primer.key_terms)
+    return (
+        "\n\n## Concept primer (align your framing and vocabulary with this)\n"
+        f"Overview: {primer.overview}\n\n"
+        f"Key terms:\n{key_terms}"
+    )
+
+
+def _render_opening_guidance(context: TutorContext) -> str:
+    """Render the worked-example-first opening instructions for an opening turn.
+
+    Returns "" on non-opening turns, leaving normal multi-mode behaviour untouched.
+    The opening guidance text lives in the versioned ``tutor_opening`` prompt; a
+    cached primer, when present, is folded in as additional framing context.
+    """
+    if not context.is_opening_turn:
+        return ""
+    return prompt_registry.render(
+        "tutor_opening",
+        {"primer_context": _format_primer(context.primer)},
+    )
+
+
 def _context_to_base_prompt_vars(context: TutorContext) -> dict[str, str]:
     recent_turns_text = (
         "\n".join(f"{turn.role.upper()}: {turn.content}" for turn in context.recent_turns) or "none"
@@ -1432,10 +1531,13 @@ def _context_to_base_prompt_vars(context: TutorContext) -> dict[str, str]:
         "mastery_status": context.mastery_status,
         "bloom_target": context.concept.bloom_level,
         "learning_goal": context.trail.goal,
+        "learner_prior_knowledge": context.prior_knowledge or "none",
         "sources": _format_sources(context.sources),
         "conversation_summary": summary_text,
         "recent_turns": recent_turns_text,
         "learner_message": context.learner_message,
+        "opening_turn": "yes" if context.is_opening_turn else "no",
+        "opening_guidance": _render_opening_guidance(context),
     }
 
 

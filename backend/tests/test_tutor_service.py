@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.app.agents.prompts import prompt_registry
 from backend.app.agents.prompts.registry import PromptRegistry
 from backend.app.agents.provider_tools import (
     NormalizedStreamEvent,
@@ -43,14 +44,21 @@ from backend.app.services.tutor import (
     FallbackTutorModeClassifier,
     LLMTutorAgent,
     _build_chat_messages,
+    _context_to_base_prompt_vars,
     _context_to_prompt_vars,
+    _infer_mode_from_message,
     _normalize_tutor_instruction_request,
+    _parse_control_from_buffer,
     _parse_mode_json,
+    _ParsedControl,
+    _resolve_control_mode,
     _restore_final_system_prompt,
     _retrieval_planning_messages,
     _should_replay_retrieval_result,
     _strip_control_prefix,
+    stream_chat_response,
 )
+from backend.app.settings import settings
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -446,6 +454,33 @@ class _StaticPromptRegistry(PromptRegistry):
         return f"{task} prompt mastery={variables.get('mastery_status')}"
 
 
+class _RecordingTaggedLLMClient:
+    """Tagged stub that records the ``thinking`` kwarg per call.
+
+    Simulates a provider: ``thinking`` chunks are only emitted when the call was
+    made with a truthy ``thinking`` argument, mirroring how providers suppress
+    reasoning when thinking is disabled.
+    """
+
+    def __init__(self, *streams: list[tuple[str, str]]) -> None:
+        self._streams = [list(stream) for stream in streams]
+        self.calls: list[list[dict]] = []
+        self.thinking_args: list[object] = []
+        self.max_tokens_args: list[object] = []
+
+    async def chat_stream_tagged(self, messages: list[dict], **kwargs: object):
+        if not self._streams:
+            raise AssertionError("Unexpected extra chat_stream_tagged call")
+        self.calls.append(messages)
+        thinking = kwargs.get("thinking")
+        self.thinking_args.append(thinking)
+        self.max_tokens_args.append(kwargs.get("max_tokens"))
+        for kind, chunk in self._streams.pop(0):
+            if kind == "thinking" and not thinking:
+                continue
+            yield (kind, chunk)
+
+
 async def test_fallback_classifier_default_is_socratic():
     clf = FallbackTutorModeClassifier()
     ctx = _make_context("How does this work?")
@@ -510,6 +545,131 @@ async def test_fallback_classifier_explore_on_application():
     clf = FallbackTutorModeClassifier()
     ctx = _make_context("How are derivatives applied in the real world?")
     assert await clf.classify(ctx) == "explore"
+
+
+# ---------------------------------------------------------------------------
+# Stuck-learner / prose-fallback mode inference (Bug A + Bug B)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I actually genuinely don't know",
+        "I don't know",
+        "honestly no idea where to start",
+        "I'm completely lost",
+        "I give up",
+        "no clue, sorry",
+    ],
+)
+async def test_fallback_classifier_routes_stuck_learner_to_repair(message):
+    """A learner who says they're stuck should be taught (repair), not re-questioned."""
+    clf = FallbackTutorModeClassifier()
+    ctx = _make_context(message)
+    assert await clf.classify(ctx) == "repair"
+
+
+def test_infer_mode_from_message_stuck_is_repair():
+    assert _infer_mode_from_message("I really don't know") == "repair"
+    assert _infer_mode_from_message("I'm stuck on this") == "repair"
+
+
+def test_infer_mode_from_message_quiz_beats_stuck():
+    # "quiz me" is an explicit readiness signal even if other words appear.
+    assert _infer_mode_from_message("quiz me, I'm not sure I'm ready") == "quiz_prompt"
+
+
+def test_infer_mode_from_message_defaults_to_socratic():
+    assert _infer_mode_from_message("How does TCP relate to this?") == "socratic"
+
+
+def test_parse_control_from_buffer_parses_mode_line():
+    parsed = _parse_control_from_buffer('<mode name="repair" />\n')
+    assert parsed is not None
+    assert parsed.kind == "mode"
+    assert parsed.value == "repair"
+
+
+def test_parse_control_from_buffer_parses_tool_line():
+    parsed = _parse_control_from_buffer('<tool name="get_tutor_instructions" mode="direct" />\n')
+    assert parsed is not None
+    assert parsed.kind == "tool"
+    assert parsed.value == "direct"
+
+
+def test_parse_control_from_buffer_finds_tag_after_leading_blank_line():
+    parsed = _parse_control_from_buffer('\n<mode name="explore" />')
+    assert parsed is not None
+    assert parsed.kind == "mode"
+    assert parsed.value == "explore"
+
+
+def test_parse_control_from_buffer_flags_prose_as_fallback():
+    """When the classifier writes a learner-facing reply, parsing signals fallback."""
+    prose = "That's completely fine — the layer you want is the Network Layer.\nMore text."
+    parsed = _parse_control_from_buffer(prose)
+    assert parsed is not None
+    assert parsed.kind == "fallback"
+
+
+def test_parse_control_from_buffer_waits_on_partial_tag():
+    # A partial control tag is not yet prose: keep buffering.
+    assert _parse_control_from_buffer('<mode name="soc') is None
+
+
+def test_resolve_control_mode_uses_real_tag_over_inference():
+    ctx = _make_context("I don't know, I'm lost")
+    parsed = _ParsedControl(kind="mode", value="explore", remainder="")
+    # A real tag is authoritative even if the message looks stuck.
+    assert _resolve_control_mode(parsed, ctx) == "explore"
+
+
+def test_resolve_control_mode_infers_from_message_on_fallback():
+    ctx = _make_context("I actually genuinely don't know")
+    parsed = _ParsedControl(kind="fallback", value="socratic", remainder="")
+    # Prose fallback must NOT blindly return socratic for a stuck learner.
+    assert _resolve_control_mode(parsed, ctx) == "repair"
+
+
+async def test_first_pass_prose_resolves_stuck_learner_to_repair():
+    """End-to-end: classifier emits prose, stuck learner resolves to repair, not socratic."""
+    client = _StubTaggedLLMClient(
+        # First (classifier) call ignores the contract and writes a reply.
+        [("text", "That's completely fine — the answer is the Network Layer.\n")],
+        # Second (final) call produces the visible answer.
+        [("text", "Here is what the Network Layer does...")],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+
+    events = [
+        (kind, chunk)
+        async for kind, chunk in agent.respond_stream(
+            _make_context("I actually genuinely don't know")
+        )
+    ]
+
+    modes = [chunk for kind, chunk in events if kind == "mode"]
+    assert modes == ["repair"]
+
+
+async def test_first_pass_prose_keeps_socratic_for_engaged_learner():
+    """A normal content question with prose fallback still resolves to socratic."""
+    client = _StubTaggedLLMClient(
+        [("text", "Great question! Let's think about it.\n")],
+        [("text", "What do you already know about this?")],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+
+    events = [
+        (kind, chunk)
+        async for kind, chunk in agent.respond_stream(
+            _make_context("How does the network layer route packets?")
+        )
+    ]
+
+    modes = [chunk for kind, chunk in events if kind == "mode"]
+    assert modes == ["socratic"]
 
 
 # ---------------------------------------------------------------------------
@@ -737,23 +897,27 @@ def test_build_chat_messages_learner_message_is_always_last():
     assert msgs[-1] == {"role": "user", "content": "Latest"}
 
 
-async def test_locked_direct_summary_request_only_emits_socratic_question():
+async def test_gated_direct_teaches_instead_of_coercing_a_question():
+    """A `direct` request while still learning must TEACH (guided), not refuse and
+    bounce a bare Socratic question back at the learner."""
     from types import SimpleNamespace
 
+    teaching = (
+        "Imbibition is water absorption by hydrophilic solids like seeds. "
+        "Step 1: water binds to the surface. Step 2: the seed swells. "
+        "Does that picture make sense so far?"
+    )
     client = _StubTaggedLLMClient(
         [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
-        [
-            ("text", '<mode name="socratic" />\nMylo Xyloto explores hope and escape. '),
-            ("text", "What theme do you think ties the album together?"),
-        ],
+        [("text", teaching)],
     )
     agent = LLMTutorAgent(client, max_tokens=512)
-    ctx = _make_context("Summarise the topics within Mylo Xyloto")
+    ctx = _make_context("Walk me through the process of imbibition.")
     ctx.mastery_status = "learning"
     ctx.concept = cast(
         ConceptNode,
         SimpleNamespace(
-            title="Mylo Xyloto",
+            title="Imbibition",
             concept_level="topic",
             bloom_level="understand",
             id=uuid.uuid4(),
@@ -762,42 +926,44 @@ async def test_locked_direct_summary_request_only_emits_socratic_question():
 
     events = [(kind, chunk) async for kind, chunk in agent.respond_stream(ctx)]
 
-    assert [chunk for kind, chunk in events if kind == "mode"] == ["socratic"]
-    assert [chunk for kind, chunk in events if kind == "status"] == [
-        "calling_tool",
-        "tool_called",
-        "tool_complete",
-    ]
-    assert [chunk for kind, chunk in events if kind == "text"] == [
-        "What theme do you think ties the album together?"
-    ]
+    # The turn is labelled `direct` (we are teaching what the learner asked for),
+    # not silently downgraded to socratic.
+    assert [chunk for kind, chunk in events if kind == "mode"] == ["direct"]
+    # The model's actual teaching streams through verbatim — it is NOT discarded
+    # and replaced with a single bare question.
+    assert [chunk for kind, chunk in events if kind == "text"] == [teaching]
 
 
-async def test_locked_direct_summary_without_question_uses_default_socratic_question():
-    from types import SimpleNamespace
-
-    client = _StubTaggedLLMClient(
-        [("text", '<tool name="get_tutor_instructions" mode="direct" />')],
-        [("text", "Mylo Xyloto explores hope, color, and resistance.")],
-    )
-    agent = LLMTutorAgent(client, max_tokens=512)
-    ctx = _make_context("Summarise the topics within Mylo Xyloto")
+def test_gated_direct_final_prompt_carries_guided_teaching_and_guardrail():
+    """The final prompt for a gated `direct` turn must use the guided-teaching prompt
+    AND embed the no-cheatsheet / no-answer-dump guardrail so an answer-extraction
+    request (e.g. "make me a cheatsheet") is redirected rather than satisfied."""
+    ctx = _make_context("Just give me all the answers / make me a cheatsheet for the exam.")
     ctx.mastery_status = "learning"
-    ctx.concept = cast(
-        ConceptNode,
-        SimpleNamespace(
-            title="Mylo Xyloto",
-            concept_level="topic",
-            bloom_level="understand",
-            id=uuid.uuid4(),
-        ),
-    )
+    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
 
-    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(ctx)]
+    prompt = agent._final_response_prompt("direct", ctx)
 
-    assert [chunk for kind, chunk in events if kind == "text"] == [
-        "What do you think are the main topics or themes within Mylo Xyloto?"
-    ]
+    # Guided teaching, not the crisp mastered-direct answer prompt.
+    assert "guided teaching" in prompt.lower()
+    assert "never refuse" in prompt.lower() or "do not refuse" in prompt.lower()
+    # Guardrail wording is present in both the gated prompt and the shared contract.
+    assert "cheatsheet" in prompt.lower()
+    assert "answer key" in prompt.lower()
+    assert "redirect" in prompt.lower()
+
+
+def test_gated_direct_prep_does_not_coerce_to_socratic():
+    """_make_mode_prep for a gated `direct` request keeps mode `direct` and does not
+    flag any locked-socratic buffering (the old refuse-and-ask path is gone)."""
+    ctx = _make_context("Explain the Calvin cycle to me.")
+    ctx.mastery_status = "learning"
+    agent = LLMTutorAgent(_StubTaggedLLMClient(), registry=_StaticPromptRegistry(), max_tokens=512)
+
+    prep = agent._make_mode_prep("direct", ctx, [{"role": "system", "content": "x"}], [])
+
+    assert prep.mode == "direct"
+    assert not hasattr(prep, "locked_socratic")
 
 
 async def test_prepare_mode_stream_emits_first_pass_thinking_live():
@@ -829,6 +995,162 @@ async def test_prepare_mode_stream_emits_first_pass_thinking_live():
     ]
     # Live-streamed reasoning must NOT be duplicated in the buffered events.
     assert all(kind != "thinking" for kind, _ in prep.buffered_events)
+
+
+async def test_mode_selection_thinking_off_by_default(monkeypatch):
+    """The first (mode-selection) call must receive thinking=False by default and
+    emit no thinking events, so mode-selection reasoning never leaks into the trace."""
+    monkeypatch.setattr(settings, "tutor_mode_selection_thinking", False)
+    client = _RecordingTaggedLLMClient(
+        [("thinking", "mode-selection reasoning"), ("text", '<mode name="socratic" />')],
+        [("text", "Visible answer")],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+
+    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Help me"))]
+
+    # First call = mode selection; reasoning disabled.
+    assert client.thinking_args[0] is False
+    # No thinking events emitted for the mode-selection phase.
+    assert all(kind != "thinking" for kind, _ in events)
+    assert [chunk for kind, chunk in events if kind == "mode"] == ["socratic"]
+
+
+async def test_mode_selection_thinking_enabled_via_settings(monkeypatch):
+    """With the setting enabled, the mode-selection call receives thinking=True."""
+    monkeypatch.setattr(settings, "tutor_mode_selection_thinking", True)
+    client = _RecordingTaggedLLMClient(
+        [("thinking", "mode-selection reasoning"), ("text", '<mode name="socratic" />')],
+        [("text", "Visible answer")],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+
+    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Help me"))]
+
+    assert client.thinking_args[0] is True
+    # Reasoning now surfaces for the mode-selection phase.
+    assert ("thinking", "mode-selection reasoning") in events
+
+
+async def test_explicit_mode_selection_thinking_overrides_settings(monkeypatch):
+    """An explicit constructor argument wins over the settings default."""
+    monkeypatch.setattr(settings, "tutor_mode_selection_thinking", True)
+    client = _RecordingTaggedLLMClient(
+        [("text", '<mode name="socratic" />')],
+        [("text", "Visible answer")],
+    )
+    agent = LLMTutorAgent(
+        client,
+        registry=_StaticPromptRegistry(),
+        max_tokens=512,
+        mode_selection_thinking=False,
+    )
+
+    [_ async for _ in agent.respond_stream(_make_context("Help me"))]
+
+    assert client.thinking_args[0] is False
+
+
+async def test_mode_selection_uses_small_token_cap(monkeypatch):
+    """The first (classifier) call uses the dedicated small cap; the second uses the full budget."""
+    monkeypatch.setattr(settings, "tutor_mode_selection_max_tokens", 48)
+    client = _RecordingTaggedLLMClient(
+        [("text", '<mode name="socratic" />')],
+        [("text", "Visible answer")],
+    )
+    # Construct after monkeypatch so __init__ reads the patched cap.
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=4096)
+
+    [_ async for _ in agent.respond_stream(_make_context("Help me"))]
+
+    # First call = mode selection/classifier: small cap. Second call = full answer budget.
+    assert client.max_tokens_args[0] == 48
+    assert client.max_tokens_args[1] == 4096
+
+
+async def test_first_pass_is_pure_classifier_and_discards_trailing_text():
+    """If the classifier call emits text after the control line, it is discarded.
+
+    The visible answer comes only from the second (final) LLM call.
+    """
+    client = _StubTaggedLLMClient(
+        [("text", '<mode name="socratic" />\nLEAKED discarded reply that must not surface.')],
+        [("text", "What do you already understand here?")],
+    )
+    agent = LLMTutorAgent(client, registry=_StaticPromptRegistry(), max_tokens=512)
+
+    events = [(kind, chunk) async for kind, chunk in agent.respond_stream(_make_context("Help"))]
+
+    text_chunks = [chunk for kind, chunk in events if kind == "text"]
+    assert text_chunks == ["What do you already understand here?"]
+    assert all("LEAKED" not in chunk for _, chunk in events)
+    assert [chunk for kind, chunk in events if kind == "mode"] == ["socratic"]
+
+
+def test_tutor_base_prompt_is_classify_only():
+    """The first-pass base prompt must instruct classify-only output, with no reply rules."""
+    from backend.app.agents.prompts import prompt_registry
+
+    body = prompt_registry.load("tutor_base").body
+    assert "Output exactly one control line and STOP" in body
+    assert "another step writes the learner-facing reply" in body
+    # The old "write the visible reply in this pass" rules must be gone.
+    assert "Visible reply rules" not in body
+    assert "immediately write the visible reply" not in body
+    # Mode policy and the beginner-by-default prior-knowledge prior remain.
+    assert "complete beginner" in body
+    assert "start from the fundamentals" in body
+
+
+async def test_truncate_tool_result_uses_settings(monkeypatch):
+    """_truncate_tool_result must honor tutor_max_tool_result_chars."""
+    from backend.app.services.conversations import _truncate_tool_result
+
+    monkeypatch.setattr(settings, "tutor_max_tool_result_chars", 5)
+    assert _truncate_tool_result("abcdefghij") == "abcde ... [truncated]"
+    assert _truncate_tool_result("abcd") == "abcd"
+
+
+async def test_recent_visible_turns_limit_uses_settings(db_engine, db_session, monkeypatch):
+    """build_tutor_context must clamp recent turns to tutor_recent_visible_turns_limit."""
+    monkeypatch.setattr(settings, "tutor_recent_visible_turns_limit", 3)
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+
+    conv = Conversation(workspace_id=ws_id, trail_id=trail_id, concept_id=concept_id)
+    db_session.add(conv)
+    await db_session.flush()
+
+    for index in range(8):
+        db_session.add(
+            ConversationTurn(
+                conversation_id=conv.id,
+                role="user" if index % 2 == 0 else "assistant",
+                kind="visible",
+                content=f"visible-{index}",
+                mode=None if index % 2 == 0 else "socratic",
+                turn_index=index,
+            )
+        )
+    await db_session.flush()
+
+    trail = await db_session.scalar(select(Trail).where(Trail.id == trail_id))
+    concept = await db_session.scalar(select(ConceptNode).where(ConceptNode.id == concept_id))
+
+    ctx = await build_tutor_context(
+        db_session,
+        conversation=conv,
+        concept=concept,
+        trail=trail,
+        learner_message="next",
+        user_turn_index=8,
+    )
+
+    assert len(ctx.recent_turns) == 3
+    assert [turn.content for turn in ctx.recent_turns] == [
+        "visible-5",
+        "visible-6",
+        "visible-7",
+    ]
 
 
 async def test_non_tool_mode_final_call_uses_final_response_prompt():
@@ -973,6 +1295,38 @@ def test_direct_prompt_tells_mastered_mode_not_to_append_socratic_followup():
     assert "do not append a Socratic follow-up" in prompt
 
 
+def test_final_response_contract_allows_markdown_hierarchy_and_concise_default():
+    """The shared final-response contract is concise-by-default and allows markdown headers."""
+    ctx = _make_context("Explain this")
+    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
+
+    prompt = agent._final_response_prompt("direct", ctx)
+
+    assert "Default to a concise reply" in prompt
+    assert "markdown headers" in prompt
+    assert "only when the topic genuinely needs it" in prompt
+    assert "walls of text" in prompt
+
+
+def test_final_mode_prompts_drop_hard_word_caps():
+    """Relaxed length guidance must reach the rendered socratic/repair/explore prompts."""
+    ctx = _make_context("Tell me more")
+    agent = LLMTutorAgent(_StubTaggedLLMClient(), max_tokens=512)
+
+    for mode in ("socratic", "repair", "explore"):
+        prompt = agent._final_response_prompt(mode, ctx)
+        # The old rigid caps are gone.
+        assert "under 80 words" not in prompt
+        assert "under 140 words" not in prompt
+        assert "under 170 words" not in prompt
+        # Concise-by-default guidance is present (via the mode prompt or the contract).
+        assert "concise" in prompt.lower()
+
+    # Socratic stays question-led even after relaxing the cap.
+    socratic_prompt = agent._final_response_prompt("socratic", ctx)
+    assert "ONE focused guiding question" in socratic_prompt
+
+
 def test_retrieval_planning_messages_reuse_no_tool_answers():
     messages = [
         {"role": "system", "content": "Final response contract"},
@@ -1029,3 +1383,283 @@ def test_only_directed_document_reads_are_replayed_in_future_prompt_context():
 
     assert _should_replay_retrieval_result(search_result) is False
     assert _should_replay_retrieval_result(document_result) is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 13.5b: worked-example-first opening move
+# ---------------------------------------------------------------------------
+
+
+async def _add_visible_turn(db_session, conversation_id, *, role, content, turn_index):
+    turn = ConversationTurn(
+        conversation_id=conversation_id,
+        role=role,
+        kind="visible",
+        content=content,
+        turn_index=turn_index,
+    )
+    db_session.add(turn)
+    await db_session.flush()
+
+
+_PRIMER_FIXTURE = {
+    "overview": "A derivative measures an instantaneous rate of change.",
+    "key_terms": [
+        {"term": "slope", "definition": "steepness of a line at a point"},
+        {"term": "tangent", "definition": "line touching a curve at one point"},
+        {"term": "limit", "definition": "value a function approaches"},
+    ],
+    "version": 1,
+}
+
+
+async def test_first_turn_sets_opening_signal_and_injects_opening_instructions(
+    db_engine, db_session
+):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    ctx, _ = await _make_db_context(db_session, ws_id, trail_id, concept_id, user_turn_index=0)
+
+    assert ctx.is_opening_turn is True
+    assert ctx.primer is None  # no primer cached, and none generated
+
+    vars_ = _context_to_base_prompt_vars(ctx)
+    assert vars_["opening_turn"] == "yes"
+    assert vars_["opening_guidance"] != ""
+
+    base_prompt = prompt_registry.render("tutor_base", vars_)
+    socratic_prompt = prompt_registry.render("tutor_socratic", vars_)
+    # The base prompt is now a pure classifier and carries no opening guidance.
+    assert "Opening turn" not in base_prompt
+    assert "worked example" not in base_prompt
+    # The opening guidance reaches the learner-facing (second-call) mode prompt.
+    assert "Opening turn" in socratic_prompt
+    assert "worked example" in socratic_prompt
+    # No primer cached, so the primer block must be absent.
+    assert "Concept primer" not in socratic_prompt
+
+
+async def test_later_turn_does_not_set_opening_signal(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+
+    conv = Conversation(workspace_id=ws_id, trail_id=trail_id, concept_id=concept_id)
+    db_session.add(conv)
+    await db_session.flush()
+    await _add_visible_turn(db_session, conv.id, role="user", content="hi", turn_index=0)
+    await _add_visible_turn(
+        db_session, conv.id, role="assistant", content="a question?", turn_index=1
+    )
+
+    trail = await db_session.scalar(select(Trail).where(Trail.id == trail_id))
+    concept = await db_session.scalar(select(ConceptNode).where(ConceptNode.id == concept_id))
+    ctx = await build_tutor_context(
+        db_session,
+        conversation=conv,
+        concept=concept,
+        trail=trail,
+        learner_message="second message",
+        user_turn_index=2,
+    )
+
+    assert ctx.is_opening_turn is False
+
+    vars_ = _context_to_base_prompt_vars(ctx)
+    assert vars_["opening_turn"] == "no"
+    assert vars_["opening_guidance"] == ""
+    assert "Opening turn" not in prompt_registry.render("tutor_base", vars_)
+
+
+async def test_cached_primer_included_in_opening_context(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+
+    concept = await db_session.scalar(select(ConceptNode).where(ConceptNode.id == concept_id))
+    concept.metadata_json = {"primer": _PRIMER_FIXTURE}
+    await db_session.commit()
+
+    ctx, _ = await _make_db_context(db_session, ws_id, trail_id, concept_id, user_turn_index=0)
+
+    assert ctx.is_opening_turn is True
+    assert ctx.primer is not None
+    assert ctx.primer.overview == _PRIMER_FIXTURE["overview"]
+
+    vars_ = _context_to_base_prompt_vars(ctx)
+    # The opening guidance (with the cached primer) reaches the final mode prompt.
+    socratic_prompt = prompt_registry.render("tutor_socratic", vars_)
+    assert "Concept primer" in socratic_prompt
+    assert "instantaneous rate of change" in socratic_prompt
+    assert "slope" in socratic_prompt
+
+
+async def test_primer_absent_does_not_trigger_generation(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    ctx, _ = await _make_db_context(db_session, ws_id, trail_id, concept_id, user_turn_index=0)
+
+    # build_tutor_context only ever reads a cached primer; with none cached it stays None
+    # and no LLM-backed generator is constructed or invoked.
+    assert ctx.primer is None
+    assert ctx.is_opening_turn is True
+    assert "Concept primer" not in prompt_registry.render(
+        "tutor_base", _context_to_base_prompt_vars(ctx)
+    )
+
+
+async def test_prior_knowledge_reaches_tutor_prompt(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+
+    trail = await db_session.scalar(select(Trail).where(Trail.id == trail_id))
+    trail.prior_knowledge = "I already understand limits and basic slopes."
+    await db_session.commit()
+
+    ctx, _ = await _make_db_context(db_session, ws_id, trail_id, concept_id, user_turn_index=0)
+
+    assert ctx.prior_knowledge == "I already understand limits and basic slopes."
+
+    vars_ = _context_to_base_prompt_vars(ctx)
+    assert vars_["learner_prior_knowledge"] == "I already understand limits and basic slopes."
+    assert "I already understand limits and basic slopes." in prompt_registry.render(
+        "tutor_base", vars_
+    )
+
+
+async def test_absent_prior_knowledge_renders_cleanly(db_engine, db_session):
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    ctx, _ = await _make_db_context(db_session, ws_id, trail_id, concept_id, user_turn_index=0)
+
+    assert ctx.prior_knowledge is None
+
+    vars_ = _context_to_base_prompt_vars(ctx)
+    assert vars_["learner_prior_knowledge"] == "none"
+    # Rendering must not raise on the missing optional field.
+    prompt = prompt_registry.render("tutor_base", vars_)
+    assert "Learner's stated prior knowledge" in prompt
+
+
+async def test_absent_prior_knowledge_prompts_beginner_default(db_engine, db_session):
+    """When prior knowledge is absent, the prompt tells the tutor to assume a beginner."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    ctx, _ = await _make_db_context(db_session, ws_id, trail_id, concept_id, user_turn_index=0)
+
+    vars_ = _context_to_base_prompt_vars(ctx)
+    assert vars_["learner_prior_knowledge"] == "none"
+
+    prompt = prompt_registry.render("tutor_base", vars_)
+    assert "complete beginner" in prompt
+    assert "start from the fundamentals" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Retrieval-loop gating: primer enables the loop on source-less concepts
+# ---------------------------------------------------------------------------
+
+
+class _ToolCapturingLLMClient:
+    """Records the tool names offered to each chat_stream_events call.
+
+    Emits no tool calls and empty text so the loop exits immediately and the
+    two-phase agent proceeds to its (stubbed) final generation.
+    """
+
+    def __init__(self) -> None:
+        self.tools_seen: list[list[str]] = []
+
+    async def chat_stream_events(self, messages, tools=None):
+        self.tools_seen.append([t.name for t in (tools or [])])
+        yield NormalizedStreamEvent.text_delta("")
+        yield NormalizedStreamEvent.done_event()
+
+
+class _GatingTwoPhaseAgent:
+    """Minimal two-phase agent that runs the real retrieval-loop gating."""
+
+    def __init__(self, llm_client) -> None:
+        self.llm_client = llm_client
+
+    def _prep(self):
+        from backend.app.services.tutor import _ModePreparation
+
+        return _ModePreparation(
+            mode="socratic",
+            messages_after_mode=[
+                {"role": "system", "content": "final"},
+                {"role": "user", "content": "how do I get started?"},
+            ],
+            buffered_events=(("mode", "socratic"),),
+        )
+
+    async def prepare_mode(self, context):
+        return self._prep()
+
+    async def prepare_mode_stream(self, context):
+        yield ("__prep__", self._prep())
+
+    async def stream_text(self, context, prep, *, messages=None):
+        yield ("text", "A guiding question?")
+
+
+async def _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id):
+    """Create a conversation with a prior visible exchange (so it is not opening)."""
+    conv = Conversation(workspace_id=ws_id, trail_id=trail_id, concept_id=concept_id)
+    db_session.add(conv)
+    await db_session.flush()
+    await _add_visible_turn(db_session, conv.id, role="user", content="hi", turn_index=0)
+    await _add_visible_turn(
+        db_session, conv.id, role="assistant", content="a question?", turn_index=1
+    )
+    await db_session.commit()
+    return conv
+
+
+async def test_retrieval_loop_offered_on_sourceless_concept_with_primer(db_engine, db_session):
+    """Source-less concept WITH a cached primer: loop runs, primer tool offered,
+    source tools withheld, even on a non-opening turn."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    concept = await db_session.scalar(select(ConceptNode).where(ConceptNode.id == concept_id))
+    concept.metadata_json = {"primer": _PRIMER_FIXTURE}
+    await db_session.commit()
+
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    llm_client = _ToolCapturingLLMClient()
+    agent = _GatingTwoPhaseAgent(llm_client)
+
+    async for _ in stream_chat_response(
+        db_session,
+        agent,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        message="how do I get started?",
+        conversation_id=conv.id,
+    ):
+        pass
+
+    # The loop ran exactly once and offered the primer tool but no source tools.
+    assert llm_client.tools_seen, "retrieval loop should have run"
+    offered = llm_client.tools_seen[0]
+    assert "get_concept_primer" in offered
+    assert "get_graph_neighbourhood" in offered
+    assert "search_sources" not in offered
+    assert "read_document_section" not in offered
+    assert "get_concept_sources" not in offered
+
+
+async def test_retrieval_loop_skipped_without_sources_or_primer(db_engine, db_session):
+    """Source-less concept WITHOUT a primer: the loop is not offered at all."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    llm_client = _ToolCapturingLLMClient()
+    agent = _GatingTwoPhaseAgent(llm_client)
+
+    async for _ in stream_chat_response(
+        db_session,
+        agent,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        message="how do I get started?",
+        conversation_id=conv.id,
+    ):
+        pass
+
+    # No sources and no primer → retrieval loop never invoked.
+    assert llm_client.tools_seen == []
