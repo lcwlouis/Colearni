@@ -20,7 +20,8 @@ export function masteryStatusFor(
   node: ConceptNode,
   masteryByConcept?: Record<string, MasteryRecord>,
 ): MasteryStatus {
-  const status = masteryByConcept?.[node.id]?.status ?? node.metadata_json.mastery_status;
+  const status =
+    masteryByConcept?.[node.id]?.status ?? node.metadata_json.mastery_status;
   if (
     status === "not_started" ||
     status === "learning" ||
@@ -100,7 +101,10 @@ export function isFocusedEdge(edge: ConceptEdge, focusSet: FocusSet): boolean {
   if (!focusSet.selected) {
     return true;
   }
-  return edge.source_node_id === focusSet.selected || edge.target_node_id === focusSet.selected;
+  return (
+    edge.source_node_id === focusSet.selected ||
+    edge.target_node_id === focusSet.selected
+  );
 }
 
 export function nodeStyleFor({
@@ -138,7 +142,10 @@ export function nodeStyleFor({
   };
 }
 
-export function edgeStyleFor(edge: ConceptEdge, focused: boolean): CSSProperties {
+export function edgeStyleFor(
+  edge: ConceptEdge,
+  focused: boolean,
+): CSSProperties {
   const style: CSSProperties = {
     stroke: edgeColor(edge.relation_type),
     strokeWidth: focused ? 2.4 : 1,

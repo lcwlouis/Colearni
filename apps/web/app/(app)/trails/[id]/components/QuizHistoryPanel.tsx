@@ -108,7 +108,10 @@ export function QuizHistoryPanel({
           No attempts yet. Take a practice or level-up quiz to build a history.
         </p>
       ) : (
-        <QuizAttemptList attempts={visible} />
+        <QuizAttemptList
+          attempts={visible}
+          pinContext={{ workspaceId, trailId }}
+        />
       )}
     </div>
   );

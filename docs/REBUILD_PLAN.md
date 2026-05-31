@@ -2,7 +2,7 @@
 
 ## Summary
 
-CoLearni is being rebuilt as a local-ready, graph-first learning system.
+CoLearni is a local-ready, graph-first learning system.
 
 Recommended strategy:
 
@@ -62,13 +62,15 @@ Dashboard, Learn/Inspect graph UX, source ingestion, retrieval tools, provider-n
 15. Guided graph navigation / recommended next concept
 16. Conversation summaries + learner state
 17. Onboarding & cold-start pedagogy
-18. Tutor-suggested quiz cards
-19. Deferred visualiser / artifact templates
-20. Demo polish/user testing
-21. Safety + content guardrails (layered, post-core)
-22. Product / marketing site
-23. Deployment
-24. SaaS prep
+18. App shell + cross-Trail navigation wiring (Trails/Graph overlap resolved)
+19. Tutor-suggested quiz cards
+20. Deferred visualiser / artifact templates
+21. Graph gardener + manual graph editing + cluster search
+22. Demo polish/user testing
+23. Safety + content guardrails (layered, post-core)
+24. Product / marketing site
+25. Deployment
+26. SaaS prep
 
 Do not start with PDF ingestion, SaaS billing/auth, or a public marketplace.
 
@@ -90,7 +92,7 @@ Implementation overlay:
 
 ## Current Build Snapshot
 
-Last updated: 2026-05-29.
+Last updated: 2026-05-31.
 
 Implemented:
 
@@ -110,18 +112,22 @@ Implemented:
 - Per-Trail graph Learn/Inspect mode split with `?concept=<id>` deep-link opening, neighbourhood focus in Learn Mode, inspect-only graph controls and edge-label toggle, mastery-aware concept-panel CTAs, and mobile concept sheet refinement.
 - Source ingestion foundation: workspace-scoped private upload API, local private object storage root, source revision records with immutable identity fields and mutable parser status/error metadata, concept-source linking API, minimal concept-panel upload/link UI, and export/import safety regressions for revision artifacts.
 - Parser pipeline (Phase 10 / Consolidation Item 2): PDF (pdfplumber), markdown, and plaintext parsing into canonical markdown with content-type + extension resolution, heading-aware chunking with line-anchored offsets, `SourceChunk` storage, best-effort embeddings (pgvector column sized from `EMBEDDING_DIM`, ILIKE fallback when absent/disabled), and `trail_id`-driven auto-linking of uploaded sources to concepts.
-- Retrieval tooling (Phase 11 / Consolidation Item 3): multi-turn LLM tool-calling loop with per-turn budget, parallel execution, dedupe, and workspace/concept scoping, exposing `search_sources`, `read_document_section`, `get_concept_sources`, and `get_graph_neighbourhood`.
+- Retrieval tooling (Phase 11 / Consolidation Item 3): multi-turn LLM tool-calling loop with per-turn budget, sequential shared-session execution (the per-response tool calls run sequentially against the request's single `AsyncSession`; parallel `asyncio.gather` dispatch was reverted because one asyncpg connection cannot run concurrent operations), dedupe, and workspace/concept scoping, exposing `search_sources`, `read_document_section`, `get_concept_sources`, and `get_graph_neighbourhood`.
 - Deterministic backend next-concept recommendation service and per-Trail API endpoint.
+- Conversation summaries + learner state (Phase 13): automatic post-turn conversation summarisation (detached follow-up), quiz attempt summaries, mutable learner state updated by both quiz grading and a tutor-driven observer, and multiple conversation threads per concept.
+- Onboarding & cold-start pedagogy (Phase 13.5): cached concept primers + key terms, worked-example-first tutor opening, suggested graph entry point, and prior-knowledge capture.
+- Tutor-suggested quiz cards (Phase 14): the `suggest_quiz` provider tool (offered every turn), `suggest_quiz` SSE event + `reasoning_parts` kind, and the opt-in CTA reusing the `quiz_drafts` path. Sibling `suggest_flashcards` and `suggest_artifact` tools follow the same opt-in contract.
+- Artifact templates + flashcards + pins (Phase 15a–15f): artifacts table + builder sub-agent + detached generation + `/artifacts/build(/stream)`, the `kind -> component` registry (`worked_example`, `comparison_card`, `timeline`, `mini_graph`, `simulation_slider`), the polymorphic pins surface, and the dedicated flashcards subsystem (Leitner scheduler, recall-first review, CSV/JSON export).
+- Public product / marketing site route group with fake login (Phase 17.6).
 
 Not implemented yet:
 
 - True per-message citation/source parts and quote support.
-- Automatic conversation summarisation.
-- Automated research-agent search, real hydration fetching/indexing, durable generation jobs, dark mode, deployment, auth, and SaaS features.
-- Guided graph focus controls, conversation summaries, mutable learner state, tutor-suggested quiz cards, and artifact templates.
-- Content-safety guardrails: trail-generation topic gate, tutor runtime scope/refusal hardening, runtime input/output moderation, and a child-safe default mode (see Phase 16.5).
-- Onboarding & cold-start pedagogy: concept primers + key-terms glossary, worked-example-first tutor opening, suggested graph entry point, and prior-knowledge capture into learner state (see Phase 13.5).
-- Public product / marketing site with fake login (see Phase 16.6).
+- Automated research-agent search, real hydration fetching/indexing, durable background generation jobs, dark mode, deployment, auth, and SaaS features.
+- Guided graph focus controls, graph gardener / manual graph editing, and semantic node-cluster search (Phase 16).
+- Content-safety guardrails: trail-generation topic gate, tutor runtime scope/refusal hardening, runtime input/output moderation, and a child-safe default mode (see Phase 17.5).
+- App shell navigation wiring: the persistent sidebar/mobile-nav shell is real and the app-shell destinations are wired to real pages/data (Dashboard, Trails, Explore, Quizzes, Progress, Sources, Bookmarks, Settings). The remaining cross-Trail/workspace graph surface stays deferred to Phase 16.
+- DOCX/PPTX source parsers (PDF/Markdown/plaintext are implemented).
 
 ## Phase 0: Foundation Cleanup
 
@@ -348,7 +354,7 @@ Requirements:
 
 - The prompt registry loads versioned Markdown prompt files from `backend/app/agents/prompts/` and renders Jinja-style variables without inlining long prompts in services/routes.
 - Trail graph persistence commits only after validation and rolls back explicitly if persistence fails.
-- `/generate/stream` remains documented as a temporary progress-stream endpoint until Phase 16 durable jobs are implemented.
+- `/generate/stream` remains documented as a temporary progress-stream endpoint until Phase 17 durable jobs are implemented.
 - Frontend dependency cleanup must not change graph behavior.
 
 Tests:
@@ -748,7 +754,7 @@ Current implementation note:
 
 ## Phase 10: Source Ingestion
 
-Status: foundation slice, concept-source linking, and the parser pipeline (PDF/markdown/plaintext parsing, heading-aware chunking, best-effort embeddings, and `trail_id` auto-linking) are implemented (see `docs/CONSOLIDATION_PLAN.md` Item 2). Durable background ingestion jobs remain deferred.
+Status: foundation slice, concept-source linking, and the parser pipeline (PDF/markdown/plaintext parsing, heading-aware chunking, best-effort embeddings, and `trail_id` auto-linking) are implemented (see `docs/archive/CONSOLIDATION_PLAN.md` Item 2). Durable background ingestion jobs remain deferred.
 
 Goal: ingest common learner documents into private, provenance-aware source records that can later power controlled retrieval.
 
@@ -822,7 +828,7 @@ Non-goals:
 
 ## Phase 11: Retrieval + Context Tooling
 
-Status: retrieval service, tool definitions, and the multi-turn LLM tool-calling loop are implemented (vector search with pgvector plus ILIKE fallback; `search_sources`, `read_document_section`, `get_concept_sources`, `get_graph_neighbourhood`; see `docs/CONSOLIDATION_PLAN.md` Item 3 and `docs/CURRENT_VARIANT.md`). `open_source_chunk` is superseded by `read_document_section` and remains deferred.
+Status: retrieval service, tool definitions, and the multi-turn LLM tool-calling loop are implemented (vector search with pgvector plus ILIKE fallback; `search_sources`, `read_document_section`, `get_concept_sources`, `get_graph_neighbourhood`; see `docs/archive/CONSOLIDATION_PLAN.md` Item 3 and `docs/CURRENT_VARIANT.md`). `open_source_chunk` is superseded by `read_document_section` and remains deferred.
 
 Goal: provide scoped, budgeted retrieval tools that support tutor grounding without whole-workspace search by default.
 
@@ -940,7 +946,7 @@ Non-goals:
 
 ## Phase 13: Conversation Summaries + Learner State
 
-Status: LLM conversation summarizer prompt/service, quiz attempt summaries, mutable learner state, tutor learner-state/active-quiz context, prior-attempt quiz generation context, prior-attempt API, and quiz result/history UI implemented. Learner state is now updated by BOTH triggers: quiz grading and a tutor-driven post-`done` observer pass (see Phase 13.5d below and `docs/CURRENT_VARIANT.md` → Tutor Runtime). Multi-thread conversations remain planned/deferred.
+Status: LLM conversation summarizer prompt/service, quiz attempt summaries, mutable learner state, tutor learner-state/active-quiz context, prior-attempt quiz generation context, prior-attempt API, and quiz result/history UI implemented. Learner state is now updated by BOTH triggers: quiz grading and a tutor-driven post-`done` observer pass (see Phase 13.5d below and `docs/CURRENT_VARIANT.md` → Tutor Runtime). Automatic conversation summarisation now runs as a detached post-turn follow-up. Multiple conversation threads per concept are implemented (migration `0018`, `POST/GET .../conversations`; see `docs/API.md`).
 
 Goal: keep tutor context useful over time without permanently over-weighting old failed attempts after the learner improves.
 
@@ -1053,106 +1059,366 @@ Non-goals:
 - No removal of mastery gating on full direct-answer mode.
 - No forced learning path; the entry point stays a suggestion.
 
+## Phase 13.7: App Shell + Cross-Trail Navigation Wiring
+
+Goal: turn the new persistent app shell (sidebar + mobile nav under the `(app)` route group) into wired surfaces backed by real data, while keeping the future cross-Trail/workspace graph deferred. The owner built the shell and the app-shell destinations as a visual direction; this phase wires each surface to backend data or marks it explicitly deferred.
+
+Status: app shell SHIPPED and wired (sidebar, mobile nav, `(app)/layout.tsx`, `UserProfileChip`, and routed pages). The only remaining Phase 13.7 deferral is the future cross-Trail/workspace graph surface under Explore (Phase 16).
+
+### Trails vs Graph overlap — RESOLUTION
+
+The sidebar currently lists both "Trails" and "Graph", and both point at `/trails` (the "Graph" item uses a `__never__` match-prefix hack so it never highlights). This is a genuine conceptual overlap, not just a routing bug: per `docs/FRONTEND.md` and `docs/GRAPH.md`, a Trail IS a concept graph, and the per-Trail graph viewer lives at `/trails/[id]`. There is no standalone graph surface today, and a cross-Trail/workspace-level graph is an explicit FUTURE feature (the "Sigma.js trigger" in `docs/FRONTEND.md`; the semantic cluster work in Phase 16).
+
+Decision (LOCKED):
+
+- The per-Trail graph is a VIEW of a Trail (`/trails/[id]`), never a separate top-level destination. Remove the standalone "Graph" sidebar item so two items no longer point at `/trails`.
+- The future cross-Trail / workspace-level graph belongs under "Explore", NOT a revived top-level "Graph" item. Explore is the home for cross-Trail discovery (workspace-level concept graph, Trail Pack import/fork, cross-Trail concept search). This keeps React Flow per-Trail and reserves the Sigma.js-class surface for Explore when it is built.
+- "Trails" remains the canonical entry to the list + per-Trail graph viewer. The `__never__` hack is removed with the duplicate item.
+
+### Surface wiring map
+
+Each placeholder maps to existing backend data or an explicit deferral. None of these introduce new tutor-event mechanisms.
+
+| Surface | Wiring | Backing data / phase |
+|---|---|---|
+| Home (`/dashboard`) | Already real | Phase 9/12 dashboard + `/next` recommendation |
+| Trails (`/trails`, `/trails/[id]`) | Already real | Phase 1–3 trail list + graph viewer |
+| Explore | Cross-Trail discovery hub | Trail Pack import/fork (Phase 7); cross-Trail concept search + future workspace graph (Phase 16). Current surface: Trail Pack import CTA + a cross-Trail concept search list. |
+| Quizzes | Cross-Trail quiz history + practice hub | Quiz attempts (Phase 5) surfaced through the workspace quiz-history page. |
+| Progress | Cross-Trail mastery/progress overview | Mastery summaries aggregated across the workspace's Trails. |
+| Sources | Workspace source library | Source ingestion API (Phase 10) — list workspace sources + revisions + ingestion status. |
+| Bookmarks | Saved/Pinned surface | Pin system (Phase 15b) with artifacts, quiz attempts, flashcard decks, and concept pins. |
+| Settings | Workspace/profile/theme settings | Workspace endpoints + theme toggle (dark mode, Phase 17). Current surface: workspace name + theme; auth-scoped settings deferred. |
+
+### Implementation scope
+
+- Keep Explore as the future home for any cross-Trail graph. The shipped surfaces are already wired; the remaining Phase 13.7 follow-up is the future workspace-level graph surface in Explore.
+- Preserve thin FastAPI routes and service-owned aggregation logic for the workspace quiz-history and progress views.
+- Explore currently = Trail Pack import entry + cross-Trail concept search; the workspace-level graph is explicitly deferred to Phase 16.
+- Bookmarks now renders saved artifacts, quiz attempts, flashcard decks, and concept pins. Settings ships a minimal workspace-name + theme surface (full settings deferred with auth).
+
+### PR-sized breakdown
+
+- Completed: nav cleanup and placeholder wiring; the remaining follow-up is the Phase 16 workspace graph in Explore.
+- Sources surface: workspace source-library list reusing `sources.py`.
+- Progress surface: workspace progress aggregation endpoint (service + thin route) + page.
+- Quizzes surface: workspace quiz-attempt history endpoint (concept->trail->workspace join) + page.
+- Explore surface: Trail Pack import entry + cross-Trail concept search.
+- Settings surface: workspace name + theme toggle.
+
+### Requirements
+
+- No new tutor-event mechanisms here; this is navigation + read surfaces over existing data.
+- New aggregation endpoints stay workspace-scoped and bounded (no whole-workspace unbounded traversal; obey `docs/GRAPH.md`).
+- Public Trail Pack content rules are unchanged; Explore import/export stays provenance-gated.
+- Quiz/progress aggregation must scope via `concept -> trail -> workspace` until quiz tables gain `workspace_id` (tracked as P1 tech-debt).
+
+### Tests
+
+- The sidebar exposes exactly one destination for the per-Trail graph (no duplicate `/trails` item) and no `__never__` hack remains.
+- The workspace quiz-history endpoint returns only attempts whose concept's trail belongs to the workspace.
+- The workspace progress endpoint aggregates mastery only across that workspace's Trails.
+- The Sources surface lists only the active workspace's sources.
+
+### Acceptance criteria
+
+- The app shell's navigation reflects real product surfaces: the Trails/Graph overlap is resolved, already-backed surfaces (Sources, Progress, Quizzes) show real workspace data, Explore hosts cross-Trail discovery, and Bookmarks/Settings are honestly scoped (stub vs. minimal) with clear deferrals recorded.
+
+### Non-goals
+
+- No workspace-level/cross-Trail GRAPH rendering yet (Sigma.js-class surface is deferred to Phase 16/Explore).
+- No auth-scoped settings (waits for SaaS prep).
+- No new tutor events or quiz/artifact generation paths.
+
 ## Phase 14: Tutor-Suggested Quiz Cards
 
-Goal: let the tutor suggest an appropriate quiz card without inline-generating or grading it.
+Goal: let the tutor suggest an appropriate quiz card at the right moment without inline-generating, opening, or grading it.
+
+Status: SHIPPED (backend + frontend implemented and tested). The `suggest_quiz` provider tool is offered every turn, surfaced as a `suggest_quiz` SSE event, persisted in `reasoning_parts` (kind `suggest_quiz`), and rendered as an opt-in CTA that reuses the existing `quiz_drafts` path.
 
 Event/tool flow:
 
 ```text
-tutor emits suggest_quiz(concept_id, quiz_type, reason)
--> frontend shows quiz CTA/card
--> backend-owned quiz draft system generates/reuses the card
+tutor emits suggest_quiz(quiz_type, reason)   # concept_id is trusted backend context, not a model arg
+-> client renders an opt-in suggest_quiz SSE card
+-> learner clicks the CTA (never auto-opened)
+-> existing backend-owned quiz_drafts generate/reuse path runs
 ```
 
 Implementation scope:
 
-- Add a provider-tool or event-style `suggest_quiz` output through the tool abstraction.
-- Show a learner-safe quiz suggestion card in the tutor UI.
-- Reuse the backend-owned `quiz_drafts` system for generation and persistence.
-- Keep grading and mastery updates in the existing quiz services.
+- `suggest_quiz` is a REAL normalized provider tool registered through `backend/app/agents/provider_tools.py` (same registration path as the retrieval tools), surfaced to the client as a new `suggest_quiz` SSE event.
+- The tool is available on EVERY tutor turn (NOT gated on the concept having sources, unlike the retrieval tools).
+- Tool args are exactly `quiz_type` (enum: `level_up` | `practice`) and `reason` (a short, learner-visible string). `concept_id` is NOT a model argument — the backend always uses the trusted current concept (the same pattern as the retrieval tools, where the schema deliberately omits `concept_id`).
+- Trigger is model-decided but mastery-aware via PROMPT guidance only: suggest `practice` anytime it would help; suggest `level_up` only when mastery looks near-ready. There is no hard backend mastery gate in v1.
+- The CTA is opt-in: the learner clicks it to act; the client NEVER auto-opens the quiz. Clicking reuses the existing backend-owned `quiz_drafts` generate/reuse path — no new quiz endpoint is required.
+- The `reason` is persisted on the assistant turn's `reasoning_parts` under a new part kind `suggest_quiz`, so the CTA rehydrates on reload alongside the rest of the turn trace.
 
 Requirements:
 
-- The tutor cannot mark mastery directly.
+- The tutor cannot grade or update mastery. This stays structurally enforced — grading and mastery updates live in the quiz service, and `suggest_quiz` only emits an intent.
 - Suggested quiz cards must not include private/source-derived content unless the backend quiz system explicitly allows it under current safety rules.
-- Duplicate suggestions must reuse or focus the same draft rather than spawning competing cards.
-- Suggestions include a short learner-visible reason.
+- Dedupe is layered: the backend `(concept_id, quiz_type)` uniqueness already guarantees a single draft, and the frontend collapses to a single active CTA per `quiz_type`, so duplicate suggestions focus the same draft rather than spawning competing cards.
+- Suggestions include a short learner-visible `reason`, persisted as above.
 
 PR-sized breakdown:
 
-- Tool/event contract and backend validation.
-- Frontend CTA/card rendering.
-- Draft reuse integration.
-- Tutor prompt/tool tests.
+- `suggest_quiz` provider-tool definition + backend validation (trusted `concept_id`, `quiz_type` enum, `reason`) + the `suggest_quiz` SSE event.
+- `suggest_quiz` `reasoning_parts` persistence/rehydration (new part kind).
+- Frontend opt-in CTA/card rendering + single-active-CTA-per-`quiz_type` collapse.
+- Draft reuse integration (click → existing `quiz_drafts` generate/reuse path).
+- Prompt guidance (mastery-aware suggest rules) + tutor/tool tests.
 
 Tests:
 
-- `suggest_quiz` creates a frontend-visible CTA without grading.
-- Clicking the CTA reuses existing backend draft when present.
-- Tutor cannot update mastery through the suggestion event.
-- Duplicate suggestion events dedupe safely.
-- Suggestion reason is persisted or included in the client event as appropriate.
+- `suggest_quiz` is offered on a turn with no sources (not gated on sources).
+- A `suggest_quiz` tool call emits a frontend-visible CTA without generating, opening, or grading anything.
+- Clicking the CTA reuses the existing backend draft when present.
+- The model cannot pass `concept_id`; the backend always scopes to the trusted current concept.
+- The tutor cannot update mastery through the suggestion event.
+- Duplicate suggestions of the same `quiz_type` collapse to one active CTA.
+- The `reason` persists on `reasoning_parts` (kind `suggest_quiz`) and rehydrates on reload.
 
 Acceptance criteria:
 
-- The tutor can nudge learners toward level-up or practice at the right moment while the backend remains the owner of quiz cards and mastery.
+- The tutor can nudge learners toward level-up or practice at the right moment while the backend remains the owner of quiz cards and mastery, and the learner stays in control of whether the quiz opens.
 
 Non-goals:
 
 - No inline tutor-generated quiz that bypasses quiz drafts.
-- No tutor-owned mastery decisions.
+- No auto-opening of the quiz from a suggestion.
+- No tutor-owned mastery decisions and no hard backend mastery gate in v1.
 
 ## Phase 15: Deferred Visualiser / Artifact Templates
 
-Goal: add helpful learning artifacts later using trusted templates, not arbitrary LLM-generated JavaScript.
+Goal: add helpful learning artifacts using trusted, validated templates — never arbitrary LLM-generated JavaScript. Artifacts are persisted, retrievable, and provenance-gated just like quizzes.
 
-Trusted templates:
+Status: decisions LOCKED; **15a–15f SHIPPED** (implemented + tested). Frontend swipe UI for flashcards (15c) and tutor `suggest_artifact` (15f) are wired. The remaining UX follow-up is the richer inline-in-chat trigger experience for `suggest_flashcards` / `suggest_artifact`; today both remain CTA-first. See `docs/CURRENT_VARIANT.md` for the authoritative implementation overlay.
 
-- Comparison card.
-- Timeline.
-- Flashcards.
-- Mini graph.
-- Simulation slider.
-- Worked example.
+Guiding philosophy (unchanged): trusted templates only, no arbitrary JS, no live code/formula execution from the model. The LLM emits a validated data payload; the BACKEND owns generation, IDs, citations, persistence, and provenance/export gating; the frontend renders through a fixed component registry that degrades to text on any failure.
+
+### Phase 15a: Artifact foundation + builder sub-agent
+
+Status: **SHIPPED** (foundation + builder sub-agent + detached generation + concept-panel artifacts surface). The artifact-builder service (`backend/app/services/artifact_builder.py`) runs a bounded retrieval loop reusing `execute_retrieval_tool` under `tutor_tool_call_budget`, does exactly one repair attempt, drops citations not matching a retrieved `source_revision_id`, downgrades zero-citation payloads to `local_only`, and persists via `create_artifact`. `ArtifactGenerationManager` mirrors `PrimerGenerationManager` (own DB session, cancel-safe, in-process single-flight + `pg_advisory_xact_lock`, lifespan teardown). Endpoints `POST .../artifacts/build` and `POST .../artifacts/build/stream` (SSE; `force_new` rejected on stream). Frontend `ArtifactsPanel` lists + generates artifacts via the SSE path. (Originally only the foundation — table/migration `0014_artifacts`, envelope schemas, list/get endpoints, registry with `worked_example`/`comparison_card` — was shipped; the builder, detached generation, dedupe, and renderer wiring are now complete.)
 
 Implementation scope:
 
-- Define an artifact payload schema and frontend component registry.
-- Let services emit structured artifacts only from approved templates.
-- Add export/privacy rules for artifacts derived from private or uploaded sources.
-- Start with read-only artifacts before interactive stateful artifacts.
+- A new `artifacts` table: workspace-scoped, `concept_id` nullable, `trail_id` (artifacts are BOTH concept-attached AND trail-attached), `artifact_type` (discriminated), a validated typed payload, `source_refs[]`, and advisory-lock dedupe (mirroring `quiz_drafts`). List/retrieval endpoints + a history UI — persisted and retrievable just like past quizzes.
+- A shared artifact ENVELOPE schema: `{ artifact_version, kind, title, caption?, text_fallback (REQUIRED), provenance{source_ids, visibility, citations[]}, data{kind-specific} }`. Strict Pydantic output schema (`extra="forbid"`) plus a versioned lenient read schema, mirroring `ConceptPrimerOutput`/`ConceptPrimerRead`. Every payload carries a mandatory `text_fallback`.
+- A frontend component REGISTRY (`kind -> component`) generalizing the existing `{type:"data", name}` dispatch, wrapped in an error boundary that degrades to `text_fallback` (like the existing Mermaid `catch -> textContent` path). Unknown or invalid `kind` renders `text_fallback`.
+- A dedicated artifact-builder SUB-AGENT exposed as a tool: its own specialised prompt + its own BOUNDED retrieval loop reusing the existing retrieval tools (`search_sources`, `read_document_section`, `get_graph_neighbourhood`, `get_concept_primer`) under the existing `tutor_tool_call_budget` (3). Structured JSON output + exactly ONE repair attempt, then fail. The BACKEND owns generation, IDs, citations, persistence, and provenance/export gating — the model returns a validated payload only. Every citation must map to a real retrieved `source_revision_id` or be dropped. On-demand only; it returns a reference, not a blob streamed through chat. (Rationale: small/local LLMs cannot juggle tutoring + retrieval + per-template JSON in one context; this is the orchestrator-worker pattern, kept as a small direct-provider adapter, NOT an agent framework.)
+- Background/detached generation with LIVE status in chat (shimmer / SSE status events) that CONTINUES if the learner leaves the page or refreshes — mirroring the existing `PrimerGenerationManager` detached-task + subscription pattern (its own DB session from the app sessionmaker; cancel-safe; lifespan shutdown owns clean teardown). The SSE response only subscribes; the background task persists independently.
+- Export/provenance: concept-level (non-source-derived) artifacts stay LOCAL-ONLY like the primer (NOT in public Trail Pack export) for now. Source-derived artifacts inherit provenance gating: public-export-eligible only if EVERY contributing source passes `_can_include_source_in_public_export` AND none is `user_upload` (all-or-nothing).
+- Ship 2 read-only templates first to prove the pipeline: `worked_example` and `comparison_card`.
 
 Requirements:
 
-- No arbitrary LLM-generated JavaScript as the default artifact path.
-- Artifacts inherit source provenance restrictions.
-- Artifact rendering failures degrade to readable text.
+- No arbitrary LLM-generated JavaScript as the artifact path.
+- Artifacts inherit source provenance restrictions; concept-level artifacts are local-only.
+- Every artifact payload validates against the strict envelope and carries a mandatory `text_fallback`.
+- Rendering failures degrade to `text_fallback`; unknown kinds degrade safely.
+- Citations map to real retrieved `source_revision_id`s or are dropped.
 
 PR-sized breakdown:
 
-- Artifact schema and renderer registry.
-- One or two trusted templates.
-- Provenance/export tests.
-- Tutor/source integration later.
+- `artifacts` table + migration + list/retrieval endpoints.
+- Envelope strict/read schemas + frontend registry + error-boundary fallback.
+- Artifact-builder sub-agent (prompt + bounded retrieval loop + one repair).
+- Detached generation manager + SSE status subscription.
+- `worked_example` + `comparison_card` templates + provenance/export tests.
 
 Tests:
 
-- Valid artifact payload renders through the expected component.
-- Unknown artifact type falls back safely.
-- Source-derived private artifacts are excluded from public export.
-- No raw script execution is allowed.
+- A valid artifact payload renders through the expected registry component.
+- Unknown/invalid `kind` falls back to `text_fallback`.
+- Source-derived private artifacts (any `user_upload` or non-public source) are excluded from public export; all-or-nothing gating holds.
+- Concept-level artifacts are excluded from public export.
+- The builder sub-agent stays within `tutor_tool_call_budget` and fails after one repair.
+- A citation with no matching retrieved `source_revision_id` is dropped.
+- Detached generation completes and persists after the SSE subscription is cancelled.
 
 Acceptance criteria:
 
-- CoLearni can show richer learning aids without creating a code-execution or provenance risk.
+- CoLearni can generate, persist, retrieve, and safely render two read-only artifact templates without any code-execution or provenance risk.
 
 Non-goals:
 
 - No arbitrary React/JS artifact generation.
 - No external sandbox requirement for V1 templates.
+- No tutor-emitted artifacts yet (deferred to 15f).
 
-## Phase 16: Demo Polish/User Testing
+### Phase 15b: Pin system
+
+Implementation scope:
+
+- A polymorphic `pins` table: `(workspace_id, trail_id, item_type, item_id, pinned_at)`, `item_type in {artifact, quiz_attempt}`. Pin/unpin endpoints + a "Saved/Pinned" surface aggregating artifacts and past quiz attempts, scoped per-Trail. Per-USER == per-workspace for now (becomes user-scoped when auth lands).
+
+Requirements:
+
+- Pins are workspace + Trail scoped and aggregate across supported item types.
+- Pin/unpin is idempotent.
+
+PR-sized breakdown:
+
+- `pins` table + pin/unpin endpoints.
+- Saved/Pinned aggregation surface.
+
+Tests:
+
+- Pinning/unpinning an artifact and a quiz attempt round-trips per-Trail.
+- The Saved surface aggregates both item types scoped to the Trail.
+
+Note: concept/source "pinning" as a PRIORITISATION signal (a retrieval/recommendation weight) is a DIFFERENT mechanism, deferred and scoped with the retrieval/gardener track (see Future Exploration / Backlog).
+
+### Phase 15c: Flashcards subsystem (dedicated)
+
+Flashcards are a DEDICATED subsystem, not a generic artifact.
+
+Implementation scope:
+
+- Storage: canonical JSON/relational (`flashcard_decks` + `flashcards`). CSV export is Anki-compatible export only, plus JSON export. CSV is an export format, NOT the source of truth.
+- Card schema: `front`, `back`, `hint`, `source_ref`, `card_type (basic|cloze|reverse)` + scheduling state `{box, interval_days, last_reviewed, due, reps, lapses}`.
+- Scheduling v1 = LEITNER (5–6 boxes, geometric intervals e.g. 1/3/7/16/35 days), recall-first swipe yes/no: yes => box+1 (capped), no => back to box 1 (`lapses++`). The schema is FSRS-ready (stores interval/lapses/last_reviewed) but v1 logic is Leitner. (FSRS is overkill for a binary swipe in v1.)
+- Generation: source-grounded, atomic, dedup-aware. The generator RETURNS `{cards, exhausted: bool, reason}` so it can declare "no more useful cards" instead of padding garbage. Cap ~3–8 cards/concept; deck soft-cap. Bake card-writing rules into the prompt: one fact per card (minimum information / atomic); specific & unambiguous; no yes/no fronts; answer not inferable from the question; cloze for lists (one blank at a time); add why/how cards; self-contained with minimal context; source-grounded only (never invent); no duplicates of existing cards; STOP when facts are exhausted.
+- Incremental extension: feed existing card FRONTS back as exclusion context + a deterministic embedding-similarity gate to drop paraphrase-duplicates. APPROVED: optionally use the learner's repeated-"no" (struggle) signal to bias new cards toward weak sub-areas (distinct from dedup).
+- Pinnable + retrievable like quizzes.
+
+Requirements:
+
+- Canonical store is relational/JSON; CSV/JSON are export only.
+- Generation is source-grounded and never invents facts; duplicates are dropped by the similarity gate.
+- v1 scheduling is Leitner; the schema must remain FSRS-ready.
+
+PR-sized breakdown:
+
+- `flashcard_decks` + `flashcards` tables + schema.
+- Leitner scheduler + recall-first swipe UI.
+- Source-grounded generator with `{cards, exhausted, reason}` + dedup gate.
+- Anki-compatible CSV + JSON export.
+- Pin/retrieve integration.
+
+Tests:
+
+- A correct ("yes") swipe promotes the box; a wrong ("no") swipe resets to box 1 and increments `lapses`.
+- Geometric intervals compute correctly per box.
+- The generator returns `exhausted: true` rather than padding when facts run out.
+- Paraphrase duplicates are dropped by the embedding-similarity gate.
+- CSV export imports cleanly into Anki; JSON round-trips.
+
+Pedagogy basis (for the future Pedagogy page): Wozniak "Twenty rules of formulating knowledge", Matuschak "How to write good prompts", Leitner/SM-2/FSRS, Bjork (testing effect, desirable difficulties, spacing, interleaving).
+
+### Phase 15d: Remaining read-only templates
+
+Implementation scope:
+
+- `timeline` + `mini_graph` read-only templates. `mini_graph` reuses the Mermaid strict-mode / `@xyflow` rendering already used in the graph viewer.
+
+Tests:
+
+- `timeline` and `mini_graph` payloads render through the registry and degrade to `text_fallback` on invalid data.
+
+### Phase 15e: Interactive "simulation slider" artifact
+
+IN SCOPE for Phase 15 (per owner). Interactive but still trusted-template, never arbitrary code.
+
+Implementation scope:
+
+- Implemented as a CLOSED ENUM of trusted `sim_kind`s (e.g. `linear`, `quadratic`, `exponential`, `supply_demand`), each backed by a HARDCODED, vetted, unit-tested compute+render function in the frontend registry. The LLM only emits a validated data payload — the chosen `sim_kind` + named coefficients within validated finite ranges + axis labels + <=3 parameters + a predict-then-check `prompt` — NEVER code or a formula string.
+- The BACKEND pre-computes baseline sample points and validates coefficient ranges (finite, no NaN, bounded `y`); it ships `precomputed.{at_defaults, y_bounds}` as a render hint + validation oracle. Client live-eval on slider drag uses the trusted hardcoded function, clamped to `y_bounds`, otherwise it degrades to the static plot / `text_fallback`.
+- NO arbitrary JS, NO live mathjs in the browser. If arbitrary formulas are ever needed, the future path is a jsep-based whitelist interpreter on the BACKEND emitting sampled points (recorded as future, NOT v1 — see Future Exploration / Backlog).
+
+Minimal schemas to add (field lists summarized here; full schema lives in API/contract docs later):
+
+- `simulation_slider`: `sim_kind` (closed enum), named coefficients (validated finite ranges), axis labels, <=3 parameters, predict-then-check `prompt`, `precomputed.{at_defaults, y_bounds}`, `text_fallback`.
+- `worked_example`: ordered steps, optional final answer, `source_refs`, `text_fallback`.
+- `timeline`: ordered events (label + date/order + optional note), `source_refs`, `text_fallback`.
+- `comparison_card`: compared items, criteria rows, per-cell values, `source_refs`, `text_fallback`.
+
+Pedagogy to bake in: PhET implicit-scaffolding & direct-manipulation/immediate-feedback, the worked-example effect (Sweller), Mayer multimedia principles (contiguity, coherence, signaling, segmenting); pair each sim with a predict-then-check prompt.
+
+Tests:
+
+- An out-of-range/NaN coefficient is rejected by backend validation.
+- Client live-eval matches the backend `precomputed` oracle within tolerance and clamps to `y_bounds`.
+- An unknown `sim_kind` degrades to the static plot / `text_fallback`.
+
+Non-goals:
+
+- No arbitrary formula strings or browser-side math evaluation in v1.
+
+### Phase 15f: Tutor integration (after Phase 14)
+
+Implementation scope:
+
+- The tutor emits a `suggest_artifact` / build request via the artifact-builder sub-agent tool.
+
+Deferred deliberately so we don't stand up two new tutor-event mechanisms at once; sequenced AFTER Phase 14's `suggest_quiz`.
+
+Acceptance criteria (Phase 15 overall):
+
+- CoLearni can generate, persist, pin, retrieve, and safely render trusted read-only and interactive artifacts plus a dedicated flashcards subsystem, all without code-execution or provenance risk, with tutor-emitted artifacts wired only after Phase 14.
+
+
+## Phase 16: Graph Gardener + Manual Graph Editing + Semantic Cluster Search
+
+Goal: let learners grow and correct the concept graph safely — from ingested source dumps or by hand — with a human-approved changeset model, scoped subgraph context for small/local LLMs, and full reuse of the validation budgets in `docs/GRAPH.md`. The gardener never auto-applies; the learner accepts or rejects every change.
+
+Status: design-locked, not yet implemented.
+
+Implementation scope:
+
+- **Semantic node-cluster search (FOUNDATIONAL — build first).** Embed concept nodes (pgvector already exists for source chunks), then vector-search the nearest nodes and expand by a 1-hop neighbourhood so only a SCOPED subgraph enters the prompt (the small/local-LLM enabler). This same search also serves entity-resolution / dedup against the existing graph.
+- **Graph-mutation toolset** (none exists today — only concept-source linking exists): `add_node`, `add_edge`, `link_source`, `propose_merge` (+ optional `propose_split`). Validation reuses the rules in `docs/GRAPH.md`: reject duplicate slugs, reject edges to missing nodes, allow only known concept levels, detect prerequisite cycles, and enforce node-count caps. Every new node/edge must carry >=1 grounding source reference (no ungrounded nodes).
+- **Changeset / approval model.** The gardener emits a PROPOSED changeset (ordered ops + rationale + source refs + a computed diff) for the learner to ACCEPT/REJECT; it NEVER auto-applies. On budget exhaustion it returns an explicit stop reason plus a valid partial changeset.
+- **Source-dump auto-gardener.** Dump sources -> ingest (resolver: chunk->concept, budgets 3 LLM calls/chunk, 50/doc) -> gardener PROPOSES node/edge/link changes (budgets 30 LLM calls/run, 50 clusters/run, per `docs/GRAPH.md`) -> learner approves.
+- **Doc-grounded Trail creation.** Create a Trail FROM ingested documents; the graph is derived from the sources' own structure / cross-references (and references between sources). The model may add structure ONLY when strictly necessary and should avoid unsupported structures. Add a "no orphan clusters" validation that flags unlinked nodes / disjoint subgraphs for review rather than silently emitting a disjoint forest.
+- **Manual Trail/graph editing.** Add/rename/delete nodes & edges and edit concept fields, using the SAME apply/validate APIs the gardener uses. This manual surface is also the human-in-the-loop correction surface for the gardener.
+- Wire all budgets from `docs/GRAPH.md` (chunk/doc resolver budgets, gardener per-run LLM-call and cluster caps, node-count caps).
+
+Implementation scope ordering: cluster search lands first (it is the context enabler), then the mutation toolset + validation, then the changeset/approval model, then the source-dump auto-gardener and doc-grounded Trail creation, then the manual editing surface over the shared apply/validate APIs.
+
+Requirements:
+
+- No node or edge is ever applied without explicit learner approval of a changeset.
+- Every new node/edge carries >=1 grounding source reference; ungrounded structure is rejected.
+- All mutations pass `docs/GRAPH.md` validation (duplicate slugs, missing-node edges, known levels, prerequisite-cycle detection, node-count caps).
+- All loops obey the `docs/GRAPH.md` resolver and gardener budgets; budget exhaustion yields an explicit stop reason + a valid partial changeset (no unbounded loops).
+- Only scoped subgraphs (cluster search + 1-hop) enter prompts; the whole graph is never dumped into context.
+- "No orphan clusters" validation flags disjoint subgraphs for review.
+- Manual editing and gardener apply share the same validate/apply APIs.
+
+PR-sized breakdown:
+
+- Concept-node embeddings + semantic cluster search (vector NN + 1-hop expansion) + entity-resolution/dedup lookup.
+- Graph-mutation toolset (`add_node`, `add_edge`, `link_source`, `propose_merge`, optional `propose_split`) + `docs/GRAPH.md` validation.
+- Changeset/approval model (proposed ordered ops + diff + accept/reject + partial-on-exhaustion).
+- Source-dump auto-gardener pipeline (ingest resolver budgets -> gardener run budgets -> proposed changes).
+- Doc-grounded Trail creation + "no orphan clusters" validation.
+- Manual graph-editing UI over the shared apply/validate APIs.
+
+Tests:
+
+- Cluster search returns a scoped subgraph (NN + 1-hop) and resolves an existing duplicate concept.
+- `add_node`/`add_edge` reject duplicate slugs, edges to missing nodes, unknown levels, prerequisite cycles, and node-cap violations.
+- An ungrounded node/edge (no source ref) is rejected.
+- A gardener run that hits the LLM-call or cluster budget returns an explicit stop reason + a valid partial changeset.
+- A proposed changeset is never applied without an explicit accept; reject discards it cleanly.
+- A source dump produces proposed (not applied) node/edge/link changes within ingest + gardener budgets.
+- Doc-grounded Trail creation flags orphan clusters / disjoint subgraphs for review.
+- Manual edits go through the same validation as gardener-proposed edits.
+
+Acceptance criteria:
+
+- A learner can dump sources or create a Trail from documents, review a grounded, validated, budget-bounded proposed changeset, accept or reject it, and additionally edit the graph by hand through the same safe apply/validate path — with the whole-graph never entering a single prompt.
+
+Non-goals:
+
+- No auto-applied graph mutations.
+- No ungrounded nodes/edges.
+- No unbounded resolver/gardener loops or whole-graph prompting.
+- Concept/source PRIORITY pinning as a retrieval/recommendation weight is out of scope here (see Future Exploration / Backlog).
+
+## Phase 17: Demo Polish/User Testing
 
 Goal: make the rebuild good enough to show people and let them try it themselves.
 
@@ -1211,11 +1477,11 @@ Non-goals:
 - No broad SaaS marketplace work in demo polish.
 - No heavy gamification beyond small UX experiments validated by user testing.
 
-## Phase 16.5: Safety + Content Guardrails
+## Phase 17.5: Safety + Content Guardrails
 
 Goal: add layered content-safety defenses after the core learning loop works. The primary audience is adults and young adults learning intentionally, but the system must assume an unknown user who may be a minor, so it should be safe by default.
 
-Sequencing note: this phase is deliberately placed after the core loop and demo polish so safety iteration does not inflate LLM token/test cost during earlier product iteration. Within the phase, the cheapest, highest-leverage control (trail-generation topic gating) lands first; per-turn runtime moderation and the child-safe default follow as separate steps. This phase must land before the product is exposed to real external users in Phase 17.
+Sequencing note: this phase is deliberately placed after the core loop and demo polish so safety iteration does not inflate LLM token/test cost during earlier product iteration. Within the phase, the cheapest, highest-leverage control (trail-generation topic gating) lands first; per-turn runtime moderation and the child-safe default follow as separate steps. This phase must land before the product is exposed to real external users in Phase 18.
 
 Layered scope (in build order):
 
@@ -1238,7 +1504,7 @@ Layered scope (in build order):
 
 4. Child-safe default mode (deferred sub-step):
    - Default to a safe profile that assumes a possibly-minor user.
-   - A future adult/account-based mode (post-auth, Phase 18) may relax it.
+   - A future adult/account-based mode (post-auth, Phase 19) may relax it.
 
 5. Documentation + red-team tests:
    - Add `docs/SAFETY.md` capturing the policy, the layered design, and the disallowed/allowed-sensitive matrix.
@@ -1273,10 +1539,10 @@ Acceptance criteria:
 
 Non-goals:
 
-- No full SaaS moderation workflow or human review queue (Phase 18).
+- No full SaaS moderation workflow or human review queue (Phase 19).
 - No age verification or account-based mode switching before auth exists.
 
-## Phase 16.6: Product / Marketing Site
+## Phase 17.6: Product / Marketing Site
 
 Goal: a public-facing product/marketing site alongside the app, so prospective users understand what CoLearni is before they enter the workspace.
 
@@ -1284,7 +1550,7 @@ Implementation scope:
 
 - Marketing routes in the existing Next.js frontend: Home, How it works, Pedagogy, Pricing, Contact.
 - The Pedagogy tab tells the real teaching story: Bloom's Taxonomy as the target-depth dial, plus Socratic questioning, Bloom mastery learning, active recall/retrieval practice, and scaffolding along a prerequisite graph.
-- Fake login: a login entry in the top-right header (and a centered call-to-action on Home, typical of consumer services) that reuses the existing localStorage workspace id. No real authentication yet; real auth lands in Phase 18.
+- Fake login: a login entry in the top-right header (and a centered call-to-action on Home, typical of consumer services) that reuses the existing localStorage workspace id. No real authentication yet; real auth lands in Phase 19.
 - Pricing tab is explicitly TBC and marked as such. Anticipated tiers: a self-host / open-source tier, a free hosted tier, and a paid hosted tier. The exact free-vs-self-host boundary is undecided.
 - Demos start as screenshots/GIFs; an embedded interactive demo can come later.
 
@@ -1297,7 +1563,7 @@ Requirements:
 - Marketing pages are public and do not require a workspace.
 - The fake login does not introduce real credential handling or secrets.
 - Pricing copy clearly signals TBC rather than committing to numbers.
-- The site is consistent with the app's theming (including dark mode from Phase 16).
+- The site is consistent with the app's theming (including dark mode from Phase 17).
 
 PR-sized breakdown:
 
@@ -1318,11 +1584,11 @@ Acceptance criteria:
 
 Non-goals:
 
-- No real authentication, accounts, or billing (Phase 18).
+- No real authentication, accounts, or billing (Phase 19).
 - No public pack marketplace.
 - No committed pricing numbers or final license text.
 
-## Phase 17: Deployment
+## Phase 18: Deployment
 
 Goal: make the product deployable to a VPS or cloud instance so real users can try it.
 
@@ -1354,7 +1620,7 @@ Acceptance criteria:
 
 - A non-developer can open a URL and use the product end-to-end.
 
-## Phase 18: SaaS Prep
+## Phase 19: SaaS Prep
 
 Goal: add hosted product concerns only after the local version proves useful.
 
@@ -1385,3 +1651,30 @@ pack_registry_entries
 Acceptance criteria:
 
 - SaaS work is a thin layer over the local-ready product core, not a rewrite.
+
+## Future Exploration / Backlog
+
+CoLearni is a real product, not a throwaway. This section tracks penned-down ideas and known tech debt so they are prioritised, not lost. Items here are intentionally not yet scheduled into a numbered phase.
+
+Product / pedagogy ideas:
+
+- **Interleaved flashcard review across concepts within a Trail** — evidence-favored (Bjork interleaving); UI/UX still to be explored before committing to a review surface.
+- **FSRS upgrade from Leitner** — swap the Phase 15c scheduler once graded ratings + real review history exist (the v1 schema is already FSRS-ready).
+- **Concept/source PRIORITY pinning as a retrieval/recommendation weight** — a prioritisation signal that biases retrieval/recommendation, DISTINCT from the Phase 15b artifact/quiz pin (saved-items) system; scope with the retrieval/gardener track.
+- **Struggle-aware generation generalized beyond flashcards** — reuse the repeated-"no"/struggle signal (first applied to flashcards in 15c) to bias quizzes, primers, and artifacts toward weak sub-areas.
+- **Tutor-emitted artifacts (Phase 15f)** — wire the tutor to request artifact builds via the sub-agent tool once Phase 14's `suggest_quiz` mechanism has landed.
+- **Inline artifacts/flashcards/quizzes in the tutor chat thread** — let the tutor trigger artifacts, flashcards, and quizzes that render INLINE within the chat thread (not only in their separate panels/tabs) and become part of the tutor chat context. Today these live in separate panels (`ArtifactsPanel`, `FlashcardsPanel`, `QuizPanel`) opened from the concept action row; the chat only emits a CTA that switches surfaces. Rationale: inline rendering keeps the learning moment in one flow and makes generated content part of the conversation the tutor reasons over. NOTE: significant chat-runtime change (new inline message-part kinds, context assembly, rehydration/replay, SSE ordering) — scope as its own phase later; NOT yet built. Related to but broader than 15f.
+- **Multiple tutor chat threads per concept** — let a single concept support multiple distinct tutor conversations instead of the current one-thread-per-concept model. Threads share the same learner state and concept/mastery state but keep INDEPENDENT conversation context (messages + summary). Rationale: a single summarized context is sometimes insufficient; a learner may want a fresh thread (new angle, redo a topic) without losing per-concept progress. NOT yet built; needs a conversation-thread model + UI thread switcher and a decision on how learner-state observation aggregates across threads.
+- **Reveal.js slide decks as a learning artifact** — explore generating reveal.js slide decks as another artifact type for learners. Explicitly FUTURE / LOW-PRIORITY: not to be built while current tech debt is being paid down. Recorded so the idea is not lost; revisit after the artifact subsystem and background-job debt settle.
+- **Sandboxed jsep whitelist expression interpreter (backend)** — the future path for arbitrary-formula sims, emitting sampled points server-side; v2 only, never browser-side eval.
+
+Tech debt (flagged in review; surface for prioritisation now that this is a real product):
+
+- **P0 — Durable background-job queue** to replace detached `asyncio.create_task` work (primer generation, tutor follow-ups, and the new artifact builder). The current pattern silently loses in-flight work on restart/crash and breaks under multiple workers.
+- **P0 — Tenant isolation**: workspace routes only check existence, not ownership, and `GET /api/workspaces` lists ALL workspaces. Add an auth principal + workspace-access dependency before any multi-user / SaaS exposure.
+- **P0 — `EMBEDDING_DIM` has no migration path** and is read from two config sources (`os.environ` in the model vs `settings`); changing it corrupts the vector column.
+- **P1 — pgvector ANN index** (hnsw/ivfflat) on `source_chunks.embedding` (currently a sequential scan).
+- **P1 — Object-storage abstraction** (S3/GCS) to replace local-filesystem upload storage (won't survive multi-replica / ephemeral deploys; also a hardcoded `revisions/1/` object key).
+- **P1 — Promote status/mode/type `str` columns** guarded only by CheckConstraints to Python `StrEnum`s (single source of truth); consider adopting a static type-checker (pyright/basedpyright) gate — the repo currently only runs ruff, so editor-surfaced type errors (e.g. `trail_pack_export.py` str-vs-Literal, test-double protocol mismatches) are ungated.
+- **P1 — Quiz tables (`QuizAttempt`, `QuizDraft`) scoped only by `concept_id`**, not `workspace_id` — inconsistent with other workspace-scoped tables.
+- **P2 — Broad `except Exception` swallows without logging** in several services (embedding fallback, primer cache read, DB health) — add structured logging/metrics.

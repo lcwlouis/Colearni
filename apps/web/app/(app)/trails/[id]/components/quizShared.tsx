@@ -1,5 +1,6 @@
 "use client";
 
+import { PinToggle } from "@/components/PinToggle";
 import type { QuizAttempt } from "@/lib/types";
 
 import { QuizMarkdown } from "./QuizMarkdown";
@@ -82,9 +83,7 @@ export function questionScoreBand(score: number): {
 
 /** Show only the leading "overall" paragraph, hiding legacy per-question sections. */
 export function displayOverallFeedback(feedback: string): string {
-  const firstSection = feedback.split(
-    /\n{2,}(?=[A-Za-z0-9_ -]{2,40}:\s)/,
-  )[0];
+  const firstSection = feedback.split(/\n{2,}(?=[A-Za-z0-9_ -]{2,40}:\s)/)[0];
   return firstSection.trim() || feedback;
 }
 
@@ -185,7 +184,18 @@ export function AttemptReview({ attempt }: { attempt: QuizAttempt }) {
 }
 
 /** A collapsible list of prior attempts, each expandable into a full review. */
-export function QuizAttemptList({ attempts }: { attempts: QuizAttempt[] }) {
+export function QuizAttemptList({
+  attempts,
+  pinContext,
+  onUnpin,
+}: {
+  attempts: QuizAttempt[];
+  // When provided, each attempt shows a Save/Saved pin toggle scoped to this
+  // workspace + trail. Omitted in contexts without a single owning trail.
+  pinContext?: { workspaceId: string; trailId: string; pinned?: boolean };
+  // Called after a successful unpin (used by the Saved surface to drop the row).
+  onUnpin?: (attemptId: string) => void;
+}) {
   return (
     <ol className="space-y-2">
       {attempts.map((attempt) => (
@@ -198,13 +208,33 @@ export function QuizAttemptList({ attempts }: { attempts: QuizAttempt[] }) {
                   {formatAttemptDate(attempt.created_at)}
                 </p>
                 <p className="text-xs text-slate-500">
-                  {attempt.passed ? "Mastery confirmed" : "Review recommended"} ·
-                  Click to review
+                  {attempt.passed
+                    ? attempt.quiz_type === "level_up"
+                      ? "Mastery confirmed"
+                      : "Practice passed"
+                    : "Review recommended"}{" "}
+                  · Click to review
                 </p>
               </div>
-              <span className="rounded-full bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                {Math.round(attempt.score * 100)}%
-              </span>
+              <div className="flex items-center gap-2">
+                {pinContext ? (
+                  <PinToggle
+                    workspaceId={pinContext.workspaceId}
+                    trailId={pinContext.trailId}
+                    itemType="quiz_attempt"
+                    itemId={attempt.id}
+                    initialPinned={pinContext.pinned}
+                    onChange={(pinned) => {
+                      if (!pinned) {
+                        onUnpin?.(attempt.id);
+                      }
+                    }}
+                  />
+                ) : null}
+                <span className="rounded-full bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                  {Math.round(attempt.score * 100)}%
+                </span>
+              </div>
             </summary>
             <AttemptReview attempt={attempt} />
           </details>

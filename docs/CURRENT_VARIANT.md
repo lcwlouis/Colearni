@@ -44,6 +44,15 @@ If this file conflicts with an older phase description, follow this file and upd
 - Current public reasoning part kinds are `status`, `thinking`, `tool_call`, and `tool_result`.
 - True per-message source/citation parts and quote rendering are still deferred. The current tutor header only shows concept-level source chips.
 
+## App Shell + Navigation (Phase 13.7)
+
+Status: **wired and shipped**. The persistent app shell lives under the `apps/web/app/(app)` route group: `(app)/layout.tsx` renders `components/layout/Sidebar.tsx` (desktop) + `MobileNav.tsx` + `UserProfileChip.tsx`, and the routed destinations now resolve to real pages/data.
+
+- Dashboard, Trails, Explore, Quizzes, Progress, Sources, Bookmarks, and Settings are wired.
+- Explore is the cross-Trail discovery hub today: Trail Pack import CTA + cross-Trail concept search list. The workspace-level graph remains deferred to Phase 16.
+- The old shared "coming soon" stub / scaffolding-typo placeholder pages have been replaced.
+- Trails/Graph overlap RESOLUTION (locked): the per-Trail graph is a VIEW of a Trail at `/trails/[id]`, not a standalone destination. The duplicate "Graph" sidebar item and its `__never__` match-prefix hack are already gone; any future cross-Trail/workspace graph belongs under Explore (the Sigma.js-class surface), not a revived top-level "Graph". See `docs/REBUILD_PLAN.md` Phase 13.7 for the full surface wiring map.
+
 ## Quiz Variant
 
 - Quiz cards are backend-owned and persisted in `quiz_drafts`, keyed by `(concept_id, quiz_type)`.
@@ -75,6 +84,79 @@ If this file conflicts with an older phase description, follow this file and upd
 - **Single-flight dedup.** At most one in-flight detached generation per `concept_id`. Two near-simultaneous `primer/stream` opens share the same background task and therefore the SAME single model call: the manager keys an in-process registry by `concept_id` (in-process guard), and `_produce_primer_events` additionally takes a PostgreSQL `pg_advisory_xact_lock` (mirroring quiz drafts) as the cross-process boundary and re-checks the cache after acquiring it, so a primer produced by another worker is returned without a model call. The advisory lock is skipped on non-PostgreSQL (e.g. SQLite tests).
 - The concept detail response (`GET .../concepts/{concept_id}`) returns `primer` when cached and `null` when absent. Generation is a calling-side decision (lazy on first open or a future bounded pre-generation loop); the detail GET never auto-generates.
 - Primer content is abstract concept-level orientation, NOT source-derived, so it is export-eligible and needs no sanitizer changes.
+- **Anti-hallucination grounding (prompt-level).** Because the primer pass receives NO source-existence signal (`_render_prompt` passes only topic/goal/concept fields, mastery labels, and neighbour titles — there is no `has_sources` variable), `concept_primer.v2.md` carries an *unconditionally safe* grounding rule: prefer conceptual framing over specific facts, and never state specific dates, counts, quantities, statistics, or proper-noun lists (e.g. exact track titles, release years) as fact unless supported by provided source material — hedge generally or omit instead of fabricating precise figures to sound authoritative. `concept_primer.v1.md` (retained per the versioning policy but not the rendered version — `PRIMER_VERSION = 2`) carries the same rule for consistency. If a source-context variable is ever threaded into `_render_prompt`, the rule can be made conditional-aware.
+
+## Tutor-Suggested Quiz Cards (Phase 14)
+
+Status: **shipped** (decisions LOCKED; backend + frontend implemented and tested). The contract below is authoritative.
+
+- `suggest_quiz` is a REAL normalized provider tool registered through `backend/app/agents/provider_tools.py` (the same registration path as the retrieval tools), surfaced to the client as a new `suggest_quiz` SSE event. It is NOT an ad-hoc event bolted onto the stream.
+- The tool is offered on EVERY tutor turn. Unlike the retrieval tools (gated on the concept having sources / a primer), `suggest_quiz` is never gated on sources.
+- Tool args are exactly `quiz_type` (enum `level_up` | `practice`) and `reason` (short, learner-visible string). `concept_id` is NOT a model argument; the backend always scopes to the trusted current concept — the same pattern as `search_sources`, whose schema deliberately omits `concept_id`.
+- Trigger is model-decided but mastery-aware via PROMPT guidance only (suggest `practice` anytime; suggest `level_up` only when mastery looks near-ready). There is NO hard backend mastery gate in v1.
+- The CTA is opt-in: clicking it (never auto-open) reuses the existing backend-owned `quiz_drafts` generate/reuse path keyed by `(concept_id, quiz_type)`. No new quiz endpoint is added.
+- The `reason` is persisted on the assistant turn's `reasoning_parts` under a NEW part kind `suggest_quiz` (joining the existing `status`, `thinking`, `tool_call`, `tool_result` kinds), so the CTA rehydrates on reload like the rest of the turn trace.
+- Dedupe is layered: the backend `(concept_id, quiz_type)` uniqueness already guarantees a single draft, and the frontend collapses to a single active CTA per `quiz_type`.
+- The tutor cannot grade or update mastery through this path — structurally enforced. `suggest_quiz` only emits an intent; grading and mastery updates stay in the quiz service.
+- Two sibling suggestion tools follow the SAME opt-in, never-auto-act, every-turn pattern and persist their own `reasoning_parts` kind + SSE event: `suggest_flashcards` (kind `suggest_flashcards`, args `reason`) nudges the recall-first flashcards deck, and `suggest_artifact` (kind `suggest_artifact`, args `kind` + `reason`; Phase 15f) nudges an artifact build. Like `suggest_quiz`, neither generates, opens, nor persists anything — the learner clicks the CTA to act, and the backend stays the owner of generation/persistence/mastery. This is CTA-first today; a richer direct in-chat trigger flow is still WIP.
+
+## Artifact Templates + Builder Sub-Agent (Phase 15)
+
+Status: **15a–15f implemented + tested** (decisions LOCKED; Phase 15 is under active review/polish at time of writing). What is shipped in code:
+
+- **15a** — artifacts table + migration `0014_artifacts` (+ `0015_artifact_kinds`), strict/lenient envelope schemas, workspace/trail-scoped list/retrieval endpoints, validated create-service, fail-closed export-gating helper, and a frontend `kind -> component` registry that degrades to `text_fallback` on any unknown kind / invalid data / render error. The artifact-builder SUB-AGENT (`backend/app/services/artifact_builder.py`), its bounded retrieval loop (`_run_builder_retrieval_loop`), one-repair-then-fail behaviour, `POST .../artifacts/build` + `POST .../artifacts/build/stream` (SSE), advisory-lock dedupe, and the detached `ArtifactGenerationManager` (own DB session, cancel-safe, lifespan teardown) are ALL implemented. Frontend `ArtifactsPanel` lists + generates via the SSE path.
+- **15b** — pin system shipped (see below).
+- **15c** — flashcards subsystem shipped, BACKEND + FRONTEND (see below).
+- **15d** — `timeline` + `mini_graph` read-only templates implemented (schemas, registry renderers, fallback).
+- **15e** — `simulation_slider` implemented as a CLOSED `sim_kind` enum with backend-owned `precomputed` oracle (`backend/app/services/simulations.py`) and trusted hardcoded client compute (`apps/web/lib/simulations.ts`).
+- **15f** — tutor `suggest_artifact` tool wired (every turn, opt-in CTA, `reasoning_parts` kind `suggest_artifact`); see the Tutor-Suggested Quiz Cards section above for the shared suggestion-tool contract.
+
+The original 15a-only status note has been superseded by this update. The old pinned-flashcard follow-up is closed; the remaining UX follow-up is the richer inline-in-chat trigger experience for `suggest_flashcards` / `suggest_artifact`, because the current implementation still lands as opt-in CTA actions that open the relevant panel/build flow.
+
+Artifact foundation (15a):
+
+- A new `artifacts` table: workspace-scoped, `concept_id` nullable, `trail_id` (artifacts are BOTH concept-attached AND trail-attached), discriminated `artifact_type`, a validated typed payload, `source_refs[]`, and advisory-lock dedupe mirroring `quiz_drafts`. List/retrieval endpoints + history UI — persisted and retrievable like past quizzes.
+- Shared artifact ENVELOPE: `{ artifact_version, kind, title, caption?, text_fallback (REQUIRED), provenance{source_ids, visibility, citations[]}, data{kind-specific} }`. Strict Pydantic output schema (`extra="forbid"`) + a versioned lenient read schema, mirroring `ConceptPrimerOutput`/`ConceptPrimerRead`. Every payload carries a mandatory `text_fallback`.
+- Frontend component REGISTRY (`kind -> component`) generalizing the existing `{type:"data", name}` dispatch, wrapped in an error boundary that degrades to `text_fallback` (like the existing Mermaid `catch -> textContent`). Unknown/invalid `kind` renders `text_fallback`.
+- Export/provenance: concept-level (non-source-derived) artifacts stay LOCAL-ONLY like the primer (excluded from public Trail Pack export). Source-derived artifacts are public-export-eligible only if EVERY contributing source passes `_can_include_source_in_public_export` AND none is `user_upload` (all-or-nothing).
+- First two read-only templates: `worked_example`, `comparison_card`.
+
+Artifact-builder SUB-AGENT (15a):
+
+- Exposed as a tool with its own specialised prompt + its own BOUNDED retrieval loop reusing the existing retrieval tools (`search_sources`, `read_document_section`, `get_graph_neighbourhood`, `get_concept_primer`) under the existing `tutor_tool_call_budget` (3). Structured JSON output + exactly ONE repair attempt, then fail.
+- The BACKEND owns generation, IDs, citations, persistence, and provenance/export gating; the model returns a validated payload only. Every citation must map to a real retrieved `source_revision_id` or be dropped. On-demand only; returns a reference, not a blob through chat.
+- Rationale: small/local LLMs cannot juggle tutoring + retrieval + per-template JSON in one context. This is the orchestrator-worker pattern kept as a small direct-provider adapter, NOT an agent framework.
+
+Background/detached generation (15a):
+
+- Generation runs detached with LIVE status in chat (shimmer / SSE status events) and CONTINUES if the learner leaves/refreshes — mirroring the existing `PrimerGenerationManager` pattern: own DB session from the app sessionmaker, cancel-safe, single-flight per target, lifespan shutdown owns clean teardown. The SSE response only subscribes; the background task persists independently.
+
+Pin system (15b):
+
+- SHIPPED: polymorphic `pins` table `(id, workspace_id, trail_id, item_type, item_id, pinned_at)` + migration `0016_pins`, `item_type in {artifact, quiz_attempt}`, with a CHECK on `item_type` and a UNIQUE constraint on `(workspace_id, trail_id, item_type, item_id)` enforcing IDEMPOTENT pinning (one row per item). Thin pin/unpin/list routes (`backend/app/api/pins.py`) over a service (`backend/app/services/pins.py`); pin/unpin are idempotent and validate the referenced item belongs to the same workspace+trail (no cross-trail/cross-workspace pins). `GET .../pins` aggregates `{artifacts: [ArtifactRead], quiz_attempts: [QuizAttemptRead]}` scoped to the trail.
+- Frontend: a reusable `PinToggle` Save/Saved control on each artifact (`ArtifactsPanel`) and each quiz attempt (`quizShared`/`QuizHistoryPanel`); the workspace-level Bookmarks page (`/bookmarks`) is a per-Trail-grouped "Saved" surface that iterates the workspace's own Trails (bounded: one `listPins` per Trail, no recursion) and renders pinned artifacts via `ArtifactRenderer` and pinned attempts via the shared quiz-attempt list. Per-USER == per-workspace for now (becomes user-scoped when auth lands).
+- NOTE: concept/source "pinning" as a retrieval/recommendation PRIORITISATION weight is a DIFFERENT, deferred mechanism (see `docs/REBUILD_PLAN.md` → Future Exploration / Backlog).
+
+Flashcards subsystem (15c, DEDICATED — not a generic artifact):
+
+- BACKEND SHIPPED: tables `flashcard_decks` + `flashcards` (one deck per concept; UNIQUE `(workspace_id, concept_id)`) + migration `0017_flashcards`. 4 thin routes (`backend/app/api/flashcards.py`, registered in `backend/app/main.py`): `POST .../concepts/{concept_id}/flashcards/generate` (extend/force flags, idempotent default), `GET .../flashcards`, `POST .../flashcards/{card_id}/review` (`{recalled}`), `GET .../flashcards/export?format=csv|json`. Logic lives in services (`flashcards.py` generation + review, `flashcard_scheduler.py` Leitner, `flashcard_export.py`). Pin integration via the `flashcard` `item_type` (deck id is the pinnable unit; aggregated under `flashcards` in `GET .../pins`).
+- FRONTEND SHIPPED: typed API helpers (`getFlashcards`, `generateFlashcards`, `reviewFlashcard`, `flashcardsExportUrl` in `lib/api.ts`; `Flashcard`/`FlashcardDeck`/`FlashcardGenerateResponse` in `lib/types.ts`). `FlashcardsPanel.tsx` opens from the concept action row ("Flashcards" button, mirroring "Artifacts"; footer hidden while open like `artifactsOpen`/`quizMode`). Empty state shows a "Generate flashcards" CTA; on `exhausted` with no new cards it shows the returned `reason` as a friendly decline. RECALL-FIRST review: one card FRONT at a time, answer hidden until "Show answer", then binary "Got it" (recalled=true) / "Missed it" (recalled=false) calls `reviewFlashcard` and advances the due-first session queue (progress `n / total`, box/reps shown subtly; keyboard space=reveal, y/n=grade). "Generate more" extends the deck, an Export CSV/JSON menu uses the export URL, and a `PinToggle` (`item_type: flashcard`) pins the deck. Errors degrade with a message + Retry. Tested in `__tests__/FlashcardsPanel.test.tsx` + a ConceptPanel open/back test.
+- Canonical relational/JSON store (`flashcard_decks` + `flashcards`); CSV is Anki-compatible export only, plus JSON export. CSV is NOT the source of truth.
+- Card schema: `front`, `back`, `hint`, `source_ref`, `card_type (basic|cloze|reverse)` + scheduling state `{box, interval_days, last_reviewed, due, reps, lapses}`.
+- Scheduling v1 = LEITNER (5–6 boxes, geometric intervals e.g. 1/3/7/16/35 days), recall-first swipe yes/no: yes => box+1 (capped), no => box 1 (`lapses++`). Schema is FSRS-ready; v1 logic is Leitner.
+- Generation is source-grounded, atomic, dedup-aware and RETURNS `{cards, exhausted: bool, reason}` so it can decline instead of padding garbage. Every card's `source_ref` must map to a real retrieved `source_revision_id` or the card is dropped (the model can never invent a citation); a deterministic embedding-similarity gate drops paraphrase-duplicates. Cap ~3–8 cards/concept; deck soft-cap. Card-writing rules baked into the prompt (`flashcard_generation.v1.md`): one fact/card, specific & unambiguous, no yes/no fronts, answer not inferable, cloze-one-blank for lists, add why/how cards, self-contained, source-grounded only, no duplicates, STOP when exhausted.
+- Incremental extension feeds existing card FRONTS back as exclusion context + a deterministic embedding-similarity gate to drop paraphrase-duplicates. Optional: bias new cards toward weak sub-areas using the learner's repeated-"no" struggle signal (distinct from dedup).
+- Pinnable + retrievable like quizzes. Pedagogy basis: Wozniak "Twenty rules", Matuschak "How to write good prompts", Leitner/SM-2/FSRS, Bjork.
+
+Interactive simulation slider (15e, `sim_kind`-enum approach):
+
+- A CLOSED ENUM of trusted `sim_kind`s (e.g. `linear`, `quadratic`, `exponential`, `supply_demand`), each backed by a HARDCODED, vetted, unit-tested compute+render function in the frontend registry. The LLM emits a validated data payload only — chosen `sim_kind` + named coefficients within validated finite ranges + axis labels + <=3 parameters + a predict-then-check `prompt` — NEVER code or a formula string.
+- The BACKEND pre-computes baseline sample points and validates ranges (finite, no NaN, bounded `y`), shipping `precomputed.{at_defaults, y_bounds}` as render hint + validation oracle. Client live-eval on slider drag uses the trusted hardcoded function clamped to `y_bounds`, else degrades to the static plot / `text_fallback`. NO arbitrary JS, NO browser-side mathjs. Arbitrary-formula sims are a future backend jsep-whitelist path only.
+- Remaining read-only templates (15d): `timeline`, `mini_graph` (reuses Mermaid strict-mode / `@xyflow`).
+
+Tutor integration (15f):
+
+- SHIPPED: the tutor emits a `suggest_artifact` opt-in suggestion (every turn, not gated on sources), surfaced as a `suggest_artifact` SSE event + `reasoning_parts` kind and rendered as an opt-in CTA. Args are `kind` (the artifact `ArtifactKind` enum) + a learner-visible `reason`; the build only runs on CTA click through the backend-owned `/artifacts/build(/stream)` path. Sequenced after Phase 14 as planned so the two suggestion mechanisms were not stood up at once.
 
 ## Graph Generation Variant
 
@@ -111,7 +193,8 @@ Key design decisions:
 
 - **Two-phase tutor turn**: `prepare_mode()` runs the first LLM call (mode selection only) and returns a `_ModePreparation` bundle. `stream_chat_response` then runs the retrieval loop (between the two LLM calls). If the retrieval planner emits no tool calls but does emit text, that text is reused as the final answer to avoid a duplicate no-tool final call. If retrieval tools are used, `stream_text()` runs the second LLM call with enriched context so the LLM sees retrieved content in its final response.
 - **Budget**: the per-turn tool-call budget (`settings.tutor_tool_call_budget`, default 3) counts individual tool calls per turn. A single LLM response returning 2 calls costs 2 against the budget, including duplicate calls served from the per-turn cache.
-- **Parallel execution**: all tool calls from one LLM response are executed concurrently with `asyncio.gather`.
+- **Sequential execution (shared session)**: the tool calls from one LLM response are dispatched SEQUENTIALLY against the request's single `AsyncSession`. A single asyncpg connection cannot run concurrent operations, so dispatching them with `asyncio.gather` corrupted the in-flight transaction (`InFailedSQLTransactionError`) whenever the model emitted >1 tool call — which then aborted the subsequent commit (e.g. `create_artifact`). Retrieval is read-only and the budget is tiny, so the latency cost of sequential dispatch is negligible. The same fix applies to the artifact-builder retrieval loop (`_run_builder_retrieval_loop`).
+- **Text-emitted tool-call recovery**: small/local models (e.g. `deepseek-v4-flash`) sometimes ignore the native tool-call channel and print a `<functioncall>{...}</functioncall>` block (or a bare `{"name": ..., "arguments": {...}}` object) directly in the text. `parse_text_tool_calls`/`strip_text_tool_calls` (in `provider_tools.py`) recover any VALID calls whose name matches an offered tool (so retrieval and the `suggest_quiz`/`suggest_artifact` CTAs still fire) and strip the raw block so it never leaks to the learner as the visible answer. Applied in both the tutor loop and the artifact-builder loop.
 - **Deduplication**: duplicate calls (same name + args) within a turn return the cached result without re-executing, but are still appended back to the tool-round transcript with their original call IDs.
 - **Per-result cap**: `settings.tutor_max_tool_result_chars` (default 2000). Truncated results include a count suffix.
 - **Mode-selection (first pass)**: the classifier call uses a small dedicated token cap (`settings.tutor_mode_selection_max_tokens`, default 48) and requests provider reasoning only when `settings.tutor_mode_selection_thinking` is true (default false). Prompt context retains the latest `settings.tutor_recent_visible_turns_limit` visible turns (default 10) plus tool turns in that window.
@@ -125,8 +208,7 @@ Key design decisions:
 
 ## Deferred Work
 
-- `open_source_chunk`: deferred (superseded by `read_document_section`).
-- Automatic conversation summarization.
+- `open_source_chunk`: superseded by `read_document_section` (intentionally not implemented).
 - True per-message citation/source parts and quotes.
 - Global cross-Trail assistant surfaces.
 - Guided graph focus controls.

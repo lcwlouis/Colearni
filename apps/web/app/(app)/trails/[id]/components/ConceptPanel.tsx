@@ -13,8 +13,15 @@ import {
 import {
   AlertCircle,
   BookOpen,
+  Bookmark,
   CheckCircle2,
+  ChevronRight,
   Circle,
+  GraduationCap,
+  Layers,
+  Link2,
+  MessageSquare,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -33,10 +40,13 @@ import type {
   MasteryStatus,
 } from "@/lib/types";
 import { titleCase } from "@/lib/display";
+import type { ArtifactKind } from "@/lib/artifacts";
 
 import { QuizHistoryPanel } from "./QuizHistoryPanel";
 import { QuizPanel } from "./QuizPanel";
 import { TutorPanel } from "./TutorPanel";
+import { ArtifactsPanel } from "./ArtifactsPanel";
+import { FlashcardsPanel } from "./FlashcardsPanel";
 
 // Dedupe in-flight primer streams per concept so React StrictMode's
 // double-invoked effects (and rapid re-opens) never open duplicate SSE
@@ -73,18 +83,28 @@ export function ConceptPanel({
   onMasteryUpdated,
 }: ConceptPanelProps) {
   const concept = detail.concept;
-  const [panelWidthState, setPanelWidthState] = useState<{
-    conceptId: string;
-    wide: boolean;
-  }>({
-    conceptId: concept.id,
-    wide: false,
-  });
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [dragStartY, setDragStartY] = useState<number | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
-  const panelWide =
-    panelWidthState.conceptId === concept.id ? panelWidthState.wide : false;
+  const [bookmarks, setBookmarks] = useState<Set<string>>(() =>
+    readBookmarks(),
+  );
+  const bookmarked = bookmarks.has(concept.id);
+
+  // Bookmarks are stored locally (this is a local-first product) so the learner
+  // can flag concepts to revisit without a backend round-trip.
+  function toggleBookmark() {
+    setBookmarks((current) => {
+      const next = new Set(current);
+      if (next.has(concept.id)) {
+        next.delete(concept.id);
+      } else {
+        next.add(concept.id);
+      }
+      writeBookmarks(next);
+      return next;
+    });
+  }
 
   function startDrag(event: PointerEvent<HTMLElement>) {
     if (event.pointerType === "mouse" && event.button !== 0) {
@@ -118,9 +138,7 @@ export function ConceptPanel({
 
   return (
     <aside
-      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl transition-[max-height,transform] duration-200 ease-out md:inset-y-0 md:left-auto md:right-0 md:h-full md:max-h-none md:translate-y-0 md:rounded-none md:border-l md:border-t-0 ${
-        panelWide ? "md:max-w-xl" : "md:max-w-md"
-      } ${mobileExpanded ? "max-h-[78vh]" : "max-h-48"}`}
+      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl transition-[max-height,transform] duration-200 ease-out md:static md:inset-auto md:z-0 md:h-full md:max-h-none md:w-[min(41vw,37rem)] md:shrink-0 md:translate-y-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none ${mobileExpanded ? "max-h-[78vh]" : "max-h-48"}`}
       style={
         dragStartY === null
           ? undefined
@@ -150,31 +168,51 @@ export function ConceptPanel({
         onPointerCancel={endDrag}
         className="flex touch-none items-start justify-between gap-4 border-b border-slate-200 p-4 md:p-5"
       >
-        <div>
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold text-slate-950 md:text-xl">
             {concept.title}
           </h2>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            <Badge>{titleCase(concept.concept_level)}</Badge>
-            <Badge>{titleCase(concept.bloom_level)}</Badge>
-            <Badge>{titleCase(concept.difficulty)}</Badge>
-            <Badge>{titleCase(concept.node_type)}</Badge>
-            <MasteryBadge status={detail.mastery.status} />
-          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            {titleCase(concept.concept_level)} · {titleCase(concept.node_type)}
+          </p>
         </div>
-        <button
-          type="button"
-          aria-label="Close"
-          onPointerDown={(event) => event.stopPropagation()}
-          onPointerUp={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onClose();
-          }}
-          className="grid size-8 place-items-center rounded-md border border-slate-200 text-lg leading-none text-slate-600 hover:bg-slate-50"
-        >
-          ×
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            aria-label={bookmarked ? "Remove bookmark" : "Bookmark concept"}
+            aria-pressed={bookmarked}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleBookmark();
+            }}
+            className={`grid size-8 place-items-center rounded-md border text-slate-600 hover:bg-slate-50 ${
+              bookmarked
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : "border-slate-200"
+            }`}
+          >
+            <Bookmark
+              className="size-4"
+              aria-hidden
+              fill={bookmarked ? "currentColor" : "none"}
+            />
+          </button>
+          <button
+            type="button"
+            aria-label="Close"
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+            className="grid size-8 place-items-center rounded-md border border-slate-200 text-lg leading-none text-slate-600 hover:bg-slate-50"
+          >
+            ×
+          </button>
+        </div>
       </div>
       <ConceptPanelBody
         key={concept.id}
@@ -185,9 +223,6 @@ export function ConceptPanel({
         onMasteryUpdated={onMasteryUpdated}
         mobileExpanded={mobileExpanded}
         setMobileExpanded={setMobileExpanded}
-        setPanelWide={(wide) =>
-          setPanelWidthState({ conceptId: concept.id, wide })
-        }
       />
     </aside>
   );
@@ -201,7 +236,6 @@ function ConceptPanelBody({
   onMasteryUpdated,
   mobileExpanded,
   setMobileExpanded,
-  setPanelWide,
 }: {
   workspaceId: string;
   trailId: string;
@@ -213,12 +247,24 @@ function ConceptPanelBody({
   ) => void;
   mobileExpanded: boolean;
   setMobileExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
-  setPanelWide: (wide: boolean) => void;
 }) {
   const concept = detail.concept;
   const [tutorOpen, setTutorOpen] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  // When the tutor's suggest_artifact CTA opens the panel, the chosen kind is
+  // stashed here so ArtifactsPanel auto-starts that build (opt-in: the learner
+  // clicked the CTA). null when the panel is opened from the concept action row.
+  const [artifactGenerateKind, setArtifactGenerateKind] =
+    useState<ArtifactKind | null>(null);
+  const [flashcardsOpen, setFlashcardsOpen] = useState(false);
+  // The Quizzes hub is a small in-panel chooser (Practice / Level Up / Past
+  // attempts) that consolidates the previously separate quiz action buttons.
+  const [quizHubOpen, setQuizHubOpen] = useState(false);
   const [quizMode, setQuizMode] = useState<
     "level_up" | "practice" | "history" | null
+  >(null);
+  const [quizHistoryReturnMode, setQuizHistoryReturnMode] = useState<
+    "level_up" | "practice" | "hub" | null
   >(null);
   // Seed welcome suggestions from a cached primer; PrimerSection reports the
   // freshly streamed primer up so the tutor can use its sample questions.
@@ -238,7 +284,7 @@ function ConceptPanelBody({
         className={`flex-1 ${
           tutorOpen
             ? "min-h-0 overflow-hidden p-0 md:p-0"
-            : "overflow-y-auto p-4 md:block md:p-5"
+            : "overflow-y-auto p-4 md:block md:p-5 app-scrollbar"
         } ${mobileExpanded ? "block" : "hidden"}`}
       >
         {tutorOpen ? (
@@ -250,7 +296,26 @@ function ConceptPanelBody({
             sampleQuestions={sampleQuestions}
             onBack={() => {
               setTutorOpen(false);
-              setPanelWide(false);
+            }}
+            onSuggestQuiz={(quizType) => {
+              // Opt-in only: the tutor CTA just switches panels to the existing
+              // QuizPanel, which owns the backend quiz_drafts generate/reuse
+              // path. Mirror the concept action quiz-open width behaviour.
+              setTutorOpen(false);
+              setQuizMode(quizType);
+            }}
+            onSuggestFlashcards={() => {
+              setTutorOpen(false);
+              setFlashcardsOpen(true);
+            }}
+            onSuggestArtifact={(kind) => {
+              // Opt-in only: the tutor CTA switches panels to the existing
+              // ArtifactsPanel, which owns the backend artifact build/persist
+              // path. The learner clicked the CTA, so we pass the chosen kind so
+              // the panel auto-starts that build on open.
+              setTutorOpen(false);
+              setArtifactGenerateKind(kind);
+              setArtifactsOpen(true);
             }}
             onMasteryUpdated={onMasteryUpdated}
           />
@@ -260,8 +325,38 @@ function ConceptPanelBody({
             trailId={trailId}
             conceptId={concept.id}
             onBack={() => {
-              setQuizMode(null);
-              setPanelWide(false);
+              if (
+                quizHistoryReturnMode === "level_up" ||
+                quizHistoryReturnMode === "practice"
+              ) {
+                setQuizMode(quizHistoryReturnMode);
+              } else if (quizHistoryReturnMode === "hub") {
+                setQuizMode(null);
+                setQuizHubOpen(true);
+              } else {
+                setQuizMode(null);
+              }
+              setQuizHistoryReturnMode(null);
+            }}
+          />
+        ) : artifactsOpen ? (
+          <ArtifactsPanel
+            workspaceId={workspaceId}
+            trailId={trailId}
+            conceptId={concept.id}
+            initialGenerateKind={artifactGenerateKind}
+            onBack={() => {
+              setArtifactsOpen(false);
+              setArtifactGenerateKind(null);
+            }}
+          />
+        ) : flashcardsOpen ? (
+          <FlashcardsPanel
+            workspaceId={workspaceId}
+            trailId={trailId}
+            conceptId={concept.id}
+            onBack={() => {
+              setFlashcardsOpen(false);
             }}
           />
         ) : quizMode ? (
@@ -272,21 +367,225 @@ function ConceptPanelBody({
             mode={quizMode}
             onBack={() => {
               setQuizMode(null);
-              setPanelWide(false);
             }}
-            onViewHistory={() => setQuizMode("history")}
+            onViewHistory={() => {
+              setQuizHistoryReturnMode(quizMode);
+              setQuizMode("history");
+            }}
             onMasteryUpdated={onMasteryUpdated}
           />
+        ) : quizHubOpen ? (
+          <QuizHub
+            onBack={() => setQuizHubOpen(false)}
+            onPractice={() => {
+              setQuizHubOpen(false);
+              setQuizMode("practice");
+            }}
+            onLevelUp={() => {
+              setQuizHubOpen(false);
+              setQuizMode("level_up");
+            }}
+            onHistory={() => {
+              setQuizHubOpen(false);
+              setQuizHistoryReturnMode("hub");
+              setQuizMode("history");
+            }}
+          />
         ) : (
-          <>
-            <PrimerSection
-              workspaceId={workspaceId}
-              trailId={trailId}
-              conceptId={concept.id}
-              initialPrimer={detail.primer ?? null}
-              onPrimerLoaded={handlePrimerLoaded}
-            />
+          <ConceptOverview
+            workspaceId={workspaceId}
+            trailId={trailId}
+            detail={detail}
+            onSelectConcept={onSelectConcept}
+            onPrimerLoaded={handlePrimerLoaded}
+            onOpenTutor={() => {
+              setTutorOpen(true);
+              setMobileExpanded(true);
+            }}
+            onOpenQuizzes={() => {
+              setQuizHubOpen(true);
+              setMobileExpanded(true);
+            }}
+            onOpenPractice={() => {
+              setQuizMode("practice");
+              setMobileExpanded(true);
+            }}
+            onOpenArtifacts={() => {
+              setArtifactGenerateKind(null);
+              setArtifactsOpen(true);
+              setMobileExpanded(true);
+            }}
+            onOpenFlashcards={() => {
+              setFlashcardsOpen(true);
+              setMobileExpanded(true);
+            }}
+          />
+        )}
+      </div>
+    </>
+  );
+}
 
+type OverviewTab = "overview" | "details" | "sources";
+
+// Compact, tabbed concept overview. Overview stays short and action-focused;
+// verbose detail (primer prose, key terms, full connection lists, attributes,
+// mastery checks) lives under Details, and sources under Sources. All three
+// tab panels stay mounted (inactive ones hidden) so the primer keeps streaming
+// and sources keep loading regardless of the active tab.
+function ConceptOverview({
+  workspaceId,
+  trailId,
+  detail,
+  onSelectConcept,
+  onPrimerLoaded,
+  onOpenTutor,
+  onOpenQuizzes,
+  onOpenPractice,
+  onOpenArtifacts,
+  onOpenFlashcards,
+}: {
+  workspaceId: string;
+  trailId: string;
+  detail: ConceptDetail;
+  onSelectConcept?: (conceptId: string) => void;
+  onPrimerLoaded?: (primer: ConceptPrimerRead) => void;
+  onOpenTutor: () => void;
+  onOpenQuizzes: () => void;
+  onOpenPractice: () => void;
+  onOpenArtifacts: () => void;
+  onOpenFlashcards: () => void;
+}) {
+  const concept = detail.concept;
+  const status = detail.mastery.status;
+  const [tab, setTab] = useState<OverviewTab>("overview");
+  const primary = primaryCtaFor(status, { onOpenTutor, onOpenPractice });
+  const connections = [
+    ...detail.prerequisites,
+    ...detail.contained_nodes,
+    ...detail.containing_nodes,
+    ...detail.related,
+  ];
+  const masteryPercent = Math.max(
+    0,
+    Math.min(100, Math.round((detail.mastery.score ?? 0) * 100)),
+  );
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div
+        role="tablist"
+        aria-label="Concept details"
+        className="flex gap-1 rounded-md border border-slate-200 bg-slate-100 p-0.5"
+      >
+        {(
+          [
+            ["overview", "Overview"],
+            ["details", "Details"],
+            ["sources", "Sources"],
+          ] as Array<[OverviewTab, string]>
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={tab === value}
+            onClick={() => setTab(value)}
+            className={`h-8 flex-1 rounded text-xs font-medium transition md:text-sm ${
+              tab === value
+                ? "bg-white text-blue-700 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Overview tab */}
+      <div className={tab === "overview" ? "flex flex-col gap-5" : "hidden"}>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-center gap-4">
+            <MasteryRing percent={masteryPercent} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-slate-900">
+                {statusHeadline(status)}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">{primary.helper}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={primary.action}
+            className="mt-4 h-10 w-full rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            {primary.label}
+          </button>
+        </div>
+
+        <section data-testid="concept-actions">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Next actions
+          </h3>
+          <div className="mt-2 grid gap-2">
+            <ActionRow
+              icon={MessageSquare}
+              label="Tutor"
+              sublabel="Work through it Socratically"
+              onClick={onOpenTutor}
+            />
+            <ActionRow
+              icon={GraduationCap}
+              label="Quizzes"
+              sublabel="Practice, level up, or review attempts"
+              onClick={onOpenQuizzes}
+            />
+            <ActionRow
+              icon={Sparkles}
+              label="Artifacts"
+              sublabel="Worked examples and comparisons"
+              onClick={onOpenArtifacts}
+            />
+            <ActionRow
+              icon={Layers}
+              label="Flashcards"
+              sublabel="Recall-first spaced review"
+              onClick={onOpenFlashcards}
+            />
+          </div>
+        </section>
+
+        <ConnectedConcepts
+          connections={connections}
+          onSelect={onSelectConcept}
+          onViewAll={() => setTab("details")}
+        />
+      </div>
+
+      {/* Details tab */}
+      <div className={tab === "details" ? "flex flex-col gap-6" : "hidden"}>
+        <PrimerSection
+          workspaceId={workspaceId}
+          trailId={trailId}
+          conceptId={concept.id}
+          initialPrimer={detail.primer ?? null}
+          onPrimerLoaded={onPrimerLoaded}
+        />
+
+        <section>
+          <h3 className="text-sm font-semibold text-slate-900">Attributes</h3>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <Badge>{titleCase(concept.concept_level)}</Badge>
+            <Badge>{titleCase(concept.bloom_level)}</Badge>
+            <Badge>{titleCase(concept.difficulty)}</Badge>
+            <Badge>{titleCase(concept.node_type)}</Badge>
+            <MasteryBadge status={status} />
+          </div>
+        </section>
+
+        <section>
+          <h3 className="text-sm font-semibold text-slate-900">Connections</h3>
+          <div className="mt-2 grid gap-4">
             <Section
               title="Prerequisites"
               nodes={detail.prerequisites}
@@ -307,148 +606,271 @@ function ConceptPanelBody({
               nodes={detail.related}
               onSelect={onSelectConcept}
             />
+          </div>
+        </section>
 
-            <section className="mt-6">
-              <h3 className="text-sm font-semibold text-slate-900">
-                Mastery checks
-              </h3>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {concept.mastery_check_labels.length === 0 ? (
-                  <p className="text-sm text-slate-500">No checks yet.</p>
-                ) : (
-                  concept.mastery_check_labels.map((label) => (
-                    <Badge key={label}>{label}</Badge>
-                  ))
-                )}
-              </div>
-            </section>
-
-            <section className="mt-6">
-              <SourcesSection
-                workspaceId={workspaceId}
-                conceptId={concept.id}
-              />
-            </section>
-          </>
-        )}
+        <section>
+          <h3 className="text-sm font-semibold text-slate-900">
+            Mastery checks
+          </h3>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {concept.mastery_check_labels.length === 0 ? (
+              <p className="text-sm text-slate-500">No checks yet.</p>
+            ) : (
+              concept.mastery_check_labels.map((label) => (
+                <Badge key={label}>{label}</Badge>
+              ))
+            )}
+          </div>
+        </section>
       </div>
-      {!tutorOpen && !quizMode ? (
-        <div
-          data-testid="concept-actions"
-          className={`border-t border-slate-200 p-4 md:block md:p-5 ${
-            mobileExpanded ? "block" : "hidden"
-          }`}
-        >
-          <ConceptActions
-            status={detail.mastery.status}
-            onOpenTutor={() => {
-              setTutorOpen(true);
-              setPanelWide(true);
-              setMobileExpanded(true);
-            }}
-            onOpenLevelUp={() => {
-              setQuizMode("level_up");
-              setPanelWide(false);
-              setMobileExpanded(true);
-            }}
-            onOpenPractice={() => {
-              setQuizMode("practice");
-              setPanelWide(false);
-              setMobileExpanded(true);
-            }}
-            onOpenHistory={() => {
-              setQuizMode("history");
-              setPanelWide(false);
-              setMobileExpanded(true);
-            }}
-          />
-        </div>
-      ) : null}
-    </>
+
+      {/* Sources tab */}
+      <div className={tab === "sources" ? "block" : "hidden"}>
+        <SourcesSection workspaceId={workspaceId} conceptId={concept.id} />
+      </div>
+    </div>
   );
 }
 
-function ConceptActions({
-  status,
-  onOpenTutor,
-  onOpenLevelUp,
-  onOpenPractice,
-  onOpenHistory,
-}: {
-  status: MasteryStatus;
-  onOpenTutor: () => void;
-  onOpenLevelUp: () => void;
-  onOpenPractice: () => void;
-  onOpenHistory: () => void;
-}) {
-  // CTA hierarchy by mastery state (see docs/FRONTEND.md):
-  //   not_started   -> Start Learning      (tutor)
-  //   learning      -> Continue Tutor      (tutor)
-  //   needs_review  -> Review Weak Points  (tutor, repair-oriented)
-  //   mastered      -> Practice / Explore Further  (practice quiz)
-  let primaryLabel: string;
-  let primaryAction: () => void;
-  let helper: string;
+// CTA hierarchy by mastery state (see docs/FRONTEND.md):
+//   not_started   -> Start Learning      (tutor)
+//   learning      -> Continue Tutor      (tutor)
+//   needs_review  -> Review Weak Points  (tutor, repair-oriented)
+//   mastered      -> Practice / Explore Further  (practice quiz)
+function primaryCtaFor(
+  status: MasteryStatus,
+  handlers: { onOpenTutor: () => void; onOpenPractice: () => void },
+): { label: string; action: () => void; helper: string } {
   if (status === "mastered") {
-    primaryLabel = "Practice / Explore Further";
-    primaryAction = onOpenPractice;
-    helper = "Mastered. Practice to keep it sharp or explore further.";
-  } else if (status === "needs_review") {
-    primaryLabel = "Review Weak Points";
-    primaryAction = onOpenTutor;
-    helper = "Marked for review — revisit weak spots with the tutor.";
-  } else if (status === "learning") {
-    primaryLabel = "Continue Tutor";
-    primaryAction = onOpenTutor;
-    helper = "Pick up the Socratic conversation where you left off.";
-  } else {
-    primaryLabel = "Start Learning";
-    primaryAction = onOpenTutor;
-    helper = "Begin a guided Socratic walk-through of this concept.";
+    return {
+      label: "Practice / Explore Further",
+      action: handlers.onOpenPractice,
+      helper: "Mastered. Practice to keep it sharp or explore further.",
+    };
   }
+  if (status === "needs_review") {
+    return {
+      label: "Review Weak Points",
+      action: handlers.onOpenTutor,
+      helper: "Marked for review — revisit weak spots with the tutor.",
+    };
+  }
+  if (status === "learning") {
+    return {
+      label: "Continue Learning",
+      action: handlers.onOpenTutor,
+      helper: "Pick up the Socratic conversation where you left off.",
+    };
+  }
+  return {
+    label: "Start Learning",
+    action: handlers.onOpenTutor,
+    helper: "Begin a guided Socratic walk-through of this concept.",
+  };
+}
 
+function statusHeadline(status: MasteryStatus): string {
+  if (status === "mastered") {
+    return "Mastered";
+  }
+  if (status === "needs_review") {
+    return "Needs review";
+  }
+  if (status === "learning") {
+    return "In progress";
+  }
+  return "Not started";
+}
+
+function MasteryRing({ percent }: { percent: number }) {
+  const radius = 26;
+  const circumference = 2 * Math.PI * radius;
+  const filled = (percent / 100) * circumference;
   return (
-    <div>
-      <button
-        type="button"
-        onClick={primaryAction}
-        className="h-10 w-full rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700"
-      >
-        {primaryLabel}
-      </button>
-      <p className="mt-2 text-xs text-slate-500">{helper}</p>
-      {/* Stable toolbar: Tutor, Practice, Level Up always keep the same slots so
-          buttons never swap position as mastery changes. */}
-      <div className="mt-3 flex gap-2">
+    <div className="relative grid size-16 shrink-0 place-items-center">
+      <svg viewBox="0 0 64 64" className="size-16 -rotate-90" aria-hidden>
+        <circle
+          cx="32"
+          cy="32"
+          r={radius}
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth="6"
+        />
+        <circle
+          cx="32"
+          cy="32"
+          r={radius}
+          fill="none"
+          stroke="#2563eb"
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={`${filled} ${circumference}`}
+        />
+      </svg>
+      <span className="absolute text-sm font-semibold text-slate-900">
+        {percent}%
+      </span>
+    </div>
+  );
+}
+
+function ActionRow({
+  icon: Icon,
+  label,
+  sublabel,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  sublabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-3 rounded-md border border-slate-200 px-3 py-2.5 text-left hover:bg-slate-50"
+    >
+      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-blue-50 text-blue-700">
+        <Icon className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-slate-900">
+          {label}
+        </span>
+        <span className="block truncate text-xs text-slate-500">
+          {sublabel}
+        </span>
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-slate-400" aria-hidden />
+    </button>
+  );
+}
+
+function ConnectedConcepts({
+  connections,
+  onSelect,
+  onViewAll,
+}: {
+  connections: ConceptNode[];
+  onSelect?: (conceptId: string) => void;
+  onViewAll: () => void;
+}) {
+  // De-duplicate (a node can appear under more than one relation) and cap the
+  // chip row so the Overview stays compact; the rest live under "View all".
+  const seen = new Set<string>();
+  const unique = connections.filter((node) => {
+    if (seen.has(node.id)) {
+      return false;
+    }
+    seen.add(node.id);
+    return true;
+  });
+  const shown = unique.slice(0, 6);
+  return (
+    <section>
+      <div className="flex items-center gap-2">
+        <Link2 className="size-4 text-slate-400" aria-hidden />
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Connected concepts
+        </h3>
+      </div>
+      {unique.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">No connections yet.</p>
+      ) : (
+        <>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {shown.map((node) => (
+              <button
+                key={node.id}
+                type="button"
+                onClick={() => onSelect?.(node.id)}
+                className="max-w-full truncate rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                title={node.title}
+              >
+                {node.title}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:text-blue-800"
+          >
+            View all connections
+            <ChevronRight className="size-3.5" aria-hidden />
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
+
+// In-panel quiz chooser opened from the "Quizzes" action. Mirrors the other
+// concept sub-panels (titled list + Back) and wires straight into the existing
+// quiz modes owned by QuizPanel / QuizHistoryPanel.
+function QuizHub({
+  onBack,
+  onPractice,
+  onLevelUp,
+  onHistory,
+}: {
+  onBack: () => void;
+  onPractice: () => void;
+  onLevelUp: () => void;
+  onHistory: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-900">Quizzes</h3>
         <button
           type="button"
-          onClick={onOpenTutor}
-          className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          onClick={onBack}
+          className="text-xs text-slate-500 hover:text-slate-800"
         >
-          Open Tutor
-        </button>
-        <button
-          type="button"
-          onClick={onOpenPractice}
-          className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Practice
-        </button>
-        <button
-          type="button"
-          onClick={onOpenLevelUp}
-          className="h-9 flex-1 rounded-md border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Level Up
+          Back
         </button>
       </div>
-      <button
-        type="button"
-        onClick={onOpenHistory}
-        className="mt-2 w-full rounded-md border border-dashed border-slate-300 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
-      >
-        View past attempts
-      </button>
+      <p className="text-xs text-slate-500">
+        Check your understanding or review how past attempts went.
+      </p>
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={onPractice}
+          className="flex w-full flex-col rounded-md border border-slate-200 p-3 text-left hover:bg-slate-50"
+        >
+          <span className="text-sm font-medium text-slate-900">Practice</span>
+          <span className="text-xs text-slate-500">
+            Low-stakes questions to rehearse this concept.
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onLevelUp}
+          className="flex w-full flex-col rounded-md border border-slate-200 p-3 text-left hover:bg-slate-50"
+        >
+          <span className="text-sm font-medium text-slate-900">Level Up</span>
+          <span className="text-xs text-slate-500">
+            Take the graded quiz to advance your mastery.
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onHistory}
+          className="flex w-full flex-col rounded-md border border-slate-200 p-3 text-left hover:bg-slate-50"
+        >
+          <span className="text-sm font-medium text-slate-900">
+            Past attempts
+          </span>
+          <span className="text-xs text-slate-500">
+            Review previous quiz attempts and results.
+          </span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -553,7 +975,7 @@ function PrimerSection({
     return (
       <section
         data-testid="primer-loading"
-        className="mt-6 border-l-2 border-slate-200 pl-3 dark:border-slate-700"
+        className="border-l-2 border-slate-200 pl-3 dark:border-slate-700"
       >
         <p className="flex items-center gap-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           <BookOpen className="size-3.5 shrink-0" aria-hidden />
@@ -606,12 +1028,20 @@ function PrimerSection({
   }
 
   return (
-    <section data-testid="primer-section" className="mt-6">
+    <section data-testid="primer-section">
       <h3 className="text-sm font-semibold text-slate-900">Overview</h3>
       <p className="mt-2 text-sm leading-5 text-slate-700">{primer.overview}</p>
 
       {primer.key_terms.length > 0 ? (
-        <KeyTerms terms={primer.key_terms} />
+        <details className="group mt-4 rounded-md border border-slate-200">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 hover:text-slate-700">
+            <span>Key terms ({primer.key_terms.length})</span>
+            <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="px-3 pb-3">
+            <KeyTerms terms={primer.key_terms} embedded />
+          </div>
+        </details>
       ) : null}
     </section>
   );
@@ -619,26 +1049,36 @@ function PrimerSection({
 
 // Shared Key-terms layout used by both the streamed (generating) state and the
 // authoritative final primer so terms keep an identical look as they arrive
-// one-by-one.
-function KeyTerms({ terms }: { terms: ConceptPrimerKeyTerm[] }) {
+// one-by-one. When `embedded`, the heading is dropped (the disclosure summary
+// labels it) and the top margin removed so it nests inside a <details>.
+function KeyTerms({
+  terms,
+  embedded = false,
+}: {
+  terms: ConceptPrimerKeyTerm[];
+  embedded?: boolean;
+}) {
+  const list = (
+    <dl className="grid gap-2">
+      {terms.map((item) => (
+        <div key={item.term} className="rounded-md border border-slate-200 p-3">
+          <dt className="text-sm font-medium text-slate-800">{item.term}</dt>
+          <dd className="mt-1 text-sm leading-5 text-slate-600">
+            {item.definition}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+  if (embedded) {
+    return list;
+  }
   return (
     <div className="mt-4">
       <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500">
         Key terms
       </h4>
-      <dl className="mt-2 grid gap-2">
-        {terms.map((item) => (
-          <div
-            key={item.term}
-            className="rounded-md border border-slate-200 p-3"
-          >
-            <dt className="text-sm font-medium text-slate-800">{item.term}</dt>
-            <dd className="mt-1 text-sm leading-5 text-slate-600">
-              {item.definition}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <div className="mt-2">{list}</div>
     </div>
   );
 }
@@ -1294,6 +1734,32 @@ function SourcesSection({
   );
 }
 
+const BOOKMARKS_KEY = "colearni.bookmarks";
+
+function readBookmarks(): Set<string> {
+  if (typeof window === "undefined") {
+    return new Set();
+  }
+  try {
+    const raw = window.localStorage.getItem(BOOKMARKS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? (parsed as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeBookmarks(ids: Set<string>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify([...ids]));
+  } catch {
+    // Best-effort persistence: ignore quota/availability errors.
+  }
+}
+
 function originLabel(origin: string): string {
   if (origin === "user_upload") {
     return "upload";
@@ -1325,7 +1791,7 @@ function Section({
   onSelect?: (conceptId: string) => void;
 }) {
   return (
-    <section className="mt-6 first:mt-0">
+    <section>
       <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
       {nodes.length === 0 ? (
         <p className="mt-2 text-sm text-slate-500">None</p>

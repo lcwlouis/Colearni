@@ -23,7 +23,6 @@ export default function TrailPage() {
   const [workspaceId, setWorkspaceId] = useState("");
   const [detail, setDetail] = useState<TrailDetail | null>(null);
   const [next, setNext] = useState<NextConceptResponse | null>(null);
-  const [focusConceptId, setFocusConceptId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -120,16 +119,6 @@ export default function TrailPage() {
     return <main className="p-6 text-sm text-slate-600">Loading graph...</main>;
   }
 
-  // A brand-new Trail: nothing has been started, learned, or mastered yet.
-  // The /next result is presented as a suggested entry point in this case.
-  const isFreshTrail = Boolean(
-    detail &&
-    detail.mastery_summary.total > 0 &&
-    detail.mastery_summary.learning === 0 &&
-    detail.mastery_summary.needs_review === 0 &&
-    detail.mastery_summary.mastered === 0,
-  );
-
   if (error || !detail) {
     return (
       <main className="mx-auto max-w-3xl p-6">
@@ -147,7 +136,7 @@ export default function TrailPage() {
   }
 
   return (
-    <main className="flex h-screen min-h-[680px] flex-col overflow-hidden bg-slate-50">
+    <main className="flex h-screen min-h-170 flex-col overflow-hidden bg-slate-50">
       <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
         <div>
           <Link
@@ -195,128 +184,15 @@ export default function TrailPage() {
           </div>
         </div>
       </header>
-      {next ? (
-        <NextConceptBanner
-          next={next}
-          isFreshTrail={isFreshTrail}
-          onFocus={() => {
-            if (next.concept_id) {
-              setFocusConceptId(next.concept_id);
-            }
-          }}
-        />
-      ) : null}
       <TrailGraph
         workspaceId={workspaceId}
         trail={detail.trail}
         graph={detail.graph}
         masterySummary={detail.mastery_summary}
         initialConceptId={initialConceptId}
-        focusConceptId={focusConceptId}
+        recommendedConceptId={next?.concept_id ?? null}
         onMasteryUpdated={handleMasteryUpdated}
       />
     </main>
-  );
-}
-
-function NextConceptBanner({
-  next,
-  isFreshTrail,
-  onFocus,
-}: {
-  next: NextConceptResponse;
-  isFreshTrail: boolean;
-  onFocus: () => void;
-}) {
-  const [dismissed, setDismissed] = useState(false);
-
-  if (dismissed) {
-    return null;
-  }
-  if (!next.all_mastered && !next.concept_id) {
-    return null;
-  }
-
-  // On a fresh Trail the recommendation is framed as a suggested starting point
-  // rather than a "next" step. It stays purely a suggestion: the learner can
-  // dismiss it and start from any node in the graph.
-  const showSuggestedStart =
-    isFreshTrail && !next.all_mastered && Boolean(next.concept_id);
-
-  const ctaLabel = (() => {
-    if (next.all_mastered) return null;
-    if (showSuggestedStart) return "Start Here";
-    switch (next.mastery_status) {
-      case "needs_review":
-        return "Review Weak Points";
-      case "learning":
-        return "Continue Tutor";
-      case "mastered":
-        return "Practice / Explore Further";
-      default:
-        return "Start Learning";
-    }
-  })();
-
-  return (
-    <section
-      data-testid={
-        showSuggestedStart ? "suggested-start-banner" : "next-concept-banner"
-      }
-      className="shrink-0 border-b border-blue-100 bg-blue-50 px-5 py-3 text-sm"
-    >
-      <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1">
-          {next.all_mastered ? (
-            <p className="font-medium text-slate-950">
-              All concepts mastered — well done.
-            </p>
-          ) : showSuggestedStart ? (
-            <p className="font-medium text-slate-950">
-              Suggested starting point:{" "}
-              <span className="text-blue-700">
-                {next.concept_title ?? "Open concept"}
-              </span>
-            </p>
-          ) : (
-            <p className="font-medium text-slate-950">
-              Recommended next:{" "}
-              <span className="text-blue-700">
-                {next.concept_title ?? "Open concept"}
-              </span>
-            </p>
-          )}
-          <p className="mt-0.5 text-xs text-slate-600">{next.reason}</p>
-          {showSuggestedStart ? (
-            <p className="mt-0.5 text-xs text-slate-500">
-              Just a suggestion — you can start from any concept in the graph.
-            </p>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {ctaLabel && next.concept_id ? (
-            <button
-              type="button"
-              data-testid="next-banner-cta"
-              onClick={() => {
-                onFocus();
-                setDismissed(true);
-              }}
-              className="inline-flex h-8 items-center justify-center rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700"
-            >
-              {ctaLabel}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            aria-label="Dismiss recommendation"
-            onClick={() => setDismissed(true)}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-blue-100 hover:text-slate-700"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-    </section>
   );
 }

@@ -81,7 +81,6 @@ export function QuizPanel({
   conceptId,
   mode,
   onBack,
-  onViewHistory,
   onMasteryUpdated,
 }: QuizPanelProps) {
   const [retryTrigger, setRetryTrigger] = useState(0);
@@ -294,7 +293,6 @@ export function QuizPanel({
     return (
       <div className="space-y-4">
         <QuizProgressCard mode={mode} phase="generating" />
-        {onViewHistory ? <ViewHistoryButton onClick={onViewHistory} /> : null}
       </div>
     );
   }
@@ -344,13 +342,21 @@ export function QuizPanel({
                 {mode === "level_up" ? "Level-up result" : "Practice result"}
               </p>
               <h3 className="mt-1 text-lg font-semibold text-slate-950">
-                {result.passed ? "Mastery confirmed" : "Review recommended"}
+                {result.passed
+                  ? mode === "level_up"
+                    ? "Mastery confirmed"
+                    : "Practice passed"
+                  : "Review recommended"}
               </h3>
               {mode === "level_up" ? (
                 <p className="mt-1 text-sm text-slate-600">
                   Status: {formatMasteryStatus(result.mastery_status)}
                 </p>
-              ) : null}
+              ) : (
+                <p className="mt-1 text-sm text-slate-600">
+                  Practice saves feedback but does not update mastery.
+                </p>
+              )}
             </div>
             <div className="rounded-lg bg-white px-3 py-2 text-right shadow-sm ring-1 ring-slate-200">
               <p className="text-xs uppercase tracking-wide text-slate-500">
@@ -435,87 +441,150 @@ export function QuizPanel({
           >
             Back
           </button>
-          {onViewHistory ? (
-            <button
-              type="button"
-              onClick={onViewHistory}
-              className="text-sm text-blue-700 hover:text-blue-900"
-            >
-              View past attempts
-            </button>
-          ) : null}
         </div>
       </div>
     );
   }
 
+  const totalQuestions = card?.questions.length ?? 0;
+  const answeredCount = card
+    ? card.questions.filter((q) => isAnswered(q, answers[q.id] ?? "")).length
+    : 0;
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-900">
-          {mode === "level_up" ? "Level-Up Quiz" : "Practice Quiz"}
-        </h3>
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-xs text-slate-500 hover:text-slate-800"
-        >
-          Back
-        </button>
-      </div>
+    <div className="space-y-5">
+      <QuizHeader mode={mode} onBack={onBack} />
+
+      <QuizProgress answered={answeredCount} total={totalQuestions} />
+
       {quizState === "grading" ? (
         <QuizProgressCard mode={mode} phase="grading" />
       ) : null}
+
       {gradeError ? (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {gradeError}
         </div>
       ) : null}
-      <ol className="space-y-5">
+
+      <ol className="space-y-4">
         {card?.questions.map((question, index) => (
-          <li key={question.id} className="space-y-2">
-            <div className="text-sm font-medium text-slate-800">
-              <span className="mr-1">{index + 1}.</span>
-              <QuizMarkdown
-                text={question.prompt}
-                className="inline-block align-top"
+          <li
+            key={question.id}
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+              Question {index + 1}
+              <span className="ml-2 font-medium text-slate-400">
+                {formatQuestionType(question.type)} ·{" "}
+                {question.difficulty ?? "standard"}
+              </span>
+            </p>
+            <div className="mt-2 text-sm font-medium leading-6 text-slate-900 sm:text-base sm:leading-7">
+              <QuizMarkdown text={question.prompt} />
+            </div>
+            <div className="mt-4">
+              <QuestionInput
+                question={question}
+                value={answers[question.id] ?? ""}
+                disabled={quizState === "grading"}
+                index={index}
+                onChange={(value) => handleAnswerChange(question.id, value)}
+                onToggleMultiSelect={(option) =>
+                  toggleMultiSelect(question, option)
+                }
+                onMoveOrdering={(i, dir) => moveOrderingItem(question, i, dir)}
+                onSetCloze={(i, value) => setClozeBlank(question, i, value)}
+                onCodeKeyDown={(event) =>
+                  handleCodeKeyDown(
+                    event,
+                    question.id,
+                    answers[question.id] ?? "",
+                  )
+                }
               />
             </div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              {formatQuestionType(question.type)} ·{" "}
-              {question.difficulty ?? "standard"}
-            </p>
-            <QuestionInput
-              question={question}
-              value={answers[question.id] ?? ""}
-              disabled={quizState === "grading"}
-              index={index}
-              onChange={(value) => handleAnswerChange(question.id, value)}
-              onToggleMultiSelect={(option) =>
-                toggleMultiSelect(question, option)
-              }
-              onMoveOrdering={(i, dir) => moveOrderingItem(question, i, dir)}
-              onSetCloze={(i, value) => setClozeBlank(question, i, value)}
-              onCodeKeyDown={(event) =>
-                handleCodeKeyDown(
-                  event,
-                  question.id,
-                  answers[question.id] ?? "",
-                )
-              }
-            />
           </li>
         ))}
       </ol>
+
+      <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-4">
+        <span className="text-xs text-slate-400">
+          {answeredCount}/{totalQuestions} answered
+        </span>
+        <button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={!allAnswered || quizState === "grading"}
+          className="inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-6 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {quizState === "grading" ? "Reviewing answers..." : "Submit"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QuizHeader({
+  mode,
+  onBack,
+}: {
+  mode: "level_up" | "practice";
+  onBack: () => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div>
+        <h3 className="text-base font-semibold text-slate-950">
+          {mode === "level_up" ? "Level-Up Quiz" : "Practice Quiz"}
+        </h3>
+        <p className="mt-0.5 text-xs leading-5 text-slate-500">
+          {mode === "level_up"
+            ? "Answer every question to confirm mastery and level up."
+            : "Low-stakes practice — feedback only, mastery stays the same."}
+        </p>
+      </div>
       <button
         type="button"
-        onClick={() => void handleSubmit()}
-        disabled={!allAnswered || quizState === "grading"}
-        className="h-10 w-full rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        onClick={onBack}
+        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
       >
-        {quizState === "grading" ? "Reviewing answers..." : "Submit"}
+        Back
       </button>
-      {onViewHistory ? <ViewHistoryButton onClick={onViewHistory} /> : null}
+    </div>
+  );
+}
+
+function QuizProgress({
+  answered,
+  total,
+}: {
+  answered: number;
+  total: number;
+}) {
+  const pct = total > 0 ? (answered / total) * 100 : 0;
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-slate-500">
+        <span>
+          {total} question{total === 1 ? "" : "s"}
+        </span>
+        <span>
+          {answered} of {total} answered
+        </span>
+      </div>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={answered}
+      >
+        <div
+          className="h-full rounded-full bg-blue-600 transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
     </div>
   );
 }
@@ -545,24 +614,45 @@ function QuestionInput({
 
   if (question.type === "multiple_choice") {
     return (
-      <div className="space-y-2" role="radiogroup" aria-label={label}>
-        {(question.options ?? []).map((option) => (
-          <label
-            key={option}
-            className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
-          >
-            <input
-              type="radio"
-              name={`question-${question.id}`}
-              value={option}
-              checked={value === option}
-              onChange={(event) => onChange(event.target.value)}
-              disabled={disabled}
-              className="mt-1"
-            />
-            <span>{option}</span>
-          </label>
-        ))}
+      <div className="space-y-2.5" role="radiogroup" aria-label={label}>
+        {(question.options ?? []).map((option, optionIndex) => {
+          const checked = value === option;
+          return (
+            <label
+              key={option}
+              className={`group flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors ${
+                checked
+                  ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200"
+                  : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+              } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+            >
+              <input
+                type="radio"
+                name={`question-${question.id}`}
+                value={option}
+                checked={checked}
+                onChange={(event) => onChange(event.target.value)}
+                disabled={disabled}
+                className="peer sr-only"
+              />
+              <span
+                aria-hidden
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-semibold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-300 peer-focus-visible:ring-offset-1 ${
+                  checked
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-slate-300 bg-white text-slate-500 group-hover:border-slate-400"
+                }`}
+              >
+                {optionLetter(optionIndex)}
+              </span>
+              <span
+                className={`flex-1 leading-6 ${checked ? "font-medium text-slate-900" : "text-slate-700"}`}
+              >
+                {option}
+              </span>
+            </label>
+          );
+        })}
       </div>
     );
   }
@@ -570,23 +660,44 @@ function QuestionInput({
   if (question.type === "multi_select") {
     const selected = new Set(value.split("\n").filter(Boolean));
     return (
-      <div className="space-y-2" role="group" aria-label={label}>
+      <div className="space-y-2.5" role="group" aria-label={label}>
         <p className="text-xs text-slate-500">Select all that apply.</p>
-        {(question.options ?? []).map((option) => (
-          <label
-            key={option}
-            className="flex cursor-pointer items-start gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
-          >
-            <input
-              type="checkbox"
-              checked={selected.has(option)}
-              onChange={() => onToggleMultiSelect(option)}
-              disabled={disabled}
-              className="mt-1"
-            />
-            <span>{option}</span>
-          </label>
-        ))}
+        {(question.options ?? []).map((option, optionIndex) => {
+          const checked = selected.has(option);
+          return (
+            <label
+              key={option}
+              className={`group flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm transition-colors ${
+                checked
+                  ? "border-blue-500 bg-blue-50 ring-1 ring-blue-200"
+                  : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+              } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onToggleMultiSelect(option)}
+                disabled={disabled}
+                className="peer sr-only"
+              />
+              <span
+                aria-hidden
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border text-xs font-semibold transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-300 peer-focus-visible:ring-offset-1 ${
+                  checked
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-slate-300 bg-white text-slate-500 group-hover:border-slate-400"
+                }`}
+              >
+                {optionLetter(optionIndex)}
+              </span>
+              <span
+                className={`flex-1 leading-6 ${checked ? "font-medium text-slate-900" : "text-slate-700"}`}
+              >
+                {option}
+              </span>
+            </label>
+          );
+        })}
       </div>
     );
   }
@@ -702,18 +813,6 @@ function QuestionInput({
   );
 }
 
-function ViewHistoryButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-md border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-    >
-      View past attempts
-    </button>
-  );
-}
-
 function QuizProgressCard({
   mode,
   phase,
@@ -812,6 +911,11 @@ function isAnswered(question: QuizQuestion, value: string): boolean {
     return parts.length === blanks && parts.every((p) => p.trim().length > 0);
   }
   return value.trim().length > 0;
+}
+
+function optionLetter(index: number): string {
+  // Wrap past Z so very long option lists stay labelled rather than blank.
+  return String.fromCharCode(65 + (index % 26));
 }
 
 function orderingItems(value: string, question: QuizQuestion): string[] {

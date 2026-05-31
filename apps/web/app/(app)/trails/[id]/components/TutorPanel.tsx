@@ -27,6 +27,7 @@ import {
   LinkIcon,
   MoreHorizontalIcon,
   PencilIcon,
+  PlusIcon,
   RotateCcwIcon,
   TargetIcon,
   type LucideIcon,
@@ -40,18 +41,24 @@ import {
   ReasoningTrigger,
 } from "@/components/assistant-ui/reasoning";
 import { SourceChip } from "@/components/assistant-ui/sources";
-import { getConversation } from "@/lib/api";
+import {
+  createConversationThread,
+  getConversation,
+  listConversationThreads,
+} from "@/lib/api";
 import { formatBloomLevel, titleCase } from "@/lib/display";
 import { useTutorRuntime } from "@/lib/tutor-runtime";
 import type {
   ConceptNode,
   ConversationHistoryResponse,
+  ConversationThreadSummary,
   MasteryStatus,
   SourceRecord,
   TutorMode,
   TutorStreamStatus,
   TutorToolEvent,
 } from "@/lib/types";
+import type { ArtifactKind } from "@/lib/artifacts";
 
 type ReasoningView = "summary" | "full";
 
@@ -70,8 +77,9 @@ function tutorHistoryKey(
   trailId: string,
   conceptId: string,
   loadKey: number,
+  selectedThreadId: string | null,
 ) {
-  return `${workspaceId}:${trailId}:${conceptId}:${loadKey}`;
+  return `${workspaceId}:${trailId}:${conceptId}:${selectedThreadId ?? "latest"}:${loadKey}`;
 }
 
 function loadingTutorHistoryState(key: string): TutorHistoryState {
@@ -93,6 +101,9 @@ interface TutorPanelProps {
   sources?: SourceRecord[];
   sampleQuestions?: string[];
   onBack?: () => void;
+  onSuggestQuiz?: (quizType: "level_up" | "practice") => void;
+  onSuggestFlashcards?: () => void;
+  onSuggestArtifact?: (kind: ArtifactKind) => void;
   onMasteryUpdated?: (
     conceptId: string,
     update: { status: MasteryStatus; score: number },
@@ -106,10 +117,21 @@ export function TutorPanel({
   sources = [],
   sampleQuestions,
   onBack,
+  onSuggestQuiz,
+  onSuggestFlashcards,
+  onSuggestArtifact,
   onMasteryUpdated,
 }: TutorPanelProps) {
   const [loadKey, setLoadKey] = useState(0);
-  const historyKey = tutorHistoryKey(workspaceId, trailId, concept.id, loadKey);
+  const [threads, setThreads] = useState<ConversationThreadSummary[]>([]);
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const historyKey = tutorHistoryKey(
+    workspaceId,
+    trailId,
+    concept.id,
+    loadKey,
+    selectedThreadId,
+  );
   const [historyState, setHistoryState] = useState<TutorHistoryState>(() =>
     loadingTutorHistoryState(historyKey),
   );
@@ -126,13 +148,27 @@ export function TutorPanel({
 
     async function loadHistory() {
       try {
-        const nextHistory = await getConversation(
+        const threadList = await listConversationThreads(
           workspaceId,
           trailId,
           concept.id,
         );
+        const threadId =
+          selectedThreadId ?? threadList.conversations[0]?.id ?? null;
+        const nextHistory = await getConversation(
+          workspaceId,
+          trailId,
+          concept.id,
+          {
+            conversationId: threadId,
+          },
+        );
         if (cancelled) {
           return;
+        }
+        setThreads(threadList.conversations);
+        if (!selectedThreadId && nextHistory.conversation_id) {
+          setSelectedThreadId(nextHistory.conversation_id);
         }
         setHistoryState({
           key: historyKey,
@@ -161,7 +197,7 @@ export function TutorPanel({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, trailId, concept.id, historyKey]);
+  }, [workspaceId, trailId, concept.id, historyKey, selectedThreadId]);
 
   if (loading) {
     return (
@@ -204,7 +240,7 @@ export function TutorPanel({
 
   return (
     <TutorRuntimePanel
-      key={concept.id}
+      key={`${concept.id}:${conversationId ?? "new"}`}
       workspaceId={workspaceId}
       trailId={trailId}
       concept={concept}
@@ -215,7 +251,27 @@ export function TutorPanel({
       mode={mode}
       chatError={chatError}
       onBack={onBack}
+      onSuggestQuiz={onSuggestQuiz}
+      onSuggestFlashcards={onSuggestFlashcards}
+      onSuggestArtifact={onSuggestArtifact}
+      threads={threads}
+      selectedThreadId={selectedThreadId}
+      onSelectThread={(threadId) => setSelectedThreadId(threadId)}
+      onCreateThread={async () => {
+        const thread = await createConversationThread(
+          workspaceId,
+          trailId,
+          concept.id,
+        );
+        setThreads((current) => [thread, ...current]);
+        setSelectedThreadId(thread.id);
+        setHistoryState({
+          ...loadingTutorHistoryState(historyKey),
+          key: historyKey,
+        });
+      }}
       onConversationId={(nextConversationId) => {
+        setSelectedThreadId(nextConversationId);
         setHistoryState((current) =>
           current.key === historyKey
             ? { ...current, conversationId: nextConversationId }
@@ -252,6 +308,13 @@ function TutorRuntimePanel({
   mode,
   chatError,
   onBack,
+  onSuggestQuiz,
+  onSuggestFlashcards,
+  onSuggestArtifact,
+  threads,
+  selectedThreadId,
+  onSelectThread,
+  onCreateThread,
   onConversationId,
   onMode,
   onError,
@@ -261,6 +324,10 @@ function TutorRuntimePanel({
   conversationId: string | null;
   mode: TutorMode | null;
   chatError: string;
+  threads: ConversationThreadSummary[];
+  selectedThreadId: string | null;
+  onSelectThread: (threadId: string) => void;
+  onCreateThread: () => Promise<void>;
   onConversationId: (conversationId: string) => void;
   onMode: (mode: TutorMode) => void;
   onError: (message: string) => void;
@@ -291,30 +358,51 @@ function TutorRuntimePanel({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <TutorShell
-        concept={concept}
-        sources={sources ?? []}
-        mode={mode}
-        onBack={onBack}
-        reasoningView={reasoningView}
-        onReasoningViewChange={setReasoningView}
-      >
-        {chatError ? (
-          <div className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {chatError}
-          </div>
-        ) : null}
-        {mode === "quiz_prompt" ? (
-          <div className="mx-4 mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Ready to level up? Go back to the concept details and use the Level
-            Up button.
-          </div>
-        ) : null}
-        <TutorThread
-          reasoningView={reasoningView}
-          sampleQuestions={sampleQuestions}
-        />
-      </TutorShell>
+      <SuggestQuizContext.Provider value={onSuggestQuiz ?? null}>
+        <SuggestFlashcardsContext.Provider value={onSuggestFlashcards ?? null}>
+          <SuggestArtifactContext.Provider value={onSuggestArtifact ?? null}>
+            <TutorShell
+              concept={concept}
+              sources={sources ?? []}
+              mode={mode}
+              onBack={onBack}
+              reasoningView={reasoningView}
+              onReasoningViewChange={setReasoningView}
+              threads={threads}
+              selectedThreadId={selectedThreadId}
+              onSelectThread={onSelectThread}
+              onCreateThread={onCreateThread}
+            >
+              {chatError ? (
+                <div className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {chatError}
+                </div>
+              ) : null}
+              {mode === "quiz_prompt" ? (
+                <div className="mx-4 mt-3 flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    Ready to level up? Take the quiz to check your
+                    understanding.
+                  </span>
+                  {onSuggestQuiz ? (
+                    <button
+                      type="button"
+                      onClick={() => onSuggestQuiz("level_up")}
+                      className="shrink-0 self-start rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500 sm:self-auto"
+                    >
+                      Start level-up quiz
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              <TutorThread
+                reasoningView={reasoningView}
+                sampleQuestions={sampleQuestions}
+              />
+            </TutorShell>
+          </SuggestArtifactContext.Provider>
+        </SuggestFlashcardsContext.Provider>
+      </SuggestQuizContext.Provider>
     </AssistantRuntimeProvider>
   );
 }
@@ -326,6 +414,10 @@ function TutorShell({
   onBack,
   reasoningView,
   onReasoningViewChange,
+  threads = [],
+  selectedThreadId = null,
+  onSelectThread,
+  onCreateThread,
   children,
 }: {
   concept: ConceptNode;
@@ -334,40 +426,71 @@ function TutorShell({
   onBack?: () => void;
   reasoningView?: ReasoningView;
   onReasoningViewChange?: (view: ReasoningView) => void;
+  threads?: ConversationThreadSummary[];
+  selectedThreadId?: string | null;
+  onSelectThread?: (threadId: string) => void;
+  onCreateThread?: () => Promise<void>;
   children: ReactNode;
 }) {
+  const [creatingThread, setCreatingThread] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <section className="flex h-full min-h-[520px] flex-1 flex-col rounded-md border border-slate-200 bg-white md:min-h-0">
-      <div className="relative z-30 shrink-0 border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
+    <section className="flex h-full min-h-130 flex-1 flex-col rounded-md border border-slate-200 bg-white md:min-h-0">
+      <div className="relative z-30 shrink-0 border-b border-slate-200 bg-white/95 px-3 py-2.5 backdrop-blur">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-start gap-2">
             {onBack ? (
               <button
                 type="button"
                 aria-label="Back to concept details"
                 onClick={onBack}
-                className="grid size-8 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-950"
               >
                 <ArrowLeft className="size-4" aria-hidden="true" />
               </button>
             ) : null}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Learning thread
+                Tutor chat
               </p>
-              <h3 className="truncate text-sm font-semibold text-slate-950 sm:text-base">
-                {concept.title}
-              </h3>
+              {threads.length > 0 ? (
+                <ThreadSwitcher
+                  threads={threads}
+                  selectedThreadId={selectedThreadId}
+                  onSelectThread={onSelectThread}
+                />
+              ) : (
+                <p className="mt-1 text-xs text-slate-500">
+                  Start a conversation for this concept.
+                </p>
+              )}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1">
             <ModeBadge mode={mode} />
+            {onCreateThread ? (
+              <button
+                type="button"
+                aria-label="New thread"
+                title="New thread"
+                onClick={() => {
+                  if (!onCreateThread || creatingThread) return;
+                  setCreatingThread(true);
+                  void onCreateThread().finally(() => {
+                    setCreatingThread(false);
+                  });
+                }}
+                disabled={creatingThread}
+                className="grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 disabled:opacity-50"
+              >
+                <PlusIcon className="size-4" aria-hidden="true" />
+              </button>
+            ) : null}
             <div className="relative">
               <button
                 type="button"
-                aria-label="Thread options"
+                aria-label="Conversation settings"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((open) => !open)}
                 className="grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950"
@@ -614,6 +737,22 @@ function ChatMessage({
 // static (Bug 1). Defaults to false so any standalone render settles quietly.
 const ReasoningRunningContext = createContext(false);
 
+// Click handler that opens the suggested quiz. Null when the host panel does
+// not wire quiz opening (e.g. standalone previews). The CTA card stays click-
+// only and never auto-opens.
+const SuggestQuizContext = createContext<
+  ((quizType: "level_up" | "practice") => void) | null
+>(null);
+
+const SuggestFlashcardsContext = createContext<(() => void) | null>(null);
+
+// Click handler that opens the artifacts panel and starts the suggested build.
+// Null when the host panel does not wire artifact opening (e.g. standalone
+// previews). The CTA card stays click-only and never auto-opens.
+const SuggestArtifactContext = createContext<
+  ((kind: ArtifactKind) => void) | null
+>(null);
+
 function AssistantMessageBody({
   message,
   reasoningView,
@@ -698,6 +837,54 @@ function AssistantMessageBody({
         if (part.type === "data" && part.name === "tutor-tool-result") {
           return <TutorToolResultLine tool={part.data as TutorToolEvent} />;
         }
+        if (part.type === "data" && part.name === "tutor-suggest-quiz") {
+          const data = part.data as {
+            quizType?: "level_up" | "practice";
+            reason?: string;
+          };
+          if (data.quizType !== "level_up" && data.quizType !== "practice") {
+            return null;
+          }
+          return (
+            <SuggestQuizCard
+              messageId={message.id}
+              quizType={data.quizType}
+              reason={data.reason ?? ""}
+              isLatestInMessage={
+                latestSuggestQuizPart(message, data.quizType) === part
+              }
+            />
+          );
+        }
+        if (part.type === "data" && part.name === "tutor-suggest-flashcards") {
+          const data = part.data as { reason?: string };
+          return (
+            <SuggestFlashcardsCard
+              messageId={message.id}
+              reason={data.reason ?? ""}
+              isLatestInMessage={latestSuggestFlashcardsPart(message) === part}
+            />
+          );
+        }
+        if (part.type === "data" && part.name === "tutor-suggest-artifact") {
+          const data = part.data as {
+            artifactKind?: ArtifactKind;
+            reason?: string;
+          };
+          if (!isArtifactKind(data.artifactKind)) {
+            return null;
+          }
+          return (
+            <SuggestArtifactCard
+              messageId={message.id}
+              artifactKind={data.artifactKind}
+              reason={data.reason ?? ""}
+              isLatestInMessage={
+                latestSuggestArtifactPart(message, data.artifactKind) === part
+              }
+            />
+          );
+        }
         if (part.type === "text") {
           return <MarkdownText />;
         }
@@ -708,6 +895,234 @@ function AssistantMessageBody({
       }}
     </MessagePrimitive.GroupedParts>
   );
+}
+
+function SuggestQuizCard({
+  messageId,
+  quizType,
+  reason,
+  isLatestInMessage,
+}: {
+  messageId: string;
+  quizType: "level_up" | "practice";
+  reason: string;
+  isLatestInMessage: boolean;
+}) {
+  const onSuggestQuiz = useContext(SuggestQuizContext);
+  // Collapse to a single active CTA per quiz_type across the whole thread: only
+  // the most recent suggestion of this type stays clickable, so re-suggesting
+  // never leaves a stale competing button behind.
+  const latestMessageId = useThread((state) => {
+    let latest: string | null = null;
+    for (const candidate of state.messages) {
+      const matches = candidate.content.some(
+        (entry) =>
+          entry.type === "data" &&
+          entry.name === "tutor-suggest-quiz" &&
+          (entry.data as { quizType?: string }).quizType === quizType,
+      );
+      if (matches) {
+        latest = candidate.id;
+      }
+    }
+    return latest;
+  });
+
+  if (!onSuggestQuiz || !isLatestInMessage) {
+    return null;
+  }
+  if (latestMessageId && latestMessageId !== messageId) {
+    return null;
+  }
+
+  const label =
+    quizType === "level_up" ? "Take level-up quiz" : "Practice this";
+
+  return (
+    <div className="mt-3 grid gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+      {reason ? (
+        <p className="min-w-0 wrap-break-word text-sm text-emerald-900 dark:text-emerald-100">
+          {reason}
+        </p>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => onSuggestQuiz(quizType)}
+        className="justify-self-start rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+      >
+        {label}
+      </button>
+    </div>
+  );
+}
+
+function latestSuggestQuizPart(
+  message: MessageState,
+  quizType: "level_up" | "practice",
+): MessageState["content"][number] | null {
+  let latest: MessageState["content"][number] | null = null;
+  for (const part of message.content) {
+    if (
+      part.type === "data" &&
+      part.name === "tutor-suggest-quiz" &&
+      (part.data as { quizType?: string }).quizType === quizType
+    ) {
+      latest = part;
+    }
+  }
+  return latest;
+}
+
+function SuggestFlashcardsCard({
+  messageId,
+  reason,
+  isLatestInMessage,
+}: {
+  messageId: string;
+  reason: string;
+  isLatestInMessage: boolean;
+}) {
+  const onSuggestFlashcards = useContext(SuggestFlashcardsContext);
+  const latestMessageId = useThread((state) => {
+    let latest: string | null = null;
+    for (const candidate of state.messages) {
+      const matches = candidate.content.some(
+        (entry) =>
+          entry.type === "data" && entry.name === "tutor-suggest-flashcards",
+      );
+      if (matches) {
+        latest = candidate.id;
+      }
+    }
+    return latest;
+  });
+
+  if (!onSuggestFlashcards || !isLatestInMessage) {
+    return null;
+  }
+  if (latestMessageId && latestMessageId !== messageId) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 grid gap-2 rounded-2xl border border-violet-200 bg-violet-50/70 p-3 dark:border-violet-900/60 dark:bg-violet-950/30">
+      {reason ? (
+        <p className="min-w-0 wrap-break-word text-sm text-violet-900 dark:text-violet-100">
+          {reason}
+        </p>
+      ) : null}
+      <button
+        type="button"
+        onClick={onSuggestFlashcards}
+        className="justify-self-start rounded-full bg-violet-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-violet-500"
+      >
+        Generate flashcards
+      </button>
+    </div>
+  );
+}
+
+function latestSuggestFlashcardsPart(
+  message: MessageState,
+): MessageState["content"][number] | null {
+  let latest: MessageState["content"][number] | null = null;
+  for (const part of message.content) {
+    if (part.type === "data" && part.name === "tutor-suggest-flashcards") {
+      latest = part;
+    }
+  }
+  return latest;
+}
+
+const ARTIFACT_KIND_LABELS: Record<ArtifactKind, string> = {
+  worked_example: "Build worked example",
+  comparison_card: "Build comparison",
+  timeline: "Build timeline",
+  mini_graph: "Build mini graph",
+  simulation_slider: "Build simulation",
+};
+
+function isArtifactKind(value: unknown): value is ArtifactKind {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(ARTIFACT_KIND_LABELS, value)
+  );
+}
+
+function SuggestArtifactCard({
+  messageId,
+  artifactKind,
+  reason,
+  isLatestInMessage,
+}: {
+  messageId: string;
+  artifactKind: ArtifactKind;
+  reason: string;
+  isLatestInMessage: boolean;
+}) {
+  const onSuggestArtifact = useContext(SuggestArtifactContext);
+  // Collapse to a single active CTA per artifact kind across the whole thread:
+  // only the most recent suggestion of this kind stays clickable, so
+  // re-suggesting never leaves a stale competing button behind.
+  const latestMessageId = useThread((state) => {
+    let latest: string | null = null;
+    for (const candidate of state.messages) {
+      const matches = candidate.content.some(
+        (entry) =>
+          entry.type === "data" &&
+          entry.name === "tutor-suggest-artifact" &&
+          (entry.data as { artifactKind?: string }).artifactKind ===
+            artifactKind,
+      );
+      if (matches) {
+        latest = candidate.id;
+      }
+    }
+    return latest;
+  });
+
+  if (!onSuggestArtifact || !isLatestInMessage) {
+    return null;
+  }
+  if (latestMessageId && latestMessageId !== messageId) {
+    return null;
+  }
+
+  const label = ARTIFACT_KIND_LABELS[artifactKind];
+
+  return (
+    <div className="mt-3 grid gap-2 rounded-2xl border border-sky-200 bg-sky-50/70 p-3 dark:border-sky-900/60 dark:bg-sky-950/30">
+      {reason ? (
+        <p className="min-w-0 wrap-break-word text-sm text-sky-900 dark:text-sky-100">
+          {reason}
+        </p>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => onSuggestArtifact(artifactKind)}
+        className="justify-self-start rounded-full bg-sky-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-sky-500"
+      >
+        {label}
+      </button>
+    </div>
+  );
+}
+
+function latestSuggestArtifactPart(
+  message: MessageState,
+  artifactKind: ArtifactKind,
+): MessageState["content"][number] | null {
+  let latest: MessageState["content"][number] | null = null;
+  for (const part of message.content) {
+    if (
+      part.type === "data" &&
+      part.name === "tutor-suggest-artifact" &&
+      (part.data as { artifactKind?: string }).artifactKind === artifactKind
+    ) {
+      latest = part;
+    }
+  }
+  return latest;
 }
 
 function UserMessageBody({ message }: { message: MessageState }) {
@@ -752,6 +1167,41 @@ function WelcomeSuggestions({
           </ThreadPrimitive.Suggestion>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ThreadSwitcher({
+  threads,
+  selectedThreadId,
+  onSelectThread,
+}: {
+  threads: ConversationThreadSummary[];
+  selectedThreadId: string | null;
+  onSelectThread?: (threadId: string) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Conversation threads"
+      className="mt-2 flex min-w-0 gap-1 overflow-x-auto pb-0.5 app-scrollbar"
+    >
+      {threads.map((thread) => (
+        <button
+          key={thread.id}
+          type="button"
+          title={thread.preview ?? thread.title}
+          aria-pressed={selectedThreadId === thread.id}
+          onClick={() => onSelectThread?.(thread.id)}
+          className={`inline-flex h-8 max-w-48 shrink-0 items-center rounded-lg border px-3 text-xs font-medium transition ${
+            selectedThreadId === thread.id
+              ? "border-blue-200 bg-blue-50 text-blue-800 shadow-sm"
+              : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
+          }`}
+        >
+          <span className="truncate">{thread.title}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -892,7 +1342,7 @@ function UserActionBar({ onEdit }: { onEdit: () => void }) {
 
 function ModeBadge({ mode }: { mode: TutorMode | null }) {
   return (
-    <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800 sm:text-xs">
+    <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-800 sm:text-xs">
       {mode ? titleCase(mode) : "waiting"}
     </span>
   );
