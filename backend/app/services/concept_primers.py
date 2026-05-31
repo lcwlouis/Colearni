@@ -81,6 +81,20 @@ class PrimerGenerator(Protocol):
         neighbour_context: dict[str, list[str]],
     ) -> AsyncIterator[tuple[str, str]]: ...
 
+    async def repair(
+        self,
+        raw: str,
+        error: str,
+        *,
+        concept: ConceptNode,
+        trail: Trail,
+        neighbour_context: dict[str, list[str]],
+    ) -> str:
+        # Optional: return corrected primer JSON for a validation failure.
+        # Generators that cannot self-repair may omit this; callers detect its
+        # absence via getattr and surface the original parse error instead.
+        ...
+
 
 class LLMPrimerGenerator:
     def __init__(
@@ -125,7 +139,41 @@ class LLMPrimerGenerator:
             temperature=0.3,
             max_tokens=_PRIMER_MAX_TOKENS,
         )
-        return _parse_primer_output(raw)
+        return await _parse_or_repair_primer(
+            self, raw, concept=concept, trail=trail, neighbour_context=neighbour_context
+        )
+
+    async def repair(
+        self,
+        raw: str,
+        error: str,
+        *,
+        concept: ConceptNode,
+        trail: Trail,
+        neighbour_context: dict[str, list[str]],
+    ) -> str:
+        """Ask the model to correct a primer JSON that failed validation.
+
+        Mirrors the quiz generator's single repair attempt: small/local models
+        (the explicit target for primers) routinely emit the wrong count of key
+        terms or sample questions, or an over-long prompt. One cheap correction
+        pass salvages those instead of failing the whole primer.
+        """
+        repair_prompt = (
+            "The following concept_primer JSON failed validation. Return ONLY "
+            "corrected JSON (no markdown fences, no explanation) for this concept.\n"
+            "Constraints: `overview` is one short paragraph; `key_terms` has 3-6 "
+            'items, each {"term", "definition"}; `sample_questions` has 3-4 short '
+            "learner-facing strings, each at most 90 characters.\n\n"
+            f"CONCEPT: {concept.title}\n"
+            f"ERROR: {error}\n\n"
+            f"JSON:\n{raw}"
+        )
+        return await self._client.chat(
+            [{"role": "user", "content": repair_prompt}],
+            temperature=0.2,
+            max_tokens=_PRIMER_MAX_TOKENS,
+        )
 
     async def generate_stream(
         self,
@@ -303,7 +351,13 @@ async def _produce_primer_events(
                 continue
             chunks.append(chunk)
             yield _sse("token", {"type": "token", "content": chunk})
-        output = _parse_primer_output("".join(chunks))
+        output = await _parse_or_repair_primer(
+            generator,
+            "".join(chunks),
+            concept=concept,
+            trail=trail,
+            neighbour_context=neighbour_context,
+        )
         primer = await _cache_primer(session, concept, output)
     except Exception as exc:
         await session.rollback()
@@ -609,3 +663,34 @@ def _parse_primer_output(raw: str) -> ConceptPrimerOutput:
         return ConceptPrimerOutput.model_validate(data)
     except Exception as exc:
         raise PrimerGenerationError(f"Primer generation failed validation: {exc}") from exc
+
+
+async def _parse_or_repair_primer(
+    generator: PrimerGenerator,
+    raw: str,
+    *,
+    concept: ConceptNode,
+    trail: Trail,
+    neighbour_context: dict[str, list[str]],
+) -> ConceptPrimerOutput:
+    """Parse primer JSON, falling back to ONE generator repair attempt.
+
+    Small/local models (the explicit target for primers) often emit the wrong
+    count of key terms/sample questions or an over-long prompt. If the generator
+    exposes a ``repair`` method, give it a single correction pass before failing.
+    """
+    try:
+        return _parse_primer_output(raw)
+    except PrimerGenerationError as exc:
+        repair = getattr(generator, "repair", None)
+        if repair is None:
+            raise
+        repaired = await repair(
+            raw, str(exc), concept=concept, trail=trail, neighbour_context=neighbour_context
+        )
+        try:
+            return _parse_primer_output(repaired)
+        except PrimerGenerationError as repair_exc:
+            raise PrimerGenerationError(
+                f"Primer generation failed validation after repair: {repair_exc}"
+            ) from repair_exc

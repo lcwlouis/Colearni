@@ -38,6 +38,7 @@ backend/app/agents/prompts/
   tutor_free_explore_instructions.v1.md
   tutor_locked_mode.v1.md
   conversation_summary.v1.md
+  learner_state_update.v1.md
   quiz_generation.v1.md
   quiz_generation.v2.md
   quiz_grader.v1.md
@@ -55,6 +56,7 @@ backend/app/agents/prompts/
 | `tutor_free_explore_instructions` | `tutor_free_explore_instructions.v1.md` | Mastery-gated broader exploration instructions |
 | `tutor_locked_mode` | `tutor_locked_mode.v1.md` | Fallback instructions when a gated tutor mode is still locked |
 | `conversation_summary` | `conversation_summary.v1.md` | Summarize older visible tutor turns for bounded Phase 13 tutor context |
+| `learner_state_update` | `learner_state_update.v1.md` | Tutor-driven learner-state observer: enforced-JSON `{should_update, summary, strengths, misconceptions, resolved}`; conservative, runs sparingly post-`done` (Phase 13.5d) |
 | `tutor_turn_classifier` | `tutor_turn_classifier.v1.md` | Unified enforced-JSON turn classifier: returns `{mode, blocks_active_quiz_answer}` in one call (replaces the tagged classifier + quiz_answer_guard for production turns) |
 | `quiz_answer_guard` | `quiz_answer_guard.v1.md` | Standalone paraphrase guard used only by legacy agents without the unified classifier |
 | `quiz_generation` | `quiz_generation.v2.md` | Generate a level-up or practice quiz from mastery_check_labels plus bounded prior quiz context |

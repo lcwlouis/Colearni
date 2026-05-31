@@ -13,9 +13,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from backend.app.db import get_session
+from backend.app.db import AsyncSessionLocal, get_session
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
 from backend.app.schemas.tutor import ChatRequest, ConversationHistoryResponse, ConversationMessage
 from backend.app.services.conversations import get_conversation_history, validate_concept_scope
@@ -44,6 +44,13 @@ def get_tutor_agent() -> TutorAgent:
     )
 
 
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    # Sessionmaker handed to detached post-turn tutor follow-ups so the background
+    # task owns a session that outlives the request. Tests override this to bind
+    # the background task to their in-memory engine.
+    return AsyncSessionLocal
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -57,6 +64,7 @@ async def chat_endpoint(
     body: ChatRequest,
     session: AsyncSession = Depends(get_session),
     agent: TutorAgent = Depends(get_tutor_agent),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
 ) -> StreamingResponse | JSONResponse:
     """Stream a Socratic tutor response via Server-Sent Events.
 
@@ -84,6 +92,7 @@ async def chat_endpoint(
             conversation_id=body.conversation_id,
             regenerate=body.regenerate,
             replace_latest_user=body.replace_latest_user,
+            session_factory=session_factory,
         ):
             yield event
 

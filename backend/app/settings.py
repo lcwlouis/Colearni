@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # Minimum number of new un-covered turns required before issuing a fresh LLM
     # summary call.  Prevents one-turn-at-a-time re-summarization.
     tutor_summary_batch_size: int = 5
+    # Tutor-driven learner-state updates run at most once every N visible learner
+    # turns (post-`done`, off the visible path). The observer itself still decides
+    # whether an update is warranted, so most eligible turns are no-ops. Set to 0
+    # to disable the tutor-driven update path entirely (quiz grading still updates).
+    learner_state_update_interval: int = 4
     # Tokens allocated per node when calculating the graph generation token budget.
     # Budget = clamp(max_nodes * this, 4096, 16000).
     llm_generation_tokens_per_node: int = 300

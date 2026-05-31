@@ -38,6 +38,23 @@ class MasteryRecordRead(BaseModel):
     updated_at: datetime | None = None
 
 
+class LearnerStateObservation(BaseModel):
+    """Structured decision from the tutor-driven learner-state observer pass.
+
+    The observer runs sparingly (not every turn) AFTER a tutor turn and returns
+    ``should_update=False`` for ordinary turns. Phrase lists are short, free-form
+    learner-behaviour labels (never quiz answer keys or source content).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    should_update: bool = False
+    summary: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    misconceptions: list[str] = Field(default_factory=list)
+    resolved: list[str] = Field(default_factory=list)
+
+
 class QuizQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

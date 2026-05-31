@@ -940,7 +940,7 @@ Non-goals:
 
 ## Phase 13: Conversation Summaries + Learner State
 
-Status: LLM conversation summarizer prompt/service, quiz attempt summaries, mutable learner state, tutor learner-state/active-quiz context, prior-attempt quiz generation context, prior-attempt API, and quiz result/history UI implemented. Multi-thread conversations remain planned/deferred.
+Status: LLM conversation summarizer prompt/service, quiz attempt summaries, mutable learner state, tutor learner-state/active-quiz context, prior-attempt quiz generation context, prior-attempt API, and quiz result/history UI implemented. Learner state is now updated by BOTH triggers: quiz grading and a tutor-driven post-`done` observer pass (see Phase 13.5d below and `docs/CURRENT_VARIANT.md` → Tutor Runtime). Multi-thread conversations remain planned/deferred.
 
 Goal: keep tutor context useful over time without permanently over-weighting old failed attempts after the learner improves.
 
@@ -999,7 +999,7 @@ Sub-phases:
 
 13.5a — Concept primers + key-terms glossary (independent; build first):
 
-Status: backend implemented. `concept_primer.v1.md` prompt + `ConceptPrimerOutput`/`ConceptPrimerRead` schemas + idempotent per-concept `generate_concept_primer` service (cached in `ConceptNode.metadata_json["primer"]`, `force_new` to regenerate) + `POST .../concepts/{concept_id}/primer` route + concept-detail wiring (`primer` field) + tests. See `docs/CURRENT_VARIANT.md` → Concept Primer Variant. Background pre-generation loop and frontend remain out of scope.
+Status: backend implemented (now `concept_primer.v2.md` with `sample_questions`, streaming generation, and a single repair attempt for small/local models) + `ConceptPrimerOutput`/`ConceptPrimerRead` schemas + idempotent per-concept `generate_concept_primer` service (cached in `ConceptNode.metadata_json["primer"]`, `force_new` to regenerate) + `POST .../concepts/{concept_id}/primer` and `.../primer/stream` routes + concept-detail wiring (`primer` field) + frontend primer panel + tests. See `docs/CURRENT_VARIANT.md` → Concept Primer Variant. Background pre-generation loop remains out of scope.
 - Add a versioned `concept_primer` prompt that, given a concept (title, concept level, Bloom target, mastery labels) plus the Trail topic/goal, returns a short overview paragraph and 3-6 key terms with one-line definitions.
 - Generate primers in a separate pass after graph generation, NOT inlined into `trail_generation`. Keeping graph JSON lean preserves generation reliability on smaller/local models, which struggle with large structured outputs and parallel tool calls.
 - Provide an idempotent per-concept service that generates and caches the primer on the concept (e.g. `metadata_json` or dedicated columns). The same service supports both lazy generation on first concept open and a bounded background pre-generation pass, so the eventual pre-generate-vs-lazy choice is a calling-side decision, not a rewrite.
@@ -1015,6 +1015,8 @@ Status: backend implemented. `concept_primer.v1.md` prompt + `ConceptPrimerOutpu
 - The learner can still start from any node; the suggestion never forces a path.
 
 13.5d — Prior-knowledge capture into learner state:
+
+Status: implemented. The create-Trail prior-knowledge field is captured and fed to the tutor classifier, and the tutor now updates mutable learner state over time through an owned post-`done` observer pass (`maybe_update_learner_state_from_chat` + `learner_state_update.v1.md`), gated by `LEARNER_STATE_UPDATE_INTERVAL` and failure-isolated. See `docs/CURRENT_VARIANT.md` → Tutor Runtime.
 - Add an optional prior-knowledge / self-rated familiarity field to the create-Trail input.
 - Store it as part of mutable learner state (Phase 13). The tutor updates it over time through an owned tool, so the exposition-vs-Socratic ramp adapts as the learner demonstrates understanding.
 - Depends on Phase 13 learner state. If Phase 13 is not yet implemented, store the initial value as a simple field and migrate it into learner state when Phase 13 lands.

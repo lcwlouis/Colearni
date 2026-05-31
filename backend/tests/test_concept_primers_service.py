@@ -316,17 +316,19 @@ async def test_llm_primer_generator_renders_prompt_and_parses_output(session):
 
 async def test_llm_primer_generator_rejects_invalid_json(session):
     _, trail, concept = await _seed_concept(session)
-    generator = LLMPrimerGenerator(client=cast(LLMClient, FakeLLMClient(["not json"])))
+    # Both the initial call and the single repair attempt return junk, so the
+    # generator gives up with PrimerGenerationError after one repair.
+    client = FakeLLMClient(["not json", "still not json"])
+    generator = LLMPrimerGenerator(client=cast(LLMClient, client))
 
     with pytest.raises(PrimerGenerationError):
         await generator.generate(concept=concept, trail=trail, neighbour_context={})
+    assert len(client.calls) == 2
 
 
 async def test_llm_primer_generator_rejects_too_few_key_terms(session):
     _, trail, concept = await _seed_concept(session)
-    client = FakeLLMClient(
-        [
-            """
+    too_few = """
             {
               "overview": "Too short.",
               "key_terms": [
@@ -334,12 +336,54 @@ async def test_llm_primer_generator_rejects_too_few_key_terms(session):
               ]
             }
             """
-        ]
-    )
+    # Initial + repair both under-deliver key terms.
+    client = FakeLLMClient([too_few, too_few])
     generator = LLMPrimerGenerator(client=cast(LLMClient, client))
 
     with pytest.raises(PrimerGenerationError):
         await generator.generate(concept=concept, trail=trail, neighbour_context={})
+    assert len(client.calls) == 2
+
+
+async def test_llm_primer_generator_repairs_invalid_output_once(session):
+    _, trail, concept = await _seed_concept(session)
+    too_few = """
+            {
+              "overview": "Too short.",
+              "key_terms": [
+                {"term": "Slope", "definition": "Rate of change."}
+              ],
+              "sample_questions": ["a", "b", "c"]
+            }
+            """
+    repaired = """
+            {
+              "overview": "Derivatives describe instantaneous change.",
+              "key_terms": [
+                {"term": "Slope", "definition": "Rate of change at a point."},
+                {"term": "Limit", "definition": "Value a function approaches."},
+                {"term": "Tangent", "definition": "Line touching a curve once."}
+              ],
+              "sample_questions": [
+                "Walk me through what a derivative is.",
+                "Give me a hint to start.",
+                "Check my understanding of slope."
+              ]
+            }
+            """
+    client = FakeLLMClient([too_few, repaired])
+    generator = LLMPrimerGenerator(client=cast(LLMClient, client))
+
+    output = await generator.generate(concept=concept, trail=trail, neighbour_context={})
+
+    assert len(output.key_terms) == 3
+    assert output.overview == "Derivatives describe instantaneous change."
+    # Exactly one repair attempt (two calls total), and the repair prompt carries
+    # the original validation error plus the bad JSON to correct.
+    assert len(client.calls) == 2
+    repair_prompt = client.calls[1][0]["content"]
+    assert "failed validation" in repair_prompt
+    assert "3-6" in repair_prompt
 
 
 async def test_generate_primer_passes_graph_neighbours_to_generator(session):

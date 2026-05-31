@@ -16,6 +16,7 @@ from .api.workspaces import router as workspaces_router
 from .db import AsyncSessionLocal, engine
 from .logging_config import configure_logging
 from .services.concept_primers import primer_generation_manager
+from .services.tutor_followups import tutor_followup_manager
 from .services.workspaces import ensure_default_workspace
 from .settings import settings
 
@@ -43,6 +44,11 @@ async def lifespan(app: FastAPI):
     # manager owns the per-concept in-flight registry; change this if primer
     # generation moves to an external worker/queue.
     await primer_generation_manager.shutdown()
+
+    # Cancel + await any detached post-turn tutor follow-ups (conversation
+    # summary + learner-state update) so their own DB sessions don't leak on
+    # shutdown. Change this if follow-ups move to an external worker/queue.
+    await tutor_followup_manager.shutdown()
 
     # Close all pooled DB connections cleanly so PostgreSQL doesn't see them
     # as abruptly dropped. Add teardown for any new resources (HTTP clients,

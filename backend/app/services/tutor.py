@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.agents.prompts import prompt_registry
 from backend.app.agents.provider_tools import (
@@ -37,10 +37,6 @@ from backend.app.agents.provider_tools import (
 )
 from backend.app.agents.retrieval_tools import select_retrieval_tools
 from backend.app.schemas.tutor import ConversationMessage, TutorMode
-from backend.app.services.conversation_summaries import (
-    LLMConversationSummarizer,
-    maybe_generate_conversation_summary,
-)
 from backend.app.services.conversations import (
     TutorContext,
     TutorSourceMetadata,
@@ -57,6 +53,10 @@ from backend.app.services.conversations import (
 )
 from backend.app.services.mastery import mark_learning_from_tutor_turn
 from backend.app.services.quiz_guard import detect_quiz_answer_seeking
+from backend.app.services.tutor_followups import (
+    TutorFollowupManager,
+    tutor_followup_manager,
+)
 from backend.app.settings import settings
 
 if TYPE_CHECKING:
@@ -1021,8 +1021,16 @@ async def stream_chat_response(
     conversation_id: uuid.UUID | None,
     regenerate: bool = False,
     replace_latest_user: bool = False,
+    session_factory: async_sessionmaker[AsyncSession] | None = None,
+    followup_manager: TutorFollowupManager | None = None,
 ) -> AsyncIterator[str]:
-    """Main SSE generator for the chat endpoint."""
+    """Main SSE generator for the chat endpoint.
+
+    ``session_factory`` (when provided) lets post-turn refinement (conversation
+    summary + learner-state update) run detached on its own session instead of
+    pinning this request's DB connection. When omitted, that refinement is
+    skipped (e.g. agents without an LLM client, or callers that don't opt in).
+    """
     try:
         conversation = await get_or_create_conversation(
             session,
@@ -1494,22 +1502,26 @@ async def stream_chat_response(
         },
     )
 
-    summary_client = getattr(agent, "llm_client", None)
-    if summary_client is not None and hasattr(summary_client, "chat"):
-        try:
-            await maybe_generate_conversation_summary(
-                session,
-                LLMConversationSummarizer(summary_client),
-                conversation_id=conversation.id,
-                through_turn_index=assistant_turn.turn_index,
-                recent_visible_turns_limit=settings.tutor_recent_visible_turns_limit,
-                history_char_budget=settings.tutor_history_char_budget,
-                batch_size=settings.tutor_summary_batch_size,
-            )
-            await session.commit()
-        except Exception as exc:
-            logger.warning("Conversation summary generation failed: %s", exc)
-            await session.rollback()
+    followup_client = getattr(agent, "llm_client", None)
+    if (
+        session_factory is not None
+        and followup_client is not None
+        and hasattr(followup_client, "chat")
+    ):
+        # Detach post-turn refinement (summary + learner state) onto a background
+        # task with its OWN session so it never pins this request's DB connection.
+        # Every visible turn is already committed (persist_assistant_turn commits),
+        # so the background session reads fully-committed data. Each step is
+        # internally gated/failure-isolated and adds no latency to the visible turn.
+        manager = followup_manager or tutor_followup_manager
+        manager.schedule(
+            session_factory,
+            followup_client,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            conversation_id=conversation.id,
+            through_turn_index=assistant_turn.turn_index,
+        )
 
 
 def _parse_control_from_buffer(buffer: str) -> _ParsedControl | None:
