@@ -23,18 +23,23 @@ vi.mock("@/lib/api", () => ({
 }));
 
 // Capture the onMasteryUpdated callback via data rendered by the mock
-vi.mock("@/app/trails/[id]/components/TrailGraph", () => ({
+vi.mock("@/app/(app)/trails/[id]/components/TrailGraph", () => ({
   TrailGraph: ({
     masterySummary,
+    recommendedConceptId,
     onMasteryUpdated,
   }: {
     masterySummary: TrailDetail["mastery_summary"];
+    recommendedConceptId?: string | null;
     onMasteryUpdated?: (
       conceptId: string,
       update: { status: MasteryStatus; score: number },
     ) => void;
   }) => (
     <div>
+      <div data-testid="recommended-concept-id">
+        {recommendedConceptId ?? ""}
+      </div>
       <div data-testid="summary-total">{masterySummary.total}</div>
       <div data-testid="summary-not-started">{masterySummary.not_started}</div>
       <div data-testid="summary-learning">{masterySummary.learning}</div>
@@ -77,7 +82,7 @@ vi.mock("@/app/trails/[id]/components/TrailGraph", () => ({
 }));
 
 import * as api from "@/lib/api";
-import TrailPage from "@/app/trails/[id]/page";
+import TrailPage from "@/app/(app)/trails/[id]/page";
 
 const mockTrailDetail: TrailDetail = {
   trail: {
@@ -214,7 +219,7 @@ const freshTrailDetail: TrailDetail = {
 };
 
 describe("TrailPage suggested starting point (fresh Trail)", () => {
-  test("shows a dismissible suggested-start affordance without blocking navigation", async () => {
+  test("does not render a top suggestion banner but passes the recommendation to the graph", async () => {
     vi.mocked(api.getTrail).mockResolvedValue(freshTrailDetail);
     vi.mocked(api.getTrailNext).mockResolvedValue({
       concept_id: "concept-id-1",
@@ -228,34 +233,22 @@ describe("TrailPage suggested starting point (fresh Trail)", () => {
     render(<TrailPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("suggested-start-banner")).toBeInTheDocument();
+      expect(screen.getByTestId("summary-total")).toHaveTextContent("3");
     });
 
-    expect(screen.getByText("Suggested starting point:")).toBeInTheDocument();
-    expect(screen.getByText("Vectors")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Good starting point - no prerequisites, beginner level.",
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Just a suggestion/)).toBeInTheDocument();
+      screen.queryByTestId("suggested-start-banner"),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Start Here" }),
-    ).toBeInTheDocument();
-
-    // The suggestion coexists with free navigation: the graph is still rendered.
-    expect(screen.getByTestId("summary-total")).toHaveTextContent("3");
-
-    // Dismissing the suggestion never blocks the graph.
-    await userEvent.click(
-      screen.getByRole("button", { name: "Dismiss recommendation" }),
+      screen.queryByText("Suggested starting point:"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Just a suggestion/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Start Here" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("recommended-concept-id")).toHaveTextContent(
+      "concept-id-1",
     );
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId("suggested-start-banner"),
-      ).not.toBeInTheDocument();
-    });
-    expect(screen.getByTestId("summary-total")).toHaveTextContent("3");
   });
 });
 
@@ -281,14 +274,16 @@ describe("TrailPage mastery update", () => {
     expect(screen.getByTestId("summary-learning")).toHaveTextContent("1");
     expect(screen.getByTestId("summary-needs-review")).toHaveTextContent("1");
     expect(screen.getByTestId("summary-mastered")).toHaveTextContent("0");
-    expect(screen.getByText("Recommended next:")).toBeInTheDocument();
-    expect(screen.getByText("Matrices")).toBeInTheDocument();
+    expect(screen.queryByText("Recommended next:")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Backend says to repair this next."),
-    ).toBeInTheDocument();
+      screen.queryByText("Backend says to repair this next."),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Start Learning" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Start Learning" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("recommended-concept-id")).toHaveTextContent(
+      "concept-id-2",
+    );
   });
 
   test("renders all-mastered recommendation state without concept link", async () => {
@@ -305,17 +300,19 @@ describe("TrailPage mastery update", () => {
     render(<TrailPage />);
 
     await waitFor(() => {
-      expect(
-        screen.getByText("All concepts mastered — well done."),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("summary-total")).toHaveTextContent("3");
     });
     expect(
-      screen.getByText("Review the Trail or extend it."),
-    ).toBeInTheDocument();
+      screen.queryByText("All concepts mastered — well done."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Review the Trail or extend it."),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Focus concept" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId("next-banner-cta")).not.toBeInTheDocument();
+    expect(screen.getByTestId("recommended-concept-id")).toHaveTextContent("");
   });
 
   test("hides recommendation banner when getTrailNext fails", async () => {

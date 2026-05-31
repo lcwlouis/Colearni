@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
+import { sortTrailsForDashboard } from "@/app/(app)/dashboard/sortTrails";
 import type { NextConceptResponse, Trail, TrailDetail } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
@@ -90,11 +91,81 @@ function nextConcept(overrides: Partial<NextConceptResponse> = {}): NextConceptR
 }
 
 async function loadPage() {
-  const mod = await import("@/app/dashboard/page");
+  const mod = await import("@/app/(app)/dashboard/page");
   return mod.default;
 }
 
 describe("Dashboard (home)", () => {
+  test("sorts pinned trails first and supports dashboard sort modes", () => {
+    const t1 = trail("t1", {
+      created_at: "2026-03-01T00:00:00Z",
+      title: "Algebra",
+    });
+    const t2 = trail("t2", {
+      created_at: "2026-02-01T00:00:00Z",
+      title: "Biology",
+    });
+    const t3 = trail("t3", {
+      created_at: "2026-01-01T00:00:00Z",
+      title: "Chemistry",
+    });
+    const progressByTrail = {
+      t1: {
+        detail: detail(t1, "learning"),
+        total: 1,
+        mastered: 0,
+        learning: 1,
+        needs_review: 0,
+        not_started: 0,
+        progress: 0.5,
+        lastActivity: "2026-05-01T00:00:00Z",
+      },
+      t2: {
+        detail: detail(t2, "mastered"),
+        total: 1,
+        mastered: 1,
+        learning: 0,
+        needs_review: 0,
+        not_started: 0,
+        progress: 1,
+        lastActivity: "2026-04-01T00:00:00Z",
+      },
+      t3: {
+        detail: detail(t3, "not_started"),
+        total: 1,
+        mastered: 0,
+        learning: 0,
+        needs_review: 0,
+        not_started: 1,
+        progress: 0,
+        lastActivity: null,
+      },
+    };
+    const pinnedIds = new Set(["t2", "t1"]);
+
+    expect(
+      sortTrailsForDashboard([t3, t2, t1], progressByTrail, pinnedIds, "recent").map(
+        (trail) => trail.id,
+      ),
+    ).toEqual(["t1", "t2", "t3"]);
+    expect(
+      sortTrailsForDashboard(
+        [t3, t2, t1],
+        progressByTrail,
+        pinnedIds,
+        "created_asc",
+      ).map((trail) => trail.id),
+    ).toEqual(["t2", "t1", "t3"]);
+    expect(
+      sortTrailsForDashboard(
+        [t3, t2, t1],
+        progressByTrail,
+        pinnedIds,
+        "mastery_desc",
+      ).map((trail) => trail.id),
+    ).toEqual(["t2", "t1", "t3"]);
+  });
+
   test("renders empty state when there are no trails", async () => {
     listTrailsMock.mockResolvedValueOnce({ trails: [] });
     const Home = await loadPage();
@@ -106,7 +177,7 @@ describe("Dashboard (home)", () => {
     expect(screen.getAllByText(/Create your first Trail/i).length).toBeGreaterThan(0);
   });
 
-  test("renders Continue Learning + Recent + per-trail CTA by mastery", async () => {
+  test("renders the main dashboard cards and per-trail CTA by mastery", async () => {
     const t1 = trail("t1", { title: "Linear Algebra", created_at: "2026-02-01T00:00:00Z" });
     const t2 = trail("t2", { title: "Calculus", created_at: "2026-01-01T00:00:00Z" });
     listTrailsMock.mockResolvedValueOnce({ trails: [t1, t2] });
@@ -134,25 +205,19 @@ describe("Dashboard (home)", () => {
     render(<Home />);
 
     // Continue Learning section picks t1 (it has activity + in-progress beats mastered fallback)
-    await waitFor(() => {
-      expect(screen.getByTestId("continue-learning")).toBeInTheDocument();
-    });
-    const continueSection = screen.getByTestId("continue-learning");
-    expect(continueSection).toHaveTextContent("Linear Algebra");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: "Continue Learning" }),
+      ).toHaveAttribute("href", "/trails/t1?concept=backend-t1-c9"),
+    );
+    expect(screen.getByText("Backend Linear Algebra focus")).toBeInTheDocument();
+    expect(
+      screen.getByText("Continue the server-picked concept."),
+    ).toBeInTheDocument();
 
-    expect(continueSection).toHaveTextContent("Backend Linear Algebra focus");
-    expect(continueSection).toHaveTextContent("Continue the server-picked concept.");
-
-    // Primary CTA uses the backend recommendation deep link.
-    await waitFor(() => {
-      expect(continueSection.querySelector("a")?.textContent).toMatch(/Start Learning/);
-    });
-
-    // Recent Trails show both, including the all-mastered backend state.
-    expect(screen.getByText("Recent Trails")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByText("All mastered")).toBeInTheDocument();
-    });
+    expect(screen.getByText("Your Trails")).toBeInTheDocument();
+    expect(screen.getByLabelText("Sort Trails")).toBeInTheDocument();
+    expect(screen.getByLabelText("Sort Trails")).toBeInTheDocument();
   });
 
   test("Continue Learning deep-links to the backend recommended concept", async () => {
@@ -167,16 +232,12 @@ describe("Dashboard (home)", () => {
     render(<Home />);
 
     await waitFor(() => {
-      const link = screen
-        .getByTestId("continue-learning")
-        .querySelector('a[href*="?concept="]') as HTMLAnchorElement | null;
-      expect(link).not.toBeNull();
-      expect(link!.getAttribute("href")).toBe("/trails/t1?concept=backend-c42");
-      expect(link!.textContent).toMatch(/Start Learning/);
+      const link = screen.getByRole("link", { name: "Continue Learning" });
+      expect(link).toHaveAttribute("href", "/trails/t1?concept=backend-c42");
     });
   });
 
-  test("Continue Learning all-mastered state shows achievement card with Create New Trail CTA", async () => {
+  test("all-mastered state shows the review path and browse fallback", async () => {
     const t1 = trail("t1");
     listTrailsMock.mockResolvedValueOnce({ trails: [t1] });
     getTrailMock.mockResolvedValueOnce(detail(t1, "mastered"));
@@ -193,16 +254,12 @@ describe("Dashboard (home)", () => {
     render(<Home />);
 
     await waitFor(() => {
-      const section = screen.getByTestId("continue-learning");
-      // Achievement state: correct heading and body copy
-      expect(section).toHaveTextContent("All trails mastered");
-      expect(section).toHaveTextContent("You have mastered every concept. Ready to go deeper?");
-      // No deep-link to a concept
-      expect(section.querySelector('a[href*="?concept="]')).toBeNull();
-      // Primary CTA is "Create New Trail"
-      expect(section.querySelector('a[href="/trails/new"]')).not.toBeNull();
-      // View graph still links to the trail
-      expect(section.querySelector('a[href="/trails/t1"]')).not.toBeNull();
+      expect(screen.getByText("All concepts mastered")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Review Trail" })).toHaveAttribute(
+        "href",
+        "/trails/t1",
+      );
+      expect(screen.getByText("You're all caught up")).toBeInTheDocument();
     });
   });
 });

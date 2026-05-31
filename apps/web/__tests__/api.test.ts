@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
+  createConversationThread,
+  deleteConversationThread,
   generateTrail,
+  getConversation,
   getTrailNext,
   linkSourceToConcept,
+  listConversationThreads,
   listTrails,
   streamConceptPrimer,
   streamTutorChat,
+  updateConversationThread,
   uploadSource,
 } from "@/lib/api";
 import type { Trail } from "@/lib/types";
@@ -109,6 +114,99 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/workspaces/workspace-1/trails/generate/stream",
       expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  test("conversation thread helpers call scoped endpoints", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "conversation-1",
+            title: "New thread",
+            preview: null,
+            message_count: 0,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ conversations: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "conversation-1",
+            title: "Renamed thread",
+            preview: null,
+            message_count: 0,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ conversation_id: "conversation-1", messages: [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+
+    await createConversationThread("workspace-1", "trail-1", "concept-1");
+    await listConversationThreads("workspace-1", "trail-1", "concept-1", 10);
+    await updateConversationThread(
+      "workspace-1",
+      "trail-1",
+      "concept-1",
+      "conversation-1",
+      "Renamed thread",
+    );
+    await deleteConversationThread(
+      "workspace-1",
+      "trail-1",
+      "concept-1",
+      "conversation-1",
+    );
+    await getConversation("workspace-1", "trail-1", "concept-1", {
+      conversationId: "conversation-1",
+      limit: 50,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/api/workspaces/workspace-1/trails/trail-1/concepts/concept-1/conversations",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/api/workspaces/workspace-1/trails/trail-1/concepts/concept-1/conversations?limit=10",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8000/api/workspaces/workspace-1/trails/trail-1/concepts/concept-1/conversations/conversation-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "Renamed thread" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://localhost:8000/api/workspaces/workspace-1/trails/trail-1/concepts/concept-1/conversations/conversation-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "http://localhost:8000/api/workspaces/workspace-1/trails/trail-1/concepts/concept-1/conversation?conversation_id=conversation-1&limit=50",
+      expect.objectContaining({ method: "GET" }),
     );
   });
 

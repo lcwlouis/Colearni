@@ -16,12 +16,27 @@ import type {
   TutorMode,
   TutorStreamStatus,
 } from "@/lib/types";
+import type { ArtifactKind } from "@/lib/artifacts";
 
 type TutorRuntimePart =
   | { kind: "status"; status: TutorStreamStatus }
   | { kind: "thinking"; text: string }
   | { kind: "tool_call"; tool: TutorToolEvent }
-  | { kind: "tool_result"; tool: TutorToolEvent };
+  | { kind: "tool_result"; tool: TutorToolEvent }
+  | {
+      kind: "suggest_quiz";
+      quizType: "level_up" | "practice";
+      reason: string;
+    }
+  | {
+      kind: "suggest_flashcards";
+      reason: string;
+    }
+  | {
+      kind: "suggest_artifact";
+      artifactKind: ArtifactKind;
+      reason: string;
+    };
 
 interface TutorRuntimeOptions {
   workspaceId: string;
@@ -130,7 +145,7 @@ export function createTutorModelAdapter({
         onMode,
         onStatus(nextStatus) {
           onStatus?.(nextStatus);
-          parts.push({ kind: "status", status: nextStatus });
+          appendRuntimePart(parts, { kind: "status", status: nextStatus });
           queue.push(assistantRunUpdate(text, parts));
         },
         onMasteryUpdated,
@@ -144,11 +159,27 @@ export function createTutorModelAdapter({
           queue.push(assistantRunUpdate(text, parts));
         },
         onToolCall(tool) {
-          parts.push({ kind: "tool_call", tool });
+          appendRuntimePart(parts, { kind: "tool_call", tool });
           queue.push(assistantRunUpdate(text, parts));
         },
         onToolResult(tool) {
-          parts.push({ kind: "tool_result", tool });
+          appendRuntimePart(parts, { kind: "tool_result", tool });
+          queue.push(assistantRunUpdate(text, parts));
+        },
+        onSuggestQuiz({ quizType, reason }) {
+          appendRuntimePart(parts, { kind: "suggest_quiz", quizType, reason });
+          queue.push(assistantRunUpdate(text, parts));
+        },
+        onSuggestFlashcards({ reason }) {
+          appendRuntimePart(parts, { kind: "suggest_flashcards", reason });
+          queue.push(assistantRunUpdate(text, parts));
+        },
+        onSuggestArtifact({ artifactKind, reason }) {
+          appendRuntimePart(parts, {
+            kind: "suggest_artifact",
+            artifactKind,
+            reason,
+          });
           queue.push(assistantRunUpdate(text, parts));
         },
         onToken(content) {
@@ -281,6 +312,30 @@ function assistantMessageContent(
       });
       continue;
     }
+    if (part.kind === "suggest_quiz") {
+      content.push({
+        type: "data",
+        name: "tutor-suggest-quiz",
+        data: { quizType: part.quizType, reason: part.reason },
+      });
+      continue;
+    }
+    if (part.kind === "suggest_flashcards") {
+      content.push({
+        type: "data",
+        name: "tutor-suggest-flashcards",
+        data: { reason: part.reason },
+      });
+      continue;
+    }
+    if (part.kind === "suggest_artifact") {
+      content.push({
+        type: "data",
+        name: "tutor-suggest-artifact",
+        data: { artifactKind: part.artifactKind, reason: part.reason },
+      });
+      continue;
+    }
     content.push({
       type: "data",
       name: `tutor-${part.kind.replace("_", "-")}`,
@@ -297,7 +352,13 @@ function reasoningParts(
   message: ConversationHistoryResponse["messages"][number],
 ): TutorRuntimePart[] {
   if (message.reasoning_parts?.length) {
-    return message.reasoning_parts.flatMap(reasoningPartToRuntimePart);
+    const parts: TutorRuntimePart[] = [];
+    for (const reasoningPart of message.reasoning_parts) {
+      for (const runtimePart of reasoningPartToRuntimePart(reasoningPart)) {
+        appendRuntimePart(parts, runtimePart);
+      }
+    }
+    return parts;
   }
   return message.reasoning
     ? [{ kind: "thinking", text: message.reasoning }]
@@ -313,6 +374,38 @@ function reasoningPartToRuntimePart(
   if (part.kind === "thinking") {
     return part.text ? [{ kind: "thinking", text: part.text }] : [];
   }
+  if (part.kind === "suggest_quiz") {
+    return part.quiz_type
+      ? [
+          {
+            kind: "suggest_quiz",
+            quizType: part.quiz_type,
+            reason: part.reason ?? "",
+          },
+        ]
+      : [];
+  }
+  if (part.kind === "suggest_flashcards") {
+    return part.reason
+      ? [
+          {
+            kind: "suggest_flashcards",
+            reason: part.reason,
+          },
+        ]
+      : [];
+  }
+  if (part.kind === "suggest_artifact") {
+    return part.artifact_kind
+      ? [
+          {
+            kind: "suggest_artifact",
+            artifactKind: part.artifact_kind,
+            reason: part.reason ?? "",
+          },
+        ]
+      : [];
+  }
   const tool = {
     name: part.name ?? "tool",
     mode: part.mode ?? null,
@@ -320,6 +413,42 @@ function reasoningPartToRuntimePart(
     result: part.result ?? undefined,
   };
   return [{ kind: part.kind, tool }];
+}
+
+function runtimePartKey(part: TutorRuntimePart): string {
+  switch (part.kind) {
+    case "status":
+      return `${part.kind}:${part.status}`;
+    case "tool_call":
+      return `${part.kind}:${part.tool.name}:${part.tool.mode ?? ""}:${part.tool.query ?? ""}`;
+    case "tool_result":
+      return `${part.kind}:${part.tool.name}:${part.tool.mode ?? ""}:${part.tool.result ?? ""}`;
+    case "suggest_quiz":
+      return `${part.kind}:${part.quizType}:${part.reason}`;
+    case "suggest_flashcards":
+      return `${part.kind}:${part.reason}`;
+    case "suggest_artifact":
+      return `${part.kind}:${part.artifactKind}:${part.reason}`;
+    case "thinking":
+      return `${part.kind}:${part.text}`;
+  }
+}
+
+function appendRuntimePart(parts: TutorRuntimePart[], part: TutorRuntimePart) {
+  if (part.kind === "thinking") {
+    const last = parts[parts.length - 1];
+    if (last?.kind === "thinking") {
+      last.text += part.text;
+      return;
+    }
+    parts.push(part);
+    return;
+  }
+  const key = runtimePartKey(part);
+  if (parts.some((existing) => runtimePartKey(existing) === key)) {
+    return;
+  }
+  parts.push(part);
 }
 
 function createRunQueue() {

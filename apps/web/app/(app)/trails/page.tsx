@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { generateTrail, deleteTrail, getTrail, listTrails } from "@/lib/api";
-import { formatBloomLevel, formatGraphSize } from "@/lib/display";
+import { formatBloomLevel } from "@/lib/display";
 import { type TrailProgress, summarizeTrail } from "@/lib/recommendation";
 import type { BloomLevel, Trail } from "@/lib/types";
 import { ensureWorkspaceId } from "@/lib/workspace";
@@ -20,7 +20,18 @@ const bloomLevels: BloomLevel[] = [
   "create",
 ];
 
-const graphSizes = [20, 40, 75, 100];
+const graphSizes = [20, 40, 75, 100] as const;
+const graphSizeLabels: Record<(typeof graphSizes)[number], string> = {
+  20: "20 nodes",
+  40: "40 nodes",
+  75: "75 nodes",
+  100: "100 nodes",
+};
+
+const GOAL_PLACEHOLDER_DESKTOP =
+  "Understand major world-history turning points so I can follow documentaries with confidence.";
+const GOAL_PLACEHOLDER_MOBILE =
+  "Learn major world-history turning points with confidence.";
 
 // Cosmetic cap on how many concept "nodes" we render in the building-graph
 // preview so a large stream never floods the DOM.
@@ -233,6 +244,26 @@ export default function TrailsPage() {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
   );
+
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 639px)");
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+    updateViewport();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateViewport);
+      return () => mediaQuery.removeEventListener("change", updateViewport);
+    }
+
+    mediaQuery.addListener(updateViewport);
+    return () => mediaQuery.removeListener(updateViewport);
+  }, []);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
 
@@ -361,344 +392,373 @@ export default function TrailsPage() {
       .pop() ?? "Preparing generation request...";
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 px-6 py-8">
-      <header className="flex items-center justify-between border-b border-slate-200 pb-6">
-        <div>
-          <Link
-            href="/dashboard"
-            className="text-sm font-medium text-slate-500 hover:text-slate-900"
-          >
-            Colearni
-          </Link>
-          <h1 className="mt-2 text-2xl font-semibold">Trails</h1>
+    <main className="flex min-h-full w-full flex-col gap-4 px-4 py-8 sm:gap-6">
+      <header className="border-b border-slate-200 pb-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-950">Trails</h1>
+            <p className="text-sm leading-6 text-slate-500">Create and manage your learning Trails.</p>
+          </div>
         </div>
       </header>
 
-      <form
-        onSubmit={onSubmit}
-        className="grid gap-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+      <div
+        data-testid="trails-page-grid"
+        className="grid gap-6 xl:grid-cols-[minmax(0,1.04fr)_minmax(20rem,0.96fr)] xl:items-stretch"
       >
-        <div>
-          <h2 className="text-lg font-semibold text-slate-950">
-            Create a new Trail
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Describe what you want to learn and we&apos;ll build a concept graph
-            tailored to your goal.
-          </p>
-        </div>
-
-        {/* Single-column stack keeps every field full-width with consistent
-            label spacing and control heights, so the short Topic input and the
-            taller Goal / prior-knowledge textareas read as intentional. */}
-        <div className="grid gap-5">
-          <div className="grid gap-2">
-            <label
-              htmlFor="topic"
-              className="text-sm font-medium text-slate-700"
-            >
-              Topic
-            </label>
-            <input
-              id="topic"
-              value={topic}
-              onChange={(event) => setTopic(event.target.value)}
-              required
-              className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3.5 text-sm shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              placeholder="What do you want to learn?"
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <label
-              htmlFor="goal"
-              className="text-sm font-medium text-slate-700"
-            >
-              Goal
-            </label>
-            <textarea
-              id="goal"
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              required
-              rows={3}
-              maxLength={2000}
-              className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm leading-6 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              placeholder="Understand the major turning points of world history so I can follow documentaries and books with confidence."
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <label
-              htmlFor="prior-knowledge"
-              className="text-sm font-medium text-slate-700"
-            >
-              What do you already know about this?{" "}
-              <span className="font-normal text-slate-400">(optional)</span>
-            </label>
-            <textarea
-              id="prior-knowledge"
-              value={priorKnowledge}
-              onChange={(event) => setPriorKnowledge(event.target.value)}
-              rows={3}
-              maxLength={2000}
-              className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm leading-6 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              placeholder="e.g. I know a few big dates but not how the events connect"
-            />
-            <p className="text-xs text-slate-400">
-              Leave blank and we&apos;ll assume you&apos;re starting from
-              scratch.
+        <form
+          onSubmit={onSubmit}
+          className="grid h-full content-start gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:gap-6 sm:p-8"
+        >
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">
+              Create a new Trail
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Describe what you want to learn and we&apos;ll build a concept
+              graph tailored to your goal.
             </p>
           </div>
-        </div>
 
-        <div className="grid gap-5 sm:grid-cols-2">
-          <fieldset className="grid gap-2">
-            <legend className="text-sm font-medium text-slate-700">
-              Target depth
-            </legend>
-            <div
-              role="radiogroup"
-              aria-label="Target depth"
-              className="grid grid-cols-3 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1"
-            >
-              {bloomLevels.map((level) => {
-                const selected = targetDepth === level;
-                return (
-                  <button
-                    key={level}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => setTargetDepth(level)}
-                    className={`rounded-md px-2 py-1.5 text-center text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300 ${
-                      selected
-                        ? "bg-white text-slate-950 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    {formatBloomLevel(level)}
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
-
-          <fieldset className="grid gap-2">
-            <legend className="text-sm font-medium text-slate-700">
-              Graph size
-            </legend>
-            <div
-              role="radiogroup"
-              aria-label="Graph size"
-              className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1"
-            >
-              {graphSizes.map((count) => {
-                const selected = maxNodes === count;
-                return (
-                  <button
-                    key={count}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => setMaxNodes(count)}
-                    className={`rounded-md px-2 py-1.5 text-center text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300 ${
-                      selected
-                        ? "bg-white text-slate-950 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    {formatGraphSize(count)}
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
-          <button
-            type="submit"
-            disabled={!workspaceId || generating}
-            className="inline-flex h-11 items-center rounded-lg bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-          >
-            {generating ? "Generating..." : "Generate Trail"}
-          </button>
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
-        </div>
-
-        {generating ? (
-          <div className="border-l-2 border-slate-300 pl-4 dark:border-slate-700">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              <span className="size-1.5 animate-pulse rounded-full bg-blue-500" />
-              Building your Trail
+          <div className="grid gap-4 sm:gap-5">
+            <div className="grid gap-2">
+              <label
+                htmlFor="topic"
+                className="text-sm font-medium text-slate-700"
+              >
+                Topic
+              </label>
+              <input
+                id="topic"
+                value={topic}
+                onChange={(event) => setTopic(event.target.value)}
+                required
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 sm:h-11 sm:px-3.5"
+                placeholder="What do you want to learn?"
+              />
             </div>
 
-            <div className="mt-3">
-              <SectionLabel>Progress</SectionLabel>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                {latestProgress}
+            <div className="grid gap-2">
+              <label
+                htmlFor="goal"
+                className="text-sm font-medium text-slate-700"
+              >
+                Goal
+              </label>
+              <textarea
+                id="goal"
+                value={goal}
+                onChange={(event) => setGoal(event.target.value)}
+                required
+                rows={3}
+                maxLength={2000}
+                className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-5 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 sm:px-3.5 sm:py-2.5 sm:leading-6"
+                placeholder={
+                  isMobileViewport
+                    ? GOAL_PLACEHOLDER_MOBILE
+                    : GOAL_PLACEHOLDER_DESKTOP
+                }
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <label
+                htmlFor="prior-knowledge"
+                className="text-sm font-medium text-slate-700"
+              >
+                What do you already know about this?{" "}
+                <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <textarea
+                id="prior-knowledge"
+                value={priorKnowledge}
+                onChange={(event) => setPriorKnowledge(event.target.value)}
+                rows={3}
+                maxLength={2000}
+                className="w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-5 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 sm:px-3.5 sm:py-2.5 sm:leading-6"
+                placeholder="e.g. I know a few big dates but not how the events connect"
+              />
+              <p className="text-xs text-slate-400">
+                Leave blank and we&apos;ll assume you&apos;re starting from
+                scratch.
               </p>
             </div>
-
-            {thinkingPreview && !streamPreview ? (
-              <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-                <SectionLabel>Reasoning</SectionLabel>
-                <StreamPreview text={thinkingPreview} variant="thinking" />
-              </div>
-            ) : null}
-
-            {streamPreview ? (
-              <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-                <SectionLabel>Output</SectionLabel>
-                <StreamPreview text={streamPreview} />
-              </div>
-            ) : null}
-
-            <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
-              <SectionLabel>Building graph</SectionLabel>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {conceptTitles.length > 0
-                  ? conceptTitles.map((title, i) => (
-                      <span
-                        key={title}
-                        className="inline-flex max-w-56 items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        style={{
-                          opacity: 0,
-                          animation: "stream-char-in 260ms ease-out both",
-                          animationDelay: `${i * 45}ms`,
-                        }}
-                      >
-                        <span
-                          aria-hidden
-                          className="mr-1.5 size-1.5 shrink-0 rounded-full bg-blue-400"
-                        />
-                        <span className="truncate">{title}</span>
-                      </span>
-                    ))
-                  : SKELETON_NODE_WIDTHS.map((width, i) => (
-                      <span
-                        key={i}
-                        aria-hidden
-                        className="h-6 rounded-full bg-slate-100 animate-pulse dark:bg-slate-800"
-                        style={{ width, animationDelay: `${i * 120}ms` }}
-                      />
-                    ))}
-              </div>
-            </div>
           </div>
-        ) : null}
-      </form>
 
-      <section className="grid gap-3">
-        <h2 className="text-lg font-semibold">Existing Trails</h2>
-        {loading ? <p className="text-sm text-slate-500">Loading...</p> : null}
-        {deleteError ? (
-          <p className="text-sm text-red-700">{deleteError}</p>
-        ) : null}
-        {!loading && trails.length === 0 ? (
-          <p className="text-sm text-slate-500">No Trails yet.</p>
-        ) : null}
-        {trails.length > 0 ? (
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <table className="w-full table-fixed text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                  <th className="px-4 py-2 font-medium">Title</th>
-                  <th className="hidden w-40 px-3 py-2 font-medium sm:table-cell">
-                    Progress
-                  </th>
-                  <th className="w-28 px-3 py-2 text-right font-medium">
-                    Mastery
-                  </th>
-                  <th className="w-20 px-3 py-2 text-right font-medium">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {trails.map((trail) => {
-                  const progress = progressByTrail[trail.id];
-                  const pct = progress
-                    ? Math.round(progress.progress * 100)
-                    : null;
+          <div className="grid gap-4 sm:grid-cols-2">
+            <fieldset className="grid gap-2.5">
+              <legend className="text-sm font-medium text-slate-700">
+                Target depth
+              </legend>
+              <div
+                role="radiogroup"
+                aria-label="Target depth"
+                className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1"
+              >
+                {bloomLevels.map((level) => {
+                  const selected = targetDepth === level;
                   return (
-                    <tr key={trail.id} className="hover:bg-slate-50">
-                      <td className="px-4 py-2">
-                        <Link
-                          href={`/trails/${trail.id}`}
-                          className="block truncate font-medium text-slate-900 hover:text-blue-700"
-                        >
-                          {trail.title}
-                        </Link>
-                      </td>
-                      <td className="hidden px-3 py-2 align-middle sm:table-cell">
-                        {progress ? (
-                          <MiniProgressBar progress={progress} />
-                        ) : (
-                          <div
-                            className="h-1.5 w-full animate-pulse rounded-full bg-slate-100"
-                            aria-hidden
-                          />
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right align-middle tabular-nums">
-                        {progress ? (
-                          <>
-                            <div className="font-semibold text-slate-950">
-                              {pct}%
-                            </div>
-                            <div className="text-xs text-slate-500">
-                              {progress.mastered}/{progress.total} mastered
-                            </div>
-                          </>
-                        ) : (
-                          <div className="text-xs text-slate-400">
-                            {trail.node_count} concepts
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center justify-end">
-                          {confirmingDeleteId === trail.id ? (
-                            <div className="flex items-center gap-2 text-xs">
-                              <button
-                                onClick={() => handleDelete(trail.id)}
-                                disabled={deletingId === trail.id}
-                                className="font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
-                              >
-                                {deletingId === trail.id
-                                  ? "Deleting..."
-                                  : "Confirm"}
-                              </button>
-                              <button
-                                onClick={() => setConfirmingDeleteId(null)}
-                                disabled={deletingId === trail.id}
-                                className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => setConfirmingDeleteId(trail.id)}
-                              aria-label={`Delete ${trail.title}`}
-                              title="Delete Trail"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-100"
-                            >
-                              <Trash2 className="h-4 w-4" aria-hidden="true" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                    <button
+                      key={level}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setTargetDepth(level)}
+                      className={`flex min-h-9 items-center justify-center rounded-lg px-2.5 py-1 text-center text-[13px] font-medium leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300 ${
+                        selected
+                          ? "bg-white text-slate-950 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      {formatBloomLevel(level)}
+                    </button>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+            </fieldset>
+
+            <fieldset className="grid gap-2.5">
+              <legend className="text-sm font-medium text-slate-700">
+                Graph size
+              </legend>
+              <div
+                role="radiogroup"
+                aria-label="Graph size"
+                className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1"
+              >
+                {graphSizes.map((count) => {
+                  const selected = maxNodes === count;
+                  return (
+                    <button
+                      key={count}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-label={`Up to ${count} concepts`}
+                      onClick={() => setMaxNodes(count)}
+                      className={`flex min-h-9 items-center justify-center rounded-lg px-2.5 py-1 text-center text-[13px] font-medium leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300 ${
+                        selected
+                          ? "bg-white text-slate-950 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      {graphSizeLabels[count]}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
           </div>
-        ) : null}
-      </section>
+
+          <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
+            <button
+              type="submit"
+              disabled={!workspaceId || generating}
+              className="inline-flex h-11 items-center rounded-lg bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            >
+              {generating ? "Generating..." : "Generate Trail"}
+            </button>
+            {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          </div>
+
+          {generating ? (
+            <div className="border-l-2 border-slate-300 pl-4 dark:border-slate-700">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <span className="size-1.5 animate-pulse rounded-full bg-blue-500" />
+                Building your Trail
+              </div>
+
+              <div className="mt-3">
+                <SectionLabel>Progress</SectionLabel>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  {latestProgress}
+                </p>
+              </div>
+
+              {thinkingPreview && !streamPreview ? (
+                <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+                  <SectionLabel>Reasoning</SectionLabel>
+                  <StreamPreview text={thinkingPreview} variant="thinking" />
+                </div>
+              ) : null}
+
+              {streamPreview ? (
+                <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+                  <SectionLabel>Output</SectionLabel>
+                  <StreamPreview text={streamPreview} />
+                </div>
+              ) : null}
+
+              <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+                <SectionLabel>Building graph</SectionLabel>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {conceptTitles.length > 0
+                    ? conceptTitles.map((title, i) => (
+                        <span
+                          key={title}
+                          className="inline-flex max-w-56 items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                          style={{
+                            opacity: 0,
+                            animation: "stream-char-in 260ms ease-out both",
+                            animationDelay: `${i * 45}ms`,
+                          }}
+                        >
+                          <span
+                            aria-hidden
+                            className="mr-1.5 size-1.5 shrink-0 rounded-full bg-blue-400"
+                          />
+                          <span className="truncate">{title}</span>
+                        </span>
+                      ))
+                    : SKELETON_NODE_WIDTHS.map((width, i) => (
+                        <span
+                          key={i}
+                          aria-hidden
+                          className="h-6 rounded-full bg-slate-100 animate-pulse dark:bg-slate-800"
+                          style={{ width, animationDelay: `${i * 120}ms` }}
+                        />
+                      ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </form>
+
+        <section className="flex h-full flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-950">
+                Existing Trails
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Jump back in or clean up older trails.
+              </p>
+            </div>
+            {!loading && trails.length > 0 ? (
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                {trails.length}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex min-h-64 flex-1 flex-col pt-4 xl:min-h-0">
+            {loading ? (
+              <p className="text-sm text-slate-500">Loading...</p>
+            ) : null}
+            {deleteError ? (
+              <p className="text-sm text-red-700">{deleteError}</p>
+            ) : null}
+            {!loading && trails.length === 0 ? (
+              <p className="text-sm text-slate-500">No Trails yet.</p>
+            ) : null}
+            {trails.length > 0 ? (
+              <div className="min-h-0 flex-1 overflow-auto app-scrollbar">
+                <table className="w-full table-auto text-sm sm:table-fixed">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                      <th className="px-2.5 py-2 font-medium sm:px-4">Title</th>
+                      <th className="hidden w-40 px-3 py-2 font-medium sm:table-cell">
+                        Progress
+                      </th>
+                      <th className="w-20 px-1.5 py-2 text-right font-medium sm:w-28 sm:px-3">
+                        <span className="sm:hidden">%</span>
+                        <span className="hidden sm:inline">Mastery</span>
+                      </th>
+                      <th className="w-11 px-1.5 py-2 text-right font-medium sm:w-20 sm:px-3">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {trails.map((trail) => {
+                      const progress = progressByTrail[trail.id];
+                      const pct = progress
+                        ? Math.round(progress.progress * 100)
+                        : null;
+                      return (
+                        <tr key={trail.id} className="hover:bg-slate-50">
+                          <td className="px-2.5 py-2 pr-1 sm:px-4">
+                            <Link
+                              href={`/trails/${trail.id}`}
+                              className="block truncate font-medium text-slate-900 hover:text-blue-700"
+                            >
+                              {trail.title}
+                            </Link>
+                          </td>
+                          <td className="hidden px-3 py-2 align-middle sm:table-cell">
+                            {progress ? (
+                              <MiniProgressBar progress={progress} />
+                            ) : (
+                              <div
+                                className="h-1.5 w-full animate-pulse rounded-full bg-slate-100"
+                                aria-hidden
+                              />
+                            )}
+                          </td>
+                          <td className="px-1.5 py-2 text-right align-middle tabular-nums sm:px-3">
+                            {progress ? (
+                              <>
+                                <div className="text-sm font-semibold text-slate-950 sm:text-base">
+                                  {pct}%
+                                </div>
+                                <div className="hidden text-xs text-slate-500 sm:block">
+                                  {progress.mastered}/{progress.total} mastered
+                                </div>
+                              </>
+                            ) : (
+                              <div className="text-[11px] text-slate-400 sm:text-xs">
+                                {trail.node_count} concepts
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-1.5 py-2 sm:px-3">
+                            <div className="flex items-center justify-end">
+                              {confirmingDeleteId === trail.id ? (
+                                <div className="flex flex-col items-end gap-1 text-[11px] sm:flex-row sm:items-center sm:gap-2 sm:text-xs">
+                                  <button
+                                    onClick={() => handleDelete(trail.id)}
+                                    disabled={deletingId === trail.id}
+                                    className="font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
+                                  >
+                                    {deletingId === trail.id
+                                      ? "Deleting..."
+                                      : "Confirm"}
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmingDeleteId(null)}
+                                    disabled={deletingId === trail.id}
+                                    className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() =>
+                                    setConfirmingDeleteId(trail.id)
+                                  }
+                                  aria-label={`Delete ${trail.title}`}
+                                  title="Delete Trail"
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-100 sm:h-8 sm:w-8"
+                                >
+                                  <Trash2
+                                    className="h-4 w-4"
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

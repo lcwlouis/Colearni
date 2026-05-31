@@ -14,12 +14,30 @@ vi.mock("@/lib/workspace", () => ({
 
 const listTrailsMock = vi.fn();
 const generateTrailMock = vi.fn();
+const getTrailMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   listTrails: (...args: unknown[]) => listTrailsMock(...args),
   generateTrail: (...args: unknown[]) => generateTrailMock(...args),
+  getTrail: (...args: unknown[]) => getTrailMock(...args),
   deleteTrail: vi.fn(),
 }));
+
+function mockMobileViewport(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
 
 function fixtureTrail(): Trail {
   return {
@@ -36,13 +54,14 @@ function fixtureTrail(): Trail {
 }
 
 async function loadPage() {
-  const mod = await import("@/app/trails/page");
+  const mod = await import("@/app/(app)/trails/page");
   return mod.default;
 }
 
 describe("Trails page prior-knowledge field", () => {
   afterEach(() => {
     vi.clearAllMocks();
+    mockMobileViewport(false);
   });
   test("renders the optional prior-knowledge input", async () => {
     listTrailsMock.mockResolvedValueOnce({ trails: [] });
@@ -54,6 +73,7 @@ describe("Trails page prior-knowledge field", () => {
         screen.getByLabelText(/What do you already know about this/i),
       ).toBeInTheDocument();
     });
+
   });
 
   test("includes prior_knowledge in the generate request when filled", async () => {
@@ -107,6 +127,43 @@ describe("Trails page prior-knowledge field", () => {
   });
 });
 
+describe("Trails page mobile density tweaks", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    mockMobileViewport(false);
+  });
+
+  test("uses a shorter goal placeholder on mobile viewports", async () => {
+    mockMobileViewport(true);
+    listTrailsMock.mockResolvedValueOnce({ trails: [] });
+    const TrailsPage = await loadPage();
+    render(<TrailsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^Goal$/i)).toHaveAttribute(
+        "placeholder",
+        "Learn major world-history turning points with confidence.",
+      );
+    });
+  });
+
+  test("keeps mobile mastery/actions columns compact to preserve title space", async () => {
+    listTrailsMock.mockResolvedValueOnce({ trails: [fixtureTrail()] });
+    getTrailMock.mockRejectedValueOnce(new Error("no progress yet"));
+
+    const TrailsPage = await loadPage();
+    render(<TrailsPage />);
+
+    const deleteButton = await screen.findByRole("button", {
+      name: /Delete Math/i,
+    });
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers[2]).toHaveClass("w-20");
+    expect(deleteButton).toHaveClass("h-7");
+    expect(deleteButton).toHaveClass("w-7");
+  });
+});
+
 describe("Trails page target-depth selector", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -140,6 +197,36 @@ describe("Trails page target-depth selector", () => {
     const body = generateTrailMock.mock.calls[0][1] as TrailGenerateRequest;
     // Underlying enum value stays lowercase.
     expect(body.target_depth).toBe("understand");
+  });
+});
+
+describe("Trails page graph-size selector", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("keeps the compact graph-size labels accessible and submits the same max_nodes value", async () => {
+    listTrailsMock.mockResolvedValueOnce({ trails: [] });
+    generateTrailMock.mockResolvedValueOnce({ trail: fixtureTrail() });
+
+    const TrailsPage = await loadPage();
+    render(<TrailsPage />);
+
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^Topic$/i)).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByLabelText(/^Topic$/i), "Linear Algebra");
+    await user.type(screen.getByLabelText(/^Goal$/i), "ML readiness");
+    await user.click(screen.getByRole("radio", { name: "Up to 75 concepts" }));
+    await user.click(screen.getByRole("button", { name: /Generate Trail/i }));
+
+    await waitFor(() => {
+      expect(generateTrailMock).toHaveBeenCalled();
+    });
+    const body = generateTrailMock.mock.calls[0][1] as TrailGenerateRequest;
+    expect(body.max_nodes).toBe(75);
   });
 });
 

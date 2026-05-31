@@ -57,6 +57,16 @@ function mentionsSources(message: string): boolean {
   return /source/i.test(message);
 }
 
+const CLOZE_PATTERN = /\{\{c\d+::(.*?)(?:::[^}]*)?\}\}/g;
+
+function renderPromptFront(card: Flashcard): string {
+  if (card.card_type !== "cloze") {
+    return card.front;
+  }
+  // Render cloze prompts as learner-facing blanks rather than template markup.
+  return card.front.replace(CLOZE_PATTERN, "_____");
+}
+
 export function FlashcardsPanel({
   workspaceId,
   trailId,
@@ -508,7 +518,7 @@ function ReviewCard({
           Prompt
         </p>
         <QuizMarkdown
-          text={card.front}
+          text={renderPromptFront(card)}
           className="mt-2 text-base leading-7 text-slate-900"
         />
         {!revealed ? (

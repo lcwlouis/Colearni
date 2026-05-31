@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { layoutGraph } from "@/app/trails/[id]/components/graphLayout";
+import { layoutGraph } from "@/app/(app)/trails/[id]/components/graphLayout";
 import type { ConceptEdge, ConceptNode } from "@/lib/types";
 
 const nodes: ConceptNode[] = [

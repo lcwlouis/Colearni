@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { QuizHistoryPanel } from "@/app/trails/[id]/components/QuizHistoryPanel";
+import { QuizHistoryPanel } from "@/app/(app)/trails/[id]/components/QuizHistoryPanel";
 import type { QuizAttempt } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({

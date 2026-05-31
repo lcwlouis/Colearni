@@ -4,9 +4,12 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
+  type FormEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ActionBarPrimitive,
   AssistantRuntimeProvider,
@@ -21,6 +24,7 @@ import {
   ArrowDownIcon,
   ArrowLeft,
   ArrowUpIcon,
+  Bookmark,
   CopyIcon,
   GaugeIcon,
   LayersIcon,
@@ -30,6 +34,7 @@ import {
   PlusIcon,
   RotateCcwIcon,
   TargetIcon,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,8 +48,14 @@ import {
 import { SourceChip } from "@/components/assistant-ui/sources";
 import {
   createConversationThread,
+  createNote,
+  deleteConversationThread,
+  deleteNote,
   getConversation,
   listConversationThreads,
+  listNotes,
+  updateConversationThread,
+  updateNote,
 } from "@/lib/api";
 import { formatBloomLevel, titleCase } from "@/lib/display";
 import { useTutorRuntime } from "@/lib/tutor-runtime";
@@ -53,6 +64,7 @@ import type {
   ConversationHistoryResponse,
   ConversationThreadSummary,
   MasteryStatus,
+  Note,
   SourceRecord,
   TutorMode,
   TutorStreamStatus,
@@ -61,6 +73,7 @@ import type {
 import type { ArtifactKind } from "@/lib/artifacts";
 
 type ReasoningView = "summary" | "full";
+type TutorPanelTab = "tutor" | "notes";
 
 type TutorHistoryState = {
   key: string;
@@ -100,6 +113,10 @@ interface TutorPanelProps {
   concept: ConceptNode;
   sources?: SourceRecord[];
   sampleQuestions?: string[];
+  embeddedInConceptPanel?: boolean;
+  bookmarked?: boolean;
+  onToggleBookmark?: () => void;
+  onPanelClose?: () => void;
   onBack?: () => void;
   onSuggestQuiz?: (quizType: "level_up" | "practice") => void;
   onSuggestFlashcards?: () => void;
@@ -116,6 +133,10 @@ export function TutorPanel({
   concept,
   sources = [],
   sampleQuestions,
+  embeddedInConceptPanel = false,
+  bookmarked = false,
+  onToggleBookmark,
+  onPanelClose,
   onBack,
   onSuggestQuiz,
   onSuggestFlashcards,
@@ -205,6 +226,10 @@ export function TutorPanel({
         concept={concept}
         sources={sources ?? []}
         mode={mode}
+        embeddedInConceptPanel={embeddedInConceptPanel}
+        bookmarked={bookmarked}
+        onToggleBookmark={onToggleBookmark}
+        onPanelClose={onPanelClose}
         onBack={onBack}
       >
         <div className="p-4 text-sm text-slate-500">
@@ -220,6 +245,10 @@ export function TutorPanel({
         concept={concept}
         sources={sources ?? []}
         mode={mode}
+        embeddedInConceptPanel={embeddedInConceptPanel}
+        bookmarked={bookmarked}
+        onToggleBookmark={onToggleBookmark}
+        onPanelClose={onPanelClose}
         onBack={onBack}
       >
         <div className="m-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -246,6 +275,10 @@ export function TutorPanel({
       concept={concept}
       sources={sources}
       sampleQuestions={sampleQuestions}
+      embeddedInConceptPanel={embeddedInConceptPanel}
+      bookmarked={bookmarked}
+      onToggleBookmark={onToggleBookmark}
+      onPanelClose={onPanelClose}
       history={history}
       conversationId={conversationId}
       mode={mode}
@@ -268,6 +301,33 @@ export function TutorPanel({
         setHistoryState({
           ...loadingTutorHistoryState(historyKey),
           key: historyKey,
+        });
+      }}
+      onRenameThread={async (threadId, title) => {
+        const updated = await updateConversationThread(
+          workspaceId,
+          trailId,
+          concept.id,
+          threadId,
+          title,
+        );
+        setThreads((current) =>
+          current.map((thread) => (thread.id === threadId ? updated : thread)),
+        );
+      }}
+      onDeleteThread={async (threadId) => {
+        await deleteConversationThread(
+          workspaceId,
+          trailId,
+          concept.id,
+          threadId,
+        );
+        setThreads((current) => {
+          const remaining = current.filter((thread) => thread.id !== threadId);
+          if (selectedThreadId === threadId) {
+            setSelectedThreadId(remaining[0]?.id ?? null);
+          }
+          return remaining;
         });
       }}
       onConversationId={(nextConversationId) => {
@@ -303,6 +363,10 @@ function TutorRuntimePanel({
   concept,
   sources,
   sampleQuestions,
+  embeddedInConceptPanel = false,
+  bookmarked = false,
+  onToggleBookmark,
+  onPanelClose,
   history,
   conversationId,
   mode,
@@ -315,6 +379,8 @@ function TutorRuntimePanel({
   selectedThreadId,
   onSelectThread,
   onCreateThread,
+  onRenameThread,
+  onDeleteThread,
   onConversationId,
   onMode,
   onError,
@@ -328,10 +394,13 @@ function TutorRuntimePanel({
   selectedThreadId: string | null;
   onSelectThread: (threadId: string) => void;
   onCreateThread: () => Promise<void>;
+  onRenameThread: (threadId: string, title: string) => Promise<void>;
+  onDeleteThread: (threadId: string) => Promise<void>;
   onConversationId: (conversationId: string) => void;
   onMode: (mode: TutorMode) => void;
   onError: (message: string) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<TutorPanelTab>("tutor");
   const [reasoningView, setReasoningView] = useState<ReasoningView>(() => {
     if (typeof window === "undefined") {
       return "summary";
@@ -365,40 +434,58 @@ function TutorRuntimePanel({
               concept={concept}
               sources={sources ?? []}
               mode={mode}
+              embeddedInConceptPanel={embeddedInConceptPanel}
+              bookmarked={bookmarked}
+              onToggleBookmark={onToggleBookmark}
+              onPanelClose={onPanelClose}
               onBack={onBack}
+              activeTab={activeTab}
+              onActiveTabChange={setActiveTab}
               reasoningView={reasoningView}
               onReasoningViewChange={setReasoningView}
               threads={threads}
               selectedThreadId={selectedThreadId}
               onSelectThread={onSelectThread}
               onCreateThread={onCreateThread}
+              onRenameThread={onRenameThread}
+              onDeleteThread={onDeleteThread}
             >
-              {chatError ? (
-                <div className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {chatError}
-                </div>
-              ) : null}
-              {mode === "quiz_prompt" ? (
-                <div className="mx-4 mt-3 flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between">
-                  <span>
-                    Ready to level up? Take the quiz to check your
-                    understanding.
-                  </span>
-                  {onSuggestQuiz ? (
-                    <button
-                      type="button"
-                      onClick={() => onSuggestQuiz("level_up")}
-                      className="shrink-0 self-start rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500 sm:self-auto"
-                    >
-                      Start level-up quiz
-                    </button>
+              {activeTab === "tutor" ? (
+                <>
+                  {chatError ? (
+                    <div className="mx-4 mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      {chatError}
+                    </div>
                   ) : null}
-                </div>
-              ) : null}
-              <TutorThread
-                reasoningView={reasoningView}
-                sampleQuestions={sampleQuestions}
-              />
+                  {mode === "quiz_prompt" ? (
+                    <div className="mx-4 mt-3 flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 sm:flex-row sm:items-center sm:justify-between">
+                      <span>
+                        Ready to level up? Take the quiz to check your
+                        understanding.
+                      </span>
+                      {onSuggestQuiz ? (
+                        <button
+                          type="button"
+                          onClick={() => onSuggestQuiz("level_up")}
+                          className="shrink-0 self-start rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500 sm:self-auto"
+                        >
+                          Start level-up quiz
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <TutorThread
+                    reasoningView={reasoningView}
+                    sampleQuestions={sampleQuestions}
+                  />
+                </>
+              ) : (
+                <NotesPanel
+                  workspaceId={workspaceId}
+                  trailId={trailId}
+                  concept={concept}
+                />
+              )}
             </TutorShell>
           </SuggestArtifactContext.Provider>
         </SuggestFlashcardsContext.Provider>
@@ -411,123 +498,234 @@ function TutorShell({
   concept,
   sources,
   mode,
+  embeddedInConceptPanel = false,
+  bookmarked = false,
+  onToggleBookmark,
+  onPanelClose,
   onBack,
+  activeTab = "tutor",
+  onActiveTabChange,
   reasoningView,
   onReasoningViewChange,
   threads = [],
   selectedThreadId = null,
   onSelectThread,
   onCreateThread,
+  onRenameThread,
+  onDeleteThread,
   children,
 }: {
   concept: ConceptNode;
   sources: SourceRecord[];
   mode: TutorMode | null;
+  embeddedInConceptPanel?: boolean;
+  bookmarked?: boolean;
+  onToggleBookmark?: () => void;
+  onPanelClose?: () => void;
   onBack?: () => void;
+  activeTab?: TutorPanelTab;
+  onActiveTabChange?: (tab: TutorPanelTab) => void;
   reasoningView?: ReasoningView;
   onReasoningViewChange?: (view: ReasoningView) => void;
   threads?: ConversationThreadSummary[];
   selectedThreadId?: string | null;
   onSelectThread?: (threadId: string) => void;
   onCreateThread?: () => Promise<void>;
+  onRenameThread?: (threadId: string, title: string) => Promise<void>;
+  onDeleteThread?: (threadId: string) => Promise<void>;
   children: ReactNode;
 }) {
   const [creatingThread, setCreatingThread] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuContainerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        menuContainerRef.current &&
+        !menuContainerRef.current.contains(event.target as Node)
+      ) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [menuOpen]);
 
   return (
-    <section className="flex h-full min-h-130 flex-1 flex-col rounded-md border border-slate-200 bg-white md:min-h-0">
-      <div className="relative z-30 shrink-0 border-b border-slate-200 bg-white/95 px-3 py-2.5 backdrop-blur">
-        <div className="flex items-start justify-between gap-2">
+    <section className="flex h-full min-h-0 flex-1 flex-col rounded-md border border-slate-200 bg-white">
+      <div className="relative z-30 shrink-0 border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur">
+        <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-1 items-start gap-2">
             {onBack ? (
               <button
                 type="button"
                 aria-label="Back to concept details"
                 onClick={onBack}
-                className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-950"
               >
-                <ArrowLeft className="size-4" aria-hidden="true" />
+                <ArrowLeft className="size-3.5" aria-hidden="true" />
               </button>
             ) : null}
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Tutor chat
-              </p>
-              {threads.length > 0 ? (
-                <ThreadSwitcher
-                  threads={threads}
-                  selectedThreadId={selectedThreadId}
-                  onSelectThread={onSelectThread}
-                />
+              {embeddedInConceptPanel ? (
+                <>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h2 className="truncate text-base font-semibold text-slate-950">
+                      {concept.title}
+                    </h2>
+                    <ModeBadge mode={mode} />
+                  </div>
+                  <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-slate-500">
+                    <span className="truncate">
+                      {titleCase(concept.concept_level)} ·{" "}
+                      {titleCase(concept.node_type)}
+                    </span>
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                      Tutor workspace
+                    </span>
+                  </div>
+                </>
               ) : (
-                <p className="mt-1 text-xs text-slate-500">
-                  Start a conversation for this concept.
-                </p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <h2 className="text-[11px] font-semibold uppercase tracking-wide text-blue-700 truncate">
+                    Tutor workspace
+                  </h2>
+                  <ModeBadge mode={mode} />
+                </div>
               )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <ModeBadge mode={mode} />
-            {onCreateThread ? (
+            {embeddedInConceptPanel && onToggleBookmark ? (
               <button
                 type="button"
-                aria-label="New thread"
-                title="New thread"
-                onClick={() => {
-                  if (!onCreateThread || creatingThread) return;
-                  setCreatingThread(true);
-                  void onCreateThread().finally(() => {
-                    setCreatingThread(false);
-                  });
-                }}
-                disabled={creatingThread}
-                className="grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 disabled:opacity-50"
+                aria-label={bookmarked ? "Remove bookmark" : "Bookmark concept"}
+                aria-pressed={bookmarked}
+                onClick={onToggleBookmark}
+                className={`grid size-7 place-items-center rounded-md border text-slate-600 hover:bg-slate-50 ${
+                  bookmarked
+                    ? "border-blue-200 bg-blue-50 text-blue-700"
+                    : "border-slate-200"
+                }`}
               >
-                <PlusIcon className="size-4" aria-hidden="true" />
+                <Bookmark
+                  className="size-3.5"
+                  aria-hidden
+                  fill={bookmarked ? "currentColor" : "none"}
+                />
               </button>
             ) : null}
-            <div className="relative">
+            {embeddedInConceptPanel && onPanelClose ? (
               <button
                 type="button"
-                aria-label="Conversation settings"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((open) => !open)}
-                className="grid size-8 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                aria-label="Close"
+                onClick={onPanelClose}
+                className="grid size-7 place-items-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
               >
-                <MoreHorizontalIcon className="size-4" />
+                <X className="size-3.5" aria-hidden="true" />
               </button>
-              {menuOpen ? (
-                <div className="absolute right-0 z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 text-xs shadow-2xl shadow-slate-300/70 ring-1 ring-slate-950/5">
-                  <div className="grid gap-2">
-                    {reasoningView && onReasoningViewChange ? (
-                      <ReasoningViewToggle
-                        value={reasoningView}
-                        onChange={onReasoningViewChange}
-                      />
-                    ) : null}
-                    <div className="flex flex-wrap gap-1.5">
-                      <ContextBadge icon={LayersIcon}>
-                        Level: {titleCase(concept.concept_level)}
-                      </ContextBadge>
-                      <ContextBadge icon={TargetIcon}>
-                        Bloom: {formatBloomLevel(concept.bloom_level)}
-                      </ContextBadge>
-                      <ContextBadge icon={GaugeIcon}>
-                        Difficulty: {titleCase(concept.difficulty)}
-                      </ContextBadge>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      <LinkIcon className="size-3 shrink-0" />
-                      {sources.length} source{sources.length === 1 ? "" : "s"}{" "}
-                      linked
-                    </div>
-                    {sources.length > 0 ? (
-                      <SourceChips sources={sources} compact />
-                    ) : null}
-                  </div>
-                </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-2 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          {onActiveTabChange ? (
+            <TutorPanelTabs
+              activeTab={activeTab}
+              onChange={onActiveTabChange}
+            />
+          ) : null}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex-nowrap">
+            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Threads
+            </span>
+            {threads.length > 0 ? (
+              <ThreadSwitcher
+                threads={threads}
+                selectedThreadId={selectedThreadId}
+                onSelectThread={onSelectThread}
+                onRenameThread={onRenameThread}
+                onDeleteThread={onDeleteThread}
+              />
+            ) : (
+              <p className="min-w-0 flex-1 truncate text-xs text-slate-500">
+                Start a conversation for this concept.
+              </p>
+            )}
+            <div className="flex shrink-0 items-center gap-1 sm:ml-auto">
+              {onCreateThread ? (
+                <button
+                  type="button"
+                  aria-label="New thread"
+                  title="New thread"
+                  onClick={() => {
+                    if (!onCreateThread || creatingThread) return;
+                    setCreatingThread(true);
+                    void onCreateThread().finally(() => {
+                      setCreatingThread(false);
+                    });
+                  }}
+                  disabled={creatingThread}
+                  className="grid size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 disabled:opacity-50"
+                >
+                  <PlusIcon className="size-3.5" aria-hidden="true" />
+                </button>
               ) : null}
+              <div ref={menuContainerRef} className="relative">
+                <button
+                  type="button"
+                  aria-label="Conversation settings"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen((open) => !open)}
+                  className="grid size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                >
+                  <MoreHorizontalIcon className="size-3.5" />
+                </button>
+                {menuOpen ? (
+                  <div className="absolute right-0 z-50 mt-2 w-64 rounded-2xl border border-slate-200 bg-white p-3 text-xs shadow-2xl shadow-slate-300/70 ring-1 ring-slate-950/5">
+                    <div className="grid gap-2">
+                      {reasoningView && onReasoningViewChange ? (
+                        <ReasoningViewToggle
+                          value={reasoningView}
+                          onChange={onReasoningViewChange}
+                        />
+                      ) : null}
+                      <div className="flex flex-wrap gap-1.5">
+                        <ContextBadge icon={LayersIcon}>
+                          Level: {titleCase(concept.concept_level)}
+                        </ContextBadge>
+                        <ContextBadge icon={TargetIcon}>
+                          Bloom: {formatBloomLevel(concept.bloom_level)}
+                        </ContextBadge>
+                        <ContextBadge icon={GaugeIcon}>
+                          Difficulty: {titleCase(concept.difficulty)}
+                        </ContextBadge>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        <LinkIcon className="size-3 shrink-0" />
+                        {sources.length} source{sources.length === 1 ? "" : "s"}{" "}
+                        linked
+                      </div>
+                      {sources.length > 0 ? (
+                        <SourceChips sources={sources} compact />
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
@@ -535,6 +733,432 @@ function TutorShell({
       {children}
     </section>
   );
+}
+
+function TutorPanelTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: TutorPanelTab;
+  onChange: (tab: TutorPanelTab) => void;
+}) {
+  const tabs: Array<{ value: TutorPanelTab; label: string }> = [
+    { value: "tutor", label: "Tutor" },
+    { value: "notes", label: "Notes" },
+  ];
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Tutor panel sections"
+      className="flex w-full shrink-0 rounded-full border border-slate-200 bg-slate-50 p-1 sm:inline-flex sm:w-auto"
+    >
+      {tabs.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === tab.value}
+          onClick={() => onChange(tab.value)}
+          className={`h-8 flex-1 rounded-full px-3 text-xs font-semibold transition sm:flex-none ${
+            activeTab === tab.value
+              ? "bg-blue-600 text-white shadow-sm shadow-blue-200"
+              : "text-slate-600 hover:bg-white hover:text-slate-950"
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function NotesPanel({
+  workspaceId,
+  trailId,
+  concept,
+}: {
+  workspaceId: string;
+  trailId: string;
+  concept: ConceptNode;
+}) {
+  const [loadKey, setLoadKey] = useState(0);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [loadError, setLoadError] = useState("");
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftBody, setDraftBody] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadNotes() {
+      setStatus("loading");
+      setLoadError("");
+      try {
+        const nextNotes = await listNotes(workspaceId, trailId, concept.id);
+        if (!cancelled) {
+          setNotes(sortNotesNewestFirst(nextNotes));
+          setStatus("ready");
+        }
+      } catch (exc) {
+        if (!cancelled) {
+          setStatus("error");
+          setLoadError(
+            exc instanceof Error ? exc.message : "Could not load notes",
+          );
+        }
+      }
+    }
+
+    void loadNotes();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, trailId, concept.id, loadKey]);
+
+  const createNewNote = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const body = draftBody.trim();
+    const title = draftTitle.trim();
+    if (!body || saving) {
+      return;
+    }
+
+    setSaving(true);
+    setSaveError("");
+    try {
+      const note = await createNote(workspaceId, trailId, {
+        title: title || null,
+        body,
+        concept_id: concept.id,
+      });
+      setNotes((current) => sortNotesNewestFirst([note, ...current]));
+      setDraftTitle("");
+      setDraftBody("");
+    } catch (exc) {
+      setSaveError(exc instanceof Error ? exc.message : "Could not save note");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateExistingNote = async (
+    noteId: string,
+    next: { title: string | null; body: string },
+  ) => {
+    const note = await updateNote(workspaceId, trailId, noteId, next);
+    setNotes((current) =>
+      sortNotesNewestFirst(
+        current.map((candidate) =>
+          candidate.id === note.id ? note : candidate,
+        ),
+      ),
+    );
+  };
+
+  const deleteExistingNote = async (noteId: string) => {
+    await deleteNote(workspaceId, trailId, noteId);
+    setNotes((current) => current.filter((note) => note.id !== noteId));
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-linear-to-b from-white to-slate-50/80">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+          <section className="rounded-3xl border border-blue-100 bg-blue-50/60 p-3 shadow-sm shadow-blue-100/50">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-950">
+                  Notes for {concept.title}
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-600">
+                  Capture takeaways while the tutor conversation stays open.
+                </p>
+              </div>
+              <span className="rounded-full border border-blue-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+                {notes.length} note{notes.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <form onSubmit={createNewNote} className="mt-3 grid gap-2">
+              <input
+                type="text"
+                aria-label="Note title"
+                value={draftTitle}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                placeholder="Optional title"
+                className="h-9 rounded-2xl border border-blue-100 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              />
+              <textarea
+                aria-label="Note body"
+                value={draftBody}
+                onChange={(event) => setDraftBody(event.target.value)}
+                placeholder="Write a note, summary, question, or next step..."
+                className="min-h-28 resize-y rounded-2xl border border-blue-100 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              />
+              {saveError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                  {saveError}
+                </div>
+              ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs text-slate-500">
+                  Saved to this Trail and concept.
+                </span>
+                <button
+                  type="submit"
+                  disabled={!draftBody.trim() || saving}
+                  className="rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {saving ? "Saving..." : "Save note"}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          {status === "loading" ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+              Loading notes...
+            </div>
+          ) : null}
+
+          {status === "error" ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              <div>{loadError || "Notes unavailable"}</div>
+              <button
+                type="button"
+                onClick={() => setLoadKey((current) => current + 1)}
+                className="mt-3 rounded-full border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+              >
+                Retry notes
+              </button>
+            </div>
+          ) : null}
+
+          {status === "ready" && notes.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white/80 p-5 text-center shadow-sm">
+              <div className="text-sm font-semibold text-slate-900">
+                No notes yet
+              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                Save one key insight, misconception, or follow-up question from
+                this tutor session.
+              </p>
+            </div>
+          ) : null}
+
+          {status === "ready" && notes.length > 0 ? (
+            <div className="grid gap-3">
+              {notes.map((note) => (
+                <NoteCard
+                  key={note.id}
+                  note={note}
+                  onUpdate={updateExistingNote}
+                  onDelete={deleteExistingNote}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoteCard({
+  note,
+  onUpdate,
+  onDelete,
+}: {
+  note: Note;
+  onUpdate: (
+    noteId: string,
+    next: { title: string | null; body: string },
+  ) => Promise<void>;
+  onDelete: (noteId: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(note.title ?? "");
+  const [body, setBody] = useState(note.body);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submitUpdate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextBody = body.trim();
+    if (!nextBody || busy) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    try {
+      await onUpdate(note.id, {
+        title: title.trim() || null,
+        body: nextBody,
+      });
+      setEditing(false);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not update note");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteNoteCard = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onDelete(note.id);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not delete note");
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <form
+        onSubmit={submitUpdate}
+        className="rounded-3xl border border-blue-100 bg-white p-3 shadow-sm"
+      >
+        <input
+          type="text"
+          aria-label="Edit note title"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="Optional title"
+          className="h-9 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+        />
+        <textarea
+          aria-label="Edit note body"
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          className="mt-2 min-h-32 w-full resize-y rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+        />
+        {error ? (
+          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {error}
+          </div>
+        ) : null}
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">
+            Updated {formatNoteTimestamp(note.updated_at)}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setTitle(note.title ?? "");
+                setBody(note.body);
+                setError("");
+                setEditing(false);
+              }}
+              disabled={busy}
+              className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!body.trim() || busy}
+              className="rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {busy ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <article className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-slate-950">
+            {noteDisplayTitle(note)}
+          </h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Updated {formatNoteTimestamp(note.updated_at)}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              setTitle(note.title ?? "");
+              setBody(note.body);
+              setError("");
+              setEditing(true);
+            }}
+            className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={deleteNoteCard}
+            disabled={busy}
+            className="rounded-full border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            {busy ? "Deleting..." : "Delete"}
+          </button>
+        </div>
+      </div>
+      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+        {note.body}
+      </p>
+      {error ? (
+        <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          {error}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function sortNotesNewestFirst(notes: Note[]): Note[] {
+  return [...notes].sort(
+    (left, right) => noteTimestamp(right) - noteTimestamp(left),
+  );
+}
+
+function noteTimestamp(note: Note): number {
+  const timestamp = Date.parse(note.updated_at || note.created_at);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function noteDisplayTitle(note: Note): string {
+  const explicit = note.title?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const firstLine = note.body
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  return firstLine || `Note from ${formatNoteTimestamp(note.created_at)}`;
+}
+
+function formatNoteTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "recently";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function TutorThread({
@@ -558,7 +1182,8 @@ function TutorThread({
         autoScroll
         scrollToBottomOnRunStart
         scrollToBottomOnInitialize
-        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5"
+        data-testid="tutor-thread-viewport"
+        className="relative flex min-h-0 flex-1 touch-pan-y flex-col overflow-y-auto overscroll-y-contain px-4 pb-4 pt-5 [-webkit-overflow-scrolling:touch]"
       >
         {messageCount === 0 ? (
           <WelcomeSuggestions sampleQuestions={sampleQuestions} />
@@ -574,37 +1199,30 @@ function TutorThread({
             )}
           </ThreadPrimitive.Messages>
         </div>
-        <ThreadPrimitive.ScrollToBottom className="sticky bottom-24 ml-auto mt-3 grid size-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 disabled:hidden">
+        <ThreadPrimitive.ScrollToBottom className="sticky bottom-28 z-10 ml-auto mt-3 grid size-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 disabled:hidden">
           <ArrowDownIcon className="size-4" />
         </ThreadPrimitive.ScrollToBottom>
-        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto pt-4">
-          <div className="bg-linear-to-t from-slate-50 via-slate-50 to-transparent pb-3 pt-6">
-            <ComposerPrimitive.Root className="rounded-3xl border border-slate-200 bg-white p-2 shadow-lg shadow-slate-200/70">
-              <ComposerPrimitive.Input
-                aria-label="Message tutor"
-                placeholder="Ask for a hint, test an idea, or explain your thinking..."
-                submitMode="enter"
-                className="max-h-36 min-h-11 w-full resize-none bg-transparent px-3 pb-2 pt-2 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 disabled:text-slate-400"
-              />
-              <div className="flex items-center justify-between gap-2 px-1 pb-1">
-                <span className="hidden pl-2 text-[11px] text-slate-400 sm:inline">
-                  Enter to send, Shift+Enter for a new line
-                </span>
-                {isRunning ? (
-                  <ComposerPrimitive.Cancel className="h-9 rounded-full border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-                    Stop
-                  </ComposerPrimitive.Cancel>
-                ) : (
-                  <ComposerPrimitive.Send
-                    aria-label="Send"
-                    className="grid size-9 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    <ArrowUpIcon className="size-4" />
-                  </ComposerPrimitive.Send>
-                )}
-              </div>
-            </ComposerPrimitive.Root>
-          </div>
+        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 mt-4 -mx-4 border-t border-slate-200 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+4rem+0.75rem)] pt-3 md:pb-3">
+          <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+            <ComposerPrimitive.Input
+              aria-label="Message tutor"
+              placeholder="Ask for a hint, test an idea, or explain your thinking..."
+              submitMode="enter"
+              className="max-h-36 min-h-[2.75rem] flex-1 resize-none bg-transparent text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 disabled:text-slate-400"
+            />
+            {isRunning ? (
+              <ComposerPrimitive.Cancel className="mb-0.5 h-9 shrink-0 rounded-full border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                Stop
+              </ComposerPrimitive.Cancel>
+            ) : (
+              <ComposerPrimitive.Send
+                aria-label="Send"
+                className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                <ArrowUpIcon className="size-4" />
+              </ComposerPrimitive.Send>
+            )}
+          </ComposerPrimitive.Root>
         </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
     </ThreadPrimitive.Root>
@@ -1175,33 +1793,202 @@ function ThreadSwitcher({
   threads,
   selectedThreadId,
   onSelectThread,
+  onRenameThread,
+  onDeleteThread,
 }: {
   threads: ConversationThreadSummary[];
   selectedThreadId: string | null;
   onSelectThread?: (threadId: string) => void;
+  onRenameThread?: (threadId: string, title: string) => Promise<void>;
+  onDeleteThread?: (threadId: string) => Promise<void>;
 }) {
+  const [menuThreadId, setMenuThreadId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [busyThreadId, setBusyThreadId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuThreadId) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      const button =
+        target instanceof Element
+          ? target.closest(`[data-thread-menu-button="${menuThreadId}"]`)
+          : null;
+      if (menuRef.current?.contains(target) || button) {
+        return;
+      }
+      setMenuThreadId(null);
+      setMenuPosition(null);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuThreadId(null);
+        setMenuPosition(null);
+      }
+    }
+
+    function handleViewportChange() {
+      setMenuThreadId(null);
+      setMenuPosition(null);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [menuThreadId]);
+
+  async function handleRename(thread: ConversationThreadSummary) {
+    if (!onRenameThread || busyThreadId) return;
+    const nextTitle = window.prompt("Rename thread", thread.title);
+    setMenuThreadId(null);
+    setMenuPosition(null);
+    if (nextTitle === null) return;
+    const title = nextTitle.trim();
+    if (!title) {
+      setActionError("Thread title cannot be blank.");
+      return;
+    }
+    setBusyThreadId(thread.id);
+    setActionError("");
+    try {
+      await onRenameThread(thread.id, title);
+    } catch (exc) {
+      setActionError(
+        exc instanceof Error ? exc.message : "Could not rename thread",
+      );
+    } finally {
+      setBusyThreadId(null);
+    }
+  }
+
+  async function handleDelete(thread: ConversationThreadSummary) {
+    if (!onDeleteThread || busyThreadId) return;
+    const confirmed = window.confirm(`Delete thread \"${thread.title}\"?`);
+    setMenuThreadId(null);
+    setMenuPosition(null);
+    if (!confirmed) return;
+    setBusyThreadId(thread.id);
+    setActionError("");
+    try {
+      await onDeleteThread(thread.id);
+    } catch (exc) {
+      setActionError(
+        exc instanceof Error ? exc.message : "Could not delete thread",
+      );
+    } finally {
+      setBusyThreadId(null);
+    }
+  }
+
+  const activeThread =
+    threads.find((thread) => thread.id === menuThreadId) ?? null;
+
   return (
-    <div
-      role="group"
-      aria-label="Conversation threads"
-      className="mt-2 flex min-w-0 gap-1 overflow-x-auto pb-0.5 app-scrollbar"
-    >
-      {threads.map((thread) => (
-        <button
-          key={thread.id}
-          type="button"
-          title={thread.preview ?? thread.title}
-          aria-pressed={selectedThreadId === thread.id}
-          onClick={() => onSelectThread?.(thread.id)}
-          className={`inline-flex h-8 max-w-48 shrink-0 items-center rounded-lg border px-3 text-xs font-medium transition ${
-            selectedThreadId === thread.id
-              ? "border-blue-200 bg-blue-50 text-blue-800 shadow-sm"
-              : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
-          }`}
-        >
-          <span className="truncate">{thread.title}</span>
-        </button>
-      ))}
+    <div className="min-w-0 flex-1">
+      <div
+        role="group"
+        aria-label="Conversation threads"
+        className="no-scrollbar flex min-w-0 gap-1 overflow-x-auto"
+      >
+        {threads.map((thread) => {
+          const selected = selectedThreadId === thread.id;
+          const menuOpen = menuThreadId === thread.id;
+          return (
+            <div
+              key={thread.id}
+              className={`relative inline-flex h-8 max-w-56 shrink-0 items-center rounded-lg border text-xs font-medium transition ${
+                selected
+                  ? "border-blue-200 bg-blue-50 text-blue-800 shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-white"
+              }`}
+            >
+              <button
+                type="button"
+                title={thread.preview ?? thread.title}
+                aria-pressed={selected}
+                onClick={() => onSelectThread?.(thread.id)}
+                className="min-w-0 flex-1 truncate px-3 text-left"
+              >
+                <span className="truncate">{thread.title}</span>
+              </button>
+              {onRenameThread || onDeleteThread ? (
+                <button
+                  type="button"
+                  data-thread-menu-button={thread.id}
+                  aria-label={`Thread actions for ${thread.title}`}
+                  aria-expanded={menuOpen}
+                  disabled={busyThreadId === thread.id}
+                  onClick={(event) => {
+                    if (menuOpen) {
+                      setMenuThreadId(null);
+                      setMenuPosition(null);
+                      return;
+                    }
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    setMenuThreadId(thread.id);
+                    setMenuPosition({
+                      top: rect.bottom + 4,
+                      left: Math.max(
+                        8,
+                        Math.min(rect.left, window.innerWidth - 144),
+                      ),
+                    });
+                  }}
+                  className="mr-1 grid size-6 shrink-0 place-items-center rounded-md text-slate-500 hover:bg-white hover:text-slate-900 disabled:opacity-50"
+                >
+                  <MoreHorizontalIcon className="size-3" aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {activeThread && menuPosition
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className="fixed z-[9999] grid min-w-32 gap-1 rounded-xl border border-slate-200 bg-white p-1.5 text-xs text-slate-700 shadow-xl ring-1 ring-slate-950/5"
+              style={{ top: menuPosition.top, left: menuPosition.left }}
+            >
+              {onRenameThread ? (
+                <button
+                  type="button"
+                  onClick={() => void handleRename(activeThread)}
+                  className="rounded-lg px-2 py-1.5 text-left hover:bg-slate-50"
+                >
+                  Rename
+                </button>
+              ) : null}
+              {onDeleteThread ? (
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(activeThread)}
+                  className="rounded-lg px-2 py-1.5 text-left text-red-600 hover:bg-red-50"
+                >
+                  Delete
+                </button>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
+      {actionError ? (
+        <p className="mt-1 text-xs text-red-600">{actionError}</p>
+      ) : null}
     </div>
   );
 }

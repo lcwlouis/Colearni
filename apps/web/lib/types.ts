@@ -1,3 +1,5 @@
+import type { ArtifactKind } from "@/lib/artifacts";
+
 export type BloomLevel =
   | "remember"
   | "understand"
@@ -278,13 +280,25 @@ export interface TutorToolEvent {
 }
 
 export interface ConversationReasoningPart {
-  kind: "status" | "thinking" | "tool_call" | "tool_result";
+  kind:
+    | "status"
+    | "thinking"
+    | "tool_call"
+    | "tool_result"
+    | "suggest_quiz"
+    | "suggest_flashcards"
+    | "suggest_artifact";
   status?: TutorStreamStatus | null;
   text?: string | null;
   name?: string | null;
   mode?: TutorMode | null;
   query?: string | null;
   result?: string | null;
+  // Only populated for the `suggest_quiz` kind.
+  quiz_type?: "level_up" | "practice";
+  reason?: string;
+  // Only populated for the `suggest_artifact` kind.
+  artifact_kind?: ArtifactKind;
 }
 
 export interface ConversationMessage {
@@ -302,6 +316,19 @@ export interface ConversationHistoryResponse {
   messages: ConversationMessage[];
 }
 
+export interface ConversationThreadSummary {
+  id: string;
+  title: string;
+  preview: string | null;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationThreadListResponse {
+  conversations: ConversationThreadSummary[];
+}
+
 export interface TrailGenerateRequest {
   topic: string;
   goal: string;
@@ -313,4 +340,149 @@ export interface TrailGenerateRequest {
 export interface TrailGenerateResponse {
   trail: Trail;
   graph: TrailGraph;
+}
+
+// --- Flashcards (Phase 15c) ---------------------------------------------------
+// Mirror backend.app.schemas.flashcard read schemas. A deck is concept-scoped
+// (one per concept) and owns its scheduling state per card (Leitner boxes).
+
+export type FlashcardType = "basic" | "cloze" | "reverse";
+
+export interface Flashcard {
+  id: string;
+  deck_id: string;
+  front: string;
+  back: string;
+  hint?: string | null;
+  source_ref?: string | null;
+  card_type: FlashcardType;
+  box: number;
+  interval_days: number;
+  last_reviewed: string | null;
+  due: string | null;
+  reps: number;
+  lapses: number;
+  created_at: string;
+}
+
+export interface FlashcardDeck {
+  id: string;
+  workspace_id: string;
+  trail_id: string;
+  concept_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  cards: Flashcard[];
+}
+
+export interface FlashcardGenerateRequest {
+  // Append new, non-duplicate cards to the existing deck.
+  extend?: boolean;
+  // Regenerate the deck from scratch (drops existing cards).
+  force?: boolean;
+}
+
+export interface FlashcardGenerateResponse {
+  deck: FlashcardDeck;
+  // True when the generator declined to add more useful cards.
+  exhausted: boolean;
+  // Short human-readable explanation when `exhausted` is true.
+  reason: string;
+}
+
+// --- Notes --------------------------------------------------------------------
+// Mirror backend.app.schemas.note read/request schemas. A note is workspace +
+// trail scoped and optionally pinned to a concept. `body` is free-form markdown;
+// `title` is an optional short label. Notes are private workspace content.
+
+export interface Note {
+  id: string;
+  workspace_id: string;
+  trail_id: string;
+  concept_id: string | null;
+  title: string | null;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NoteListResponse {
+  notes: Note[];
+}
+
+export interface NoteCreateRequest {
+  body: string;
+  title?: string | null;
+  concept_id?: string | null;
+}
+
+export interface NoteUpdateRequest {
+  // Both optional; send only the fields you want to change. `title: null`
+  // clears the title. `body`, when present, must be non-empty.
+  title?: string | null;
+  body?: string;
+}
+
+// --- Workspace-level aggregates -----------------------------------------------
+
+export interface WorkspaceQuizAttemptItem {
+  id: string;
+  concept_id: string;
+  concept_title: string;
+  trail_id: string;
+  trail_title: string;
+  quiz_type: "level_up" | "practice";
+  passed: boolean;
+  score: number;
+  evaluator_feedback: string;
+  created_at: string;
+}
+
+export interface WorkspaceQuizAttemptsResponse {
+  attempts: WorkspaceQuizAttemptItem[];
+}
+
+export interface SourceConceptLink {
+  concept_id: string;
+  concept_title: string;
+  trail_id: string;
+  trail_title: string;
+  relation: string;
+}
+
+export interface WorkspaceSourceItem {
+  id: string;
+  workspace_id: string;
+  origin: string;
+  access: string;
+  title: string;
+  url: string | null;
+  license: string | null;
+  include_on_public_export: boolean;
+  metadata_json: Record<string, unknown>;
+  linked_concepts: SourceConceptLink[];
+}
+
+export interface WorkspaceSourcesResponse {
+  sources: WorkspaceSourceItem[];
+}
+
+export interface ConceptMasteryItem {
+  concept_id: string;
+  concept_title: string;
+  status: MasteryStatus;
+  score: number;
+  bloom_level: BloomLevel;
+}
+
+export interface TrailProgressItem {
+  trail_id: string;
+  trail_title: string;
+  mastery_summary: MasterySummary;
+  concepts: ConceptMasteryItem[];
+}
+
+export interface WorkspaceProgressResponse {
+  trails: TrailProgressItem[];
 }

@@ -118,13 +118,14 @@ export function TrailGraph({
   recommendedConceptId,
   onMasteryUpdated,
 }: TrailGraphProps) {
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [mode, setMode] = useState<GraphMode>("learn");
   const [query, setQuery] = useState("");
   const [visibleLevels, setVisibleLevels] = useState<Set<ConceptLevel>>(
     () => new Set(levels),
   );
   const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("freeform");
-  const [toolsExpanded, setToolsExpanded] = useState(true);
+  const [toolsExpanded, setToolsExpanded] = useState(false);
   const [legendExpanded, setLegendExpanded] = useState(false);
   const [neighborsOnly, setNeighborsOnly] = useState(false);
   const [showEdgeLabels, setShowEdgeLabels] = useState(true);
@@ -133,6 +134,7 @@ export function TrailGraph({
   const [positions, setPositions] = useState<Map<string, GraphPosition>>(
     new Map(),
   );
+  const [focusRevision, setFocusRevision] = useState(0);
   const [flow, setFlow] = useState<ReactFlowInstance | null>(null);
   const [detail, setDetail] = useState<ConceptDetail | null>(null);
   const [panelError, setPanelError] = useState("");
@@ -146,6 +148,10 @@ export function TrailGraph({
   const viewportRef = useRef<GraphViewport | null>(null);
   const overviewViewportRef = useRef<GraphViewport | null>(null);
   const pendingViewportTransitionRef = useRef<ViewportTransition | null>(null);
+  const pendingFocusRef = useRef<{
+    conceptId: string;
+    zoom: number;
+  } | null>(null);
   const wasDetailOpenRef = useRef(false);
   const conceptLoadRequestRef = useRef(0);
 
@@ -187,6 +193,9 @@ export function TrailGraph({
   const effectiveNeighborsOnly =
     neighborsOnly || (isLearnMode && Boolean(selectedNodeId));
   const effectiveShowEdgeLabels = showEdgeLabels && edgeLabelsZoomedIn;
+  const mobileCardHeightPx = 104;
+  const controlsBottomOffset =
+    isMobileViewport && detail ? mobileCardHeightPx + 16 : 16;
 
   const visibleNodeIds = useMemo(() => {
     const levelVisible = new Set(
@@ -263,18 +272,10 @@ export function TrailGraph({
     [effectiveShowEdgeLabels, focusSet, graph.edges, visibleNodeIds],
   );
 
-  const focusConceptInView = useCallback(
-    (conceptId: string, zoom: number) => {
-      const point = computedPositions.get(conceptId);
-      if (point) {
-        void flow?.setCenter(point.x + 110, point.y + 46, {
-          zoom,
-          duration: 220,
-        });
-      }
-    },
-    [computedPositions, flow],
-  );
+  const queueFocusConcept = useCallback((conceptId: string, zoom: number) => {
+    pendingFocusRef.current = { conceptId, zoom };
+    setFocusRevision((current) => current + 1);
+  }, []);
 
   const updateEdgeLabelZoom = useCallback((zoom: number) => {
     const next = zoom >= EDGE_LABEL_MIN_ZOOM;
@@ -324,7 +325,7 @@ export function TrailGraph({
 
     if (selectedNodeId) {
       if (layoutChanged || modeChanged) {
-        focusConceptInView(
+        queueFocusConcept(
           selectedNodeId,
           window.innerWidth < 768
             ? READABLE_FOCUS_ZOOM_MOBILE
@@ -352,7 +353,7 @@ export function TrailGraph({
     selectedNodeId,
     computedPositions,
     fitVisibleGraph,
-    focusConceptInView,
+    queueFocusConcept,
   ]);
 
   async function openConcept(
@@ -394,12 +395,7 @@ export function TrailGraph({
       const nextZoom = options?.focusViewport
         ? readableZoom
         : Math.max(currentZoom, readableZoom);
-      window.requestAnimationFrame(() => {
-        if (requestId !== conceptLoadRequestRef.current) {
-          return;
-        }
-        focusConceptInView(conceptId, nextZoom);
-      });
+      queueFocusConcept(conceptId, nextZoom);
     } catch (exc) {
       if (requestId !== conceptLoadRequestRef.current) {
         return;
@@ -474,6 +470,7 @@ export function TrailGraph({
 
   function clearSelection() {
     conceptLoadRequestRef.current += 1;
+    pendingFocusRef.current = null;
     if (detail && overviewViewportRef.current) {
       pendingViewportTransitionRef.current = {
         type: "close",
@@ -523,7 +520,7 @@ export function TrailGraph({
     }
     setSelectedNodeId(match.id);
     setDetail(null);
-    focusConceptInView(match.id, 0.95);
+    queueFocusConcept(match.id, READABLE_FOCUS_ZOOM);
   }
 
   function toggleLevel(level: ConceptLevel) {
@@ -547,7 +544,7 @@ export function TrailGraph({
       fitVisibleGraph(0.24);
       return;
     }
-    focusConceptInView(selectedNodeId, READABLE_FOCUS_ZOOM);
+    queueFocusConcept(selectedNodeId, READABLE_FOCUS_ZOOM);
   }
 
   function changeLayoutMode(mode: GraphLayoutMode) {
@@ -566,6 +563,32 @@ export function TrailGraph({
         .then(() => handleViewportChange(instance.getViewport()));
     });
   }
+
+  useEffect(() => {
+    if (!flow || !selectedNodeId) {
+      return;
+    }
+    const pending = pendingFocusRef.current;
+    if (!pending || pending.conceptId !== selectedNodeId) {
+      return;
+    }
+    const point = computedPositions.get(pending.conceptId);
+    if (!point) {
+      return;
+    }
+    pendingFocusRef.current = null;
+    window.requestAnimationFrame(() => {
+      void flow
+        .setCenter(point.x + 110, point.y + 46, {
+          zoom: pending.zoom,
+          duration: 220,
+        })
+        .then(() => {
+          viewportRef.current = flow.getViewport();
+          updateEdgeLabelZoom(flow.getZoom());
+        });
+    });
+  }, [computedPositions, flow, focusRevision, selectedNodeId, updateEdgeLabelZoom]);
 
   useEffect(() => {
     if (!flow) {
@@ -595,8 +618,19 @@ export function TrailGraph({
   }, [detail, flow, handleViewportChange]);
 
   const controlsWidthClass = detail
-    ? "w-[min(94vw,720px)] md:w-[min(54vw,600px)] lg:w-[min(50vw,660px)]"
-    : "w-[min(94vw,720px)] md:w-[min(70vw,760px)] lg:w-[min(58vw,780px)]";
+    ? "w-[min(94vw,680px)] md:w-[min(52vw,580px)] lg:w-[min(48vw,620px)]"
+    : "w-[min(94vw,680px)] md:w-[min(66vw,720px)] lg:w-[min(54vw,720px)]";
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsMobileViewport(event.matches);
+    };
+
+    setIsMobileViewport(mediaQuery.matches);
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
 
   return (
     <section className="relative flex min-h-0 flex-1">
@@ -621,7 +655,13 @@ export function TrailGraph({
       </style>
       <div
         ref={graphFrameRef}
-        className="h-full w-full md:min-w-0 md:flex-1"
+        data-testid="trail-graph-frame"
+        className="w-full md:min-w-0 md:flex-1"
+        style={
+          isMobileViewport && detail
+            ? { height: `calc(100% - ${mobileCardHeightPx}px)` }
+            : { height: "100%" }
+        }
         onClickCapture={handleGraphSurfaceClick}
       >
         <ReactFlow
@@ -654,11 +694,28 @@ export function TrailGraph({
               style={{ bottom: 16, left: 76, height: 118, width: 180 }}
             />
           )}
-          <Controls position="bottom-left" style={{ bottom: 16, left: 12 }} />
+          <Controls
+            position="bottom-left"
+            style={{ bottom: controlsBottomOffset, left: 12 }}
+          />
           <Panel position="top-left">
             <div
-              className={`flex ${controlsWidthClass} flex-col gap-2 rounded-md border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur md:gap-3 md:p-3`}
+              className={`flex ${controlsWidthClass} flex-col gap-2 rounded-md border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur md:gap-2.5 md:p-3`}
             >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                    Trail graph
+                  </p>
+                  <h1 className="truncate text-sm font-semibold text-slate-950 md:text-base">
+                    {trail.title}
+                  </h1>
+                </div>
+                <div className="shrink-0 text-right text-[11px] text-slate-500">
+                  <div>{graph.nodes.length} concepts</div>
+                  <div>{masterySummary.mastered} mastered</div>
+                </div>
+              </div>
               <div className="flex gap-2 md:items-center">
                 <input
                   value={query}
@@ -688,35 +745,35 @@ export function TrailGraph({
                   ))}
                 </div>
               </div>
-              {/* Inspect-only toggles live on their own row so the mode toggle
-                  above keeps a fixed position when these appear/disappear. */}
-              {!isLearnMode ? (
-                <div className="flex flex-wrap gap-2">
-                  <ToolbarButton
-                    icon={<SlidersHorizontal size={15} />}
-                    label="Tools"
-                    onClick={() => setToolsExpanded((current) => !current)}
-                    active={toolsExpanded}
-                  />
-                  <ToolbarButton
-                    icon={<MapIcon size={15} />}
-                    label="Legend"
-                    onClick={() => setLegendExpanded((current) => !current)}
-                    active={legendExpanded}
-                  />
-                </div>
-              ) : null}
-              {selectedNode ? (
-                <p className="text-xs font-medium text-blue-800">
-                  Selected: {selectedNode.title}
-                </p>
-              ) : (
-                <p className="text-xs text-slate-500">
-                  {isLearnMode
-                    ? "Tap a concept to see what it is and what to do next."
-                    : "Select a node to highlight its connections."}
-                </p>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {selectedNode ? (
+                  <p className="text-xs font-medium text-blue-800">
+                    Selected: {selectedNode.title}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    {isLearnMode
+                      ? "Tap a concept to see what it is and what to do next."
+                      : "Select a node to highlight its connections."}
+                  </p>
+                )}
+                {!isLearnMode ? (
+                  <>
+                    <ToolbarButton
+                      icon={<SlidersHorizontal size={15} />}
+                      label="Tools"
+                      onClick={() => setToolsExpanded((current) => !current)}
+                      active={toolsExpanded}
+                    />
+                    <ToolbarButton
+                      icon={<MapIcon size={15} />}
+                      label="Legend"
+                      onClick={() => setLegendExpanded((current) => !current)}
+                      active={legendExpanded}
+                    />
+                  </>
+                ) : null}
+              </div>
               {!isLearnMode && legendExpanded ? (
                 <div>
                   <GraphLegendContent compact={false} />

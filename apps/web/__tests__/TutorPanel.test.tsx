@@ -8,10 +8,11 @@ import {
 } from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { TutorPanel } from "@/app/trails/[id]/components/TutorPanel";
+import { TutorPanel } from "@/app/(app)/trails/[id]/components/TutorPanel";
 import type {
   ConceptNode,
   ConversationHistoryResponse,
+  Note,
   SourceRecord,
 } from "@/lib/types";
 
@@ -38,6 +39,14 @@ const MockMessageContext = createContext<MockMessage | null>(null);
 
 vi.mock("@/lib/api", () => ({
   getConversation: vi.fn(),
+  listConversationThreads: vi.fn(),
+  createConversationThread: vi.fn(),
+  updateConversationThread: vi.fn(),
+  deleteConversationThread: vi.fn(),
+  listNotes: vi.fn(),
+  createNote: vi.fn(),
+  updateNote: vi.fn(),
+  deleteNote: vi.fn(),
 }));
 
 vi.mock("@/lib/tutor-runtime", () => ({
@@ -193,6 +202,13 @@ vi.mock("@assistant-ui/react", () => ({
             ].includes(part.name)),
       );
       const textParts = message.content.filter((part) => part.type === "text");
+      const ungroupedDataParts = message.content.filter(
+        (part) =>
+          part.type === "data" &&
+          (part.name === "tutor-suggest-quiz" ||
+            part.name === "tutor-suggest-flashcards" ||
+            part.name === "tutor-suggest-artifact"),
+      );
       const rendered: ReactNode[] = [];
 
       if (reasoningParts.length > 0) {
@@ -219,6 +235,14 @@ vi.mock("@assistant-ui/react", () => ({
       textParts.forEach((part, index) => {
         rendered.push(
           <PartScope key={`text-${index}`} part={part}>
+            {children({ part, children: null })}
+          </PartScope>,
+        );
+      });
+
+      ungroupedDataParts.forEach((part, index) => {
+        rendered.push(
+          <PartScope key={`data-${index}`} part={part}>
             {children({ part, children: null })}
           </PartScope>,
         );
@@ -319,9 +343,16 @@ vi.mock("@assistant-ui/react", () => ({
   useScrollLock: vi.fn(() => vi.fn()),
 }));
 
-const getConversationMock = vi.mocked(
-  await import("@/lib/api"),
-).getConversation;
+const apiMocks = vi.mocked(await import("@/lib/api"));
+const getConversationMock = apiMocks.getConversation;
+const listConversationThreadsMock = apiMocks.listConversationThreads;
+const createConversationThreadMock = apiMocks.createConversationThread;
+const updateConversationThreadMock = apiMocks.updateConversationThread;
+const deleteConversationThreadMock = apiMocks.deleteConversationThread;
+const listNotesMock = apiMocks.listNotes;
+const createNoteMock = apiMocks.createNote;
+const updateNoteMock = apiMocks.updateNote;
+const deleteNoteMock = apiMocks.deleteNote;
 
 interface MockMessage {
   id: string;
@@ -365,18 +396,107 @@ describe("TutorPanel", () => {
     editSetRunConfigMock.mockClear();
     editSendMock.mockClear();
     getConversationMock.mockResolvedValue(emptyHistory);
+    listConversationThreadsMock.mockResolvedValue({ conversations: [] });
+    createConversationThreadMock.mockResolvedValue({
+      id: "conversation-new",
+      title: "New thread",
+      preview: null,
+      message_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+    updateConversationThreadMock.mockImplementation(
+      async (_workspaceId, _trailId, _conceptId, conversationId, title) => ({
+        id: conversationId,
+        title,
+        preview: null,
+        message_count: 2,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      }),
+    );
+    deleteConversationThreadMock.mockResolvedValue(undefined);
+    listNotesMock.mockResolvedValue([]);
+    createNoteMock.mockResolvedValue({
+      ...note,
+      id: "note-new",
+      title: "New note",
+      body: "Remember bases.",
+      created_at: "2026-01-03T00:00:00Z",
+      updated_at: "2026-01-03T00:00:00Z",
+    });
+    updateNoteMock.mockImplementation(
+      async (_workspaceId, _trailId, noteId, body) => ({
+        ...note,
+        id: noteId,
+        title: body.title ?? null,
+        body: body.body ?? note.body,
+        updated_at: "2026-01-04T00:00:00Z",
+      }),
+    );
+    deleteNoteMock.mockResolvedValue(undefined);
   });
 
-  test("renders concept title and context", async () => {
+  test("renders a compact tutor header and context menu metadata", async () => {
     renderPanel();
 
     await screen.findByText("waiting");
-    expect(screen.getByText("Vectors")).toBeInTheDocument();
+    expect(screen.queryByText("Learning thread")).not.toBeInTheDocument();
+    expect(screen.getByText("Tutor workspace")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Tutor workspace" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Start a conversation for this concept."),
+    ).toBeInTheDocument();
     await userEvent.click(
-      screen.getByRole("button", { name: "Thread options" }),
+      screen.getByRole("button", { name: "Conversation settings" }),
     );
     expect(screen.getByText("Level: Topic")).toBeInTheDocument();
     expect(screen.getByText("Bloom: Understand")).toBeInTheDocument();
+  });
+
+  test("uses mobile-safe shell and full-width tutor tabs", async () => {
+    renderPanel();
+
+    const heading = await screen.findByRole("heading", { name: "Tutor workspace" });
+    const shell = heading.closest("section");
+    expect(shell).toHaveClass("min-h-0");
+    expect(shell).not.toHaveClass("min-h-130");
+
+    const tablist = screen.getByRole("tablist", { name: "Tutor panel sections" });
+    expect(tablist).toHaveClass("w-full");
+    expect(screen.getByRole("tab", { name: "Tutor" })).toHaveClass("flex-1");
+    expect(screen.getByRole("tab", { name: "Notes" })).toHaveClass("flex-1");
+    const viewport = document.querySelector("div.touch-pan-y");
+    expect(viewport).not.toBeNull();
+    expect(viewport).toHaveClass(
+      "overflow-y-auto",
+      "touch-pan-y",
+      "overscroll-y-contain",
+    );
+    const footer = viewport?.querySelector(".sticky.bottom-0");
+    expect(footer).toHaveClass("z-20", "border-t", "bg-white");
+    expect(screen.getByLabelText("Message tutor").closest("form")).toHaveClass(
+      "rounded-2xl",
+      "shadow-sm",
+    );
+  });
+
+  test("conversation settings menu closes on outside click", async () => {
+    renderPanel();
+
+    await screen.findByText("waiting");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Conversation settings" }),
+    );
+    expect(screen.getByText("Level: Topic")).toBeInTheDocument();
+
+    await userEvent.click(document.body);
+
+    await waitFor(() => {
+      expect(screen.queryByText("Level: Topic")).not.toBeInTheDocument();
+    });
   });
 
   test("mode badge updates when runtime reports mode", async () => {
@@ -805,25 +925,431 @@ describe("TutorPanel", () => {
     expect(await screen.findByText("Generation failed")).toBeInTheDocument();
   });
 
-  test("quiz prompt placeholder appears in quiz_prompt mode", async () => {
-    renderPanel();
+  test("quiz prompt banner offers a direct level-up CTA in quiz_prompt mode", async () => {
+    const onSuggestQuiz = vi.fn();
+    render(
+      <TutorPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        concept={concept}
+        onSuggestQuiz={onSuggestQuiz}
+      />,
+    );
     await screen.findByText("waiting");
 
     act(() => {
       runtimeOptions?.onMode("quiz_prompt");
     });
 
+    const cta = await screen.findByRole("button", {
+      name: "Start level-up quiz",
+    });
+    await userEvent.click(cta);
+    expect(onSuggestQuiz).toHaveBeenCalledWith("level_up");
+  });
+
+  test("renders the suggested quiz CTA and opens the quiz on click", async () => {
+    const onSuggestQuiz = vi.fn();
+    mockMessages = [
+      {
+        id: "assistant-cta",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-suggest-quiz",
+            data: {
+              quizType: "level_up",
+              reason: "You're close to mastering this.",
+            },
+          },
+          { type: "text", text: "Great progress so far." },
+        ],
+        status: { type: "complete" },
+      },
+    ];
+
+    render(
+      <TutorPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        concept={concept}
+        onSuggestQuiz={onSuggestQuiz}
+      />,
+    );
+
+    const cta = await screen.findByRole("button", {
+      name: "Take level-up quiz",
+    });
     expect(
-      await screen.findByText(
-        "Ready to level up? Go back to the concept details and use the Level Up button.",
-      ),
+      screen.getByText("You're close to mastering this."),
     ).toBeInTheDocument();
+
+    await userEvent.click(cta);
+    expect(onSuggestQuiz).toHaveBeenCalledWith("level_up");
+  });
+
+  test("renders the suggested flashcards CTA and opens flashcards on click", async () => {
+    const onSuggestFlashcards = vi.fn();
+    mockMessages = [
+      {
+        id: "assistant-flashcards-cta",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-suggest-flashcards",
+            data: {
+              reason: "A quick recall deck would help cement this.",
+            },
+          },
+          {
+            type: "text",
+            text: "Let's turn the key ideas into recall prompts.",
+          },
+        ],
+        status: { type: "complete" },
+      },
+    ];
+
+    render(
+      <TutorPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        concept={concept}
+        onSuggestFlashcards={onSuggestFlashcards}
+      />,
+    );
+
+    const cta = await screen.findByRole("button", {
+      name: "Generate flashcards",
+    });
+    expect(
+      screen.getByText("A quick recall deck would help cement this."),
+    ).toBeInTheDocument();
+
+    await userEvent.click(cta);
+    expect(onSuggestFlashcards).toHaveBeenCalledTimes(1);
+  });
+
+  test("renders the suggested artifact CTA and opens the build on click", async () => {
+    const onSuggestArtifact = vi.fn();
+    mockMessages = [
+      {
+        id: "assistant-artifact-cta",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-suggest-artifact",
+            data: {
+              artifactKind: "timeline",
+              reason: "A timeline would tie these steps together.",
+            },
+          },
+          { type: "text", text: "Here is the sequence so far." },
+        ],
+        status: { type: "complete" },
+      },
+    ];
+
+    render(
+      <TutorPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        concept={concept}
+        onSuggestArtifact={onSuggestArtifact}
+      />,
+    );
+
+    const cta = await screen.findByRole("button", {
+      name: "Build timeline",
+    });
+    expect(
+      screen.getByText("A timeline would tie these steps together."),
+    ).toBeInTheDocument();
+
+    await userEvent.click(cta);
+    expect(onSuggestArtifact).toHaveBeenCalledWith("timeline");
+  });
+
+  test("loads and switches between saved conversation threads", async () => {
+    listConversationThreadsMock.mockResolvedValue({
+      conversations: [
+        {
+          id: "conversation-2",
+          title: "Second thread",
+          preview: "Recent answer",
+          message_count: 2,
+          created_at: "2026-01-02T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+        {
+          id: "conversation-1",
+          title: "First thread",
+          preview: "Older answer",
+          message_count: 2,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+
+    renderPanel();
+
+    await waitFor(() => {
+      expect(getConversationMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+        { conversationId: "conversation-2" },
+      );
+    });
+
+    await userEvent.click(
+      screen.getAllByRole("button", { name: /First thread/ })[0],
+    );
+
+    await waitFor(() => {
+      expect(getConversationMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+        { conversationId: "conversation-1" },
+      );
+    });
+  });
+
+  test("creates a fresh conversation thread from the thread switcher", async () => {
+    renderPanel();
+    await screen.findByText("waiting");
+
+    await userEvent.click(screen.getByRole("button", { name: "New thread" }));
+
+    expect(createConversationThreadMock).toHaveBeenCalledWith(
+      "workspace-1",
+      "trail-1",
+      "concept-1",
+    );
+    await waitFor(() => {
+      expect(getConversationMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+        { conversationId: "conversation-new" },
+      );
+    });
+  });
+
+  test("renames a thread from the thread chip actions", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("Renamed thread");
+    listConversationThreadsMock.mockResolvedValue({
+      conversations: [
+        {
+          id: "conversation-2",
+          title: "Second thread",
+          preview: "Recent answer",
+          message_count: 2,
+          created_at: "2026-01-02T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+      ],
+    });
+
+    renderPanel();
+
+    await screen.findByRole("button", {
+      name: /Thread actions for Second thread/,
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: /Thread actions for Second thread/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+
+    await waitFor(() => {
+      expect(updateConversationThreadMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+        "conversation-2",
+        "Renamed thread",
+      );
+    });
+    expect(
+      (await screen.findAllByRole("button", { name: /Renamed thread/ }))[0],
+    ).toBeInTheDocument();
+  });
+
+  test("thread actions menu closes on outside click", async () => {
+    listConversationThreadsMock.mockResolvedValue({
+      conversations: [
+        {
+          id: "conversation-2",
+          title: "Second thread",
+          preview: "Recent answer",
+          message_count: 2,
+          created_at: "2026-01-02T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+      ],
+    });
+
+    renderPanel();
+
+    await screen.findByRole("button", {
+      name: /Thread actions for Second thread/,
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: /Thread actions for Second thread/ }),
+    );
+    expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument();
+
+    await userEvent.click(document.body);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Rename" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  test("deletes the selected thread from the thread chip actions", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    listConversationThreadsMock.mockResolvedValue({
+      conversations: [
+        {
+          id: "conversation-2",
+          title: "Second thread",
+          preview: "Recent answer",
+          message_count: 2,
+          created_at: "2026-01-02T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
+        },
+        {
+          id: "conversation-1",
+          title: "First thread",
+          preview: "Older answer",
+          message_count: 2,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+
+    renderPanel();
+
+    await waitFor(() => {
+      expect(getConversationMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+        { conversationId: "conversation-2" },
+      );
+    });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Thread actions for Second thread/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(deleteConversationThreadMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+        "conversation-2",
+      );
+    });
+    await waitFor(() => {
+      expect(getConversationMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+        { conversationId: "conversation-1" },
+      );
+    });
+    expect(
+      screen.queryByRole("button", { name: /Second thread/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("notes tab loads, creates, edits, and deletes concept notes", async () => {
+    listNotesMock.mockResolvedValue([note]);
+
+    renderPanel();
+
+    await userEvent.click(await screen.findByRole("tab", { name: "Notes" }));
+
+    await waitFor(() => {
+      expect(listNotesMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "concept-1",
+      );
+    });
+    expect(await screen.findByText("Existing note")).toBeInTheDocument();
+    expect(
+      screen.getByText("Vectors have magnitude and direction."),
+    ).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByPlaceholderText("Optional title"),
+      "New note",
+    );
+    await userEvent.type(
+      screen.getByPlaceholderText(
+        "Write a note, summary, question, or next step...",
+      ),
+      "Remember bases.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save note" }));
+
+    await waitFor(() => {
+      expect(createNoteMock).toHaveBeenCalledWith("workspace-1", "trail-1", {
+        title: "New note",
+        body: "Remember bases.",
+        concept_id: "concept-1",
+      });
+    });
+    expect(await screen.findByText("New note")).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    const editTitle = screen.getByDisplayValue("New note");
+    const editBody = screen.getByDisplayValue("Remember bases.");
+    await userEvent.clear(editTitle);
+    await userEvent.type(editTitle, "Updated note");
+    await userEvent.clear(editBody);
+    await userEvent.type(editBody, "Updated body");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(updateNoteMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "note-new",
+        { title: "Updated note", body: "Updated body" },
+      );
+    });
+    expect(await screen.findByText("Updated note")).toBeInTheDocument();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+
+    await waitFor(() => {
+      expect(deleteNoteMock).toHaveBeenCalledWith(
+        "workspace-1",
+        "trail-1",
+        "note-new",
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Updated body")).not.toBeInTheDocument();
+    });
   });
 
   test("source chips render only when source metadata exists", async () => {
     const { rerender } = renderPanel();
 
-    await screen.findByText("Vectors");
+    await screen.findByText("waiting");
     expect(screen.queryByText("Sources available")).not.toBeInTheDocument();
 
     rerender(
@@ -836,7 +1362,7 @@ describe("TutorPanel", () => {
     );
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Thread options" }),
+      await screen.findByRole("button", { name: "Conversation settings" }),
     );
     expect(await screen.findByText("Sources available")).toBeInTheDocument();
     expect(
@@ -867,6 +1393,7 @@ describe("TutorPanel", () => {
         "workspace-1",
         "trail-1",
         "concept-1",
+        { conversationId: null },
       );
     });
     expect(await screen.findByText("Repair")).toBeInTheDocument();
@@ -969,4 +1496,15 @@ const source: SourceRecord = {
   license: null,
   include_on_public_export: true,
   metadata_json: {},
+};
+
+const note: Note = {
+  id: "note-1",
+  workspace_id: "workspace-1",
+  trail_id: "trail-1",
+  concept_id: "concept-1",
+  title: "Existing note",
+  body: "Vectors have magnitude and direction.",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-02T00:00:00Z",
 };

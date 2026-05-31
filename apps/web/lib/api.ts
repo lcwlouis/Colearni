@@ -1,3 +1,4 @@
+import type { ArtifactKind, ArtifactRead } from "@/lib/artifacts";
 import type {
   ConceptDetail,
   ConceptPrimerRead,
@@ -5,15 +6,30 @@ import type {
   ConceptSourceListItem,
   ConversationHistoryResponse,
   ConversationMessage,
+  ConversationThreadListResponse,
+  ConversationThreadSummary,
+  Flashcard,
+  FlashcardDeck,
+  FlashcardGenerateRequest,
+  FlashcardGenerateResponse,
   GradeResult,
   LevelUpCard,
   MasteryStatus,
   NextConceptResponse,
+  Note,
+  NoteCreateRequest,
+  NoteListResponse,
+  NoteUpdateRequest,
   QuizAnswer,
+  QuizAttempt,
   QuizAttemptListResponse,
   QuizGenerateRequest,
   QuizQuestion,
+  SourceRecord,
   SourceUploadResponse,
+  WorkspaceProgressResponse,
+  WorkspaceQuizAttemptsResponse,
+  WorkspaceSourcesResponse,
   TrailDetail,
   TrailGenerateRequest,
   TrailGenerateResponse,
@@ -27,6 +43,14 @@ import type {
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+export interface HealthResponse {
+  status: "ok";
+  version: string;
+  db: "ok" | "error";
+  llm_provider: string;
+  llm_model: string;
+}
+
 interface WorkspaceListResponse {
   workspaces: Workspace[];
 }
@@ -37,6 +61,26 @@ interface TrailListResponse {
 
 interface ConceptSourcesResponse {
   sources: ConceptSourceListItem[];
+}
+
+interface ArtifactListResponse {
+  artifacts: ArtifactRead[];
+}
+
+export type PinItemType = "artifact" | "quiz_attempt" | "flashcard" | "concept";
+
+export interface ConceptPinItem {
+  concept_id: string;
+  concept_title: string;
+  trail_id: string;
+  trail_title: string;
+}
+
+export interface PinListResponse {
+  artifacts: ArtifactRead[];
+  quiz_attempts: QuizAttempt[];
+  flashcards: FlashcardDeck[];
+  concepts: ConceptPinItem[];
 }
 
 interface ErrorEnvelope {
@@ -51,6 +95,9 @@ interface TutorStreamEvent {
     | "thinking"
     | "tool_call"
     | "tool_result"
+    | "suggest_quiz"
+    | "suggest_flashcards"
+    | "suggest_artifact"
     | "token"
     | "done"
     | "error";
@@ -60,6 +107,9 @@ interface TutorStreamEvent {
   name?: string;
   query?: string;
   result?: string;
+  quiz_type?: "level_up" | "practice";
+  artifact_kind?: ArtifactKind;
+  reason?: string;
   conversation_id?: string;
   message?: ConversationMessage | string;
   mastery_update?: { concept_id: string; status: MasteryStatus; score: number };
@@ -82,6 +132,15 @@ export interface StreamTutorChatOptions {
   onThinking?: (content: string) => void;
   onToolCall?: (tool: TutorToolEvent) => void;
   onToolResult?: (tool: TutorToolEvent) => void;
+  onSuggestQuiz?: (suggestion: {
+    quizType: "level_up" | "practice";
+    reason: string;
+  }) => void;
+  onSuggestFlashcards?: (suggestion: { reason: string }) => void;
+  onSuggestArtifact?: (suggestion: {
+    artifactKind: ArtifactKind;
+    reason: string;
+  }) => void;
   onToken: (content: string) => void;
   onDone: (conversationId: string, message: ConversationMessage) => void;
   onMasteryUpdated?: (
@@ -380,15 +439,386 @@ export async function getConceptSources(
   );
 }
 
-export async function getConversation(
+export async function listArtifacts(
+  workspaceId: string,
+  trailId: string,
+  conceptId?: string | null,
+): Promise<ArtifactListResponse> {
+  const query = conceptId ? `?concept_id=${encodeURIComponent(conceptId)}` : "";
+  return request<ArtifactListResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/artifacts${query}`,
+    { method: "GET" },
+  );
+}
+
+export async function getArtifact(
+  workspaceId: string,
+  trailId: string,
+  artifactId: string,
+): Promise<ArtifactRead> {
+  return request<ArtifactRead>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/artifacts/${artifactId}`,
+    { method: "GET" },
+  );
+}
+
+export async function buildArtifact(
+  workspaceId: string,
+  trailId: string,
+  body: { kind: ArtifactKind; conceptId?: string | null; forceNew?: boolean },
+): Promise<ArtifactRead> {
+  return request<ArtifactRead>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/artifacts/build`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        kind: body.kind,
+        concept_id: body.conceptId ?? null,
+        force_new: body.forceNew ?? false,
+      }),
+    },
+  );
+}
+
+export async function pinItem(
+  workspaceId: string,
+  trailId: string,
+  itemType: PinItemType,
+  itemId: string,
+): Promise<void> {
+  await request<unknown>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/pins`,
+    {
+      method: "POST",
+      body: JSON.stringify({ item_type: itemType, item_id: itemId }),
+    },
+  );
+}
+
+export async function unpinItem(
+  workspaceId: string,
+  trailId: string,
+  itemType: PinItemType,
+  itemId: string,
+): Promise<void> {
+  const query = new URLSearchParams({ item_type: itemType, item_id: itemId });
+  await request<unknown>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/pins?${query.toString()}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function listPins(
+  workspaceId: string,
+  trailId: string,
+): Promise<PinListResponse> {
+  return request<PinListResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/pins`,
+    { method: "GET" },
+  );
+}
+
+// --- Flashcards (Phase 15c) ---------------------------------------------------
+
+export async function getFlashcards(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+): Promise<FlashcardDeck> {
+  return request<FlashcardDeck>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/flashcards`,
+    { method: "GET" },
+  );
+}
+
+export async function generateFlashcards(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  body: FlashcardGenerateRequest = {},
+): Promise<FlashcardGenerateResponse> {
+  return request<FlashcardGenerateResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/flashcards/generate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        extend: body.extend ?? false,
+        force: body.force ?? false,
+      }),
+    },
+  );
+}
+
+export interface StreamGenerateFlashcardsCallbacks {
+  onStatus?: (status: "generating") => void;
+  onDone: (response: FlashcardGenerateResponse) => void;
+  onError?: (message: string) => void;
+}
+
+export async function streamGenerateFlashcards(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  body: FlashcardGenerateRequest,
+  callbacks: StreamGenerateFlashcardsCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/flashcards/generate/stream`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        extend: body.extend ?? false,
+        force: body.force ?? false,
+      }),
+      signal,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  if (!response.body) {
+    throw new Error("Flashcard stream is unavailable");
+  }
+
+  const sawDone = await readFlashcardStream(response.body, callbacks);
+  if (!sawDone) {
+    throw new Error("Flashcard stream ended before completion");
+  }
+}
+
+export async function reviewFlashcard(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  cardId: string,
+  recalled: boolean,
+): Promise<Flashcard> {
+  return request<Flashcard>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/flashcards/${cardId}/review`,
+    {
+      method: "POST",
+      body: JSON.stringify({ recalled }),
+    },
+  );
+}
+
+// Build the export download URL for a deck. The backend returns the file with a
+// Content-Disposition attachment header, so navigating to it triggers a
+// download without an extra fetch round-trip.
+export function flashcardsExportUrl(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  format: "csv" | "json",
+): string {
+  return `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/flashcards/export?format=${format}`;
+}
+
+// --- Notes --------------------------------------------------------------------
+// Free-form learner notes, scoped to a trail (and optionally a concept). Mirror
+// the backend.app.api.notes routes.
+
+export async function listNotes(
+  workspaceId: string,
+  trailId: string,
+  conceptId?: string | null,
+): Promise<Note[]> {
+  const query = conceptId ? `?concept_id=${encodeURIComponent(conceptId)}` : "";
+  const response = await request<NoteListResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/notes${query}`,
+    { method: "GET" },
+  );
+  return response.notes;
+}
+
+export async function createNote(
+  workspaceId: string,
+  trailId: string,
+  body: NoteCreateRequest,
+): Promise<Note> {
+  return request<Note>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/notes`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        body: body.body,
+        title: body.title ?? null,
+        concept_id: body.concept_id ?? null,
+      }),
+    },
+  );
+}
+
+export async function updateNote(
+  workspaceId: string,
+  trailId: string,
+  noteId: string,
+  body: NoteUpdateRequest,
+): Promise<Note> {
+  return request<Note>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/notes/${noteId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function deleteNote(
+  workspaceId: string,
+  trailId: string,
+  noteId: string,
+): Promise<void> {
+  await request<unknown>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/notes/${noteId}`,
+    { method: "DELETE" },
+  );
+}
+
+// --- Workspace-level aggregates -----------------------------------------------
+
+export async function listWorkspaceQuizAttempts(
+  workspaceId: string,
+): Promise<WorkspaceQuizAttemptsResponse> {
+  return request<WorkspaceQuizAttemptsResponse>(
+    `/api/workspaces/${workspaceId}/quiz-attempts`,
+    { method: "GET" },
+  );
+}
+
+export async function getWorkspaceProgress(
+  workspaceId: string,
+): Promise<WorkspaceProgressResponse> {
+  return request<WorkspaceProgressResponse>(
+    `/api/workspaces/${workspaceId}/progress`,
+    { method: "GET" },
+  );
+}
+
+export async function listWorkspaceSources(
+  workspaceId: string,
+): Promise<WorkspaceSourcesResponse> {
+  return request<WorkspaceSourcesResponse>(
+    `/api/workspaces/${workspaceId}/sources`,
+    { method: "GET" },
+  );
+}
+
+export interface StreamBuildArtifactCallbacks {
+  onStatus?: (status: "retrieving" | "generating") => void;
+  onThinking?: (chunk: string) => void;
+  onToken?: (content: string) => void;
+  onDone: (artifact: ArtifactRead) => void;
+  onError?: (message: string) => void;
+}
+
+// Streams an on-demand artifact build over SSE. Mirrors streamConceptPrimer:
+// the `done` event carries the authoritative ArtifactRead, while `status`
+// (retrieving/generating), `thinking` (reasoning) and `token` (output) events
+// are a cosmetic live preview only. A recent/cached artifact arrives as a single
+// `done` event with no preview events. `force_new` is intentionally unsupported
+// here (backend rejects it with 400); use buildArtifact for forced regeneration.
+export async function streamBuildArtifact(
+  workspaceId: string,
+  trailId: string,
+  body: { kind: ArtifactKind; conceptId?: string | null },
+  callbacks: StreamBuildArtifactCallbacks,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/workspaces/${workspaceId}/trails/${trailId}/artifacts/build/stream`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: body.kind,
+        concept_id: body.conceptId ?? null,
+      }),
+      signal,
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  if (!response.body) {
+    throw new Error("Artifact stream is unavailable");
+  }
+
+  const sawDone = await readArtifactBuildStream(response.body, callbacks);
+  if (!sawDone) {
+    throw new Error("Artifact stream ended before completion");
+  }
+}
+
+export async function createConversationThread(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+): Promise<ConversationThreadSummary> {
+  return request<ConversationThreadSummary>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/conversations`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export async function listConversationThreads(
   workspaceId: string,
   trailId: string,
   conceptId: string,
   limit?: number,
-): Promise<ConversationHistoryResponse> {
+): Promise<ConversationThreadListResponse> {
   const query = limit ? `?limit=${encodeURIComponent(String(limit))}` : "";
+  return request<ConversationThreadListResponse>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/conversations${query}`,
+    { method: "GET" },
+  );
+}
+
+export async function updateConversationThread(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  conversationId: string,
+  title: string,
+): Promise<ConversationThreadSummary> {
+  return request<ConversationThreadSummary>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/conversations/${conversationId}`,
+    { method: "PATCH", body: JSON.stringify({ title }) },
+  );
+}
+
+export async function deleteConversationThread(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  conversationId: string,
+): Promise<void> {
+  return request<void>(
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/conversations/${conversationId}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function getConversation(
+  workspaceId: string,
+  trailId: string,
+  conceptId: string,
+  options: { conversationId?: string | null; limit?: number } = {},
+): Promise<ConversationHistoryResponse> {
+  const query = new URLSearchParams();
+  if (options.conversationId) {
+    query.set("conversation_id", options.conversationId);
+  }
+  if (options.limit) {
+    query.set("limit", String(options.limit));
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
   return request<ConversationHistoryResponse>(
-    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/conversation${query}`,
+    `/api/workspaces/${workspaceId}/trails/${trailId}/concepts/${conceptId}/conversation${suffix}`,
     { method: "GET" },
   );
 }
@@ -407,6 +837,9 @@ export async function streamTutorChat({
   onThinking,
   onToolCall,
   onToolResult,
+  onSuggestQuiz,
+  onSuggestFlashcards,
+  onSuggestArtifact,
   onToken,
   onDone,
   onMasteryUpdated,
@@ -440,6 +873,9 @@ export async function streamTutorChat({
     onThinking,
     onToolCall,
     onToolResult,
+    onSuggestQuiz,
+    onSuggestFlashcards,
+    onSuggestArtifact,
     onToken,
     onDone,
     onMasteryUpdated,
@@ -508,6 +944,9 @@ async function readTutorStream(
     | "onThinking"
     | "onToolCall"
     | "onToolResult"
+    | "onSuggestQuiz"
+    | "onSuggestFlashcards"
+    | "onSuggestArtifact"
     | "onToken"
     | "onDone"
     | "onMasteryUpdated"
@@ -547,6 +986,9 @@ function handleTutorStreamEvent(
     | "onThinking"
     | "onToolCall"
     | "onToolResult"
+    | "onSuggestQuiz"
+    | "onSuggestFlashcards"
+    | "onSuggestArtifact"
     | "onToken"
     | "onDone"
     | "onMasteryUpdated"
@@ -602,6 +1044,36 @@ function handleTutorStreamEvent(
     });
     return false;
   }
+  if (payload.type === "suggest_quiz") {
+    if (
+      (payload.quiz_type === "level_up" || payload.quiz_type === "practice") &&
+      typeof payload.reason === "string"
+    ) {
+      callbacks.onSuggestQuiz?.({
+        quizType: payload.quiz_type,
+        reason: payload.reason,
+      });
+    }
+    return false;
+  }
+  if (payload.type === "suggest_flashcards") {
+    if (typeof payload.reason === "string") {
+      callbacks.onSuggestFlashcards?.({ reason: payload.reason });
+    }
+    return false;
+  }
+  if (payload.type === "suggest_artifact") {
+    if (
+      isArtifactKind(payload.artifact_kind) &&
+      typeof payload.reason === "string"
+    ) {
+      callbacks.onSuggestArtifact?.({
+        artifactKind: payload.artifact_kind,
+        reason: payload.reason,
+      });
+    }
+    return false;
+  }
   if (payload.type === "done") {
     if (
       typeof payload.conversation_id === "string" &&
@@ -636,6 +1108,96 @@ function isConversationMessage(
     "reasoning" in value &&
     "created_at" in value
   );
+}
+
+const ARTIFACT_KINDS: ReadonlySet<string> = new Set([
+  "worked_example",
+  "comparison_card",
+  "timeline",
+  "mini_graph",
+  "simulation_slider",
+]);
+
+function isArtifactKind(value: unknown): value is ArtifactKind {
+  return typeof value === "string" && ARTIFACT_KINDS.has(value);
+}
+
+interface FlashcardStreamEvent {
+  type?: "status" | "done" | "error";
+  status?: "generating";
+  deck?: FlashcardDeck;
+  exhausted?: boolean;
+  reason?: string;
+  code?: string;
+  message?: string;
+  error?: { message?: string };
+  detail?: unknown;
+}
+
+async function readFlashcardStream(
+  body: ReadableStream<Uint8Array>,
+  callbacks: StreamGenerateFlashcardsCallbacks,
+): Promise<boolean> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let sawDone = false;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      sawDone = handleFlashcardStreamEvent(chunk, callbacks) || sawDone;
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    sawDone = handleFlashcardStreamEvent(buffer, callbacks) || sawDone;
+  }
+  return sawDone;
+}
+
+function handleFlashcardStreamEvent(
+  chunk: string,
+  callbacks: StreamGenerateFlashcardsCallbacks,
+): boolean {
+  const dataLines = chunk
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  const rawData = dataLines.join("\n");
+  if (!rawData) {
+    return false;
+  }
+
+  const payload = JSON.parse(rawData) as FlashcardStreamEvent;
+  if (payload.type === "status") {
+    if (payload.status) {
+      callbacks.onStatus?.(payload.status);
+    }
+    return false;
+  }
+  if (payload.type === "done") {
+    if (payload.deck) {
+      callbacks.onDone({
+        deck: payload.deck,
+        exhausted: payload.exhausted ?? false,
+        reason: payload.reason ?? "",
+      });
+      return true;
+    }
+    throw new Error("Flashcard stream returned a malformed completion event");
+  }
+  if (payload.type === "error") {
+    throw new Error(streamErrorMessage(payload));
+  }
+  return false;
 }
 
 interface ConceptPrimerStreamEvent {
@@ -725,7 +1287,13 @@ function handleConceptPrimerStreamEvent(
   return false;
 }
 
-function streamErrorMessage(payload: TutorStreamEvent): string {
+function streamErrorMessage(
+  payload:
+    | TutorStreamEvent
+    | FlashcardStreamEvent
+    | ConceptPrimerStreamEvent
+    | ArtifactBuildStreamEvent,
+): string {
   if (typeof payload.message === "string") {
     return payload.message;
   }
@@ -733,6 +1301,93 @@ function streamErrorMessage(payload: TutorStreamEvent): string {
     return payload.error.message;
   }
   return errorMessage(payload as ErrorEnvelope);
+}
+
+interface ArtifactBuildStreamEvent {
+  type?: "status" | "thinking" | "token" | "done" | "error";
+  status?: "retrieving" | "generating";
+  content?: string;
+  artifact?: ArtifactRead;
+  code?: string;
+  message?: string;
+  error?: { message?: string };
+  detail?: unknown;
+}
+
+async function readArtifactBuildStream(
+  body: ReadableStream<Uint8Array>,
+  callbacks: StreamBuildArtifactCallbacks,
+): Promise<boolean> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let sawDone = false;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      sawDone = handleArtifactBuildStreamEvent(chunk, callbacks) || sawDone;
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    sawDone = handleArtifactBuildStreamEvent(buffer, callbacks) || sawDone;
+  }
+  return sawDone;
+}
+
+function handleArtifactBuildStreamEvent(
+  chunk: string,
+  callbacks: StreamBuildArtifactCallbacks,
+): boolean {
+  const dataLines = chunk
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  const rawData = dataLines.join("\n");
+  if (!rawData) {
+    return false;
+  }
+
+  const payload = JSON.parse(rawData) as ArtifactBuildStreamEvent;
+  if (payload.type === "status") {
+    if (payload.status) {
+      callbacks.onStatus?.(payload.status);
+    }
+    return false;
+  }
+  if (payload.type === "thinking") {
+    if (typeof payload.content === "string") {
+      callbacks.onThinking?.(payload.content);
+    }
+    return false;
+  }
+  if (payload.type === "token") {
+    if (typeof payload.content === "string") {
+      callbacks.onToken?.(payload.content);
+    }
+    return false;
+  }
+  if (payload.type === "done") {
+    if (payload.artifact) {
+      callbacks.onDone(payload.artifact);
+      return true;
+    }
+    throw new Error("Artifact stream returned a malformed completion event");
+  }
+  if (payload.type === "error") {
+    const message = streamErrorMessage(payload as TutorStreamEvent);
+    callbacks.onError?.(message);
+    throw new Error(message);
+  }
+  return false;
 }
 
 async function readTrailGenerationStream(
@@ -812,4 +1467,8 @@ function handleStreamEvent(
     return payload as TrailGenerateResponse;
   }
   return null;
+}
+
+export async function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>("/health", { method: "GET" });
 }

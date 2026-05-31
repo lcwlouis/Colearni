@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi, beforeEach } from "vitest";
 
-import { QuizPanel } from "@/app/trails/[id]/components/QuizPanel";
+import { QuizPanel } from "@/app/(app)/trails/[id]/components/QuizPanel";
 import type { GradeResult, LevelUpCard } from "@/lib/types";
 
 const mockLevelUpCard: LevelUpCard = {
@@ -522,8 +522,11 @@ describe("QuizPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Submit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Mastery confirmed")).toBeInTheDocument();
+      expect(screen.getByText("Practice passed")).toBeInTheDocument();
     });
+    expect(
+      screen.getByText("Practice saves feedback but does not update mastery."),
+    ).toBeInTheDocument();
 
     expect(onMasteryUpdated).not.toHaveBeenCalled();
   });

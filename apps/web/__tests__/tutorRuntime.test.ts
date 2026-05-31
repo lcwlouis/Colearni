@@ -258,6 +258,202 @@ describe("tutor runtime adapter", () => {
     ]);
   });
 
+  test("streamed quiz suggestions surface as a tutor-suggest-quiz data part", async () => {
+    const { streamTutorChat } = await import("@/lib/api");
+    vi.mocked(streamTutorChat).mockImplementationOnce(
+      async ({ onMode, onSuggestQuiz, onToken, onDone }) => {
+        onMode("socratic");
+        onSuggestQuiz?.({
+          quizType: "level_up",
+          reason: "You've nailed the basics.",
+        });
+        onToken("Nice work.");
+        onDone("conversation-9", {
+          id: "assistant-9",
+          role: "assistant",
+          content: "Nice work.",
+          reasoning: null,
+          reasoning_parts: [],
+          mode: "socratic",
+          created_at: "2026-01-01T00:00:00Z",
+        } satisfies ConversationMessage);
+      },
+    );
+
+    const adapter = createTutorModelAdapter({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      conversationId: "conversation-0",
+      onConversationId: vi.fn(),
+      onMode: vi.fn(),
+    });
+    const stream = adapter.run({
+      messages: [userMessage("Am I ready?")],
+      runConfig: {},
+      abortSignal: new AbortController().signal,
+      context: {},
+      unstable_getMessage: () => assistantMessage(""),
+    });
+
+    if (!(Symbol.asyncIterator in stream)) {
+      throw new Error("Expected streaming adapter result");
+    }
+    let lastChunk;
+    for await (const chunk of stream) {
+      lastChunk = chunk;
+    }
+
+    const suggestion = lastChunk?.content?.find(
+      (part) => part.type === "data" && part.name === "tutor-suggest-quiz",
+    );
+    expect(suggestion && "data" in suggestion ? suggestion.data : null).toEqual(
+      {
+        quizType: "level_up",
+        reason: "You've nailed the basics.",
+      },
+    );
+  });
+
+  test("rehydrates a persisted suggest_quiz reasoning part as a CTA data part", () => {
+    const history: ConversationHistoryResponse = {
+      conversation_id: "conversation-1",
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "Let's keep going.",
+          reasoning: null,
+          reasoning_parts: [
+            {
+              kind: "suggest_quiz",
+              quiz_type: "practice",
+              reason: "A few practice questions would help.",
+            },
+          ],
+          mode: "socratic",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    };
+
+    expect(toThreadMessages(history)).toEqual([
+      expect.objectContaining({
+        id: "assistant-1",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-suggest-quiz",
+            data: {
+              quizType: "practice",
+              reason: "A few practice questions would help.",
+            },
+          },
+          { type: "text", text: "Let's keep going." },
+        ],
+      }),
+    ]);
+  });
+
+  test("streamed artifact suggestions surface as a tutor-suggest-artifact data part", async () => {
+    const { streamTutorChat } = await import("@/lib/api");
+    vi.mocked(streamTutorChat).mockImplementationOnce(
+      async ({ onMode, onSuggestArtifact, onToken, onDone }) => {
+        onMode("socratic");
+        onSuggestArtifact?.({
+          artifactKind: "worked_example",
+          reason: "A worked example would make this click.",
+        });
+        onToken("Let's try one.");
+        onDone("conversation-10", {
+          id: "assistant-10",
+          role: "assistant",
+          content: "Let's try one.",
+          reasoning: null,
+          reasoning_parts: [],
+          mode: "socratic",
+          created_at: "2026-01-01T00:00:00Z",
+        } satisfies ConversationMessage);
+      },
+    );
+
+    const adapter = createTutorModelAdapter({
+      workspaceId: "workspace-1",
+      trailId: "trail-1",
+      conceptId: "concept-1",
+      conversationId: "conversation-0",
+      onConversationId: vi.fn(),
+      onMode: vi.fn(),
+    });
+    const stream = adapter.run({
+      messages: [userMessage("Can you show me?")],
+      runConfig: {},
+      abortSignal: new AbortController().signal,
+      context: {},
+      unstable_getMessage: () => assistantMessage(""),
+    });
+
+    if (!(Symbol.asyncIterator in stream)) {
+      throw new Error("Expected streaming adapter result");
+    }
+    let lastChunk;
+    for await (const chunk of stream) {
+      lastChunk = chunk;
+    }
+
+    const suggestion = lastChunk?.content?.find(
+      (part) => part.type === "data" && part.name === "tutor-suggest-artifact",
+    );
+    expect(suggestion && "data" in suggestion ? suggestion.data : null).toEqual(
+      {
+        artifactKind: "worked_example",
+        reason: "A worked example would make this click.",
+      },
+    );
+  });
+
+  test("rehydrates a persisted suggest_artifact reasoning part as a CTA data part", () => {
+    const history: ConversationHistoryResponse = {
+      conversation_id: "conversation-2",
+      messages: [
+        {
+          id: "assistant-2",
+          role: "assistant",
+          content: "Here is the sequence.",
+          reasoning: null,
+          reasoning_parts: [
+            {
+              kind: "suggest_artifact",
+              artifact_kind: "timeline",
+              reason: "A timeline ties these together.",
+            },
+          ],
+          mode: "socratic",
+          created_at: "2026-01-01T00:00:01Z",
+        },
+      ],
+    };
+
+    expect(toThreadMessages(history)).toEqual([
+      expect.objectContaining({
+        id: "assistant-2",
+        role: "assistant",
+        content: [
+          {
+            type: "data",
+            name: "tutor-suggest-artifact",
+            data: {
+              artifactKind: "timeline",
+              reason: "A timeline ties these together.",
+            },
+          },
+          { type: "text", text: "Here is the sequence." },
+        ],
+      }),
+    ]);
+  });
+
   test("marks explicit reload runs as backend regenerate requests", async () => {
     const { streamTutorChat } = await import("@/lib/api");
     vi.mocked(streamTutorChat).mockClear();

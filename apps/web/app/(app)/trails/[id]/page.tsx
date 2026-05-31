@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 
-import { deleteTrail, getTrail, getTrailNext } from "@/lib/api";
+import { getTrail, getTrailNext } from "@/lib/api";
 import type {
   MasteryRecord,
   MasteryStatus,
@@ -17,7 +17,6 @@ import { TrailGraph } from "./components/TrailGraph";
 
 export default function TrailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const initialConceptId = searchParams?.get("concept") ?? null;
   const [workspaceId, setWorkspaceId] = useState("");
@@ -25,9 +24,6 @@ export default function TrailPage() {
   const [next, setNext] = useState<NextConceptResponse | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -58,19 +54,6 @@ export default function TrailPage() {
       cancelled = true;
     };
   }, [params.id]);
-
-  async function handleDelete() {
-    setDeleting(true);
-    setDeleteError("");
-    try {
-      await deleteTrail(workspaceId, params.id);
-      router.push("/");
-    } catch (exc) {
-      setDeleteError(exc instanceof Error ? exc.message : "Delete failed");
-      setDeleting(false);
-      setConfirmingDelete(false);
-    }
-  }
 
   function handleMasteryUpdated(
     conceptId: string,
@@ -136,54 +119,7 @@ export default function TrailPage() {
   }
 
   return (
-    <main className="flex h-screen min-h-170 flex-col overflow-hidden bg-slate-50">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
-        <div>
-          <Link
-            href="/dashboard"
-            className="text-xs font-medium text-slate-500 hover:text-slate-900"
-          >
-            Colearni
-          </Link>
-          <h1 className="text-lg font-semibold text-slate-950">
-            {detail.trail.title}
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          {deleteError ? (
-            <span className="text-xs text-red-600">{deleteError}</span>
-          ) : null}
-          {confirmingDelete ? (
-            <>
-              <span className="text-xs text-slate-500">Delete this Trail?</span>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="text-xs font-medium text-red-600 hover:text-red-800 disabled:opacity-50"
-              >
-                {deleting ? "Deleting..." : "Confirm"}
-              </button>
-              <button
-                onClick={() => setConfirmingDelete(false)}
-                disabled={deleting}
-                className="text-xs text-slate-400 hover:text-slate-600 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setConfirmingDelete(true)}
-              className="text-xs text-slate-400 hover:text-red-600"
-            >
-              Delete Trail
-            </button>
-          )}
-          <div className="text-right text-xs text-slate-500">
-            {detail.mastery_summary.total} concepts
-          </div>
-        </div>
-      </header>
+    <main className="flex h-[100svh] min-h-170 flex-col overflow-hidden bg-slate-50 md:h-screen">
       <TrailGraph
         workspaceId={workspaceId}
         trail={detail.trail}

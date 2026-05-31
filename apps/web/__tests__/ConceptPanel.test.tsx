@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { ConceptPanel } from "@/app/trails/[id]/components/ConceptPanel";
+import { ConceptPanel } from "@/app/(app)/trails/[id]/components/ConceptPanel";
 import {
   getConceptSources,
   linkSourceToConcept,
@@ -18,13 +18,36 @@ vi.mock("@/lib/api", () => ({
   uploadSource: vi.fn(),
 }));
 
-vi.mock("@/app/trails/[id]/components/TutorPanel", () => ({
-  TutorPanel: ({ concept }: { concept: { title: string } }) => (
-    <div data-testid="tutor-panel">Tutor for {concept.title}</div>
+vi.mock("@/app/(app)/trails/[id]/components/TutorPanel", () => ({
+  TutorPanel: ({
+    concept,
+    onSuggestQuiz,
+    onSuggestArtifact,
+  }: {
+    concept: { title: string };
+    onSuggestQuiz?: (quizType: "level_up" | "practice") => void;
+    onSuggestArtifact?: (
+      kind:
+        | "worked_example"
+        | "comparison_card"
+        | "timeline"
+        | "mini_graph"
+        | "simulation_slider",
+    ) => void;
+  }) => (
+    <div data-testid="tutor-panel">
+      Tutor for {concept.title}
+      <button type="button" onClick={() => onSuggestQuiz?.("level_up")}>
+        Tutor Suggest Level Up
+      </button>
+      <button type="button" onClick={() => onSuggestArtifact?.("timeline")}>
+        Tutor Suggest Timeline
+      </button>
+    </div>
   ),
 }));
 
-vi.mock("@/app/trails/[id]/components/QuizPanel", () => ({
+vi.mock("@/app/(app)/trails/[id]/components/QuizPanel", () => ({
   QuizPanel: ({
     mode,
     onBack,
@@ -48,12 +71,43 @@ vi.mock("@/app/trails/[id]/components/QuizPanel", () => ({
   ),
 }));
 
-vi.mock("@/app/trails/[id]/components/QuizHistoryPanel", () => ({
+vi.mock("@/app/(app)/trails/[id]/components/QuizHistoryPanel", () => ({
   QuizHistoryPanel: ({ onBack }: { onBack: () => void }) => (
     <div data-testid="quiz-history-panel">
       Quiz History
       <button type="button" onClick={onBack}>
         History Back
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("@/app/(app)/trails/[id]/components/ArtifactsPanel", () => ({
+  ArtifactsPanel: ({
+    onBack,
+    initialGenerateKind,
+  }: {
+    onBack: () => void;
+    initialGenerateKind?: string | null;
+  }) => (
+    <div data-testid="artifacts-panel">
+      Artifacts
+      <span data-testid="artifacts-initial-kind">
+        {initialGenerateKind ?? "none"}
+      </span>
+      <button type="button" onClick={onBack}>
+        Artifacts Back
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("@/app/(app)/trails/[id]/components/FlashcardsPanel", () => ({
+  FlashcardsPanel: ({ onBack }: { onBack: () => void }) => (
+    <div data-testid="flashcards-panel">
+      Flashcards Panel
+      <button type="button" onClick={onBack}>
+        Flashcards Back
       </button>
     </div>
   ),
@@ -154,7 +208,7 @@ describe("ConceptPanel", () => {
     expect(screen.getByText("Not Started")).toBeInTheDocument();
   });
 
-  test("mobile sheet starts collapsed and expands from the handle", async () => {
+  test("mobile sheet starts collapsed and expands to a fixed max height", async () => {
     render(
       <ConceptPanel
         workspaceId="workspace-1"
@@ -165,15 +219,25 @@ describe("ConceptPanel", () => {
     );
 
     expect(screen.getByTestId("concept-sheet-body")).toHaveClass("hidden");
+    expect(
+      screen
+        .getByRole("button", { name: "Expand concept details" })
+        .closest("aside"),
+    ).toHaveClass("h-[6.5rem]", "max-h-[6.5rem]");
 
     await userEvent.click(
       screen.getByRole("button", { name: "Expand concept details" }),
     );
 
-    expect(screen.getByTestId("concept-sheet-body")).toHaveClass("block");
-    expect(
-      screen.getByRole("button", { name: "Collapse concept details" }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("concept-sheet-body")).not.toHaveClass("hidden");
+    const collapseButton = screen.getByRole("button", {
+      name: "Collapse concept details",
+    });
+    expect(collapseButton).toBeInTheDocument();
+    expect(collapseButton.closest("aside")).toHaveClass(
+      "h-[calc(100svh-4rem)]",
+      "max-h-[calc(100svh-4rem)]",
+    );
   });
 
   test("close button calls onClose from inside draggable header", async () => {
@@ -211,6 +275,32 @@ describe("ConceptPanel", () => {
     expect(screen.getByTestId("tutor-panel")).toHaveTextContent(
       "Tutor for Vectors",
     );
+    expect(screen.getByTestId("concept-sheet-body")).toHaveClass(
+      "flex",
+      "overflow-hidden",
+    );
+    expect(screen.getByTestId("concept-sheet-body")).not.toHaveClass("hidden");
+  });
+
+  test("switching concept tabs keeps the expanded sheet height stable", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+    await expandConceptDetails();
+    const sheet = screen
+      .getByRole("button", { name: "Collapse concept details" })
+      .closest("aside");
+
+    expect(sheet).toHaveClass("h-[calc(100svh-4rem)]");
+    await userEvent.click(screen.getByRole("tab", { name: "Details" }));
+    expect(sheet).toHaveClass("h-[calc(100svh-4rem)]");
+    await userEvent.click(screen.getByRole("tab", { name: "Sources" }));
+    expect(sheet).toHaveClass("h-[calc(100svh-4rem)]");
   });
 
   test("Level Up button opens quiz panel in level_up mode", async () => {
@@ -223,7 +313,9 @@ describe("ConceptPanel", () => {
       />,
     );
 
-    const levelUpBtn = screen.getByRole("button", { name: "Level Up" });
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Quizzes/ }));
+    const levelUpBtn = screen.getByRole("button", { name: /Level Up/ });
     expect(levelUpBtn).toBeEnabled();
 
     await userEvent.click(levelUpBtn);
@@ -243,7 +335,9 @@ describe("ConceptPanel", () => {
       />,
     );
 
-    const practiceBtn = screen.getByRole("button", { name: "Practice" });
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Quizzes/ }));
+    const practiceBtn = screen.getByRole("button", { name: /Practice/ });
     expect(practiceBtn).toBeEnabled();
 
     await userEvent.click(practiceBtn);
@@ -251,6 +345,37 @@ describe("ConceptPanel", () => {
     expect(screen.getByTestId("quiz-panel")).toHaveTextContent(
       "Quiz Panel: practice",
     );
+  });
+
+  test("Quizzes hub offers practice, level up, and past attempts", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Quizzes/ }));
+
+    // The action footer is hidden while the hub is open.
+    expect(screen.queryByTestId("concept-actions")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Practice/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Level Up/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Past attempts/ }),
+    ).toBeInTheDocument();
+
+    // Back returns to the concept overview with the action footer restored.
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByTestId("concept-actions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Quizzes/ })).toBeInTheDocument();
   });
 
   test("View past attempts opens the history panel without generating a quiz", async () => {
@@ -263,15 +388,68 @@ describe("ConceptPanel", () => {
       />,
     );
 
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Quizzes/ }));
     await userEvent.click(
-      screen.getByRole("button", { name: "View past attempts" }),
+      screen.getByRole("button", { name: /Past attempts/ }),
     );
     expect(screen.getByTestId("quiz-history-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("quiz-panel")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "History Back" }));
     expect(
-      screen.getByRole("button", { name: "View past attempts" }),
+      screen.getByRole("heading", { name: "Quizzes" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Past attempts/ }),
+    ).toBeInTheDocument();
+  });
+
+  test("Artifacts button opens the artifacts panel and back returns to the overview", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Artifacts/ }));
+    expect(screen.getByTestId("artifacts-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("quiz-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quiz-history-panel")).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Artifacts Back" }),
+    );
+    expect(
+      screen.getByRole("button", { name: /Artifacts/ }),
+    ).toBeInTheDocument();
+  });
+
+  test("Flashcards button opens the flashcards panel and back returns to the overview", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Flashcards/ }));
+    expect(screen.getByTestId("flashcards-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("artifacts-panel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("quiz-panel")).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Flashcards Back" }),
+    );
+    expect(
+      screen.getByRole("button", { name: /Flashcards/ }),
     ).toBeInTheDocument();
   });
 
@@ -290,11 +468,9 @@ describe("ConceptPanel", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: "Level Up" }),
+      screen.queryByRole("button", { name: /Quizzes/ }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Practice" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("concept-actions")).not.toBeInTheDocument();
   });
 
   test("back button in quiz panel returns to concept detail view", async () => {
@@ -307,18 +483,71 @@ describe("ConceptPanel", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Level Up" }));
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Quizzes/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Level Up/ }));
     expect(screen.getByTestId("quiz-panel")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Quiz Back" }));
 
     expect(screen.queryByTestId("quiz-panel")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Level Up" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Quizzes/ })).toBeInTheDocument();
   });
 
-  test("mastery badge reflects detail.mastery prop directly", () => {
+  test("tutor quiz suggestion switches from the tutor panel into the quiz panel", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+
+    await expandConceptDetails();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start Learning" }),
+    );
+    expect(screen.getByTestId("tutor-panel")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Tutor Suggest Level Up" }),
+    );
+
+    expect(screen.queryByTestId("tutor-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("quiz-panel")).toHaveTextContent(
+      "Quiz Panel: level_up",
+    );
+  });
+
+  test("tutor artifact suggestion opens the artifacts panel with the chosen kind", async () => {
+    render(
+      <ConceptPanel
+        workspaceId="workspace-1"
+        trailId="trail-1"
+        detail={detail}
+        onClose={() => undefined}
+      />,
+    );
+
+    await expandConceptDetails();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start Learning" }),
+    );
+    expect(screen.getByTestId("tutor-panel")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Tutor Suggest Timeline" }),
+    );
+
+    expect(screen.queryByTestId("tutor-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("artifacts-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("artifacts-initial-kind")).toHaveTextContent(
+      "timeline",
+    );
+  });
+
+  test("mastery badge reflects detail.mastery prop directly", async () => {
     const detailWithMastered = {
       ...detail,
       mastery: { ...detail.mastery, status: "mastered" as const },
@@ -332,8 +561,8 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
-
-    expect(screen.getByText("Mastered")).toBeInTheDocument();
+    await expandConceptDetails();
+    expect(screen.getAllByText("Mastered").length).toBeGreaterThan(0);
   });
 
   test("onMasteryUpdated is forwarded to QuizPanel", async () => {
@@ -352,11 +581,13 @@ describe("ConceptPanel", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Level Up" }));
+    await expandConceptDetails();
+    await userEvent.click(screen.getByRole("button", { name: /Quizzes/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Level Up/ }));
     expect(screen.getByTestId("quiz-panel")).toBeInTheDocument();
   });
 
-  test("primary CTA reflects mastery status: learning -> Continue Tutor", () => {
+  test("primary CTA reflects mastery status: learning -> Continue Tutor", async () => {
     const d = {
       ...detail,
       mastery: { ...detail.mastery, status: "learning" as const },
@@ -369,6 +600,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
+    await expandConceptDetails();
     expect(
       screen.getByRole("button", { name: "Continue Tutor" }),
     ).toBeInTheDocument();
@@ -390,6 +622,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
+    await expandConceptDetails();
     const cta = screen.getByRole("button", { name: "Review Weak Points" });
     expect(cta).toBeInTheDocument();
     await userEvent.click(cta);
@@ -410,6 +643,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
+    await expandConceptDetails();
     const cta = screen.getByRole("button", {
       name: "Practice / Explore Further",
     });
@@ -430,9 +664,7 @@ describe("ConceptPanel", () => {
       />,
     );
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Expand concept details" }),
-    );
+    await expandConceptDetails();
 
     expect(
       await screen.findByText("No sources linked yet."),
@@ -471,9 +703,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Expand concept details" }),
-    );
+    await expandConceptDetails();
 
     expect(await screen.findByText("Vector Notes")).toBeInTheDocument();
     expect(screen.getByText("upload")).toBeInTheDocument();
@@ -495,9 +725,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Expand concept details" }),
-    );
+    await expandConceptDetails();
     await userEvent.click(screen.getByRole("button", { name: "Add source" }));
 
     expect(screen.getByLabelText("Source file")).toBeInTheDocument();
@@ -533,9 +761,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
-    await user.click(
-      screen.getByRole("button", { name: "Expand concept details" }),
-    );
+    await expandConceptDetails();
     await user.click(screen.getByRole("button", { name: "Add source" }));
     const file = new File(["notes"], "notes.txt", { type: "text/plain" });
     fireEvent.change(screen.getByLabelText("Source file"), {
@@ -560,7 +786,7 @@ describe("ConceptPanel", () => {
     expect(await screen.findByText("Uploaded Notes")).toBeInTheDocument();
   });
 
-  test("renders a cached primer (Overview + Key terms) immediately without generating", async () => {
+  test("renders the primer overview on the overview tab and key terms in details", async () => {
     const detailWithPrimer: ConceptDetail = {
       ...detail,
       primer: {
@@ -582,6 +808,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
+    await expandConceptDetails();
 
     expect(
       screen.getByRole("heading", { name: "Overview" }),
@@ -589,7 +816,13 @@ describe("ConceptPanel", () => {
     expect(
       screen.getByText("Vectors have magnitude and direction."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Key terms")).toBeInTheDocument();
+    expect(screen.queryByText("Magnitude")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Details" }));
+    expect(screen.getByText("Key terms (2)")).toBeInTheDocument();
+    expect(screen.queryByText("Magnitude")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Key terms (2)"));
     expect(screen.getByText("Magnitude")).toBeInTheDocument();
     expect(screen.getByText("The length of a vector.")).toBeInTheDocument();
     expect(screen.getByText("Dot product")).toBeInTheDocument();
@@ -605,6 +838,7 @@ describe("ConceptPanel", () => {
         onClose={() => undefined}
       />,
     );
+    await expandConceptDetails();
 
     expect(streamConceptPrimer).toHaveBeenCalledWith(
       "workspace-1",
@@ -615,6 +849,8 @@ describe("ConceptPanel", () => {
     expect(
       await screen.findByText("Generated overview text."),
     ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Details" }));
+    await userEvent.click(screen.getByText("Key terms (1)"));
     expect(screen.getByText("Generated term")).toBeInTheDocument();
   });
 
@@ -672,3 +908,9 @@ describe("ConceptPanel", () => {
     ).toBeInTheDocument();
   });
 });
+
+async function expandConceptDetails() {
+  await userEvent.click(
+    screen.getByRole("button", { name: "Expand concept details" }),
+  );
+}

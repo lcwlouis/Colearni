@@ -1,8 +1,8 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { TrailGraph } from "@/app/trails/[id]/components/TrailGraph";
+import { TrailGraph } from "@/app/(app)/trails/[id]/components/TrailGraph";
 import type { ConceptEdge, ConceptNode, Trail } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
@@ -61,14 +61,73 @@ vi.mock("@/lib/api", () => ({
   ),
 }));
 
+const {
+  mockFitView,
+  mockSetViewport,
+  mockSetCenter,
+  mockGetViewport,
+  mockGetZoom,
+  getMockViewport,
+  resetMockViewport,
+  setMockViewport,
+  setMobileViewport,
+  getMobileViewport,
+} = vi.hoisted(() => {
+  let mockViewport = { x: 0, y: 0, zoom: 0.5 };
+  let mobileViewport = false;
+
+  return {
+    mockFitView: vi.fn(async () => true),
+    mockSetViewport: vi.fn(
+      async (viewport: { x: number; y: number; zoom: number }) => {
+        mockViewport = viewport;
+        return true;
+      },
+    ),
+    mockSetCenter: vi.fn(
+      async (x: number, y: number, options?: { zoom?: number }) => {
+        mockViewport = {
+          x,
+          y,
+          zoom: options?.zoom ?? mockViewport.zoom,
+        };
+        return true;
+      },
+    ),
+    mockGetViewport: vi.fn(() => mockViewport),
+    mockGetZoom: vi.fn(() => mockViewport.zoom),
+    getMockViewport: () => mockViewport,
+    resetMockViewport: () => {
+      mockViewport = { x: 0, y: 0, zoom: 0.5 };
+    },
+    setMockViewport: (viewport: { x: number; y: number; zoom: number }) => {
+      mockViewport = viewport;
+    },
+    setMobileViewport: (mobile: boolean) => {
+      mobileViewport = mobile;
+    },
+    getMobileViewport: () => mobileViewport,
+  };
+});
+
 vi.mock("@xyflow/react", async () => {
+  const React = await import("react");
   const actual =
     await vi.importActual<typeof import("@xyflow/react")>("@xyflow/react");
+  const instance = {
+    fitView: mockFitView,
+    setViewport: mockSetViewport,
+    setCenter: mockSetCenter,
+    getViewport: mockGetViewport,
+    getZoom: mockGetZoom,
+  };
+
   return {
     ...actual,
     ReactFlow: ({
       nodes,
       edges,
+      onInit,
       onMove,
       onNodeClick,
       onNodeDoubleClick,
@@ -77,6 +136,13 @@ vi.mock("@xyflow/react", async () => {
     }: {
       nodes: Array<{ id: string; data: { label: React.ReactNode } }>;
       edges: Array<{ id: string; label?: React.ReactNode }>;
+      onInit?: (instance: {
+        fitView: typeof mockFitView;
+        setViewport: typeof mockSetViewport;
+        setCenter: typeof mockSetCenter;
+        getViewport: typeof mockGetViewport;
+        getZoom: typeof mockGetZoom;
+      }) => void;
       onMove?: (
         _event: unknown,
         viewport: { x: number; y: number; zoom: number },
@@ -85,41 +151,66 @@ vi.mock("@xyflow/react", async () => {
       onNodeDoubleClick?: (event: unknown, node: { id: string }) => void;
       onPaneClick?: () => void;
       children?: React.ReactNode;
-    }) => (
-      <div>
-        {nodes.map((node) => (
-          <button
-            key={node.id}
-            type="button"
-            onClick={() => onNodeClick?.({}, node)}
-            onDoubleClick={() => onNodeDoubleClick?.({}, node)}
-          >
-            {node.data.label}
+    }) => {
+      React.useEffect(() => {
+        onInit?.(instance);
+      }, [onInit]);
+
+      return (
+        <div className="react-flow">
+          {nodes.map((node) => (
+            <button
+              key={node.id}
+              type="button"
+              onClick={() => onNodeClick?.({}, node)}
+              onDoubleClick={() => onNodeDoubleClick?.({}, node)}
+            >
+              {node.data.label}
+            </button>
+          ))}
+          <button type="button" onClick={() => onPaneClick?.()}>
+            Pane
           </button>
-        ))}
-        <button type="button" onClick={() => onPaneClick?.()}>
-          Pane
-        </button>
-        <button
-          type="button"
-          onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 0.35 })}
-        >
-          Zoom overview
-        </button>
-        <button
-          type="button"
-          onClick={() => onMove?.(null, { x: 0, y: 0, zoom: 1 })}
-        >
-          Zoom detail
-        </button>
-        {edges.map((edge) =>
-          edge.label ? <span key={edge.id}>{edge.label}</span> : null,
-        )}
-        {children}
-      </div>
-    ),
+          <button
+            type="button"
+            onClick={() => {
+              setMockViewport({ x: 120, y: 40, zoom: 0.35 });
+              onMove?.(null, getMockViewport());
+            }}
+          >
+            Zoom overview
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMockViewport({ x: 120, y: 40, zoom: 1 });
+              onMove?.(null, getMockViewport());
+            }}
+          >
+            Zoom detail
+          </button>
+          {edges.map((edge) =>
+            edge.label ? <span key={edge.id}>{edge.label}</span> : null,
+          )}
+          {children}
+        </div>
+      );
+    },
     Background: () => null,
-    Controls: () => null,
+    Controls: ({
+      position,
+      style,
+    }: {
+      position?: string;
+      style?: { bottom?: number; left?: number };
+    }) => (
+      <div
+        data-testid="reactflow-controls"
+        data-position={position}
+        data-bottom={style?.bottom}
+        data-left={style?.left}
+      />
+    ),
     MiniMap: () => null,
     Panel: ({ children }: { children: React.ReactNode }) => (
       <div>{children}</div>
@@ -181,6 +272,40 @@ const mastery = {
 };
 
 describe("TrailGraph", () => {
+  beforeEach(() => {
+    resetMockViewport();
+    mockFitView.mockClear();
+    mockSetViewport.mockClear();
+    mockSetCenter.mockClear();
+    mockGetViewport.mockClear();
+    mockGetZoom.mockClear();
+    Object.defineProperty(HTMLDivElement.prototype, "clientWidth", {
+      configurable: true,
+      get() {
+        return document.querySelector('[aria-label="Close"]') ? 700 : 1000;
+      },
+    });
+    setMobileViewport(false);
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => {
+        const isMobileQuery = query.includes("max-width: 767px");
+        const matches = isMobileQuery ? getMobileViewport() : false;
+        return {
+          matches,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        };
+      }),
+    });
+  });
+
   test("renders graph node labels", () => {
     render(
       <TrailGraph
@@ -363,6 +488,66 @@ describe("TrailGraph", () => {
     );
 
     await screen.findByText("Selected: Matrices");
+  });
+
+  test("preserves the overview framing when opening and closing a concept", async () => {
+    render(
+      <TrailGraph
+        workspaceId="workspace-1"
+        trail={trail}
+        graph={{ nodes, edges, mastery }}
+        masterySummary={{
+          total: 3,
+          not_started: 3,
+          learning: 0,
+          needs_review: 0,
+          mastered: 0,
+        }}
+      />,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Zoom overview" }),
+    );
+    mockFitView.mockClear();
+    mockSetViewport.mockClear();
+    mockSetCenter.mockClear();
+
+    await userEvent.click(screen.getByRole("button", { name: /Vectors/ }));
+    await screen.findByRole("button", { name: "Close" });
+
+    await waitFor(() => {
+      expect(mockSetCenter).toHaveBeenCalledWith(
+        expect.any(Number),
+        expect.any(Number),
+        expect.objectContaining({ zoom: 1, duration: 220 }),
+      );
+    });
+
+    const viewportCallsBeforeClose = mockSetViewport.mock.calls.length;
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => {
+      expect(mockSetViewport.mock.calls.length).toBeGreaterThan(
+        viewportCallsBeforeClose,
+      );
+    });
+  });
+
+  test("keeps mobile graph controls above the slide-up concept card", async () => {
+    setMobileViewport(true);
+    renderGraph();
+
+    await userEvent.click(screen.getByRole("button", { name: /Vectors/ }));
+    await screen.findByRole("button", { name: "Close" });
+
+    expect(screen.getByTestId("trail-graph-frame")).toHaveStyle({
+      height: "calc(100% - 104px)",
+    });
+    expect(screen.getByTestId("reactflow-controls")).toHaveAttribute(
+      "data-bottom",
+      "120",
+    );
   });
 });
 

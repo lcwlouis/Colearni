@@ -22,6 +22,7 @@ import {
   Link2,
   MessageSquare,
   Sparkles,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -86,10 +87,14 @@ export function ConceptPanel({
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const [dragStartY, setDragStartY] = useState<number | null>(null);
   const [dragOffset, setDragOffset] = useState(0);
+  const [tutorOpen, setTutorOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<Set<string>>(() =>
     readBookmarks(),
   );
   const bookmarked = bookmarks.has(concept.id);
+  const mobileExpandedHeightClass =
+    "h-[calc(100svh-4rem)] max-h-[calc(100svh-4rem)]";
+  const mobileCollapsedHeightClass = "h-[6.5rem] max-h-[6.5rem]";
 
   // Bookmarks are stored locally (this is a local-first product) so the learner
   // can flag concepts to revisit without a backend round-trip.
@@ -138,7 +143,7 @@ export function ConceptPanel({
 
   return (
     <aside
-      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col rounded-t-xl border-t border-slate-200 bg-white shadow-xl transition-[max-height,transform] duration-200 ease-out md:static md:inset-auto md:z-0 md:h-full md:max-h-none md:w-[min(41vw,37rem)] md:shrink-0 md:translate-y-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none ${mobileExpanded ? "max-h-[78vh]" : "max-h-48"}`}
+      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-slate-200 bg-white shadow-xl transition-[height,max-height,transform] duration-200 ease-out md:static md:inset-auto md:z-0 md:h-full md:max-h-none md:w-[min(41vw,37rem)] md:shrink-0 md:translate-y-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none ${mobileExpanded ? mobileExpandedHeightClass : mobileCollapsedHeightClass}`}
       style={
         dragStartY === null
           ? undefined
@@ -157,63 +162,70 @@ export function ConceptPanel({
         onPointerMove={moveDrag}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        className="touch-none px-4 pt-2 md:hidden"
+        className="touch-none px-4 pb-1 pt-2 md:hidden"
       >
         <span className="mx-auto block h-1 w-10 rounded-full bg-slate-300" />
       </button>
       <div
-        onPointerDown={startDrag}
-        onPointerMove={moveDrag}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        className="flex touch-none items-start justify-between gap-4 border-b border-slate-200 p-4 md:p-5"
-      >
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-slate-950 md:text-xl">
-            {concept.title}
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            {titleCase(concept.concept_level)} · {titleCase(concept.node_type)}
-          </p>
+          onPointerDown={startDrag}
+          onPointerMove={moveDrag}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          className={`flex touch-none justify-between gap-4 p-4 md:items-start md:border-b md:border-slate-200 md:p-5 ${
+            mobileExpanded ? "items-start border-b border-slate-200" : "items-center"
+          }${tutorOpen ? " md:hidden" : ""}${tutorOpen && mobileExpanded ? " hidden" : ""}`}
+        >
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-slate-950 md:text-xl">
+              {concept.title}
+            </h2>
+            <p
+              className={`mt-1 text-xs text-slate-500 ${
+                mobileExpanded ? "" : "hidden md:block"
+              }`}
+            >
+              {titleCase(concept.concept_level)} ·{" "}
+              {titleCase(concept.node_type)}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              aria-label={bookmarked ? "Remove bookmark" : "Bookmark concept"}
+              aria-pressed={bookmarked}
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleBookmark();
+              }}
+              className={`grid size-8 place-items-center rounded-md border text-slate-600 hover:bg-slate-50 ${
+                bookmarked
+                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                  : "border-slate-200"
+              }`}
+            >
+              <Bookmark
+                className="size-4"
+                aria-hidden
+                fill={bookmarked ? "currentColor" : "none"}
+              />
+            </button>
+            <button
+              type="button"
+              aria-label="Close"
+              onPointerDown={(event) => event.stopPropagation()}
+              onPointerUp={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+              className="grid size-8 place-items-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            aria-label={bookmarked ? "Remove bookmark" : "Bookmark concept"}
-            aria-pressed={bookmarked}
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerUp={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleBookmark();
-            }}
-            className={`grid size-8 place-items-center rounded-md border text-slate-600 hover:bg-slate-50 ${
-              bookmarked
-                ? "border-blue-200 bg-blue-50 text-blue-700"
-                : "border-slate-200"
-            }`}
-          >
-            <Bookmark
-              className="size-4"
-              aria-hidden
-              fill={bookmarked ? "currentColor" : "none"}
-            />
-          </button>
-          <button
-            type="button"
-            aria-label="Close"
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerUp={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose();
-            }}
-            className="grid size-8 place-items-center rounded-md border border-slate-200 text-lg leading-none text-slate-600 hover:bg-slate-50"
-          >
-            ×
-          </button>
-        </div>
-      </div>
       <ConceptPanelBody
         key={concept.id}
         workspaceId={workspaceId}
@@ -221,6 +233,11 @@ export function ConceptPanel({
         detail={detail}
         onSelectConcept={onSelectConcept}
         onMasteryUpdated={onMasteryUpdated}
+        tutorOpen={tutorOpen}
+        setTutorOpen={setTutorOpen}
+        bookmarked={bookmarked}
+        onToggleBookmark={toggleBookmark}
+        onPanelClose={onClose}
         mobileExpanded={mobileExpanded}
         setMobileExpanded={setMobileExpanded}
       />
@@ -234,6 +251,11 @@ function ConceptPanelBody({
   detail,
   onSelectConcept,
   onMasteryUpdated,
+  tutorOpen,
+  setTutorOpen,
+  bookmarked,
+  onToggleBookmark,
+  onPanelClose,
   mobileExpanded,
   setMobileExpanded,
 }: {
@@ -245,11 +267,15 @@ function ConceptPanelBody({
     conceptId: string,
     update: { status: MasteryStatus; score: number },
   ) => void;
+  tutorOpen: boolean;
+  setTutorOpen: (value: boolean | ((current: boolean) => boolean)) => void;
+  bookmarked: boolean;
+  onToggleBookmark: () => void;
+  onPanelClose: () => void;
   mobileExpanded: boolean;
   setMobileExpanded: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
   const concept = detail.concept;
-  const [tutorOpen, setTutorOpen] = useState(false);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   // When the tutor's suggest_artifact CTA opens the panel, the chosen kind is
   // stashed here so ArtifactsPanel auto-starts that build (opt-in: the learner
@@ -281,11 +307,11 @@ function ConceptPanelBody({
     <>
       <div
         data-testid="concept-sheet-body"
-        className={`flex-1 ${
+        className={`flex-1 min-h-0 ${
           tutorOpen
-            ? "min-h-0 overflow-hidden p-0 md:p-0"
-            : "overflow-y-auto p-4 md:block md:p-5 app-scrollbar"
-        } ${mobileExpanded ? "block" : "hidden"}`}
+            ? "flex overflow-hidden p-0"
+            : "overflow-y-auto p-4 md:p-5 app-scrollbar"
+        } ${mobileExpanded ? "" : "hidden md:block"}`}
       >
         {tutorOpen ? (
           <TutorPanel
@@ -294,6 +320,10 @@ function ConceptPanelBody({
             concept={concept}
             sources={detail.sources}
             sampleQuestions={sampleQuestions}
+            embeddedInConceptPanel
+            bookmarked={bookmarked}
+            onToggleBookmark={onToggleBookmark}
+            onPanelClose={onPanelClose}
             onBack={() => {
               setTutorOpen(false);
             }}
@@ -429,10 +459,10 @@ function ConceptPanelBody({
 type OverviewTab = "overview" | "details" | "sources";
 
 // Compact, tabbed concept overview. Overview stays short and action-focused;
-// verbose detail (primer prose, key terms, full connection lists, attributes,
-// mastery checks) lives under Details, and sources under Sources. All three
-// tab panels stay mounted (inactive ones hidden) so the primer keeps streaming
-// and sources keep loading regardless of the active tab.
+// primer prose lives in Overview, while key terms, full connection lists,
+// attributes, and mastery checks live under Details. Sources stay separate.
+// All three tab panels stay mounted (inactive ones hidden) so the primer keeps
+// streaming and sources keep loading regardless of the active tab.
 function ConceptOverview({
   workspaceId,
   trailId,
@@ -459,6 +489,9 @@ function ConceptOverview({
   const concept = detail.concept;
   const status = detail.mastery.status;
   const [tab, setTab] = useState<OverviewTab>("overview");
+  const [primer, setPrimer] = useState<ConceptPrimerRead | null>(
+    detail.primer ?? null,
+  );
   const primary = primaryCtaFor(status, { onOpenTutor, onOpenPractice });
   const connections = [
     ...detail.prerequisites,
@@ -555,6 +588,17 @@ function ConceptOverview({
           </div>
         </section>
 
+        <PrimerSection
+          workspaceId={workspaceId}
+          trailId={trailId}
+          conceptId={concept.id}
+          initialPrimer={primer}
+          onPrimerLoaded={(primerValue) => {
+            setPrimer(primerValue);
+            onPrimerLoaded?.(primerValue);
+          }}
+        />
+
         <ConnectedConcepts
           connections={connections}
           onSelect={onSelectConcept}
@@ -564,13 +608,7 @@ function ConceptOverview({
 
       {/* Details tab */}
       <div className={tab === "details" ? "flex flex-col gap-6" : "hidden"}>
-        <PrimerSection
-          workspaceId={workspaceId}
-          trailId={trailId}
-          conceptId={concept.id}
-          initialPrimer={detail.primer ?? null}
-          onPrimerLoaded={onPrimerLoaded}
-        />
+        <PrimerKeyTerms primer={primer} />
 
         <section>
           <h3 className="text-sm font-semibold text-slate-900">Attributes</h3>
@@ -658,7 +696,7 @@ function primaryCtaFor(
   }
   if (status === "learning") {
     return {
-      label: "Continue Learning",
+      label: "Continue Tutor",
       action: handlers.onOpenTutor,
       helper: "Pick up the Socratic conversation where you left off.",
     };
@@ -966,10 +1004,9 @@ function PrimerSection({
     // treatment mirrors the chain-of-thought reasoning block.
     const partial = parsePartialPrimer(preview);
     const reasoningTail = formatReasoningPreview(thinkingPreview);
-    // Structured sections take over as soon as any overview prose or a complete
-    // key-term object has arrived; until then reasoning fills the early phase.
-    const hasStructured =
-      partial.overview.trim().length > 0 || partial.keyTerms.length > 0;
+    // Structured overview takes over as soon as the prose arrives; until then
+    // reasoning fills the early phase.
+    const hasStructured = partial.overview.trim().length > 0;
     const showReasoning = !hasStructured && reasoningTail.length > 0;
     const showSkeleton = !hasStructured && !showReasoning;
     return (
@@ -986,9 +1023,8 @@ function PrimerSection({
           />
         </p>
         {hasStructured ? (
-          // Structured phase — the real sections parse in progressively: the
-          // Overview prose grows in, then key-term cards appear one-by-one as
-          // each object completes in the partial JSON.
+          // Structured phase — the real sections parse in progressively so the
+          // Overview prose can grow in before the final primer resolves.
           <div className="mt-2">
             {partial.overview.trim().length > 0 ? (
               <StreamingProse text={partial.overview} />
@@ -998,9 +1034,6 @@ function PrimerSection({
                 className="mt-2 block h-4 w-2/3 animate-pulse rounded bg-slate-100 dark:bg-slate-800"
               />
             )}
-            {partial.keyTerms.length > 0 ? (
-              <KeyTerms terms={partial.keyTerms} />
-            ) : null}
           </div>
         ) : showReasoning ? (
           // Reasoning phase — keep the sweeping-shimmer reasoning preview moving
@@ -1031,18 +1064,44 @@ function PrimerSection({
     <section data-testid="primer-section">
       <h3 className="text-sm font-semibold text-slate-900">Overview</h3>
       <p className="mt-2 text-sm leading-5 text-slate-700">{primer.overview}</p>
+    </section>
+  );
+}
 
-      {primer.key_terms.length > 0 ? (
-        <details className="group mt-4 rounded-md border border-slate-200">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 hover:text-slate-700">
-            <span>Key terms ({primer.key_terms.length})</span>
-            <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
-          </summary>
+function PrimerKeyTerms({ primer }: { primer: ConceptPrimerRead | null }) {
+  const [open, setOpen] = useState(false);
+
+  if (!primer?.key_terms?.length) {
+    return (
+      <section className="rounded-md border border-slate-200 bg-slate-50 p-4">
+        <h3 className="text-sm font-semibold text-slate-900">Key terms</h3>
+        <p className="mt-2 text-sm text-slate-500">
+          Key terms will appear here once the primer finishes loading.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <h3 className="text-sm font-semibold text-slate-900">Key terms</h3>
+      <details
+        className="group mt-3 rounded-md border border-slate-200"
+        open={open}
+        onToggle={(event) =>
+          setOpen((event.currentTarget as HTMLDetailsElement).open)
+        }
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500 hover:text-slate-700">
+          <span>Key terms ({primer.key_terms.length})</span>
+          <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+        </summary>
+        {open ? (
           <div className="px-3 pb-3">
             <KeyTerms terms={primer.key_terms} embedded />
           </div>
-        </details>
-      ) : null}
+        ) : null}
+      </details>
     </section>
   );
 }
