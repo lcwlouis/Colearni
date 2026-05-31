@@ -275,12 +275,16 @@ Quiz generation reuses the existing backend draft for the same `(concept_id, qui
   "reasoning": "string | null",
   "reasoning_parts": [
     {
-      "kind": "status | thinking | tool_call | tool_result",
+      "kind": "status | thinking | tool_call | tool_result | suggest_quiz | suggest_flashcards | suggest_artifact",
       "status": "TutorStreamStatus | null",
       "text": "string | null",
       "name": "string | null",
       "mode": "TutorMode | null",
-      "result": "string | null"
+      "query": "string | null",
+      "result": "string | null",
+      "quiz_type": "level_up | practice | null",
+      "artifact_kind": "worked_example | comparison_card | timeline | mini_graph | simulation_slider | null",
+      "reason": "string | null"
     }
   ],
   "mode": "TutorMode | null",
@@ -569,7 +573,7 @@ Generate a new Trail from a topic description. Calls the graph generator LLM, va
 
 #### `POST /api/workspaces/{workspace_id}/trails/generate/stream`
 
-Generate a new Trail while streaming progress events to the frontend. This endpoint is a local-ready progress helper for the current UI. It is **not durable across page refreshes**; Phase 16 demo polish replaces this with backend jobs and polling.
+Generate a new Trail while streaming progress events to the frontend. This endpoint is a local-ready progress helper for the current UI. It is **not durable across page refreshes**; Phase 17 demo polish replaces this with backend jobs and polling.
 
 **Request body:** same as `POST /api/workspaces/{workspace_id}/trails/generate`.
 
@@ -898,6 +902,21 @@ Optional public trace event showing the sanitized result preview for that intern
 If tool arguments fail validation, the public preview still uses this shape and omits raw provider/internal payloads.
 
 ```json
+{ "type": "suggest_quiz", "quiz_type": "level_up | practice", "reason": "string" }
+```
+Optional learner-visible quiz suggestion (Phase 14). Emitted when the tutor calls the `suggest_quiz` provider tool, which is offered on every turn (not gated on sources). It only surfaces an opt-in CTA: nothing is generated, opened, or graded, and mastery is never changed by this event. `concept_id` is implicit (the current concept) and is never a model argument. The suggestion is persisted on the assistant turn's `reasoning_parts` as `{ "kind": "suggest_quiz", "quiz_type": ..., "reason": ... }` so the CTA rehydrates on reload. The client collapses to a single active CTA per `quiz_type`; clicking it reuses the existing `quiz_drafts` generate/reuse path (no new endpoint).
+
+```json
+{ "type": "suggest_flashcards", "reason": "string" }
+```
+Optional learner-visible flashcards suggestion (Phase 15c). Emitted when the tutor calls the `suggest_flashcards` provider tool, offered on every turn (not gated on sources). Same opt-in contract as `suggest_quiz`: nothing is generated, opened, or graded, and mastery is never changed. `concept_id` is implicit. Persisted as `{ "kind": "suggest_flashcards", "reason": ... }`. Clicking the CTA opens the flashcards panel, which uses the existing `flashcards/generate` path. This remains CTA-first today; a direct inline chat-trigger flow is still WIP.
+
+```json
+{ "type": "suggest_artifact", "artifact_kind": "worked_example | comparison_card | timeline | mini_graph | simulation_slider", "reason": "string" }
+```
+Optional learner-visible artifact suggestion (Phase 15f). Emitted when the tutor calls the `suggest_artifact` provider tool, offered on every turn (not gated on sources). Same opt-in contract: nothing is generated, opened, or persisted, and mastery is never changed. `concept_id` is implicit; the model only passes `kind` + `reason`. Persisted as `{ "kind": "suggest_artifact", "artifact_kind": ..., "reason": ... }`. Clicking the CTA runs the backend-owned `POST .../artifacts/build(/stream)` path. This remains CTA-first today; a direct inline chat-trigger flow is still WIP.
+
+```json
 { "type": "thinking", "content": "string" }
 ```
 Optional reasoning/thinking chunks when the provider exposes them. When available, assistant turns persist the assembled full text in `ConversationMessage.reasoning` and an ordered public UI trace in `ConversationMessage.reasoning_parts` so clients can rehydrate thinking/tool boundaries after refresh.
@@ -932,14 +951,99 @@ Emitted if the LLM call fails. The stream then closes.
 
 ---
 
-#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversation`
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversations`
 
-Retrieve the conversation history for a concept in the current workspace.
+Create a fresh tutor conversation thread for this concept. This does not send a
+message; it gives the learner a clean thread to start from.
+
+**Response 200:**
+
+```json
+{
+  "id": "uuid",
+  "title": "New thread",
+  "preview": null,
+  "message_count": 0,
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+---
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversations`
+
+List tutor conversation threads for this concept, newest first.
 
 **Query params:**
 
 | Param | Type | Default | Description |
 |---|---|---|---|
+| `limit` | int | 20 | Max thread summaries to return |
+
+**Response 200:**
+
+```json
+{
+  "conversations": [
+    {
+      "id": "uuid",
+      "title": "First learner question, truncated",
+      "preview": "Latest visible message, truncated | null",
+      "message_count": 2,
+      "created_at": "datetime",
+      "updated_at": "datetime"
+    }
+  ]
+}
+```
+
+---
+
+#### `PATCH /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversations/{conversation_id}`
+
+Rename one tutor conversation thread for this concept.
+
+**Request body:**
+
+```json
+{ "title": "Renamed thread" }
+```
+
+**Response 200:**
+
+```json
+{
+  "id": "uuid",
+  "title": "Renamed thread",
+  "preview": "Latest visible message, truncated | null",
+  "message_count": 2,
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+---
+
+#### `DELETE /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversations/{conversation_id}`
+
+Delete one tutor conversation thread for this concept.
+
+**Response 204:** no body.
+
+---
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/conversation`
+
+Retrieve one tutor conversation thread for a concept in the current workspace.
+When `conversation_id` is omitted, the latest updated thread is returned. If no
+thread exists yet, the response has `conversation_id: null` and no messages.
+
+**Query params:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `conversation_id` | uuid | latest thread | Specific thread to load |
 | `limit` | int | 20 | Max messages to return |
 
 **Response 200:**
@@ -1141,6 +1245,74 @@ If an older content-light pack lacks the additive round-trip fields, import uses
   "report": "ImportReport"
 }
 ```
+
+---
+
+## Artifacts (Phase 15)
+
+Artifacts are workspace + trail scoped learning artifacts rendered from a validated, versioned envelope (`artifact_version`, `kind`, `title`, `caption?`, required `text_fallback`, `provenance{source_ids, visibility, citations[]}`, kind-specific `data`). Shipped kinds: `worked_example`, `comparison_card`, `timeline`, `mini_graph`, `simulation_slider`. The frontend renders through a `kind -> component` registry that degrades to `text_fallback` on any unknown kind, invalid data, or render error. Generation (the builder sub-agent + detached generation) is implemented; see the build endpoints below.
+
+Provenance/export: concept-level / `local_only` artifacts are excluded from public Trail Pack export (like the primer). `source_derived` artifacts are public-export-eligible only if EVERY contributing source passes the source-level export gate AND none is `user_upload` (all-or-nothing, fail-closed).
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/artifacts`
+
+List artifacts for a trail. Optional `?concept_id=<uuid>` filters to one concept.
+
+**Response 200:** `{ "artifacts": [ArtifactRead] }` where `ArtifactRead = { id, workspace_id, trail_id, concept_id, artifact_type, title, visibility, payload, created_at }` and `payload` is the stored envelope.
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/artifacts/build`
+
+Generate (or reuse) an artifact via the backend-owned artifact-builder sub-agent. **Body:** `ArtifactBuildRequest = { "kind": ArtifactKind, "concept_id": "<uuid> | null", "force_new": false }`. The builder runs a bounded retrieval loop (reusing the tutor retrieval tools under `tutor_tool_call_budget`) with exactly one repair attempt, drops citations that do not map to a retrieved `source_revision_id`, downgrades zero-citation payloads to `local_only`, and persists the result. Advisory-lock dedupe serializes concurrent builds for the same target. **Response 200:** `ArtifactRead`. **404** when the trail/concept is out of scope; **502** error envelope (`code: "llm_error"`) when generation fails.
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/artifacts/build/stream`
+
+LIVE-preview variant of `/build`. Streams SSE status while a DETACHED background task (own DB session, cancel-safe, lifespan-managed `ArtifactGenerationManager`) performs and persists the generation, so it completes even if the client disconnects. `force_new` is rejected here (**400**) — use `POST /build` for forced regeneration so the single-flight manager never reconciles force-vs-dedupe races. **Response:** `text/event-stream`.
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/artifacts/{artifact_id}`
+
+Retrieve one artifact. **Response 200:** `ArtifactRead`. **404** error envelope when the artifact is missing or out of workspace/trail scope.
+
+---
+
+## Pins / Saved (Phase 15b)
+
+Polymorphic pins let a learner "save" supported items to a Trail. Pins are workspace + trail scoped (per-USER == per-workspace until auth lands) and aggregate across supported `item_type`s (`artifact`, `quiz_attempt`, `flashcard`). Pin/unpin are IDEMPOTENT: a second pin of the same item is a no-op (a unique constraint on `(workspace_id, trail_id, item_type, item_id)` guarantees one row), and unpinning a non-pinned item is a no-op. Pinning validates the referenced item belongs to the same workspace+trail (no cross-trail / cross-workspace pins); a mismatch returns a **404** error envelope.
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/pins`
+
+Pin an item. **Body:** `{ "item_type": "artifact" | "quiz_attempt" | "flashcard", "item_id": "<uuid>" }` (for `flashcard`, `item_id` is the deck id). **Response 200:** `{ "status": "pinned" }` (idempotent). **404** error envelope when the trail or referenced item is missing / out of scope.
+
+#### `DELETE /api/workspaces/{workspace_id}/trails/{trail_id}/pins`
+
+Unpin an item. **Query:** `?item_type=<artifact|quiz_attempt|flashcard>&item_id=<uuid>`. **Response 200:** `{ "status": "unpinned" }` (idempotent; a no-op when the item is not pinned). **404** error envelope when the trail is missing / out of scope.
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/pins`
+
+List pinned items for a trail, grouped by type. **Response 200:** `{ "artifacts": [ArtifactRead], "quiz_attempts": [QuizAttemptRead], "flashcards": [FlashcardDeckRead] }` — the existing read shapes so the frontend reuses `ArtifactRenderer` and the quiz-attempt rendering. Pins whose target row no longer resolves in scope are excluded. **404** error envelope when the trail is missing / out of scope.
+
+---
+
+## Flashcards (Phase 15c)
+
+Flashcards are a DEDICATED subsystem (not a generic artifact). Each concept owns at most one `FlashcardDeck` (the retrievable / pinnable unit, like a quiz attempt); the deck is the canonical relational store. Generation is source-grounded (every card's `source_ref` must map to a real retrieved `source_revision_id`, else it is dropped), atomic, and dedup-aware via a deterministic embedding-similarity gate; the generator can decline with `exhausted: true` + a `reason` instead of padding. Scheduling v1 is LEITNER (`box` + geometric `interval_days`; recall-first swipe: yes => box+1 capped, no => box 1 with `lapses++`); the extra columns (`last_reviewed`, `due`, `reps`, `lapses`) keep the schema FSRS-ready. CSV export is Anki-compatible and EXPORT-ONLY (not the source of truth); JSON export round-trips the deck.
+
+`FlashcardRead = { id, deck_id, front, back, hint, source_ref, card_type, box, interval_days, last_reviewed, due, reps, lapses, created_at }`. `FlashcardDeckRead = { id, workspace_id, trail_id, concept_id, title, created_at, updated_at, cards: [FlashcardRead] }`.
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/flashcards/generate`
+
+Generate (or extend) the concept's deck. **Body:** `{ "extend": false, "force": false }` (both default off). With neither flag an existing populated deck is returned unchanged (idempotent); `extend` appends new non-duplicate cards; `force` regenerates from scratch. **Response 200:** `{ "deck": FlashcardDeckRead, "exhausted": bool, "reason": string }` — `exhausted` is the generator's honest decline (e.g. no linked source material, or the deck soft-cap is reached). **404** error envelope when the concept is missing / out of scope; **502** error envelope on generator failure.
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/flashcards`
+
+Retrieve the concept's deck + cards with scheduling state. **Response 200:** `FlashcardDeckRead`. **404** error envelope when no deck exists or the concept is out of scope.
+
+#### `POST /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/flashcards/{card_id}/review`
+
+Apply one Leitner recall-first swipe. **Body:** `{ "recalled": true | false }` — `true` promotes the card (box+1 capped, `reps++`, recomputes `interval_days`/`due`); `false` resets to box 1 and increments `lapses` (`reps++`). **Response 200:** the updated `FlashcardRead`. **404** error envelope when the card / concept is missing or out of scope.
+
+#### `GET /api/workspaces/{workspace_id}/trails/{trail_id}/concepts/{concept_id}/flashcards/export`
+
+Export the deck. **Query:** `?format=csv` (default) or `?format=json`. CSV is an Anki-compatible export (`#separator:Comma`, `#columns:front,back,hint,source_ref,card_type`) returned as `text/csv` with a `Content-Disposition` attachment header; JSON returns the round-trippable deck as `application/json`. **400** error envelope when `format` is not `csv`/`json`; **404** error envelope when no deck exists or the concept is out of scope.
 
 ---
 
