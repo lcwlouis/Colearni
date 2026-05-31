@@ -227,6 +227,44 @@ def _parse_sse(body: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+async def test_create_and_update_conversation_thread(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+
+    create_resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversations"
+    )
+    assert create_resp.status_code == 200
+    conversation_id = create_resp.json()["id"]
+
+    update_resp = await api_client.patch(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversations/{conversation_id}",
+        json={"title": "Renamed thread"},
+    )
+
+    assert update_resp.status_code == 200
+    assert update_resp.json()["title"] == "Renamed thread"
+
+
+async def test_delete_conversation_thread_endpoint(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+
+    create_resp = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversations"
+    )
+    conversation_id = create_resp.json()["id"]
+
+    delete_resp = await api_client.delete(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversations/{conversation_id}"
+    )
+
+    assert delete_resp.status_code == 204
+
+    async_session = async_sessionmaker(db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        rows = list(await session.scalars(select(Conversation)))
+    assert rows == []
+
+
 async def test_chat_returns_sse_events_in_order(api_client, db_engine):
     ws_id, trail_id, concept_id = await _seed(db_engine)
 

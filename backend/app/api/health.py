@@ -13,6 +13,8 @@ class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     version: str
     db: Literal["ok", "error"]
+    llm_provider: str
+    llm_model: str
 
 
 async def _check_db() -> Literal["ok", "error"]:
@@ -31,4 +33,9 @@ async def _check_db() -> Literal["ok", "error"]:
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     db_status = await _check_db()
-    return HealthResponse(version=settings.app_version, db=db_status)
+    return HealthResponse(
+        version=settings.app_version,
+        db=db_status,
+        llm_provider=settings.llm_provider,
+        llm_model=settings.llm_model,
+    )

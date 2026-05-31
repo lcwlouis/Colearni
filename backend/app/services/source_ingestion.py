@@ -8,13 +8,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.agents.embedding_client import EmbeddingClient
+from backend.app.models.concept import ConceptNode
 from backend.app.models.source import (  # noqa: F401 (SourceChunk: mapper registration)
+    ConceptSourceLink,
     SourceChunk,
     SourceRecord,
     SourceRevision,
 )
+from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.schemas.source import SourceRecordRead, SourceRevisionSummary, SourceUploadResponse
+from backend.app.schemas.workspace import SourceConceptLink as SourceConceptLinkSchema
+from backend.app.schemas.workspace import WorkspaceSourceItem
 from backend.app.services.chunker import chunk_elements
 from backend.app.services.concept_source_links import auto_link_source_to_trail
 from backend.app.services.parser import parse_source
@@ -247,3 +252,63 @@ def _storage_root(storage_root: str) -> Path:
     if not storage_root.strip():
         raise SourceUploadError("Private source storage root is not configured", status_code=500)
     return Path(storage_root).expanduser().resolve()
+
+
+async def list_workspace_sources(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+) -> list[WorkspaceSourceItem]:
+    """Return all source records scoped to a workspace, ordered by id, with linked concept info."""
+    if await session.get(Workspace, workspace_id) is None:
+        raise LookupError(f"Workspace {workspace_id} not found")
+
+    stmt = select(SourceRecord).where(SourceRecord.workspace_id == workspace_id).order_by(SourceRecord.id)
+    records = list(await session.scalars(stmt))
+
+    if not records:
+        return []
+
+    source_ids = [r.id for r in records]
+    links_stmt = (
+        select(
+            ConceptSourceLink.source_id,
+            ConceptSourceLink.concept_id,
+            ConceptSourceLink.relation,
+            ConceptNode.title.label("concept_title"),
+            Trail.id.label("trail_id"),
+            Trail.title.label("trail_title"),
+        )
+        .join(ConceptNode, ConceptSourceLink.concept_id == ConceptNode.id)
+        .join(Trail, ConceptNode.trail_id == Trail.id)
+        .where(ConceptSourceLink.source_id.in_(source_ids))
+    )
+    link_rows = list(await session.execute(links_stmt))
+
+    links_by_source: dict[uuid.UUID, list[SourceConceptLinkSchema]] = {}
+    for source_id, concept_id, relation, concept_title, trail_id, trail_title in link_rows:
+        links_by_source.setdefault(source_id, []).append(
+            SourceConceptLinkSchema(
+                concept_id=concept_id,
+                concept_title=concept_title,
+                trail_id=trail_id,
+                trail_title=trail_title,
+                relation=relation,
+            )
+        )
+
+    return [
+        WorkspaceSourceItem(
+            id=r.id,
+            workspace_id=r.workspace_id,
+            origin=r.origin,
+            access=r.access,
+            title=r.title,
+            url=r.url,
+            license=r.license,
+            include_on_public_export=r.include_on_public_export,
+            metadata_json=r.metadata_json,
+            linked_concepts=links_by_source.get(r.id, []),
+        )
+        for r in records
+    ]

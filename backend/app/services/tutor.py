@@ -35,7 +35,12 @@ from backend.app.agents.provider_tools import (
     ProviderToolDefinition,
     normalize_tool_call,
 )
-from backend.app.agents.retrieval_tools import select_retrieval_tools
+from backend.app.agents.retrieval_tools import (
+    SUGGEST_ARTIFACT_TOOL,
+    SUGGEST_FLASHCARDS_TOOL,
+    SUGGEST_QUIZ_TOOL,
+    select_retrieval_tools,
+)
 from backend.app.schemas.tutor import ConversationMessage, TutorMode
 from backend.app.services.conversations import (
     TutorContext,
@@ -1184,27 +1189,32 @@ async def stream_chat_response(
                 str(tool_call_nc.arguments.get("mode")) if tool_call_nc.is_valid else None
             )
             tool_turns.append(("assistant", "tool_call", chunk, tool_mode))
-            reasoning_parts.append(
-                {"kind": "tool_call", "name": "get_tutor_instructions", "mode": tool_mode}
+            _append_unique_reasoning_part(
+                reasoning_parts,
+                {"kind": "tool_call", "name": "get_tutor_instructions", "mode": tool_mode},
             )
         elif kind == "tool_result":
             tool_mode = _safe_tool_mode(_extract_tool_mode(chunk))
             preview = _tool_result_preview(chunk)
             tool_turns.append(("tool", "tool_result", chunk, tool_mode))
-            reasoning_parts.append(
+            _append_unique_reasoning_part(
+                reasoning_parts,
                 {
                     "kind": "tool_result",
                     "name": "get_tutor_instructions",
                     "mode": tool_mode,
                     "result": preview,
-                }
+                },
             )
         elif kind == "status":
             if chunk == "responding":
                 emitted_response_status = True
             status = chunk if chunk in _VALID_STATUSES else "thinking"
             if status != "responding":
-                reasoning_parts.append({"kind": "status", "status": status})
+                _append_unique_reasoning_part(
+                    reasoning_parts,
+                    {"kind": "status", "status": status},
+                )
         else:
             full_text += chunk
 
@@ -1320,7 +1330,20 @@ async def stream_chat_response(
                 has_sources=has_sources,
                 has_primer=primer_available,
             )
-            if llm_client_for_retrieval is not None and (has_sources or primer_available):
+            # Phase 14: suggest_quiz is offered on EVERY tutor turn (not gated on
+            # sources/primer). Appending it here also means the planning loop runs
+            # every turn whenever there is a usable LLM client, so the tutor can
+            # nudge level-up/practice even on source-less concepts.
+            # Phase 15f: suggest_artifact is offered the same way (every turn, not
+            # gated on sources), so the tutor can nudge a worked example, timeline,
+            # etc. The model only emits the intent; the build happens on CTA click.
+            offered_tools = [
+                *offered_tools,
+                SUGGEST_QUIZ_TOOL,
+                SUGGEST_FLASHCARDS_TOOL,
+                SUGGEST_ARTIFACT_TOOL,
+            ]
+            if llm_client_for_retrieval is not None and offered_tools:
                 try:
                     retrieval_messages = _retrieval_planning_messages(prep.messages_after_mode)
                     retrieval_loop = await _run_retrieval_loop(
@@ -1343,6 +1366,73 @@ async def stream_chat_response(
                     enriched_messages = prep.messages_after_mode
 
                 for result in retrieval_results:
+                    if result.name == "suggest_quiz":
+                        # Phase 14: emit a dedicated, learner-visible suggestion
+                        # event + reasoning part instead of the generic tool
+                        # trace. The CTA is opt-in and reuses the existing
+                        # quiz_drafts path on click; nothing is generated, opened,
+                        # or graded here, and mastery is untouched. We also do not
+                        # replay this into the prompt history (the brief tool
+                        # result already informs the final generation that a
+                        # suggestion was surfaced).
+                        quiz_type = result.public_preview.get("quiz_type")
+                        reason = result.public_preview.get("reason")
+                        _append_unique_reasoning_part(
+                            reasoning_parts,
+                            {
+                                "kind": "suggest_quiz",
+                                "quiz_type": quiz_type,
+                                "reason": reason,
+                            },
+                        )
+                        yield _sse(
+                            "suggest_quiz",
+                            {
+                                "type": "suggest_quiz",
+                                "quiz_type": quiz_type,
+                                "reason": reason,
+                            },
+                        )
+                        continue
+                    if result.name == "suggest_flashcards":
+                        reason = result.public_preview.get("reason")
+                        _append_unique_reasoning_part(
+                            reasoning_parts,
+                            {"kind": "suggest_flashcards", "reason": reason},
+                        )
+                        yield _sse(
+                            "suggest_flashcards",
+                            {"type": "suggest_flashcards", "reason": reason},
+                        )
+                        continue
+                    if result.name == "suggest_artifact":
+                        # Phase 15f: emit a dedicated, learner-visible suggestion
+                        # event + reasoning part instead of the generic tool
+                        # trace. The CTA is opt-in and reuses the existing artifact
+                        # build path on click; nothing is generated, opened, or
+                        # persisted here, and mastery is untouched. We also do not
+                        # replay this into the prompt history (the brief tool
+                        # result already informs the final generation that a
+                        # suggestion was surfaced).
+                        artifact_kind = result.public_preview.get("artifact_kind")
+                        reason = result.public_preview.get("reason")
+                        _append_unique_reasoning_part(
+                            reasoning_parts,
+                            {
+                                "kind": "suggest_artifact",
+                                "artifact_kind": artifact_kind,
+                                "reason": reason,
+                            },
+                        )
+                        yield _sse(
+                            "suggest_artifact",
+                            {
+                                "type": "suggest_artifact",
+                                "artifact_kind": artifact_kind,
+                                "reason": reason,
+                            },
+                        )
+                        continue
                     retrieval_tool_turns.append(
                         (
                             "assistant",
@@ -1357,21 +1447,23 @@ async def stream_chat_response(
                             None,
                         )
                     )
-                    reasoning_parts.append(
+                    _append_unique_reasoning_part(
+                        reasoning_parts,
                         {
                             "kind": "tool_call",
                             "name": result.name,
                             "mode": None,
                             "query": result.public_preview.get("query"),
-                        }
+                        },
                     )
-                    reasoning_parts.append(
+                    _append_unique_reasoning_part(
+                        reasoning_parts,
                         {
                             "kind": "tool_result",
                             "name": result.name,
                             "mode": None,
                             "result": result.preview_json(),
-                        }
+                        },
                     )
                     if _should_replay_retrieval_result(result):
                         retrieval_tool_turns.append(("tool", "tool_result", result.content, None))
@@ -1633,21 +1725,16 @@ def _build_chat_messages(
     """
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     for turn in recent_turns:
-        if turn.role == "tool" or getattr(turn, "kind", "visible") == "tool_result":
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": _tool_result_content(
-                        _ToolInstructionResult(
-                            requested_mode=turn.mode or "socratic",
-                            final_mode=(turn.mode or "socratic"),  # type: ignore[arg-type]
-                            content=turn.content,
-                        )
-                    )
-                    if not turn.content.startswith("<tool_result")
-                    else turn.content,
-                }
-            )
+        kind = getattr(turn, "kind", "visible")
+        if kind == "tool_result":
+            if str(turn.content).startswith("<tool_result"):
+                content = turn.content
+            else:
+                content = f"<retrieval_result>\n{turn.content}\n</retrieval_result>"
+            messages.append({"role": "assistant", "content": content})
+            continue
+        if kind == "tool_call":
+            messages.append({"role": "assistant", "content": turn.content})
             continue
         messages.append({"role": turn.role, "content": turn.content})
     messages.append({"role": "user", "content": learner_message})
@@ -1828,6 +1915,32 @@ def _tool_result_content(result: _ToolInstructionResult) -> str:
 def _tool_result_preview(content: str) -> str:
     mode = _safe_tool_mode(_extract_tool_mode(content)) or "unknown"
     return json.dumps({"status": "received", "mode": mode})
+
+
+def _reasoning_part_key(part: dict) -> tuple:
+    return (
+        part.get("kind"),
+        part.get("status"),
+        part.get("name"),
+        part.get("mode"),
+        part.get("query"),
+        part.get("result"),
+        part.get("quiz_type"),
+        part.get("artifact_kind"),
+        part.get("reason"),
+    )
+
+
+def _append_unique_reasoning_part(parts: list[dict], part: dict) -> None:
+    if part.get("kind") == "status":
+        if parts and _reasoning_part_key(parts[-1]) == _reasoning_part_key(part):
+            return
+        parts.append(part)
+        return
+    key = _reasoning_part_key(part)
+    if any(_reasoning_part_key(existing) == key for existing in parts):
+        return
+    parts.append(part)
 
 
 def _extract_tool_mode(content: str) -> str | None:

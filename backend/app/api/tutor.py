@@ -11,14 +11,28 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.db import AsyncSessionLocal, get_session
 from backend.app.schemas.errors import ErrorBody, ErrorEnvelope
-from backend.app.schemas.tutor import ChatRequest, ConversationHistoryResponse, ConversationMessage
-from backend.app.services.conversations import get_conversation_history, validate_concept_scope
+from backend.app.schemas.tutor import (
+    ChatRequest,
+    ConversationHistoryResponse,
+    ConversationMessage,
+    ConversationThreadListResponse,
+    ConversationThreadSummary,
+    ConversationThreadUpdateRequest,
+)
+from backend.app.services.conversations import (
+    create_conversation_thread,
+    delete_conversation_thread,
+    get_conversation_history,
+    list_conversation_threads,
+    update_conversation_thread_title,
+    validate_concept_scope,
+)
 from backend.app.services.tutor import (
     LLMTutorAgent,
     TutorAgent,
@@ -103,11 +117,112 @@ async def chat_endpoint(
     )
 
 
+@router.post("/{concept_id}/conversations", response_model=ConversationThreadSummary)
+async def create_conversation_endpoint(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ConversationThreadSummary | JSONResponse:
+    try:
+        conversation = await create_conversation_thread(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+        )
+    except LookupError as exc:
+        await session.rollback()
+        return _not_found(str(exc))
+
+    return ConversationThreadSummary(
+        id=conversation.id,
+        title="New thread",
+        preview=None,
+        message_count=0,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+    )
+
+
+@router.get("/{concept_id}/conversations", response_model=ConversationThreadListResponse)
+async def list_conversations_endpoint(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    limit: int = Query(default=20, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
+) -> ConversationThreadListResponse | JSONResponse:
+    try:
+        conversations = await list_conversation_threads(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            limit=limit,
+        )
+    except LookupError as exc:
+        return _not_found(str(exc))
+    return ConversationThreadListResponse(conversations=conversations)
+
+
+@router.patch(
+    "/{concept_id}/conversations/{conversation_id}", response_model=ConversationThreadSummary
+)
+async def update_conversation_endpoint(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    body: ConversationThreadUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+) -> ConversationThreadSummary | JSONResponse:
+    try:
+        return await update_conversation_thread_title(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            conversation_id=conversation_id,
+            title=body.title,
+        )
+    except LookupError as exc:
+        await session.rollback()
+        return _not_found(str(exc))
+
+
+@router.delete(
+    "/{concept_id}/conversations/{conversation_id}",
+    status_code=204,
+    response_model=None,
+)
+async def delete_conversation_endpoint(
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    try:
+        await delete_conversation_thread(
+            session,
+            workspace_id=workspace_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            conversation_id=conversation_id,
+        )
+    except LookupError as exc:
+        await session.rollback()
+        return _not_found(str(exc))
+    return Response(status_code=204)
+
+
 @router.get("/{concept_id}/conversation", response_model=ConversationHistoryResponse)
 async def get_conversation_endpoint(
     workspace_id: uuid.UUID,
     trail_id: uuid.UUID,
     concept_id: uuid.UUID,
+    conversation_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ) -> ConversationHistoryResponse | JSONResponse:
@@ -121,6 +236,7 @@ async def get_conversation_endpoint(
             workspace_id=workspace_id,
             trail_id=trail_id,
             concept_id=concept_id,
+            conversation_id=conversation_id,
             limit=limit,
         )
     except LookupError as exc:

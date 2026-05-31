@@ -14,16 +14,21 @@ Known limitations:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TypedDict
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.agents.provider_tools import NormalizedToolCall, NormalizedToolResult
+from backend.app.agents.provider_tools import (
+    NormalizedToolCall,
+    NormalizedToolResult,
+    parse_text_tool_calls,
+    strip_text_tool_calls,
+)
 from backend.app.agents.retrieval_tools import (  # noqa: F401
     READ_DOCUMENT_SECTION_TOOL,
     RETRIEVAL_TOOLS,
@@ -39,6 +44,7 @@ from backend.app.models.source import ConceptSourceLink, SourceRecord
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.schemas.concept import ConceptPrimerRead
+from backend.app.schemas.tutor import ConversationThreadSummary
 from backend.app.services.conversation_summaries import delete_stale_conversation_summaries
 from backend.app.services.learner_state import get_learner_state
 from backend.app.services.mastery import get_mastery_state
@@ -180,21 +186,19 @@ async def get_or_create_conversation(
     concept_id: uuid.UUID,
     conversation_id: uuid.UUID | None = None,
 ) -> Conversation:
-    """Return the conversation for this workspace/trail/concept, creating it if
-    it does not exist.
+    """Return a conversation for this workspace/trail/concept, creating one if needed.
 
     If *conversation_id* is provided, it is verified to belong to the same
-    workspace/trail/concept.  A mismatch raises LookupError (→ 404 in routes).
+    workspace/trail/concept. When omitted, the most recently updated thread is
+    reused; if none exists yet, a fresh thread is created.
     """
-    # Validate scope and confirm concept belongs to trail.
-    trail, concept = await validate_concept_scope(
+    await validate_concept_scope(
         session,
         workspace_id=workspace_id,
         trail_id=trail_id,
         concept_id=concept_id,
     )
 
-    # If a specific conversation_id was supplied, validate its scope.
     if conversation_id is not None:
         conv = await session.scalar(
             select(Conversation).where(
@@ -208,17 +212,43 @@ async def get_or_create_conversation(
             raise LookupError(f"Conversation {conversation_id} not found for this concept")
         return conv
 
-    # Look up (or create) the single conversation for this workspace/trail/concept.
     existing = await session.scalar(
-        select(Conversation).where(
+        select(Conversation)
+        .where(
             Conversation.workspace_id == workspace_id,
             Conversation.trail_id == trail_id,
             Conversation.concept_id == concept_id,
         )
+        .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+        .limit(1)
     )
     if existing is not None:
         return existing
 
+    return await create_conversation_thread(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        commit=False,
+    )
+
+
+async def create_conversation_thread(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    commit: bool = True,
+) -> Conversation:
+    """Create a fresh conversation thread for one concept."""
+    await validate_concept_scope(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
     new_conv = Conversation(
         workspace_id=workspace_id,
         trail_id=trail_id,
@@ -226,7 +256,114 @@ async def get_or_create_conversation(
     )
     session.add(new_conv)
     await session.flush()
+    if commit:
+        await session.commit()
+        await session.refresh(new_conv)
     return new_conv
+
+
+async def list_conversation_threads(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    limit: int = 20,
+) -> list[ConversationThreadSummary]:
+    """List conversation threads for one concept, newest first."""
+    limit = min(max(1, limit), 100)
+    await validate_concept_scope(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+    conversations = list(
+        await session.scalars(
+            select(Conversation)
+            .where(
+                Conversation.workspace_id == workspace_id,
+                Conversation.trail_id == trail_id,
+                Conversation.concept_id == concept_id,
+            )
+            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+            .limit(limit)
+        )
+    )
+    return [
+        await _conversation_thread_summary(session, conversation) for conversation in conversations
+    ]
+
+
+async def update_conversation_thread_title(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    title: str,
+) -> ConversationThreadSummary:
+    """Persist a learner-edited title for one conversation thread."""
+    conversation = await get_scoped_conversation(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        conversation_id=conversation_id,
+    )
+    conversation.custom_title = " ".join(title.split())
+    await session.commit()
+    await session.refresh(conversation)
+    return await _conversation_thread_summary(session, conversation)
+
+
+async def delete_conversation_thread(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> None:
+    """Delete one conversation thread in scope."""
+    conversation = await get_scoped_conversation(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        conversation_id=conversation_id,
+    )
+    await session.delete(conversation)
+    await session.commit()
+
+
+async def get_scoped_conversation(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    trail_id: uuid.UUID,
+    concept_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+) -> Conversation:
+    """Return one conversation thread verified to belong to the requested scope."""
+    await validate_concept_scope(
+        session,
+        workspace_id=workspace_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+    conversation = await session.scalar(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.workspace_id == workspace_id,
+            Conversation.trail_id == trail_id,
+            Conversation.concept_id == concept_id,
+        )
+    )
+    if conversation is None:
+        raise LookupError(f"Conversation {conversation_id} not found for this concept")
+    return conversation
 
 
 async def build_tutor_context(
@@ -379,12 +516,13 @@ async def get_conversation_history(
     workspace_id: uuid.UUID,
     trail_id: uuid.UUID,
     concept_id: uuid.UUID,
+    conversation_id: uuid.UUID | None = None,
     limit: int = 20,
 ) -> tuple[uuid.UUID | None, list[ConversationTurn]]:
-    """Return conversation_id (or None) and up to *limit* turns in chronological order.
+    """Return one thread's visible turns in chronological order.
 
-    Validates scope; raises LookupError if workspace/trail/concept is invalid.
-    Returns (None, []) if no conversation has started for this concept yet.
+    When *conversation_id* is omitted, the most recently updated thread for this
+    concept is returned. Returns ``(None, [])`` if the concept has no threads yet.
     """
     limit = min(max(1, limit), 100)
 
@@ -395,17 +533,31 @@ async def get_conversation_history(
         concept_id=concept_id,
     )
 
-    conv = await session.scalar(
-        select(Conversation).where(
-            Conversation.workspace_id == workspace_id,
-            Conversation.trail_id == trail_id,
-            Conversation.concept_id == concept_id,
+    if conversation_id is not None:
+        conv = await session.scalar(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.workspace_id == workspace_id,
+                Conversation.trail_id == trail_id,
+                Conversation.concept_id == concept_id,
+            )
         )
-    )
-    if conv is None:
-        return None, []
+        if conv is None:
+            raise LookupError(f"Conversation {conversation_id} not found for this concept")
+    else:
+        conv = await session.scalar(
+            select(Conversation)
+            .where(
+                Conversation.workspace_id == workspace_id,
+                Conversation.trail_id == trail_id,
+                Conversation.concept_id == concept_id,
+            )
+            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+            .limit(1)
+        )
+        if conv is None:
+            return None, []
 
-    # Fetch the most recent turns, then restore chronological order for the API.
     recent_turns = list(
         await session.scalars(
             select(ConversationTurn)
@@ -448,6 +600,9 @@ async def persist_user_turn(
         turn_index=turn_index,
     )
     session.add(turn)
+    conv = await session.get(Conversation, conversation_id)
+    if conv is not None:
+        conv.updated_at = datetime.now(UTC)
     await session.flush()
     return turn
 
@@ -588,12 +743,18 @@ async def persist_tool_turn(
     return turn
 
 
+class _ActiveQuizContext(TypedDict):
+    active_quiz_context: str
+    active_quiz_question_match: bool
+    active_quiz_prompts: list[str]
+
+
 async def _load_active_quiz_context(
     session: AsyncSession,
     *,
     concept_id: uuid.UUID,
     learner_message: str,
-) -> dict[str, str | bool | list[str]]:
+) -> _ActiveQuizContext:
     """Render sanitized active-quiz guardrail state.
 
     Never send active quiz prompts to tutor/classifier prompts: provider reasoning
@@ -650,6 +811,36 @@ def _is_same_quiz_prompt(message: str, prompt: str) -> bool:
 
 def _normalize_quiz_text(text: str) -> str:
     return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in text).split())
+
+
+async def _conversation_thread_summary(
+    session: AsyncSession,
+    conversation: Conversation,
+) -> ConversationThreadSummary:
+    turns = list(
+        await session.scalars(
+            select(ConversationTurn)
+            .where(
+                ConversationTurn.conversation_id == conversation.id,
+                ConversationTurn.kind == "visible",
+            )
+            .order_by(ConversationTurn.turn_index.asc())
+        )
+    )
+    preview_turn = turns[-1] if turns else None
+    title_turn = next((turn for turn in turns if turn.role == "user"), preview_turn)
+    title = conversation.custom_title or (
+        _excerpt(title_turn.content, max_chars=48) if title_turn else "New thread"
+    )
+    preview = _excerpt(preview_turn.content, max_chars=90) if preview_turn else None
+    return ConversationThreadSummary(
+        id=conversation.id,
+        title=title,
+        preview=preview,
+        message_count=len(turns),
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+    )
 
 
 def _excerpt(text: str, *, max_chars: int) -> str:
@@ -832,52 +1023,108 @@ async def execute_retrieval_tool(
 
     Enforces workspace scope on all calls. Returns an error result on
     any exception — does not re-raise (the loop continues safely).
+
+    The dispatch runs inside a SAVEPOINT (``begin_nested``) so that a DB-level
+    failure (e.g. a malformed query reaching asyncpg) rolls back ONLY this tool's
+    statements instead of leaving the whole transaction aborted. Without it, the
+    swallowed error would poison the shared session and a later commit (e.g. the
+    artifact ``create_artifact``) would raise ``InFailedSQLTransactionError``.
     """
     try:
-        if not tool_call.is_valid:
-            raise ValueError(f"Invalid tool arguments: {tool_call.validation_error}")
+        async with session.begin_nested():
+            if not tool_call.is_valid:
+                raise ValueError(f"Invalid tool arguments: {tool_call.validation_error}")
 
-        if tool_call.name == "search_sources":
-            query = tool_call.arguments["query"]
-            results = await search_sources_by_text(
-                query=query,
-                workspace_id=workspace_id,
-                session=session,
-                concept_id=concept_id,
-            )
-            content = _format_chunk_results(results)
+            if tool_call.name == "search_sources":
+                query = tool_call.arguments["query"]
+                results = await search_sources_by_text(
+                    query=query,
+                    workspace_id=workspace_id,
+                    session=session,
+                    concept_id=concept_id,
+                )
+                content = _format_chunk_results(results)
 
-        elif tool_call.name == "get_concept_sources":
-            cid = _tool_concept_id(tool_call, concept_id)
-            sources = await get_concept_sources_for_tutor(
-                session=session,
-                workspace_id=workspace_id,
-                concept_id=cid,
-            )
-            content = _format_source_list(sources)
+            elif tool_call.name == "get_concept_sources":
+                cid = _tool_concept_id(tool_call, concept_id)
+                sources = await get_concept_sources_for_tutor(
+                    session=session,
+                    workspace_id=workspace_id,
+                    concept_id=cid,
+                )
+                content = _format_source_list(sources)
 
-        elif tool_call.name == "get_graph_neighbourhood":
-            cid = _tool_concept_id(tool_call, concept_id)
-            content = await _get_neighbourhood_for_concept(session, workspace_id, cid)
+            elif tool_call.name == "get_graph_neighbourhood":
+                cid = _tool_concept_id(tool_call, concept_id)
+                content = await _get_neighbourhood_for_concept(
+                    session,
+                    workspace_id=workspace_id,
+                    concept_id=cid,
+                )
 
-        elif tool_call.name == "get_concept_primer":
-            cid = _tool_concept_id(tool_call, concept_id)
-            content = await _get_primer_for_concept(session, workspace_id, cid)
+            elif tool_call.name == "get_concept_primer":
+                cid = _tool_concept_id(tool_call, concept_id)
+                content = await _get_primer_for_concept(
+                    session,
+                    workspace_id=workspace_id,
+                    concept_id=cid,
+                )
 
-        elif tool_call.name == "read_document_section":
-            rev_id = uuid.UUID(tool_call.arguments["source_revision_id"])
-            line_start = int(tool_call.arguments["line_start"])
-            window_lines = int(tool_call.arguments.get("window_lines", 50))
-            content = await read_document_section(
-                session=session,
-                workspace_id=workspace_id,
-                source_revision_id=rev_id,
-                line_start=line_start,
-                window_lines=window_lines,
-            )
+            elif tool_call.name == "suggest_quiz":
+                # Phase 14: the tutor only emits an intent. There is no retrieval
+                # or DB read here, and mastery/grading stay owned by the quiz
+                # service. The orchestrator turns this result into a `suggest_quiz`
+                # SSE event and reasoning part; the brief content keeps the model
+                # aware it has already suggested a quiz this turn (so it does not
+                # repeat).
+                quiz_type = tool_call.arguments["quiz_type"]
+                reason = tool_call.arguments["reason"]
+                return NormalizedToolResult(
+                    call_id=tool_call.call_id,
+                    name=tool_call.name,
+                    content="Quiz suggestion surfaced to the learner.",
+                    public_preview={"quiz_type": quiz_type, "reason": reason},
+                )
 
-        else:
-            content = f"Unknown tool: {tool_call.name}"
+            elif tool_call.name == "suggest_flashcards":
+                reason = tool_call.arguments["reason"]
+                return NormalizedToolResult(
+                    call_id=tool_call.call_id,
+                    name=tool_call.name,
+                    content="Flashcard suggestion surfaced to the learner.",
+                    public_preview={"reason": reason},
+                )
+
+            elif tool_call.name == "suggest_artifact":
+                # Phase 15f: the tutor only emits an intent. There is no retrieval
+                # or DB read here, and artifact generation/persistence stays owned
+                # by the artifact build path. The orchestrator turns this result
+                # into a `suggest_artifact` SSE event and reasoning part; the brief
+                # content keeps the model aware it has already suggested an
+                # artifact this turn (so it does not repeat).
+                artifact_kind = tool_call.arguments["kind"]
+                reason = tool_call.arguments["reason"]
+                return NormalizedToolResult(
+                    call_id=tool_call.call_id,
+                    name=tool_call.name,
+                    content="Artifact suggestion surfaced to the learner.",
+                    public_preview={"artifact_kind": artifact_kind, "reason": reason},
+                )
+
+            elif tool_call.name == "read_document_section":
+                rev_id = uuid.UUID(tool_call.arguments["source_revision_id"])
+                line_start = int(tool_call.arguments["line_start"])
+                window_lines = int(tool_call.arguments.get("window_lines", 50))
+                content = await read_document_section(
+                    session=session,
+                    workspace_id=workspace_id,
+                    source_revision_id=rev_id,
+                    line_start=line_start,
+                    window_lines=window_lines,
+                )
+
+            else:
+                content = f"Unknown tool: {tool_call.name}"
 
     except Exception as exc:
         return NormalizedToolResult(
@@ -983,15 +1230,25 @@ async def _run_retrieval_loop(
         tool_calls = [
             e.tool_call for e in events if e.kind == "tool_call" and e.tool_call is not None
         ]
+        text = "".join(e.text or "" for e in events if e.kind == "text")
+        thinking = "".join(e.text or "" for e in events if e.kind == "thinking")
         if not tool_calls:
-            text = "".join(e.text or "" for e in events if e.kind == "text")
-            thinking = "".join(e.text or "" for e in events if e.kind == "thinking")
-            return RetrievalLoopResult(
-                messages=messages,
-                tool_results=all_results,
-                text=text,
-                thinking=thinking,
-            )
+            # Recovery: small/local models sometimes emit tool calls as TEXT
+            # (e.g. a <functioncall>{...}</functioncall> block) instead of native
+            # tool calls. Recover any valid ones so retrieval and the
+            # suggest_quiz/suggest_artifact CTAs still fire, and strip the raw
+            # block so it never leaks to the learner as the visible answer.
+            recovered = [c for c in parse_text_tool_calls(text, tools) if c.is_valid]
+            if recovered:
+                tool_calls = recovered
+                text = strip_text_tool_calls(text)
+            else:
+                return RetrievalLoopResult(
+                    messages=messages,
+                    tool_results=all_results,
+                    text=strip_text_tool_calls(text),
+                    thinking=thinking,
+                )
 
         # Deduplicate: same name + same args -> reuse cached result but keep call_id.
         # Cached calls still count against the loop budget so repeated duplicate
@@ -1025,20 +1282,22 @@ async def _run_retrieval_loop(
                 seen_keys.add(cache_key)
                 unique_calls.append(tc)
 
-        # Execute all calls concurrently
-        new_results = list(
-            await asyncio.gather(
-                *[
-                    execute_retrieval_tool(
-                        tc,
-                        session=session,
-                        workspace_id=workspace_id,
-                        concept_id=concept_id,
-                    )
-                    for tc in unique_calls
-                ]
+        # Execute all unique calls SEQUENTIALLY. They share this one
+        # AsyncSession; a single asyncpg connection cannot run concurrent
+        # operations, so asyncio.gather here corrupts the transaction
+        # (InFailedSQLTransactionError) whenever the model emits >1 tool call in
+        # a round. Retrieval is read-only and the budget is small, so running
+        # them in sequence costs negligible latency and is correctness-safe.
+        new_results = []
+        for tc in unique_calls:
+            new_results.append(
+                await execute_retrieval_tool(
+                    tc,
+                    session=session,
+                    workspace_id=workspace_id,
+                    concept_id=concept_id,
+                )
             )
-        )
 
         for tc, result in zip(unique_calls, new_results):
             cache_key = (tc.name, json.dumps(tc.arguments, sort_keys=True))

@@ -39,13 +39,39 @@ class ChatRequest(BaseModel):
 class ConversationReasoningPart(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["status", "thinking", "tool_call", "tool_result"]
+    kind: Literal[
+        "status",
+        "thinking",
+        "tool_call",
+        "tool_result",
+        "suggest_quiz",
+        "suggest_flashcards",
+        "suggest_artifact",
+    ]
     status: TutorStreamStatus | None = None
     text: str | None = None
     name: str | None = None
     mode: TutorMode | None = None
     query: str | None = None
     result: str | None = None
+    # suggest_quiz parts (Phase 14): the tutor's opt-in quiz suggestion. The
+    # backend stays the owner of the quiz draft; this only carries the intent so
+    # the CTA rehydrates with the rest of the turn trace.
+    quiz_type: Literal["level_up", "practice"] | None = None
+    reason: str | None = None
+    # suggest_artifact parts (Phase 15f): the tutor's opt-in artifact suggestion.
+    # The backend stays the owner of artifact generation/persistence; this only
+    # carries the intent (kind + reason) so the CTA rehydrates on reload.
+    artifact_kind: (
+        Literal[
+            "worked_example",
+            "comparison_card",
+            "timeline",
+            "mini_graph",
+            "simulation_slider",
+        ]
+        | None
+    ) = None
 
 
 class ConversationMessage(BaseModel):
@@ -68,3 +94,29 @@ class ConversationMessage(BaseModel):
 class ConversationHistoryResponse(BaseModel):
     conversation_id: uuid.UUID | None
     messages: list[ConversationMessage]
+
+
+class ConversationThreadSummary(BaseModel):
+    id: uuid.UUID
+    title: str
+    preview: str | None = None
+    message_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationThreadUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=1, max_length=120)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def title_not_blank(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("title must not be blank")
+        return v
+
+
+class ConversationThreadListResponse(BaseModel):
+    conversations: list[ConversationThreadSummary]

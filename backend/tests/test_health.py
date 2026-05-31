@@ -27,7 +27,16 @@ async def test_health_db_field_present(client):
 
 @pytest.mark.anyio
 async def test_health_shape(client):
-    """Response must only contain status, version, and db fields."""
+    """Response must contain status, version, db, llm_provider, and llm_model fields."""
     response = await client.get("/health")
     data = response.json()
-    assert set(data.keys()) == {"status", "version", "db"}
+    assert set(data.keys()) == {"status", "version", "db", "llm_provider", "llm_model"}
+
+
+@pytest.mark.anyio
+async def test_health_llm_fields(client):
+    """llm_provider and llm_model must be non-empty strings."""
+    response = await client.get("/health")
+    data = response.json()
+    assert isinstance(data["llm_provider"], str) and len(data["llm_provider"]) > 0
+    assert isinstance(data["llm_model"], str) and len(data["llm_model"]) > 0

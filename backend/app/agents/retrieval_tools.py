@@ -127,6 +127,115 @@ RETRIEVAL_TOOLS = [
     GET_CONCEPT_PRIMER_TOOL,
 ]
 
+# Suggest-quiz is NOT a retrieval tool: it never reads sources or graph context
+# and is offered on EVERY tutor turn (see Phase 14), unlike the retrieval tools
+# which are gated on the concept having sources or a cached primer. It is kept
+# out of RETRIEVAL_TOOLS / select_retrieval_tools and appended separately by the
+# tutor orchestrator so it is always available. The model only emits an intent;
+# the backend stays the owner of quiz drafts, grading, and mastery.
+SUGGEST_QUIZ_TOOL = ProviderToolDefinition(
+    name="suggest_quiz",
+    description=(
+        "Suggest a quiz card to the learner at a good moment. This only surfaces "
+        "an opt-in suggestion; it never generates, opens, or grades a quiz, and it "
+        "never changes mastery. The learner chooses whether to start it. Use "
+        "quiz_type='practice' anytime focused practice would help the learner "
+        "consolidate. Use quiz_type='level_up' ONLY when the learner looks "
+        "near-ready to advance this concept (e.g. they have demonstrated solid "
+        "understanding this turn); do not push level-up prematurely. Always give a "
+        "short, encouraging, learner-visible reason. The current concept is implied; "
+        "do not pass a concept id. Call this at most once per turn."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "quiz_type": {
+                "type": "string",
+                "enum": ["level_up", "practice"],
+                "description": "Kind of quiz to suggest.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Short learner-visible reason for the suggestion.",
+            },
+        },
+        "required": ["quiz_type", "reason"],
+        "additionalProperties": False,
+    },
+    public_argument_fields=("quiz_type", "reason"),
+)
+
+SUGGEST_FLASHCARDS_TOOL = ProviderToolDefinition(
+    name="suggest_flashcards",
+    description=(
+        "Suggest generating flashcards for the learner when spaced recall would help. "
+        "This only surfaces an opt-in suggestion; it never generates cards, opens "
+        "the panel, grades anything, or changes mastery. Use it when the learner "
+        "would benefit from recall-first review of source-grounded facts from this "
+        "concept. Always give a short, encouraging, learner-visible reason. The "
+        "current concept is implied; do not pass a concept id. Call this at most "
+        "once per turn."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": "Short learner-visible reason for the suggestion.",
+            },
+        },
+        "required": ["reason"],
+        "additionalProperties": False,
+    },
+    public_argument_fields=("reason",),
+)
+
+# Suggest-artifact is NOT a retrieval tool either: like suggest_quiz it reads no
+# sources or graph context and is offered on EVERY tutor turn (Phase 15f). It is
+# appended separately by the tutor orchestrator so it is always available. The
+# model only emits an intent (kind + reason); the backend stays the owner of
+# artifact generation/persistence, which happens only when the learner clicks the
+# CTA and reuses the existing artifact build path. The current concept is implied;
+# the model never passes a concept id (trusted backend context, like suggest_quiz).
+SUGGEST_ARTIFACT_TOOL = ProviderToolDefinition(
+    name="suggest_artifact",
+    description=(
+        "Suggest a learning artifact (a visual or interactive aid) to the learner "
+        "at a good moment. This only surfaces an opt-in suggestion; it never "
+        "generates, opens, or persists an artifact, and it never changes mastery. "
+        "The learner chooses whether to build it. Pick the kind that best fits what "
+        "would help right now: 'worked_example' for a step-by-step solved problem, "
+        "'comparison_card' to contrast two related ideas, 'timeline' for ordered "
+        "events or steps, 'mini_graph' for a small relationship diagram, "
+        "'simulation_slider' for an interactive parameter to explore. Always give a "
+        "short, encouraging, learner-visible reason. The current concept is implied; "
+        "do not pass a concept id. Call this at most once per turn."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": [
+                    "worked_example",
+                    "comparison_card",
+                    "timeline",
+                    "mini_graph",
+                    "simulation_slider",
+                ],
+                "description": "Kind of artifact to suggest.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Short learner-visible reason for the suggestion.",
+            },
+        },
+        "required": ["kind", "reason"],
+        "additionalProperties": False,
+    },
+    public_argument_fields=("kind", "reason"),
+)
+
 
 def select_retrieval_tools(
     *,

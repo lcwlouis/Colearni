@@ -25,8 +25,12 @@ from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
 from backend.app.services.conversations import (
     TutorContext,
+    create_conversation_thread,
+    delete_conversation_thread,
     get_conversation_history,
     get_or_create_conversation,
+    list_conversation_threads,
+    update_conversation_thread_title,
 )
 
 # ---------------------------------------------------------------------------
@@ -162,7 +166,7 @@ async def test_first_chat_creates_conversation(db_engine, db_session):
     assert conv.concept_id == concept_id
 
 
-async def test_second_call_reuses_conversation(db_engine, db_session):
+async def test_second_call_reuses_latest_conversation(db_engine, db_session):
     ws_id, trail_id, concept_id = await _seed(db_engine)
 
     conv1 = await get_or_create_conversation(
@@ -180,7 +184,162 @@ async def test_second_call_reuses_conversation(db_engine, db_session):
         concept_id=concept_id,
     )
 
-    assert conv1.id == conv2.id, "second call must reuse existing conversation"
+    assert conv1.id == conv2.id, "omitted conversation_id should reuse latest thread"
+
+
+async def test_multiple_conversation_threads_can_exist_for_one_concept(db_engine, db_session):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+
+    conv1 = await create_conversation_thread(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+    conv2 = await create_conversation_thread(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+
+    assert conv1.id != conv2.id
+
+    rows = list(
+        await db_session.scalars(
+            select(Conversation).where(
+                Conversation.workspace_id == ws_id,
+                Conversation.trail_id == trail_id,
+                Conversation.concept_id == concept_id,
+            )
+        )
+    )
+    assert {row.id for row in rows} == {conv1.id, conv2.id}
+
+
+async def test_thread_list_summarizes_each_thread(db_engine, db_session):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    conv1 = await create_conversation_thread(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        commit=False,
+    )
+    conv2 = await create_conversation_thread(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        commit=False,
+    )
+    db_session.add_all(
+        [
+            ConversationTurn(
+                conversation_id=conv1.id,
+                role="user",
+                content="First thread question",
+                turn_index=0,
+            ),
+            ConversationTurn(
+                conversation_id=conv1.id,
+                role="assistant",
+                content="First thread answer",
+                mode="socratic",
+                turn_index=1,
+            ),
+            ConversationTurn(
+                conversation_id=conv2.id,
+                role="user",
+                content="Second thread question",
+                turn_index=0,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    summaries = await list_conversation_threads(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+
+    assert {summary.id for summary in summaries} == {conv1.id, conv2.id}
+    by_id = {summary.id: summary for summary in summaries}
+    assert by_id[conv1.id].title == "First thread question"
+    assert by_id[conv1.id].preview == "First thread answer"
+    assert by_id[conv1.id].message_count == 2
+    assert by_id[conv2.id].title == "Second thread question"
+    assert by_id[conv2.id].message_count == 1
+
+
+async def test_thread_title_can_be_customized(db_engine, db_session):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    conv = await create_conversation_thread(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        commit=False,
+    )
+    db_session.add(
+        ConversationTurn(
+            conversation_id=conv.id,
+            role="user",
+            content="Auto generated title",
+            turn_index=0,
+        )
+    )
+    await db_session.commit()
+
+    summary = await update_conversation_thread_title(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        conversation_id=conv.id,
+        title="Manual title",
+    )
+
+    assert summary.title == "Manual title"
+
+    summaries = await list_conversation_threads(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+    assert summaries[0].title == "Manual title"
+
+
+async def test_thread_can_be_deleted(db_engine, db_session):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+    conv = await create_conversation_thread(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+    )
+
+    await delete_conversation_thread(
+        db_session,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        conversation_id=conv.id,
+    )
+
+    rows = list(
+        await db_session.scalars(
+            select(Conversation).where(
+                Conversation.workspace_id == ws_id,
+                Conversation.trail_id == trail_id,
+                Conversation.concept_id == concept_id,
+            )
+        )
+    )
+    assert rows == []
 
 
 # ---------------------------------------------------------------------------
@@ -266,9 +425,7 @@ async def test_assistant_reasoning_is_stored_when_provider_exposes_it(db_engine)
     assert len(assistant_turns) == 1
     assert assistant_turns[0].content == "Visible answer"
     assert assistant_turns[0].reasoning == "Reasoning trace"
-    assert assistant_turns[0].reasoning_parts == [
-        {"kind": "thinking", "text": "Reasoning trace"}
-    ]
+    assert assistant_turns[0].reasoning_parts == [{"kind": "thinking", "text": "Reasoning trace"}]
 
 
 async def test_split_control_prefix_is_not_emitted_or_persisted(db_engine):
@@ -437,6 +594,53 @@ async def test_history_endpoint_returns_empty_when_no_conversation(api_client, d
     data = resp.json()
     assert data["conversation_id"] is None
     assert data["messages"] == []
+
+
+async def test_conversation_thread_endpoints_create_list_and_select_history(api_client, db_engine):
+    ws_id, trail_id, concept_id = await _seed(db_engine)
+
+    first = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversations"
+    )
+    second = await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversations"
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_id = first.json()["id"]
+    second_id = second.json()["id"]
+    assert first_id != second_id
+
+    await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "First thread", "conversation_id": first_id},
+    )
+    await api_client.post(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/chat",
+        json={"message": "Second thread", "conversation_id": second_id},
+    )
+
+    listed = await api_client.get(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversations"
+    )
+    assert listed.status_code == 200
+    summaries = listed.json()["conversations"]
+    assert {summary["id"] for summary in summaries} == {first_id, second_id}
+    assert {summary["title"] for summary in summaries} == {
+        "First thread",
+        "Second thread",
+    }
+
+    first_history = await api_client.get(
+        f"/api/workspaces/{ws_id}/trails/{trail_id}/concepts/{concept_id}/conversation",
+        params={"conversation_id": first_id},
+    )
+    assert first_history.status_code == 200
+    assert [message["content"] for message in first_history.json()["messages"]] == [
+        "First thread",
+        "Response text",
+    ]
 
 
 async def test_history_endpoint_returns_messages_in_chronological_order(api_client, db_engine):

@@ -2048,8 +2048,9 @@ async def test_retrieval_loop_offered_on_sourceless_concept_with_primer(db_engin
     assert "get_concept_sources" not in offered
 
 
-async def test_retrieval_loop_skipped_without_sources_or_primer(db_engine, db_session):
-    """Source-less concept WITHOUT a primer: the loop is not offered at all."""
+async def test_retrieval_loop_offers_suggest_quiz_without_sources_or_primer(db_engine, db_session):
+    """Source-less concept WITHOUT a primer: the loop still runs every turn so the
+    tutor can offer suggest_quiz (Phase 14), but no source tools are offered."""
     ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
     conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
 
@@ -2067,5 +2068,484 @@ async def test_retrieval_loop_skipped_without_sources_or_primer(db_engine, db_se
     ):
         pass
 
-    # No sources and no primer → retrieval loop never invoked.
-    assert llm_client.tools_seen == []
+    # Phase 14: suggest_quiz is offered on every turn, so the loop runs even with
+    # no sources and no primer. Only graph neighbourhood + suggest_quiz are offered;
+    # no source tools or primer tool.
+    assert llm_client.tools_seen, "retrieval loop should run to offer suggest_quiz"
+    offered = llm_client.tools_seen[0]
+    assert "suggest_quiz" in offered
+    assert "get_graph_neighbourhood" in offered
+    assert "get_concept_primer" not in offered
+    assert "search_sources" not in offered
+    assert "read_document_section" not in offered
+    assert "get_concept_sources" not in offered
+
+
+class _SuggestQuizLLMClient:
+    """Two-phase retrieval client that emits suggest_quiz tool call(s).
+
+    On the first chat_stream_events call it emits ``repeat`` identical
+    suggest_quiz tool calls (no text); subsequent calls emit empty text so the
+    loop exits and the agent proceeds to its stubbed final generation.
+    """
+
+    def __init__(
+        self,
+        *,
+        quiz_type: str = "level_up",
+        reason: str = "You explained that clearly — ready to try a level-up?",
+        repeat: int = 1,
+    ) -> None:
+        self.quiz_type = quiz_type
+        self.reason = reason
+        self.repeat = repeat
+        self._calls = 0
+        self.tools_seen: list[list[str]] = []
+
+    async def chat_stream_events(self, messages, tools=None):
+        self.tools_seen.append([t.name for t in (tools or [])])
+        self._calls += 1
+        if self._calls == 1:
+            for i in range(self.repeat):
+                yield NormalizedStreamEvent.tool_call_event(
+                    NormalizedToolCall(
+                        call_id=f"call_sq_{i}",
+                        name="suggest_quiz",
+                        arguments={"quiz_type": self.quiz_type, "reason": self.reason},
+                    )
+                )
+            yield NormalizedStreamEvent.done_event()
+        else:
+            yield NormalizedStreamEvent.text_delta("")
+            yield NormalizedStreamEvent.done_event()
+
+
+def _parse_sse_events(chunks: list[str]) -> list[tuple[str, dict]]:
+    """Parse collected SSE strings into (event_type, data) tuples."""
+    import json as _json
+
+    events: list[tuple[str, dict]] = []
+    for chunk in chunks:
+        event_type = ""
+        data_line = ""
+        for line in chunk.splitlines():
+            if line.startswith("event: "):
+                event_type = line[len("event: ") :]
+            elif line.startswith("data: "):
+                data_line = line[len("data: ") :]
+        if data_line:
+            events.append((event_type, _json.loads(data_line)))
+    return events
+
+
+async def _latest_assistant_turn(db_session, conversation_id):
+    result = await db_session.execute(
+        select(ConversationTurn)
+        .where(
+            ConversationTurn.conversation_id == conversation_id,
+            ConversationTurn.role == "assistant",
+            ConversationTurn.kind == "visible",
+        )
+        .order_by(ConversationTurn.turn_index.desc())
+    )
+    return result.scalars().first()
+
+
+async def test_suggest_quiz_emits_event_and_persists_part(db_engine, db_session):
+    """A suggest_quiz tool call surfaces a CTA event + reasoning part, without a
+    generic tool_call/tool_result trace, and the visible answer still streams."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    client = _SuggestQuizLLMClient(quiz_type="level_up", reason="Ready to level up?")
+    agent = _GatingTwoPhaseAgent(client)
+
+    chunks = [
+        chunk
+        async for chunk in stream_chat_response(
+            db_session,
+            agent,
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="A derivative is the instantaneous rate of change, right?",
+            conversation_id=conv.id,
+        )
+    ]
+    events = _parse_sse_events(chunks)
+    by_type: dict[str, list[dict]] = {}
+    for etype, data in events:
+        by_type.setdefault(etype, []).append(data)
+
+    # Exactly one learner-visible suggest_quiz CTA event with the locked shape.
+    suggestions = by_type.get("suggest_quiz", [])
+    assert len(suggestions) == 1
+    assert suggestions[0] == {
+        "type": "suggest_quiz",
+        "quiz_type": "level_up",
+        "reason": "Ready to level up?",
+    }
+    # suggest_quiz is NOT surfaced through the generic tool trace.
+    for data in by_type.get("tool_call", []) + by_type.get("tool_result", []):
+        assert data.get("name") != "suggest_quiz"
+    # The visible answer still streamed and the turn completed.
+    assert "done" in by_type
+
+    # The suggestion persists on the assistant turn's reasoning_parts.
+    turn = await _latest_assistant_turn(db_session, conv.id)
+    assert turn is not None
+    parts = turn.reasoning_parts or []
+    sq_parts = [p for p in parts if p.get("kind") == "suggest_quiz"]
+    assert sq_parts == [
+        {"kind": "suggest_quiz", "quiz_type": "level_up", "reason": "Ready to level up?"}
+    ]
+
+    # It rehydrates through the public ConversationMessage schema.
+    from backend.app.schemas.tutor import ConversationMessage
+
+    schema = ConversationMessage.model_validate(turn)
+    rehydrated = [p for p in schema.reasoning_parts if p.kind == "suggest_quiz"]
+    assert len(rehydrated) == 1
+    assert rehydrated[0].quiz_type == "level_up"
+    assert rehydrated[0].reason == "Ready to level up?"
+
+
+async def test_suggest_quiz_does_not_grade_or_create_quiz(db_engine, db_session):
+    """The tutor suggestion never grades, opens, or persists a quiz, and the only
+    mastery change is the ordinary first-turn learning transition."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    client = _SuggestQuizLLMClient(quiz_type="practice", reason="A little practice helps.")
+    agent = _GatingTwoPhaseAgent(client)
+
+    chunks = [
+        chunk
+        async for chunk in stream_chat_response(
+            db_session,
+            agent,
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="how do I get started?",
+            conversation_id=conv.id,
+        )
+    ]
+    events = _parse_sse_events(chunks)
+    done = next(data for etype, data in events if etype == "done")
+
+    # No quiz drafts were created by the suggestion.
+    drafts = (
+        (await db_session.execute(select(QuizDraft).where(QuizDraft.concept_id == concept_id)))
+        .scalars()
+        .all()
+    )
+    assert drafts == []
+
+    # The mastery update is the normal tutor learning transition, not a grade.
+    assert done["mastery_update"]["concept_id"] == str(concept_id)
+    assert done["mastery_update"]["status"] == "learning"
+
+
+async def test_distinct_suggest_quiz_types_each_surface(db_engine, db_session):
+    """Distinct quiz_types each surface their own CTA event. Same-type collapse is
+    a frontend concern (single active CTA per quiz_type); the backend surfaces the
+    suggestions and leaves draft dedupe to the (concept_id, quiz_type) uniqueness."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    class _TwoTypeClient:
+        def __init__(self) -> None:
+            self._calls = 0
+            self.tools_seen: list[list[str]] = []
+
+        async def chat_stream_events(self, messages, tools=None):
+            self.tools_seen.append([t.name for t in (tools or [])])
+            self._calls += 1
+            if self._calls == 1:
+                yield NormalizedStreamEvent.tool_call_event(
+                    NormalizedToolCall(
+                        call_id="sq_practice",
+                        name="suggest_quiz",
+                        arguments={"quiz_type": "practice", "reason": "Warm up."},
+                    )
+                )
+                yield NormalizedStreamEvent.tool_call_event(
+                    NormalizedToolCall(
+                        call_id="sq_levelup",
+                        name="suggest_quiz",
+                        arguments={"quiz_type": "level_up", "reason": "Then level up."},
+                    )
+                )
+                yield NormalizedStreamEvent.done_event()
+            else:
+                yield NormalizedStreamEvent.text_delta("")
+                yield NormalizedStreamEvent.done_event()
+
+    agent = _GatingTwoPhaseAgent(_TwoTypeClient())
+
+    chunks = [
+        chunk
+        async for chunk in stream_chat_response(
+            db_session,
+            agent,
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="ok",
+            conversation_id=conv.id,
+        )
+    ]
+    events = _parse_sse_events(chunks)
+    suggestions = [data for etype, data in events if etype == "suggest_quiz"]
+    quiz_types = sorted(s["quiz_type"] for s in suggestions)
+    assert quiz_types == ["level_up", "practice"]
+
+
+def test_suggest_quiz_tool_rejects_concept_id_and_validates_enum():
+    """The model cannot pass concept_id, and quiz_type is enum-constrained."""
+    from backend.app.agents.provider_tools import normalize_tool_call
+    from backend.app.agents.retrieval_tools import SUGGEST_QUIZ_TOOL
+
+    # concept_id is not an accepted argument (additionalProperties: false).
+    with_concept = normalize_tool_call(
+        call_id="c1",
+        name="suggest_quiz",
+        raw_arguments={
+            "quiz_type": "level_up",
+            "reason": "r",
+            "concept_id": str(uuid.uuid4()),
+        },
+        provider="fake",
+        definition=SUGGEST_QUIZ_TOOL,
+    )
+    assert not with_concept.is_valid
+
+    # An unknown quiz_type is rejected by the enum.
+    bad_enum = normalize_tool_call(
+        call_id="c2",
+        name="suggest_quiz",
+        raw_arguments={"quiz_type": "final_exam", "reason": "r"},
+        provider="fake",
+        definition=SUGGEST_QUIZ_TOOL,
+    )
+    assert not bad_enum.is_valid
+
+    # A well-formed suggestion validates.
+    ok = normalize_tool_call(
+        call_id="c3",
+        name="suggest_quiz",
+        raw_arguments={"quiz_type": "practice", "reason": "keep going"},
+        provider="fake",
+        definition=SUGGEST_QUIZ_TOOL,
+    )
+    assert ok.is_valid
+    assert ok.arguments == {"quiz_type": "practice", "reason": "keep going"}
+
+
+class _SuggestArtifactLLMClient:
+    """Two-phase retrieval client that emits a suggest_artifact tool call.
+
+    On the first chat_stream_events call it emits one suggest_artifact tool call
+    (no text); subsequent calls emit empty text so the loop exits and the agent
+    proceeds to its stubbed final generation.
+    """
+
+    def __init__(
+        self,
+        *,
+        artifact_kind: str = "worked_example",
+        reason: str = "A worked example would make this click.",
+    ) -> None:
+        self.artifact_kind = artifact_kind
+        self.reason = reason
+        self._calls = 0
+        self.tools_seen: list[list[str]] = []
+
+    async def chat_stream_events(self, messages, tools=None):
+        self.tools_seen.append([t.name for t in (tools or [])])
+        self._calls += 1
+        if self._calls == 1:
+            yield NormalizedStreamEvent.tool_call_event(
+                NormalizedToolCall(
+                    call_id="call_sa_0",
+                    name="suggest_artifact",
+                    arguments={"kind": self.artifact_kind, "reason": self.reason},
+                )
+            )
+            yield NormalizedStreamEvent.done_event()
+        else:
+            yield NormalizedStreamEvent.text_delta("")
+            yield NormalizedStreamEvent.done_event()
+
+
+async def test_suggest_artifact_emits_event_and_persists_part(db_engine, db_session):
+    """A suggest_artifact tool call surfaces a CTA event + reasoning part, without a
+    generic tool_call/tool_result trace, and the visible answer still streams."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    client = _SuggestArtifactLLMClient(
+        artifact_kind="timeline", reason="A timeline ties these steps together."
+    )
+    agent = _GatingTwoPhaseAgent(client)
+
+    chunks = [
+        chunk
+        async for chunk in stream_chat_response(
+            db_session,
+            agent,
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="Can you show me how these events fit together over time?",
+            conversation_id=conv.id,
+        )
+    ]
+    events = _parse_sse_events(chunks)
+    by_type: dict[str, list[dict]] = {}
+    for etype, data in events:
+        by_type.setdefault(etype, []).append(data)
+
+    # Exactly one learner-visible suggest_artifact CTA event with the locked shape.
+    suggestions = by_type.get("suggest_artifact", [])
+    assert len(suggestions) == 1
+    assert suggestions[0] == {
+        "type": "suggest_artifact",
+        "artifact_kind": "timeline",
+        "reason": "A timeline ties these steps together.",
+    }
+    # suggest_artifact is NOT surfaced through the generic tool trace.
+    for data in by_type.get("tool_call", []) + by_type.get("tool_result", []):
+        assert data.get("name") != "suggest_artifact"
+    # The visible answer still streamed and the turn completed.
+    assert "done" in by_type
+
+    # The suggestion persists on the assistant turn's reasoning_parts.
+    turn = await _latest_assistant_turn(db_session, conv.id)
+    assert turn is not None
+    parts = turn.reasoning_parts or []
+    sa_parts = [p for p in parts if p.get("kind") == "suggest_artifact"]
+    assert sa_parts == [
+        {
+            "kind": "suggest_artifact",
+            "artifact_kind": "timeline",
+            "reason": "A timeline ties these steps together.",
+        }
+    ]
+
+    # It rehydrates through the public ConversationMessage schema.
+    from backend.app.schemas.tutor import ConversationMessage
+
+    schema = ConversationMessage.model_validate(turn)
+    rehydrated = [p for p in schema.reasoning_parts if p.kind == "suggest_artifact"]
+    assert len(rehydrated) == 1
+    assert rehydrated[0].artifact_kind == "timeline"
+    assert rehydrated[0].reason == "A timeline ties these steps together."
+
+
+async def test_suggest_artifact_does_not_create_artifact(db_engine, db_session):
+    """The tutor suggestion never generates or persists an artifact, and the only
+    mastery change is the ordinary first-turn learning transition."""
+    from backend.app.models.artifact import Artifact
+
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    client = _SuggestArtifactLLMClient(
+        artifact_kind="comparison_card", reason="Comparing these helps."
+    )
+    agent = _GatingTwoPhaseAgent(client)
+
+    chunks = [
+        chunk
+        async for chunk in stream_chat_response(
+            db_session,
+            agent,
+            workspace_id=ws_id,
+            trail_id=trail_id,
+            concept_id=concept_id,
+            message="how do I tell these apart?",
+            conversation_id=conv.id,
+        )
+    ]
+    events = _parse_sse_events(chunks)
+    done = next(data for etype, data in events if etype == "done")
+
+    # No artifacts were created by the suggestion.
+    artifacts = (
+        (await db_session.execute(select(Artifact).where(Artifact.concept_id == concept_id)))
+        .scalars()
+        .all()
+    )
+    assert artifacts == []
+
+    # The mastery update is the normal tutor learning transition, not a grade.
+    assert done["mastery_update"]["concept_id"] == str(concept_id)
+    assert done["mastery_update"]["status"] == "learning"
+
+
+async def test_retrieval_loop_offers_suggest_artifact_every_turn(db_engine, db_session):
+    """suggest_artifact is offered on every tutor turn alongside suggest_quiz."""
+    ws_id, trail_id, concept_id, _ = await _seed_graph(db_engine)
+    conv = await _seed_later_turn_conversation(db_session, ws_id, trail_id, concept_id)
+
+    client = _SuggestArtifactLLMClient()
+    agent = _GatingTwoPhaseAgent(client)
+
+    async for _ in stream_chat_response(
+        db_session,
+        agent,
+        workspace_id=ws_id,
+        trail_id=trail_id,
+        concept_id=concept_id,
+        message="ok",
+        conversation_id=conv.id,
+    ):
+        pass
+
+    assert client.tools_seen, "retrieval loop should run to offer suggest_artifact"
+    offered = client.tools_seen[0]
+    assert "suggest_artifact" in offered
+    assert "suggest_quiz" in offered
+
+
+def test_suggest_artifact_tool_rejects_concept_id_and_validates_enum():
+    """The model cannot pass concept_id, and kind is enum-constrained."""
+    from backend.app.agents.provider_tools import normalize_tool_call
+    from backend.app.agents.retrieval_tools import SUGGEST_ARTIFACT_TOOL
+
+    # concept_id is not an accepted argument (additionalProperties: false).
+    with_concept = normalize_tool_call(
+        call_id="a1",
+        name="suggest_artifact",
+        raw_arguments={
+            "kind": "worked_example",
+            "reason": "r",
+            "concept_id": str(uuid.uuid4()),
+        },
+        provider="fake",
+        definition=SUGGEST_ARTIFACT_TOOL,
+    )
+    assert not with_concept.is_valid
+
+    # An unknown kind is rejected by the enum.
+    bad_enum = normalize_tool_call(
+        call_id="a2",
+        name="suggest_artifact",
+        raw_arguments={"kind": "flashcard", "reason": "r"},
+        provider="fake",
+        definition=SUGGEST_ARTIFACT_TOOL,
+    )
+    assert not bad_enum.is_valid
+
+    # A well-formed suggestion validates.
+    ok = normalize_tool_call(
+        call_id="a3",
+        name="suggest_artifact",
+        raw_arguments={"kind": "simulation_slider", "reason": "try tuning it"},
+        provider="fake",
+        definition=SUGGEST_ARTIFACT_TOOL,
+    )
+    assert ok.is_valid
+    assert ok.arguments == {"kind": "simulation_slider", "reason": "try tuning it"}

@@ -91,7 +91,8 @@ def _build_formatter(*, use_color: bool) -> logging.Formatter:
 def _configure_handlers(logger: logging.Logger, level: int) -> None:
     for handler in logger.handlers:
         handler.setLevel(level)
-        handler.setFormatter(_build_formatter(use_color=_supports_color(getattr(handler, "stream", None))))
+        use_color = _supports_color(getattr(handler, "stream", None))
+        handler.setFormatter(_build_formatter(use_color=use_color))
 
 
 def configure_logging(log_level: str) -> None:

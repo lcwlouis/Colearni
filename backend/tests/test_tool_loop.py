@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.agents.provider_tools import (
@@ -310,6 +311,48 @@ async def test_tool_loop_no_calls(db_session: AsyncSession):
     assert retrieval_loop.text == "Just text."
 
 
+async def test_tool_loop_recovers_text_emitted_tool_call(db_session: AsyncSession):
+    """A <functioncall> block in TEXT is recovered and executed.
+
+    Regression guard for small/local models that print the call as text instead
+    of using the native tool-call channel: the suggestion must fire and the raw
+    block must not leak as the visible answer.
+    """
+    from backend.app.agents.retrieval_tools import SUGGEST_ARTIFACT_TOOL
+
+    workspace_id = uuid.uuid4()
+    concept_id = uuid.uuid4()
+
+    leaked = (
+        "I can suggest a learning artifact for you. <functioncall> "
+        '{"name": "suggest_artifact", "arguments": {"kind": "timeline", '
+        '"reason": "A timeline anchors the tracklist in order."}}</functioncall>'
+    )
+    fake_llm = _FakeLLMClient(
+        responses=[
+            [NormalizedStreamEvent.text_delta(leaked), NormalizedStreamEvent.done_event()],
+            [NormalizedStreamEvent.text_delta(""), NormalizedStreamEvent.done_event()],
+        ]
+    )
+
+    messages = [{"role": "user", "content": "can you generate an artefact?"}]
+    retrieval_loop = await _run_retrieval_loop(
+        messages,
+        [SUGGEST_ARTIFACT_TOOL],
+        session=db_session,
+        workspace_id=workspace_id,
+        concept_id=concept_id,
+        llm_client=fake_llm,
+    )
+
+    results = retrieval_loop.tool_results
+    assert len(results) == 1
+    assert results[0].name == "suggest_artifact"
+    assert results[0].public_preview.get("artifact_kind") == "timeline"
+    # The raw block never becomes the visible answer.
+    assert "functioncall" not in retrieval_loop.text
+
+
 async def test_tool_loop_cached_duplicates_count_against_budget(db_session: AsyncSession):
     workspace_id = uuid.uuid4()
     concept_id = uuid.uuid4()
@@ -498,6 +541,51 @@ async def test_tool_loop_bad_args(db_session: AsyncSession):
     # The loop must not raise; we get an error result
     assert len(all_results) == 1
     assert all_results[0].is_error is True
+
+
+async def test_tool_db_error_does_not_poison_outer_transaction(db_session: AsyncSession):
+    """A tool that fails mid-DB-work must not abort the surrounding transaction.
+
+    Regression guard for the artifact-builder ``InFailedSQLTransactionError``: a
+    swallowed DB error inside a retrieval tool used to leave the shared session's
+    transaction aborted (on Postgres), so the later ``create_artifact`` commit
+    failed. ``execute_retrieval_tool`` now runs each dispatch inside a SAVEPOINT,
+    so the failing tool's partial writes roll back while the outer transaction
+    (and a subsequent commit) stays intact.
+    """
+    # Outer-transaction write that must survive the failing tool call.
+    kept = Workspace(name="kept-outer")
+    db_session.add(kept)
+    await db_session.flush()
+
+    async def boom(*, query, workspace_id, session, concept_id):
+        # Simulate a tool that writes then hits a DB failure: the partial write
+        # must be rolled back to the savepoint, not persisted with the outer txn.
+        session.add(Workspace(name="dropped-inner"))
+        await session.flush()
+        raise RuntimeError("simulated db failure")
+
+    tc = _make_tool_call("search_sources", {"query": "anything"}, "call_boom")
+    with patch(
+        "backend.app.services.conversations.search_sources_by_text",
+        side_effect=boom,
+    ):
+        result = await execute_retrieval_tool(
+            tc,
+            session=db_session,
+            workspace_id=uuid.uuid4(),
+            concept_id=uuid.uuid4(),
+        )
+
+    assert result.is_error is True
+
+    # The outer transaction is still usable: this commit must succeed (on Postgres
+    # it raised InFailedSQLTransactionError before the savepoint fix).
+    await db_session.commit()
+
+    names = set((await db_session.execute(select(Workspace.name))).scalars().all())
+    assert "kept-outer" in names  # outer write survived
+    assert "dropped-inner" not in names  # failing tool's write rolled back
 
 
 async def test_get_concept_sources_invalid_concept_id_defaults_to_current(db_session: AsyncSession):

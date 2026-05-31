@@ -5,9 +5,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from .api.artifacts import router as artifacts_router
 from .api.concepts import concept_sources_router
 from .api.concepts import router as concepts_router
+from .api.flashcards import router as flashcards_router
 from .api.health import router as health_router
+from .api.notes import router as notes_router
+from .api.pins import router as pins_router
 from .api.sources import router as sources_router
 from .api.trail_packs import router as trail_packs_router
 from .api.trails import router as trails_router
@@ -15,7 +19,9 @@ from .api.tutor import router as tutor_router
 from .api.workspaces import router as workspaces_router
 from .db import AsyncSessionLocal, engine
 from .logging_config import configure_logging
+from .services.artifact_builder import artifact_generation_manager
 from .services.concept_primers import primer_generation_manager
+from .services.flashcards import flashcard_generation_manager
 from .services.tutor_followups import tutor_followup_manager
 from .services.workspaces import ensure_default_workspace
 from .settings import settings
@@ -44,6 +50,17 @@ async def lifespan(app: FastAPI):
     # manager owns the per-concept in-flight registry; change this if primer
     # generation moves to an external worker/queue.
     await primer_generation_manager.shutdown()
+
+    # Cancel + await any detached artifact-builder generation tasks so background
+    # generations (and their own DB sessions) don't leak on shutdown. The manager
+    # owns the per-target in-flight registry; change this if artifact generation
+    # moves to an external worker/queue.
+    await artifact_generation_manager.shutdown()
+
+    # Cancel + await any detached flashcard generation tasks so background deck
+    # builds (and their own DB sessions) don't leak on shutdown. Change this if
+    # flashcard generation moves to an external worker/queue.
+    await flashcard_generation_manager.shutdown()
 
     # Cancel + await any detached post-turn tutor follow-ups (conversation
     # summary + learner-state update) so their own DB sessions don't leak on
@@ -99,4 +116,8 @@ app.include_router(sources_router)
 app.include_router(trail_packs_router)
 app.include_router(concept_sources_router)
 app.include_router(concepts_router)
+app.include_router(artifacts_router)
+app.include_router(flashcards_router)
+app.include_router(notes_router)
+app.include_router(pins_router)
 app.include_router(tutor_router)

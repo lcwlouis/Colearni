@@ -18,17 +18,9 @@ from .base import Base, UUIDType, uuid_pk
 
 
 class Conversation(Base):
-    """One active conversation thread per (workspace, trail, concept) triple."""
+    """One conversation thread within a (workspace, trail, concept) scope."""
 
     __tablename__ = "conversations"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "trail_id",
-            "concept_id",
-            name="uq_conversations_workspace_trail_concept",
-        ),
-    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -46,6 +38,7 @@ class Conversation(Base):
         ForeignKey("concept_nodes.id", ondelete="CASCADE"),
         nullable=False,
     )
+    custom_title: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # updated_at is set explicitly by the service layer; no onupdate hook.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

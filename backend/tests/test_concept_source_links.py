@@ -12,9 +12,9 @@ from backend.app.main import app
 from backend.app.models.base import Base
 from backend.app.models.concept import ConceptNode
 from backend.app.models.source import ConceptSourceLink, SourceChunk, SourceRecord, SourceRevision
-from backend.app.services.concept_source_links import auto_link_source_to_trail
 from backend.app.models.trail import Trail
 from backend.app.models.workspace import Workspace
+from backend.app.services.concept_source_links import auto_link_source_to_trail
 
 
 def _sessionmaker(engine):

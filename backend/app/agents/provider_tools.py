@@ -153,6 +153,117 @@ def normalize_tool_call(
     )
 
 
+_TEXT_TOOL_CALL_RE = re.compile(
+    r"<\s*(?:function[_\s]?call|tool[_\s]?call|tool[_\s]?use)\s*>(.*?)"
+    r"<\s*/\s*(?:function[_\s]?call|tool[_\s]?call|tool[_\s]?use)\s*>",
+    re.DOTALL | re.IGNORECASE,
+)
+# Tolerate an UNCLOSED opening tag (model truncated before emitting the close).
+_TEXT_TOOL_CALL_OPEN_RE = re.compile(
+    r"<\s*(?:function[_\s]?call|tool[_\s]?call|tool[_\s]?use)\s*>(.*)\Z",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _first_json_object(text: str) -> dict[str, Any] | None:
+    """Return the first balanced top-level JSON object in *text*, or None."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(text[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+                return obj if isinstance(obj, dict) else None
+    return None
+
+
+def parse_text_tool_calls(
+    text: str,
+    definitions: Sequence[ProviderToolDefinition] | Mapping[str, ProviderToolDefinition] = (),
+    *,
+    provider: str = "text",
+) -> list[NormalizedToolCall]:
+    """Recover tool calls a model emitted as TEXT instead of native tool calls.
+
+    Small/local models (e.g. deepseek-v4-flash) sometimes ignore the native
+    tool-call channel and instead print a ``<functioncall>{...}</functioncall>``
+    block (or a bare ``{"name": ..., "arguments": {...}}`` object) directly in the
+    text. Without this recovery the call leaks to the learner as raw text and the
+    intended action (retrieval, suggest_quiz, suggest_artifact) never fires.
+
+    Only calls whose ``name`` matches a provided definition are returned, each
+    validated against that definition (invalid ones carry a ``validation_error``
+    so callers can drop them).
+    """
+    if not text:
+        return []
+    blobs: list[str] = [m.group(1) for m in _TEXT_TOOL_CALL_RE.finditer(text)]
+    if not blobs:
+        open_match = _TEXT_TOOL_CALL_OPEN_RE.search(text)
+        if open_match is not None:
+            blobs.append(open_match.group(1))
+    if not blobs:
+        stripped = text.strip()
+        # Bare JSON object with no wrapping tags: only treat as a call when it
+        # advertises a name (and, below, the name matches a known tool).
+        if stripped.startswith("{") and '"name"' in stripped:
+            blobs.append(stripped)
+    calls: list[NormalizedToolCall] = []
+    for idx, blob in enumerate(blobs):
+        obj = _first_json_object(blob)
+        if obj is None:
+            continue
+        name = obj.get("name")
+        if not isinstance(name, str):
+            continue
+        definition = _definition_for(definitions, name)
+        if definition is None:
+            continue
+        raw_args = obj.get("arguments")
+        if raw_args is None:
+            raw_args = obj.get("parameters", {})
+        calls.append(
+            normalize_tool_call(
+                call_id=f"text_{idx}_{name}",
+                name=name,
+                raw_arguments=raw_args,
+                provider=provider,
+                definition=definition,
+            )
+        )
+    return calls
+
+
+def strip_text_tool_calls(text: str) -> str:
+    """Remove textual tool-call blocks so they never leak to the learner."""
+    if not text:
+        return text
+    cleaned = _TEXT_TOOL_CALL_RE.sub("", text)
+    cleaned = _TEXT_TOOL_CALL_OPEN_RE.sub("", cleaned)
+    return cleaned.strip()
+
+
 def safe_public_tool_call_preview(
     call: NormalizedToolCall,
     definition: ProviderToolDefinition | None = None,

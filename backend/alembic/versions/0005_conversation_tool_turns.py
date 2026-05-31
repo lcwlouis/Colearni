@@ -39,7 +39,8 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_conversation_turns_mode",
         "conversation_turns",
-        "mode IS NULL OR mode in ('socratic', 'direct', 'repair', 'quiz_prompt', 'explore', 'free_explore')",
+        "mode IS NULL OR mode in "
+        "('socratic', 'direct', 'repair', 'quiz_prompt', 'explore', 'free_explore')",
     )
 
 

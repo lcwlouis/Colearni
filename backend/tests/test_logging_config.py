@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from io import StringIO
 import logging
 import re
+from io import StringIO
 
 from backend.app.logging_config import configure_logging
 
@@ -87,7 +87,8 @@ def test_configure_logging_reformats_existing_root_handlers(capsys):
 
         assert "\x1b[" not in log_line
         assert re.search(
-            r"\d{2}:\d{2}:\d{2}\.\d{3} \| DEBUG\s+\| services\.workspaces \| existing handler updated",
+            r"\d{2}:\d{2}:\d{2}\.\d{3} \| DEBUG\s+\| services\.workspaces \| "
+            r"existing handler updated",
             log_line,
         )
     finally:
