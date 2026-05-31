@@ -2,7 +2,7 @@
 
 ## What is CoLearni?
 
-CoLearni is a **local-ready, graph-first personal learning system** being rebuilt from scratch. The product shape:
+CoLearni is a **local-ready, graph-first personal learning system**. The product shape:
 
 ```
 personal learning workspace
@@ -85,7 +85,7 @@ docs/           # Architecture, API contract, plan docs
 - Automatic conversation summarization (the LLM summarizer exists but isn't auto-triggered yet)
 - Dark mode
 - Trail generation background jobs (refresh-resilient)
-- Safety + content guardrails (Phase 16.5)
+- Safety + content guardrails (Phase 17.5)
 - Deployment/SaaS features
 
 ---

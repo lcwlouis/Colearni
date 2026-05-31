@@ -18,7 +18,7 @@ create Trail
 -> export/import safe Trail Pack
 ```
 
-Do not build a marketing landing page as the main experience. The first screen should become a learning dashboard that helps the learner continue progress, understand recent Trail mastery, follow a recommended next action, search older Trails, and create a new Trail. Trail sharing/import is a core product identity, not a later nice-to-have.
+The product app home is a learning dashboard, not a marketing page. The app dashboard (route group `(app)`, e.g. `/dashboard`) helps the learner continue progress, understand recent Trail mastery, follow a recommended next action, search older Trails, and create a new Trail. Trail sharing/import is a core product identity, not a later nice-to-have. A separate public marketing site (route group `(marketing)` at `/`, with a fake login that enters the app) exists as of Phase 17.6 — it is the public entry point and must not replace the dashboard as the learner's working home.
 
 ## Planned Stack
 
@@ -122,9 +122,8 @@ AssistantModal evaluation:
 
 Artifact roadmap:
 
-- Start with structured artifact payloads such as JSON or CSV rendered by a frontend component registry.
-- Flashcard sets, worked examples, mini graphs, and other trusted templates should arrive through that artifact path after the current mastery and Trail sharing loop is stable.
-- Raw React or JavaScript artifacts are a much-later option, not part of the current phases.
+- Structured artifact payloads (the validated envelope) are rendered by a frontend component registry. This path is SHIPPED (Phase 15): `worked_example`, `comparison_card`, `timeline`, `mini_graph`, and the interactive `simulation_slider`, plus a dedicated flashcards subsystem, all degrade to `text_fallback` on any unknown kind / invalid data / render error.
+- Raw React or JavaScript artifacts remain a much-later option and are deliberately NOT part of the trusted-template path.
 
 ### Installation
 
@@ -208,6 +207,15 @@ Primary CTA by mastery state:
 
 Mobile should prioritize clear next actions, selected concept detail, tutor/quiz access, and simple Trail progress over dense graph controls.
 
+#### Concept sub-panels
+
+The concept action row opens dedicated sub-panels (each with an `onBack` to the concept overview; the action footer is hidden while a sub-panel is open):
+
+- **Tutor** — Socratic chat (`TutorPanel`).
+- **Practice / Level Up** — quiz cards (`QuizPanel`); **View past attempts** opens `QuizHistoryPanel`.
+- **Artifacts** — worked examples / comparison cards (`ArtifactsPanel`).
+- **Flashcards** — recall-first spaced-repetition review (`FlashcardsPanel`, Phase 15c). Empty state offers a "Generate flashcards" CTA; the review loop shows one card FRONT, hides the answer until "Show answer", then grades binary "Got it"/"Missed it" (→ `reviewFlashcard`) and advances the due-first session queue. Supports "Generate more", CSV/JSON export, and a deck `PinToggle` (`item_type: flashcard`). Keyboard: space reveals, y/n grade.
+
 ## Dashboard Requirements
 
 Home should be a learning dashboard, not only a Trail list.
@@ -283,7 +291,7 @@ export default {
 
 ### When to implement
 
-Dark mode is a Phase 16 demo polish requirement. It should be implemented before the product is shown to external users.
+Dark mode is a Phase 17 demo polish requirement. It should be implemented before the product is shown to external users.
 
 ## API Access
 

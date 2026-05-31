@@ -4,20 +4,20 @@ This file gives Claude Code guidance for working in this repository.
 
 ## Current State
 
-CoLearni was reset to start fresh for the actual MVP. Some historical files may still exist in git history, but the current rebuild should follow the docs in `docs/`.
+CoLearni is a local-ready, graph-first learning workspace. Some historical files may still exist in git history, but the current product should follow the docs in `docs/`.
 
-Do not assume the old ingestion-first app still exists. The new MVP is local-ready, graph-first, and Trail-centered.
+Do not assume the old ingestion-first app still exists. The current product is local-ready, graph-first, and Trail-centered.
 
 ## Read These First
 
 Before making changes, read the relevant docs:
 
 - `docs/CODEX.md` - contributor rules, safety rules, verification format.
-- `docs/REBUILD_PLAN.md` - phased MVP execution plan.
+- `docs/REBUILD_PLAN.md` - current delivery plan and phase status.
 - `docs/ARCHITECTURE.md` - system architecture, data model, and layer structure.
 - `docs/API.md` - full API contract (endpoints, schemas, streaming spec).
 - `docs/PROMPTS.md` - prompt registry format and skeletons for all LLM tasks.
-- `docs/PRODUCT_SPEC.md` - MVP product behavior and non-goals.
+- `docs/PRODUCT_SPEC.md` - current product behavior and non-goals.
 - `docs/GRAPH.md` - graph validation and budget rules.
 - `docs/MASTERY_MODEL.md` - mastery statuses, state transitions, scoring, practice mode.
 - `docs/TUTOR_BEHAVIOUR.md` - tutor modes, context management, streaming.
@@ -42,7 +42,7 @@ The product should feel like a mentor or coach, not a search engine.
 
 Build local-ready first. Keep SaaS compatibility in the architecture, but do not start with auth, billing, moderation, or a public marketplace.
 
-## MVP Build Order
+## Product Delivery Order
 
 1. Foundation cleanup.
 2. Workspace + Trail database models.
@@ -73,7 +73,7 @@ Do not start with PDF ingestion.
 
 ## Layer Structure
 
-The canonical layout for this rebuild:
+The canonical layout for this product:
 
 ```text
 backend/

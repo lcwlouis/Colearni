@@ -4,7 +4,7 @@
 
 ## What CoLearni Is
 
-CoLearni is being rebuilt from scratch for the actual MVP.
+CoLearni is a local-ready, graph-first learning workspace.
 
 The product is not a generic RAG chatbot and it should not start with PDF ingestion. The first useful version should prove the core learning loop:
 
@@ -35,7 +35,7 @@ Research Trace: a record of public-source searches and selected links. It stores
 
 Hydration: enriching an imported Trail locally with public links, open-license sources, user uploads, manual notes, or model knowledge. Hydrated content is private by default.
 
-## MVP Direction
+## Product Direction
 
 Build local-ready first and keep SaaS compatibility in the architecture.
 
@@ -59,9 +59,9 @@ SaaS later means:
 - Moderation.
 - Organization/school accounts.
 
-The main MVP risk is learning experience quality, not SaaS infrastructure.
+The main product risk is learning experience quality, not SaaS infrastructure.
 
-## Planned MVP Features
+## Core Product Features
 
 - Trail creation from topic, goal, and target depth.
 - Concept graph viewer with statuses and concept levels.
@@ -108,7 +108,7 @@ Public export must exclude:
 
 ## Intended Stack
 
-The docs describe the intended rebuild stack:
+The docs describe the current stack:
 
 | Layer | Technology |
 |---|---|
@@ -116,12 +116,12 @@ The docs describe the intended rebuild stack:
 | Database | PostgreSQL + pgvector |
 | ORM / migrations | SQLAlchemy 2 + Alembic |
 | Frontend | Next.js, TypeScript |
-| Graph UI | React Flow for MVP or Sigma.js if already working |
+| Graph UI | React Flow initially or Sigma.js if already working |
 | LLM client | `openai` SDK (direct, provider-configurable) |
 | Tests | pytest, frontend typecheck/test tooling |
 | Tracing | Phoenix/OpenTelemetry later, optional on day one |
 
-This repository was reset before implementation. Treat the docs as the current source of truth until the new app scaffold exists.
+This repository tracks the current product implementation. Treat the docs as the current source of truth.
 
 ## Documentation
 
@@ -138,9 +138,9 @@ Start here:
 - [docs/TEST_PLAN.md](docs/TEST_PLAN.md)
 - [docs/CODEX.md](docs/CODEX.md)
 
-## Planned Local Commands
+## Local Commands
 
-These commands should exist after the foundation scaffold is implemented:
+Use these commands in the local setup:
 
 ```bash
 # local infra

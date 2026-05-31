@@ -132,8 +132,8 @@ Retrieval tools are controlled and budgeted:
 
 - `search_sources(query, concept_id?)` — chunk-text search returning `ChunkSearchResult` objects with `section_heading`, `line_start`, `line_end`, `source_revision_id`. Scoped to the current concept when `concept_id` is provided.
 - `read_document_section(source_revision_id, line_start, window_lines=50)` — reads a markdown window from `SourceRevision.raw_text`. Scoped to the current workspace.
-- `get_concept_sources(concept_id)` — service function exists; tool dispatch deferred.
-- `get_graph_neighbourhood(concept_id)` — service function exists; tool dispatch deferred.
+- `get_concept_sources(concept_id)` — registered and dispatched in `execute_retrieval_tool`; defaults to the current concept when `concept_id` is omitted.
+- `get_graph_neighbourhood(concept_id)` — registered and dispatched in `execute_retrieval_tool`; offered whenever the retrieval loop runs (it leaks no source content) and defaults to the current concept.
 
 These tools enforce workspace/Trail/concept scope and return citation-ready metadata. Per-turn budget is `TOOL_CALL_BUDGET = 3` individual tool executions. Tool results are capped at `MAX_TOOL_RESULT_CHARS = 2000` characters before entering context. The retrieval loop is offered to the LLM when the current concept has at least one linked source OR a cached primer. The offered tool set is scoped: source tools (`search_sources`, `read_document_section`, `get_concept_sources`) are only included when the concept has linked sources, `get_concept_primer` is included whenever a primer is cached, and `get_graph_neighbourhood` is offered whenever the loop runs.
 
@@ -181,7 +181,7 @@ Each concept has one conversation per workspace. The conversation is persisted i
 Context window rules:
 - Include the last **10 visible turns** (user + assistant only) in the prompt.
 - If internal tool-call/tool-result turns occurred within that retained visible window, include those tool turns too so prior gated-mode context remains replayable.
-- Automatic conversation summarisation remains deferred in the current implementation. The service still reads the most recent `conversation_summaries` row if one already exists, but it does not generate new summaries yet.
+- Automatic conversation summarisation is active. After a visible turn's `done` event, a detached post-turn follow-up (`run_tutor_followups`) calls `maybe_generate_conversation_summary` on its own DB session; summary generation is bounded (batched over older visible turns) and idempotent (records `turns_covered_to`). The tutor prompt always includes the most recent `conversation_summaries` row when present.
 - Always include the summary (if present) at the start of the context block.
 - Context included in prompt: summary (if any) → recent turns → current message.
 
@@ -201,15 +201,17 @@ Rules:
 
 ## Quiz Suggestions
 
-The tutor may eventually suggest a quiz, but it must not inline-generate the quiz or mark mastery directly.
+The tutor can suggest a quiz, but it must not inline-generate the quiz or mark mastery directly.
 
-Planned flow:
+Shipped flow (Phase 14):
 
 ```text
-tutor emits suggest_quiz(concept_id, quiz_type, reason)
--> frontend shows quiz CTA/card
--> backend-owned quiz draft system generates/reuses the card
+tutor emits suggest_quiz(quiz_type, reason)   # concept_id is trusted backend context, not a model arg
+-> frontend shows an opt-in quiz CTA/card (never auto-opened)
+-> backend-owned quiz draft system generates/reuses the card on click
 ```
+
+`suggest_quiz` is a real normalized provider tool offered every turn (not gated on sources). Two sibling suggestion tools follow the same opt-in, never-auto-act contract: `suggest_flashcards(reason)` nudges the recall-first flashcards deck, and `suggest_artifact(kind, reason)` nudges an artifact build (Phase 15f). All three only emit an intent (persisted as a `reasoning_parts` kind + SSE event); generation, persistence, and mastery stay backend-owned.
 
 Mastery remains owned by the grading flow documented in `docs/MASTERY_MODEL.md`.
 

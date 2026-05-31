@@ -12,4 +12,4 @@ build/
 .pytest_cache/
 .ruff_cache/
 .colearni/
-test_files/
+test_files/.superpowers/

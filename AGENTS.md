@@ -2,7 +2,7 @@
 
 ## Current State
 
-CoLearni was reset to start fresh for the actual MVP. Treat the docs in `docs/` as the current source of truth. Historical README/architecture assumptions should not be carried forward unless they match the rebuild docs.
+CoLearni is a local-ready, graph-first learning workspace. Treat the docs in `docs/` as the current source of truth. Historical README/architecture assumptions should not be carried forward unless they still match the current delivery docs.
 
 When the current tutor/quiz implementation has moved ahead of older phase wording, `docs/CURRENT_VARIANT.md` is the implementation overlay and should be treated as authoritative until the stale phase/domain doc is updated.
 
@@ -55,7 +55,7 @@ Agents must stop after completing implementation and verification. The user revi
 
 Always add a short inline comment above each startup/shutdown line explaining what it owns and when it should be changed (e.g. `# Replace with user-scoped provisioning when auth is added`).
 
-## MVP Direction
+## Product Direction
 
 Build local-ready first, with SaaS as a thin layer later.
 
@@ -66,4 +66,4 @@ Do not start with:
 - Public marketplace.
 - Complex multi-agent frameworks.
 
-The first demo should prove that a learner can create a Trail, learn one concept Socratically, pass a level-up quiz, see graph progress update, and export/import a safe Trail Pack.
+The core demo should prove that a learner can create a Trail, learn one concept Socratically, pass a level-up quiz, see graph progress update, and export/import a safe Trail Pack.

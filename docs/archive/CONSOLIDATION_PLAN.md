@@ -9,7 +9,7 @@ After completing Phases 10, 11, and 12, a review identified a consistent pattern
 - The harder backend pieces (parser pipeline, LLM tool calling loop) were deferred each time.
 
 Left unresolved, these compound. Phase 13+ will continue building on a foundation that looks
-complete in the plan but is not wired up for users. The demo path (Phase 16) requires all three
+complete in the plan but is not wired up for users. The demo path (Phase 17) requires all three
 items to work end-to-end.
 
 This document tracks the three consolidation items that must be resolved before Phase 13 begins.
@@ -162,7 +162,7 @@ Format-specific element extraction:
 - **PDF** (`pdfplumber`, MIT): extract text page by page, use basic font-size heuristics where
   available, split on `\n\n` or ≥2 blank lines to produce `"paragraph"` elements. pdfplumber
   is preferred over pdfminer.six because it exposes font metadata and image bounding boxes,
-  enabling richer heading detection and future image placeholder insertion (Phase 16). All
+  enabling richer heading detection and future image placeholder insertion (Phase 17). All
   elements are `"paragraph"` currently; heading detection via font sizes is deferred.
 - **Markdown** (`text/markdown`): regex-based heading detection (`^#{1,3}\s+`), then paragraph
   splitting. Produces `"heading_1"/"heading_2"/"heading_3"` + `"paragraph"` elements.
@@ -247,7 +247,7 @@ RERANKER_API_KEY       API key for Cohere (not needed for none/flashrank)
 - For every concept in the trail, check if the concept's `title` or `description` appears in
   any chunk (case-insensitive substring match). If yes → link with `link_type="supplementary"`.
 - This is basic keyword linking. When embeddings are enabled, similarity-based candidate
-  generation is possible but is deferred to Phase 16 (after the embedding pipeline is proven
+  generation is possible but is deferred to Phase 17 (after the embedding pipeline is proven
   in production).
 - Linker runs only when upload includes `trail_id`. Without it, no auto-links are created.
 - Linker respects existing manual links — no duplicate `ConceptSourceLink` rows.
@@ -334,11 +334,11 @@ shape. The reranker receives this list and returns it reordered (no-op by defaul
 ### Note on scope
 
 DOCX and PPTX can follow in a second pass. One working format (PDF) unblocks the retrieval
-loop. Background-job upgrade for parsing is Phase 16 polish.
+loop. Background-job upgrade for parsing is Phase 17 polish.
 
 **Images**: pdfplumber exposes image bounding boxes and byte data (via `page.images`). Currently,
 images are silently skipped — no chunk is produced. A `[IMAGE: page N]` placeholder insertion
-and vision-model captioning via `LLMClient.caption_image` is reserved for Phase 16.
+and vision-model captioning via `LLMClient.caption_image` is reserved for Phase 17.
 The `DocumentElement` type list reserves `"image"` as a deferred type: a vision model converts
 image bytes → text description → `DocumentElement(type="image", text="...")` → flows through
 the chunker identically to a paragraph. No structural change will be needed when this lands.
@@ -346,10 +346,10 @@ Markdown image alt text (`![alt](url)`) IS preserved as paragraph text.
 
 **Why pdfplumber instead of pdfminer.six**: pdfplumber (MIT) exposes font metadata and image
 bounding boxes through a higher-level API without the AGPL concerns of PyMuPDF. It gives us
-the hooks for heading detection (via font size heuristics) and image handling (Phase 16)
+the hooks for heading detection (via font size heuristics) and image handling (Phase 17)
 without switching libraries later.
 
-**Why embeddings now instead of Phase 16**: The Alembic migration and EmbeddingClient add
+**Why embeddings now instead of Phase 17**: The Alembic migration and EmbeddingClient add
 ~100 LOC but avoid a schema migration on a live table later (adding a vector column to a
 populated table requires `ALTER TABLE ... ADD COLUMN` which is instant for nullable columns
 but still a migration event). Having the interface in place also means the reranker and

@@ -80,15 +80,15 @@ Tutor detects readiness
 
 The tutor may invite the learner to level up, but it should not mark a concept mastered without an explicit grade/evaluation step.
 
-Future tutor-suggested quizzes should use an event/tool-style handoff rather than inline quiz generation:
+Tutor-suggested quizzes (shipped, Phase 14) use an event/tool-style handoff rather than inline quiz generation:
 
 ```text
-tutor emits suggest_quiz(concept_id, quiz_type, reason)
--> frontend shows quiz CTA/card
--> backend-owned quiz draft system generates/reuses the card
+tutor emits suggest_quiz(quiz_type, reason)   # concept_id is trusted backend context, not a model arg
+-> frontend shows an opt-in quiz CTA/card (never auto-opened)
+-> backend-owned quiz draft system generates/reuses the card on click
 ```
 
-This preserves the existing rule that quiz drafts, grading, attempts, and mastery updates are backend-owned.
+This preserves the existing rule that quiz drafts, grading, attempts, and mastery updates are backend-owned. The sibling `suggest_flashcards` and `suggest_artifact` tools follow the same opt-in handoff for their own backend-owned subsystems.
 
 ## Level-Up Card Shape
 

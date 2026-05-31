@@ -33,36 +33,58 @@ Front-matter fields:
 ```text
 backend/app/agents/prompts/
   trail_generation.v1.md
-  tutor_base.v1.md
+  tutor_base.v1.md                      # classifier-style base (mode selection)
+  tutor_turn_classifier.v1.md           # unified enforced-JSON turn classifier
+  tutor_socratic.v2.md
+  tutor_repair.v2.md
+  tutor_explore.v2.md
+  tutor_direct.v2.md
   tutor_direct_instructions.v1.md
+  tutor_direct_locked.v1.md             # gated direct -> guided teaching
   tutor_free_explore_instructions.v1.md
   tutor_locked_mode.v1.md
+  tutor_opening.v1.md                   # worked-example-first opening guidance
+  quiz_answer_guard.v1.md
+  quiz_generation.v1.md                 # retained for a registry regression test
+  quiz_generation.v2.md                 # active quiz generation
+  quiz_grader.v1.md
+  concept_primer.v2.md                  # PRIMER_VERSION = 2
   conversation_summary.v1.md
   learner_state_update.v1.md
-  quiz_generation.v1.md
-  quiz_generation.v2.md
-  quiz_grader.v1.md
-  research_query.v1.md
-  research_select.v1.md
+  flashcard_generation.v1.md
+  artifact_builder.v1.md
+  registry.py
+  archive/                              # superseded versions, invisible to the registry glob
 ```
+
+Superseded prompt versions (e.g. `tutor_socratic.v1`, `tutor_mode_classifier.v1`/`.v2`, `concept_primer.v1`) live under `archive/`. The registry globs the prompt directory non-recursively, so archived files are never loaded. Research-agent prompts (`research_query`, `research_select`) are planned but not yet added — research automation is deferred.
 
 ## Task Registry
 
 | Task | File | Description |
 |---|---|---|
 | `trail_generation` | `trail_generation.v1.md` | Generate a 10–30 node concept graph from a topic/goal/depth |
-| `tutor_base` | `tutor_base.v1.md` | Single base tutor prompt for Socratic, repair, quiz_prompt, and bounded explore turns |
-| `tutor_direct_instructions` | `tutor_direct_instructions.v1.md` | Mastery-gated direct explanation instructions |
-| `tutor_free_explore_instructions` | `tutor_free_explore_instructions.v1.md` | Mastery-gated broader exploration instructions |
+| `tutor_base` | `tutor_base.v1.md` | Base tutor prompt used for first-pass mode selection |
+| `tutor_turn_classifier` | `tutor_turn_classifier.v1.md` | Unified enforced-JSON turn classifier: returns `{mode, blocks_active_quiz_answer}` in one call (replaces the archived tagged `tutor_mode_classifier` + the standalone guard for production turns) |
+| `tutor_socratic` | `tutor_socratic.v2.md` | Final-response Socratic teaching prompt |
+| `tutor_repair` | `tutor_repair.v2.md` | Final-response repair/misconception prompt |
+| `tutor_explore` | `tutor_explore.v2.md` | Final-response bounded-explore prompt |
+| `tutor_direct` | `tutor_direct.v2.md` | Final-response direct explanation (mastered) prompt |
+| `tutor_direct_instructions` | `tutor_direct_instructions.v1.md` | Internal-tool direct-mode instructions |
+| `tutor_direct_locked` | `tutor_direct_locked.v1.md` | Guided-teaching prompt for gated `direct` before mastery |
+| `tutor_free_explore_instructions` | `tutor_free_explore_instructions.v1.md` | Internal-tool broader-exploration instructions |
 | `tutor_locked_mode` | `tutor_locked_mode.v1.md` | Fallback instructions when a gated tutor mode is still locked |
-| `conversation_summary` | `conversation_summary.v1.md` | Summarize older visible tutor turns for bounded Phase 13 tutor context |
-| `learner_state_update` | `learner_state_update.v1.md` | Tutor-driven learner-state observer: enforced-JSON `{should_update, summary, strengths, misconceptions, resolved}`; conservative, runs sparingly post-`done` (Phase 13.5d) |
-| `tutor_turn_classifier` | `tutor_turn_classifier.v1.md` | Unified enforced-JSON turn classifier: returns `{mode, blocks_active_quiz_answer}` in one call (replaces the tagged classifier + quiz_answer_guard for production turns) |
-| `quiz_answer_guard` | `quiz_answer_guard.v1.md` | Standalone paraphrase guard used only by legacy agents without the unified classifier |
+| `tutor_opening` | `tutor_opening.v1.md` | Worked-example-first opening-turn guidance (folds in a cached primer when present) |
+| `quiz_answer_guard` | `quiz_answer_guard.v1.md` | Paraphrase guard used by the production tutor to block disguised active-quiz-answer extraction (fails open) |
 | `quiz_generation` | `quiz_generation.v2.md` | Generate a level-up or practice quiz from mastery_check_labels plus bounded prior quiz context |
 | `quiz_grader` | `quiz_grader.v1.md` | Grade a mixed-format quiz response and return score plus feedback |
-| `research_query` | `research_query.v1.md` | Generate search queries for a topic/concept |
-| `research_select` | `research_select.v1.md` | Evaluate and rank candidate sources for inclusion in research trace |
+| `concept_primer` | `concept_primer.v2.md` | Generate a concept primer (overview + key terms + sample questions); `PRIMER_VERSION = 2` |
+| `conversation_summary` | `conversation_summary.v1.md` | Summarize older visible tutor turns for bounded tutor context (now run automatically post-`done`) |
+| `learner_state_update` | `learner_state_update.v1.md` | Tutor-driven learner-state observer; enforced-JSON `{should_update, summary, strengths, misconceptions, resolved}` |
+| `flashcard_generation` | `flashcard_generation.v1.md` | Source-grounded, dedup-aware flashcard generation returning `{cards, exhausted, reason}` (Phase 15c) |
+| `artifact_builder` | `artifact_builder.v1.md` | Artifact-builder sub-agent: validated per-kind envelope payload from a bounded retrieval loop (Phase 15a) |
+| `research_query` *(planned)* | — | Generate search queries for a topic/concept (research automation deferred; prompt not yet added) |
+| `research_select` *(planned)* | — | Evaluate and rank candidate sources for the research trace (research automation deferred; prompt not yet added) |
 
 ## PromptRegistry (Python Interface)
 

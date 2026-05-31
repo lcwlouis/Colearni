@@ -173,25 +173,26 @@ Current foundation behavior:
 - Uploaded files are private workspace objects stored under the configured local source storage root.
 - Uploaded files create private `SourceRecord` rows and immutable `SourceRevision` rows with object key, content hash, parser metadata, and status.
 - Learner-facing source metadata shows sanitized ingestion status, not storage object keys or content hashes.
-- Parser/chunk/index work is not yet implemented, so uploaded content is not used by tutor retrieval.
+- Parser pipeline (PDF via pdfplumber, Markdown, and plaintext) parses uploads into canonical markdown, heading-aware chunks, and best-effort embeddings, and auto-links uploaded sources to concepts; the tutor's scoped retrieval tools use these chunks. DOCX/PPTX parsing is still deferred.
 - Uploaded/private/source-derived content never enters public Trail Pack export by default.
 
 Future expected behavior:
 
-- Priority formats are PDF, DOCX, and PPTX.
-- Parsed text becomes markdown-like canonical text, then chunks and indexes behind scoped retrieval tools.
+- Add DOCX and PPTX parsers (PDF/Markdown/plaintext already supported).
+- Durable background ingestion jobs (current parsing runs inline at upload).
 - Raw filesystem browsing is not the primary retrieval architecture.
 
-## Future User Story: Tutor-Suggested Quiz
+## User Story: Tutor-Suggested Quiz
 
-As a learner, I can accept a tutor's suggestion to practice or level up without the tutor bypassing the quiz system.
+As a learner, I can accept a tutor's suggestion to practice or level up without the tutor bypassing the quiz system. (Shipped, Phase 14.)
 
-Expected behavior:
+Behavior:
 
-- The tutor emits a `suggest_quiz(concept_id, quiz_type, reason)` event/tool result.
-- The frontend shows a quiz CTA/card.
-- The backend-owned quiz draft system generates or reuses the card.
+- The tutor emits a `suggest_quiz(quiz_type, reason)` event/tool result (`concept_id` is trusted backend context, never a model arg).
+- The frontend shows an opt-in quiz CTA/card; it is never auto-opened.
+- The backend-owned quiz draft system generates or reuses the card on click.
 - The tutor cannot mark mastery directly.
+- Sibling `suggest_flashcards` and `suggest_artifact` tools follow the same opt-in handoff.
 
 ## Non-Goals
 

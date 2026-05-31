@@ -108,7 +108,7 @@ Photography Exposure Triangle
 - Dashboard renders empty, loading, populated, and error states.
 - Continue Learning chooses a valid active/recent Trail or concept.
 - Trail mastery summaries render correct counts/progress.
-- Recommended Next uses deterministic graph/mastery heuristics.
+- Recommended Next is served by the backend `GET .../next` endpoint (deterministic graph/mastery heuristics tested at the service level); the dashboard renders the response and handles failure/all-mastered states.
 - Recent Trails and older Trail search/list work.
 - Create new Trail entry point remains visible.
 
@@ -221,7 +221,7 @@ These are critical and should be treated as regression tests for every export/im
 - Chunks and embeddings are excluded from export.
 - Concept-source links can be created and read.
 - No endpoint exposes raw private source text without workspace scope.
-- Deferred parser expansion: PDF/DOCX/PPTX parsing should add format-specific tests when real parser support lands.
+- Parser pipeline (implemented): PDF (pdfplumber), Markdown, and plaintext parse into canonical markdown; heading-aware chunking produces line-anchored `SourceChunk` rows; best-effort embeddings populate the pgvector column with ILIKE fallback; uploads auto-link to concepts. DOCX/PPTX parsing should add format-specific tests when real parser support lands.
 
 ## Retrieval and Context Tests
 
