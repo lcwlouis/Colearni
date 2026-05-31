@@ -618,7 +618,7 @@ export function TrailGraph({
   }, [detail, flow, handleViewportChange]);
 
   const controlsWidthClass = detail
-    ? "w-[min(94vw,680px)] md:w-[min(52vw,580px)] lg:w-[min(48vw,620px)]"
+    ? "w-[min(94vw,680px)] md:w-[min(27vw,230px)] lg:w-[min(34vw,380px)] xl:w-[min(39vw,480px)]"
     : "w-[min(94vw,680px)] md:w-[min(66vw,720px)] lg:w-[min(54vw,720px)]";
 
   useEffect(() => {

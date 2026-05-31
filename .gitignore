@@ -13,3 +13,5 @@ build/
 .ruff_cache/
 .colearni/
 test_files/.superpowers/
+proxy.py
+.superpowers/

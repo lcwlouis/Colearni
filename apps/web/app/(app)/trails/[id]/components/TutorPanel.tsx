@@ -1199,32 +1199,33 @@ function TutorThread({
             )}
           </ThreadPrimitive.Messages>
         </div>
-        <ThreadPrimitive.ScrollToBottom className="sticky bottom-28 z-10 ml-auto mt-3 grid size-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 disabled:hidden">
+        <ThreadPrimitive.ScrollToBottom className="sticky bottom-4 z-10 ml-auto mt-3 grid size-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 disabled:hidden">
           <ArrowDownIcon className="size-4" />
         </ThreadPrimitive.ScrollToBottom>
-        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 mt-4 -mx-4 border-t border-slate-200 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+4rem+0.75rem)] pt-3 md:pb-3">
-          <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-            <ComposerPrimitive.Input
-              aria-label="Message tutor"
-              placeholder="Ask for a hint, test an idea, or explain your thinking..."
-              submitMode="enter"
-              className="max-h-36 min-h-[2.75rem] flex-1 resize-none bg-transparent text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 disabled:text-slate-400"
-            />
-            {isRunning ? (
-              <ComposerPrimitive.Cancel className="mb-0.5 h-9 shrink-0 rounded-full border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-                Stop
-              </ComposerPrimitive.Cancel>
-            ) : (
-              <ComposerPrimitive.Send
-                aria-label="Send"
-                className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                <ArrowUpIcon className="size-4" />
-              </ComposerPrimitive.Send>
-            )}
-          </ComposerPrimitive.Root>
-        </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
+      {/* Chatbox is outside the scroll container so messages can never bleed below it */}
+      <div className="shrink-0 border-t border-slate-200 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 md:pb-3">
+        <ComposerPrimitive.Root className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <ComposerPrimitive.Input
+            aria-label="Message tutor"
+            placeholder="Ask for a hint, test an idea, or explain your thinking..."
+            submitMode="enter"
+            className="max-h-36 min-h-[2.75rem] flex-1 resize-none bg-transparent text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400 disabled:text-slate-400"
+          />
+          {isRunning ? (
+            <ComposerPrimitive.Cancel className="mb-0.5 h-9 shrink-0 rounded-full border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+              Stop
+            </ComposerPrimitive.Cancel>
+          ) : (
+            <ComposerPrimitive.Send
+              aria-label="Send"
+              className="mb-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              <ArrowUpIcon className="size-4" />
+            </ComposerPrimitive.Send>
+          )}
+        </ComposerPrimitive.Root>
+      </div>
     </ThreadPrimitive.Root>
   );
 }

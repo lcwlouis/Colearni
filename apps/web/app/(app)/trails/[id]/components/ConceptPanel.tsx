@@ -143,7 +143,7 @@ export function ConceptPanel({
 
   return (
     <aside
-      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-slate-200 bg-white shadow-xl transition-[height,max-height,transform] duration-200 ease-out md:static md:inset-auto md:z-0 md:h-full md:max-h-none md:w-[min(41vw,37rem)] md:shrink-0 md:translate-y-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none ${mobileExpanded ? mobileExpandedHeightClass : mobileCollapsedHeightClass}`}
+      className={`absolute inset-x-0 bottom-0 z-20 flex w-full flex-col overflow-hidden rounded-t-2xl border-t border-slate-200 bg-white shadow-xl transition-[height,max-height,transform] duration-200 ease-out md:static md:inset-auto md:z-0 md:h-full md:max-h-none md:w-[min(38vw,22rem)] md:shrink-0 lg:w-[min(40vw,32rem)] xl:w-[min(41vw,37rem)] md:translate-y-0 md:rounded-none md:border-l md:border-t-0 md:shadow-none ${mobileExpanded ? mobileExpandedHeightClass : mobileCollapsedHeightClass}`}
       style={
         dragStartY === null
           ? undefined
