@@ -1,0 +1,269 @@
+{
+  "fixtureVersion": "1",
+  "label": "SYNTHETIC DEMONSTRATION — not a published research paper or real learner data",
+  "deskId": "desk-demo",
+  "goal": {
+    "id": "goal-1",
+    "deskId": "desk-demo",
+    "capability": "Explain how the two parameters change the score and predict a new output.",
+    "bloomTags": [
+      "understand",
+      "apply"
+    ]
+  },
+  "source": {
+    "id": "source-demo",
+    "revision": 1,
+    "title": "A Simple Score Transformation — synthetic teaching fixture",
+    "blocks": [
+      {
+        "id": "s1",
+        "text": "This demonstration transforms an input x into an output y using y = a*x + b. The parameters a and b can be adjusted."
+      }
+    ],
+    "notARealUpload": true
+  },
+  "notes": [
+    {
+      "id": "note-1",
+      "deskId": "desk-demo",
+      "revision": 3,
+      "ownerId": "learner-demo",
+      "title": "My explanation of the score",
+      "tutorReadAccess": "shared",
+      "updatedAt": "2026-09-27T10:00:00+08:00",
+      "blocks": [
+        {
+          "id": "p1",
+          "text": "I am trying to explain what changes when a or b changes.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        },
+        {
+          "id": "p2",
+          "text": "Changing b adds the same amount to every output.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        },
+        {
+          "id": "p3",
+          "text": "I am unsure why increasing a changes negative and positive inputs differently.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        },
+        {
+          "id": "p4",
+          "text": "Next I will predict the output at x = -2 before moving the control.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "note-private",
+      "deskId": "desk-demo",
+      "revision": 1,
+      "ownerId": "learner-demo",
+      "title": "Private demo reflection",
+      "tutorReadAccess": "private",
+      "updatedAt": "2026-09-27T09:00:00+08:00",
+      "blocks": [
+        {
+          "id": "private-p1",
+          "text": "This synthetic reflection is excluded from tutor context.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        }
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "card-source",
+      "deskId": "desk-demo",
+      "revision": 1,
+      "contractVersion": "1",
+      "title": "Source passage",
+      "provenance": {
+        "origin": "source",
+        "sourceRefs": [
+          {
+            "sourceId": "source-demo",
+            "sourceRevision": 1,
+            "locator": "s1",
+            "label": "Synthetic source, paragraph 1"
+          }
+        ]
+      },
+      "body": {
+        "kind": "text",
+        "blocks": [
+          {
+            "id": "s1",
+            "text": "This demonstration transforms an input x into an output y using y = a*x + b.",
+            "provenance": {
+              "origin": "source",
+              "sourceRefs": []
+            }
+          }
+        ]
+      },
+      "textFallback": "Read the synthetic source passage."
+    },
+    {
+      "id": "card-example",
+      "deskId": "desk-demo",
+      "revision": 1,
+      "contractVersion": "1",
+      "title": "One worked example",
+      "provenance": {
+        "origin": "tutor",
+        "sourceRefs": []
+      },
+      "body": {
+        "kind": "plugin",
+        "plugin": {
+          "id": "desk/worked-example",
+          "version": "1.0.0"
+        },
+        "input": {
+          "steps": [
+            {
+              "id": "step-1",
+              "text": "Choose a = 2, b = 1, x = 3."
+            },
+            {
+              "id": "step-2",
+              "text": "Substitute: y = 2*3 + 1."
+            },
+            {
+              "id": "step-3",
+              "text": "The result is y = 7."
+            }
+          ]
+        },
+        "savedState": {
+          "revealedStepIds": [
+            "step-1"
+          ]
+        }
+      },
+      "textFallback": "For a=2, b=1 and x=3, y=2*3+1=7."
+    },
+    {
+      "id": "card-plot",
+      "deskId": "desk-demo",
+      "revision": 1,
+      "contractVersion": "1",
+      "title": "Explore the score",
+      "provenance": {
+        "origin": "tutor",
+        "sourceRefs": []
+      },
+      "body": {
+        "kind": "plugin",
+        "plugin": {
+          "id": "desk/scalar-function",
+          "version": "1.0.0"
+        },
+        "input": {
+          "model": "affine",
+          "a": 2,
+          "b": 1,
+          "xMin": -5,
+          "xMax": 5
+        },
+        "savedState": {
+          "a": 2,
+          "b": 1,
+          "selectedX": 3
+        }
+      },
+      "textFallback": "The model is y=a*x+b. Current parameters a=2 and b=1 give y=7 at x=3."
+    }
+  ],
+  "expectedContextPreview": {
+    "deskId": "desk-demo",
+    "index": [
+      {
+        "noteId": "note-1",
+        "revision": 3,
+        "title": "My explanation of the score",
+        "changedBlockIds": [
+          "p2",
+          "p3",
+          "p4"
+        ]
+      }
+    ],
+    "recentExcerpts": [
+      {
+        "noteId": "note-1",
+        "fromRevision": 2,
+        "toRevision": 3,
+        "blocks": [
+          {
+            "id": "p2",
+            "text": "Changing b adds the same amount to every output.",
+            "provenance": {
+              "origin": "learner",
+              "sourceRefs": []
+            }
+          },
+          {
+            "id": "p3",
+            "text": "I am unsure why increasing a changes negative and positive inputs differently.",
+            "provenance": {
+              "origin": "learner",
+              "sourceRefs": []
+            }
+          },
+          {
+            "id": "p4",
+            "text": "Next I will predict the output at x = -2 before moving the control.",
+            "provenance": {
+              "origin": "learner",
+              "sourceRefs": []
+            }
+          }
+        ],
+        "truncated": false,
+        "trust": "untrusted_task_data"
+      }
+    ],
+    "sizeEstimate": {
+      "value": 193,
+      "unit": "characters",
+      "approximate": true
+    },
+    "remainingNoteReads": 2
+  },
+  "scenarioExpectations": [
+    {
+      "id": "note-privacy",
+      "description": "Private note contents and metadata are absent from context."
+    },
+    {
+      "id": "revocation",
+      "description": "After note-1 becomes private, remove its index, queued excerpts and derived context before dispatch."
+    },
+    {
+      "id": "agent-undo",
+      "description": "Add card-plot, then edit note-1, then undo the addition: remove only card-plot; retain the edited note."
+    },
+    {
+      "id": "stale-highlight",
+      "description": "Targeting an outdated revision of note-1 returns unavailable rather than highlighting different text."
+    }
+  ]
+}

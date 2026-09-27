@@ -1,0 +1,10 @@
+node_modules
+dist
+storybook-static
+coverage
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+debug-storybook.log
+__screenshots__

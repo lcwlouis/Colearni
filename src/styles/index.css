@@ -1,0 +1,3 @@
+/* Shared CSS entry for the app and Storybook.
+   No design tokens yet: they wait for the approved visual reference (P1). */
+@import "tailwindcss";
