@@ -23,8 +23,8 @@ Acceptance means conversational agreement. It does not prove usability, security
 
 | ID | Default | Why / review point |
 |---|---|---|
-| P01 | Workplace-aligned subset: React 19, Vite 7, TypeScript, Tailwind 4, Storybook 9; TanStack Router/Query when needed | The workplace list is supplied by the founder; adopting the subset for Desk is this revision's recommendation. Verify exact installed versions together. |
-| P02 | Vitest 4 (4.1.11+; changed from 3.x on 27 Sep 2026, see below), Storybook 9 checks, Playwright/MSW, ESLint 9 | Align majors while using each tool at its actual boundary; avoid unused dependencies. |
+| P01 | Workplace-aligned subset: React 19, Vite 7, TypeScript, Tailwind 4, Storybook 10 (changed from 9, see below); TanStack Router/Query when needed | The workplace list is supplied by the founder; adopting the subset for Desk is this revision's recommendation. Verify exact installed versions together. |
+| P02 | Vitest 4 (4.1.11+; changed from 3.x on 27 Sep 2026, see below), Storybook 10 checks, Playwright/MSW, ESLint 9 | Align majors while using each tool at its actual boundary; avoid unused dependencies. |
 | P03 | A single frontend package in an isolated directory | Avoid both an early monorepo framework and modifying the existing app. |
 | P04 | A responsive ordered work area and supporting area, not an infinite canvas | Lower prototype complexity; spatial design remains reviewable. |
 | P05 | Bundled `worked-example` and `scalar-function` plugins | Exercise both instructional content and deterministic parameter interaction. |
@@ -61,3 +61,4 @@ For a change, record the decision ID, old and new rule, rationale, impacted cont
 | Date | ID | Old → new | Rationale | Impact | Reviewer |
 |---|---|---|---|---|---|
 | 27 Sep 2026 | P02 | Vitest 3.2+ within 3.x → Vitest 4 (4.1.11+) | GHSA-82fw-gwwq-j7x9 (`@vitest/mocker` dev-server path traversal) is fixed only in Vitest ≥4.1.11. Storybook 9.1.20's addon-vitest supports Vitest 4 via `@vitest/browser-playwright`. | Browser provider config now uses `playwright()` from `@vitest/browser-playwright`; no contract or story changes. Storybook 9.1.20 still bundles `@vitest/mocker` 3.2.4, which remains flagged. | Founder (in conversation) |
+| 27 Sep 2026 | P01, P02 | Storybook 9 → Storybook 10 (10.6.0) | Storybook 9.1.x bundles `@vitest/mocker` 3.2.4, still affected by GHSA-82fw-gwwq-j7x9; Storybook ≥10.1 does not. Clearing it otherwise needs a forced override, which `AGENTS.md` disallows. | All Storybook packages move to 10.6.0 together; existing config, stories and a11y/interaction tests work unchanged. `npm audit`: 0 findings. | Founder (in conversation) |

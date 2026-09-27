@@ -6,7 +6,7 @@ Follow: read the relevant specification → state the small change → implement
 
 ## P0 — Tooling and contract baseline
 
-Prepare the React 19 / Vite 7 / TypeScript application tooling, Tailwind 4 integration, and Storybook 9 React/Vite configuration using `FRONTEND.md`. Configure ESLint 9, typecheck, Vitest 3.2+ within 3.x, and compatible Storybook interaction/accessibility tooling. Use a minimal smoke story, not an invented desk or visual design system. Record actual versions, Node choice, and commands. Router, Query, MSW, and Playwright belong at their appropriate testing/composition boundaries; do not build unused scaffolding for the entire workplace inventory.
+Prepare the React 19 / Vite 7 / TypeScript application tooling, Tailwind 4 integration, and Storybook 10 (P01 changed from 9) React/Vite configuration using `FRONTEND.md`. Configure ESLint 9, typecheck, Vitest 3.2+ within 3.x, and compatible Storybook interaction/accessibility tooling. Use a minimal smoke story, not an invented desk or visual design system. Record actual versions, Node choice, and commands. Router, Query, MSW, and Playwright belong at their appropriate testing/composition boundaries; do not build unused scaffolding for the entire workplace inventory.
 
 Use the supplied contract seed as a draft, resolving only fields needed for P1. Add a tiny mock adapter; do not write backend endpoints. Install no model SDK or execution sandbox.
 
