@@ -17,7 +17,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "types": ["vite/client", "@vitest/browser/providers/playwright"]
+    "types": ["vite/client"]
   },
   "include": ["src", "contracts", ".storybook"]
 }

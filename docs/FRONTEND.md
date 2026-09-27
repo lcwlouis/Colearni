@@ -16,7 +16,7 @@ That is the workplace reference, not a requirement to import enterprise integrat
 | Routing | TanStack Router for workspace/location/search state | P5 composition; do not build an app navigation system in P0 |
 | Server state | TanStack Query for adapter-backed saved records and async status | Network-backed work when needed; not each keystroke |
 | Component review | Storybook 9 with compatible React/Vite framework and addons | P0 |
-| Tests | Vitest 3.2+ within 3.x; Playwright; MSW; ESLint 9 | Configure core tests at P0, add browser/network cases by unit |
+| Tests | Vitest 4 (4.1.11+; P02 changed from 3.x); Playwright; MSW; ESLint 9 | Configure core tests at P0, add browser/network cases by unit |
 | Markdown | One owned MarkdownContent boundary; react-markdown for static material, Streamdown when streaming is demonstrated | Introduce incrementally, not two unrelated rendering policies |
 | Motion/feedback | framer-motion and sonner are allowed choices, not mandatory dependencies on every component | Only for a defined interaction; reduced-motion and accessible feedback |
 | Microsoft integrations | Do not include MSAL or Teams SDK yet | Only if a future authentication/integration requirement calls for them |
@@ -31,13 +31,13 @@ MSAL concerns authentication and token acquisition; TeamsJS supports Microsoft-h
 
 This is a compatibility target, not an installed lockfile or a claim that the workplace majors are the latest releases.
 
-- Stay within React 19, Vite 7, Tailwind 4, Storybook 9, Vitest 3, and ESLint 9 unless an incompatibility or security issue requires an explicitly reviewed exception. Other library majors were not supplied; inspect their published peer requirements before choosing them.
+- Stay within React 19, Vite 7, Tailwind 4, Storybook 9, Vitest 4 (changed from 3 under P02), and ESLint 9 unless an incompatibility or security issue requires an explicitly reviewed exception. Other library majors were not supplied; inspect their published peer requirements before choosing them.
 - Vite 7 supports Vitest from 3.2 onward. Do not install arbitrary Vitest 3.0/3.1 alongside it. Vite 7's documented Node minima are 20.19 or 22.12 on the corresponding major lines; choose a currently supported, patched Node release satisfying all selected package engine constraints. A historical minimum is not a security recommendation. [R12]
 - Storybook 9's guide requires Vite 5+, Vitest 3+, and TypeScript 4.9+. Its Vitest addon has its own setup requirements. These minimums are necessary information, not proof that every package combination works. Use matching Storybook core/framework/addon releases. [R13, R14, R15]
 - Do not copy unqualified `@latest` scaffold commands from v0.1 or rolling documentation. Select a compatible generator and inspect the generated manifest; a generator version does not by itself prove the resulting runtime versions.
 - Record exact resolved versions and retain one lockfile. Use reproducible clean installs in verification. Review published advisories for the resolved direct and transitive dependencies; do not suppress peer conflicts using `--force` or `--legacy-peer-deps`.
 - Use Tailwind 4's documented Vite integration, not Tailwind 3 setup snippets. Verify tailwind-merge support for the selected Tailwind version. [R4]
-- Use Storybook 9/Vitest 3 documentation for addon imports and browser-test configuration. Do not mix examples for a different major. Do not install every library in the reference table before it has a consumer.
+- Use Storybook 9/Vitest 4 documentation for addon imports and browser-test configuration. Do not mix examples for a different major. Do not install every library in the reference table before it has a consumer.
 
 No dependency installation or integration verification has been performed for this package.
 
