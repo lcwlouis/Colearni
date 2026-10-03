@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Desk MCP App Binding (draft, not MCP wire protocol)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "connectionId",
+    "toolName",
+    "resourceUri",
+    "protocolVersion",
+    "input",
+    "integration",
+    "persistence"
+  ],
+  "properties": {
+    "kind": {
+      "const": "mcp_app"
+    },
+    "connectionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "toolName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resourceUri": {
+      "type": "string",
+      "pattern": "^ui://.+"
+    },
+    "resourceDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "protocolVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input": {},
+    "integration": {
+      "enum": [
+        "generic",
+        "desk_learning_profile"
+      ]
+    },
+    "profileVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "persistence": {
+      "enum": [
+        "fallback_only",
+        "host_snapshot",
+        "external_service"
+      ]
+    },
+    "savedState": {}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "integration": {
+            "const": "desk_learning_profile"
+          }
+        },
+        "required": [
+          "integration"
+        ]
+      },
+      "then": {
+        "required": [
+          "profileVersion"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "persistence": {
+            "const": "host_snapshot"
+          }
+        },
+        "required": [
+          "persistence"
+        ]
+      },
+      "then": {
+        "required": [
+          "savedState"
+        ]
+      }
+    }
+  ]
+}

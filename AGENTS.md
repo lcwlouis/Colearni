@@ -1,3 +1,13 @@
+# Repository adoption notice — 3 October 2026
+
+Read [docs/FOUNDATION_ADOPTION.md](docs/FOUNDATION_ADOPTION.md) and [START_HERE.md](START_HERE.md) first. This is the existing `desk` prototype: P0 is recorded as complete, Storybook 10 / Vitest 4 upgrades remain in force, and root v1 contracts/fixtures are not replaced by imported v2 drafts. Use [prompts/RESUME_DESK.md](prompts/RESUME_DESK.md), not an archived empty-workspace setup.
+
+Foundation v0.4 under `docs/foundation/v0.4/` supplies product/design requirements subject to that adoption record. Older rules below remain applicable except where the adoption record explicitly supersedes setup/status, version targets or visual workflow. Work only on the assigned unit. No old mockup is approved; one requested view per visual review. Root `docs/VISUAL_SELECTION.md` is the live approval record.
+
+Preserve existing work and progress. One agent owns a unit, another reviews; no racing on contracts, lockfiles, navigation or tokens. The founder's request authorises this documentation-update branch/PR only, not merging, deployment, future implementation, provider activation or licence adoption. Future commits/pushes still require explicit authorisation for their unit.
+
+---
+
 # Agent working contract — new Desk prototype
 
 Scope: this new prototype directory only. It does not authorise editing the live CoLearni repository or superseding higher-level instructions.
