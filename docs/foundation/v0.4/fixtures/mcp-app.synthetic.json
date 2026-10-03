@@ -1,0 +1,61 @@
+{
+  "label": "SYNTHETIC MCP binding candidate; no server exists",
+  "binding": {
+    "kind": "mcp_app",
+    "connectionId": "mcp-fixture-only",
+    "toolName": "affine_explorer",
+    "resourceUri": "ui://desk-demo/affine-explorer",
+    "protocolVersion": "2026-01-26",
+    "input": {
+      "a": 2,
+      "b": 1,
+      "x": 3
+    },
+    "integration": "desk_learning_profile",
+    "profileVersion": "0.1-draft",
+    "persistence": "host_snapshot",
+    "savedState": {
+      "a": 2,
+      "b": 1,
+      "x": 3,
+      "y": 7
+    }
+  },
+  "contextUpdates": [
+    {
+      "appInstanceId": "app-demo",
+      "cardId": "card-explorer",
+      "cardRevision": 1,
+      "sequence": 1,
+      "summary": "x is now 2; y is 5.",
+      "structured": {
+        "a": 2,
+        "b": 1,
+        "x": 2,
+        "y": 5
+      },
+      "trust": "untrusted_tool_data"
+    },
+    {
+      "appInstanceId": "app-demo",
+      "cardId": "card-explorer",
+      "cardRevision": 1,
+      "sequence": 2,
+      "summary": "x is now -2; y is -3.",
+      "structured": {
+        "a": 2,
+        "b": 1,
+        "x": -2,
+        "y": -3
+      },
+      "trust": "untrusted_tool_data"
+    }
+  ],
+  "expectedPolicy": {
+    "retainLatestViewContextSequence": 2,
+    "automaticModelCalls": 0,
+    "noteWriteAllowed": false,
+    "newPermissionAutoGrant": false
+  },
+  "note": "This envelope is our host fixture, not a raw MCP protocol request. The profile transport and actual version negotiation remain a spike decision."
+}

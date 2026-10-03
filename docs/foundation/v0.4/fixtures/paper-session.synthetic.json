@@ -1,0 +1,268 @@
+{
+  "fixtureVersion": "2",
+  "label": "SYNTHETIC DEMONSTRATION — not a published paper or actual learner data",
+  "workspaceId": "workspace-demo",
+  "learnerId": "learner-demo",
+  "desks": [
+    {
+      "id": "desk-linear",
+      "workspaceId": "workspace-demo",
+      "title": "Understanding linear models",
+      "goal": {
+        "id": "goal-linear",
+        "deskId": "desk-linear",
+        "capability": "Explain how a and b change the output, then predict a new output.",
+        "bloomTags": [
+          "understand",
+          "apply"
+        ]
+      },
+      "status": "active"
+    },
+    {
+      "id": "desk-followup",
+      "workspaceId": "workspace-demo",
+      "title": "Use linear models in a new context",
+      "goal": {
+        "id": "goal-followup",
+        "deskId": "desk-followup",
+        "capability": "Compare a new model with my earlier explanation.",
+        "bloomTags": [
+          "analyze"
+        ]
+      },
+      "status": "paused"
+    }
+  ],
+  "sources": [
+    {
+      "id": "source-demo",
+      "revision": 1,
+      "title": "A Simple Score Transformation",
+      "origin": "synthetic",
+      "locator": "Section 1",
+      "text": "The model transforms an input x into an output y using y = a*x + b. Changing b shifts every output equally; changing a changes how the output depends on x.",
+      "access": "fixture_only"
+    }
+  ],
+  "documents": [
+    {
+      "id": "note-1",
+      "workspaceId": "workspace-demo",
+      "ownerId": "learner-demo",
+      "revision": 3,
+      "kind": "note",
+      "title": "My explanation",
+      "privateOverride": false,
+      "contentSchema": "desk-blocks/0.3-draft",
+      "blocks": [
+        {
+          "id": "p1",
+          "text": "Changing b adds the same amount to every output.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        },
+        {
+          "id": "p2",
+          "text": "I am unsure why increasing a affects negative and positive inputs differently.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        },
+        {
+          "id": "p3",
+          "text": "Next I will predict the output at x = -2 before changing the control.",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        }
+      ],
+      "updatedAt": "2026-09-29T08:00:00Z"
+    },
+    {
+      "id": "response-1",
+      "workspaceId": "workspace-demo",
+      "ownerId": "learner-demo",
+      "revision": 1,
+      "kind": "response",
+      "title": "My first prediction",
+      "privateOverride": false,
+      "contentSchema": "desk-blocks/0.3-draft",
+      "blocks": [
+        {
+          "id": "r1",
+          "text": "",
+          "provenance": {
+            "origin": "learner",
+            "sourceRefs": []
+          }
+        }
+      ],
+      "updatedAt": "2026-09-29T08:01:00Z"
+    }
+  ],
+  "documentLinks": [
+    {
+      "deskId": "desk-linear",
+      "documentId": "note-1",
+      "tutorReadAccess": "shared",
+      "placement": "working"
+    },
+    {
+      "deskId": "desk-followup",
+      "documentId": "note-1",
+      "tutorReadAccess": "private",
+      "placement": "shelf"
+    },
+    {
+      "deskId": "desk-linear",
+      "documentId": "response-1",
+      "tutorReadAccess": "shared",
+      "placement": "working"
+    }
+  ],
+  "activities": [
+    {
+      "id": "activity-1",
+      "workspaceId": "workspace-demo",
+      "revision": 1,
+      "title": "Predict an output",
+      "instructions": [
+        {
+          "id": "question-1",
+          "text": "Using y = a*x + b with a = 2 and b = 1, predict y when x = -2. Explain how you worked it out.",
+          "provenance": {
+            "origin": "tutor",
+            "sourceRefs": []
+          }
+        }
+      ],
+      "responseKind": "rich_text",
+      "provenance": {
+        "origin": "tutor",
+        "sourceRefs": []
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "id": "attempt-1",
+      "workspaceId": "workspace-demo",
+      "deskId": "desk-linear",
+      "learnerId": "learner-demo",
+      "activityId": "activity-1",
+      "activityRevision": 1,
+      "responseDocumentId": "response-1",
+      "responseRevision": 1,
+      "assistance": "unknown",
+      "status": "draft",
+      "createdAt": "2026-09-29T08:01:00Z"
+    }
+  ],
+  "cards": [
+    {
+      "id": "card-explorer",
+      "workspaceId": "workspace-demo",
+      "deskId": "desk-linear",
+      "revision": 1,
+      "contractVersion": "2",
+      "title": "Explore y = a*x + b",
+      "provenance": {
+        "origin": "tutor",
+        "sourceRefs": []
+      },
+      "body": {
+        "kind": "native_plugin",
+        "plugin": {
+          "id": "desk.affine-explorer",
+          "version": "0.1.0-demo"
+        },
+        "input": {
+          "a": 2,
+          "b": 1,
+          "x": 3
+        },
+        "savedState": {
+          "a": 2,
+          "b": 1,
+          "x": 3,
+          "y": 7
+        }
+      },
+      "textFallback": "At a = 2, b = 1 and x = 3, y = 7. At x = -2 with the same parameters, y = -3."
+    },
+    {
+      "id": "card-support",
+      "workspaceId": "workspace-demo",
+      "deskId": "desk-linear",
+      "revision": 1,
+      "contractVersion": "2",
+      "title": "One useful comparison",
+      "provenance": {
+        "origin": "tutor",
+        "sourceRefs": []
+      },
+      "body": {
+        "kind": "text",
+        "blocks": [
+          {
+            "id": "s1",
+            "text": "At x = 0, changing a has no effect. At x = 3, increasing a by 1 increases y by 3. The change depends on x.",
+            "provenance": {
+              "origin": "tutor",
+              "sourceRefs": []
+            }
+          }
+        ]
+      },
+      "textFallback": "The effect of changing a depends on x."
+    }
+  ],
+  "researchResults": [
+    {
+      "id": "research-demo-1",
+      "title": "Background: affine functions",
+      "status": "synthetic_result",
+      "selectionReason": "Provides another explanation of parameters without replacing the current task.",
+      "placement": "shelf",
+      "url": null
+    }
+  ],
+  "scenarios": [
+    "Save three paragraphs without a tutor interruption",
+    "Read note in desk-linear, not desk-followup",
+    "Refuse tutor/plugin note edit",
+    "Undo support card after further learner writing",
+    "Reopen saved explorer without model regeneration"
+  ],
+  "expectedCalculations": [
+    {
+      "a": 2,
+      "b": 1,
+      "x": 3,
+      "y": 7
+    },
+    {
+      "a": 2,
+      "b": 1,
+      "x": -2,
+      "y": -3
+    },
+    {
+      "a": 0,
+      "b": 4,
+      "x": -5,
+      "y": 4
+    }
+  ],
+  "claims": {
+    "realResearch": false,
+    "liveTutoring": false,
+    "assessedMastery": false,
+    "secureSandboxImplemented": false
+  }
+}

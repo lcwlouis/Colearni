@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "1",
+  "status": "proposed_not_approved",
+  "workingName": "Desk",
+  "brandAsset": null,
+  "global": [
+    {
+      "id": "home",
+      "label": "Home"
+    },
+    {
+      "id": "desks",
+      "label": "My desks"
+    },
+    {
+      "id": "library",
+      "label": "Library"
+    }
+  ],
+  "globalUtilities": [
+    {
+      "id": "search",
+      "label": "Search"
+    },
+    {
+      "id": "settings",
+      "label": "Settings"
+    },
+    {
+      "id": "profile",
+      "label": "Profile"
+    }
+  ],
+  "deskTabs": [
+    {
+      "id": "learn",
+      "label": "Learn"
+    },
+    {
+      "id": "notes",
+      "label": "Notes"
+    },
+    {
+      "id": "practice",
+      "label": "Practice"
+    },
+    {
+      "id": "research",
+      "label": "Research"
+    },
+    {
+      "id": "graph",
+      "label": "Graph"
+    }
+  ],
+  "deskActions": [
+    {
+      "id": "shelf",
+      "label": "Shelf"
+    },
+    {
+      "id": "history",
+      "label": "History"
+    },
+    {
+      "id": "pause",
+      "label": "Pause"
+    }
+  ],
+  "placement": {
+    "desktopGlobal": "sidebar_or_icon_rail",
+    "mobileGlobal": "drawer",
+    "desktopDeskTabs": "context_tab_strip",
+    "mobileDeskTabs": "bottom_bar",
+    "outsideDeskBottomBar": "hidden"
+  },
+  "collapsedBrand": "approved_mark_only_no_wordmark",
+  "images": []
+}

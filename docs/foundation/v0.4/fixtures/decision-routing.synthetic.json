@@ -1,0 +1,47 @@
+{
+  "fixtureVersion": "1",
+  "label": "SYNTHETIC expected policies, not model outputs or benchmark results",
+  "featureDefault": "disabled",
+  "cases": [
+    {
+      "id": "explicit-example",
+      "event": "learner_clicked_show_example",
+      "expected": "bypass_model"
+    },
+    {
+      "id": "saved-note",
+      "event": "note_saved",
+      "expected": "coalesce_context_without_tutor_turn"
+    },
+    {
+      "id": "unclear-message",
+      "event": "ambiguous_current_turn",
+      "expected": "abstain_or_safe_fallback"
+    },
+    {
+      "id": "private-document",
+      "event": "candidate_context_contains_private_note",
+      "expected": "filter_before_dispatch"
+    },
+    {
+      "id": "unknown-choice",
+      "event": "model_returns_non_candidate",
+      "expected": "reject_result"
+    },
+    {
+      "id": "revoked-context",
+      "event": "sharing_revoked_while_request_in_flight",
+      "expected": "discard_result"
+    },
+    {
+      "id": "local-timeout",
+      "event": "local_provider_timeout",
+      "expected": "no_implicit_remote_fallback"
+    },
+    {
+      "id": "write-note",
+      "event": "model_suggests_overwriting_learner_note",
+      "expected": "deny_mutation"
+    }
+  ]
+}
